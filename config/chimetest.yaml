@@ -1,0 +1,24 @@
+
+
+pipeline :
+    tasks:
+        -   type:   chimepipe.LoadTimeStreamSidereal
+            out:    siderealday
+            params: input_params
+
+        -   type:   chimepipe.RFIFilter
+            in:     siderealday
+            out:    maskedday
+            params: no_params
+
+        -   type:   chimepipe.SaveOutput
+            in:     maskedday
+            params: save_params
+
+no_params: {}
+
+input_params:
+    filepat:  "testdata/*.h5"
+
+save_params:
+    root:   rfi_filt
