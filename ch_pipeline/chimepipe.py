@@ -56,7 +56,7 @@ class LoadTimeStreamSidereal(pipeline.TaskBase):
         """Divide the list of files up into sidereal days.
         """
 
-        self.files = glob.glob(self.filepat)[-4:-1]
+        self.files = glob.glob(self.filepat)
 
         filemap = None
         if mpiutil.rank0:
@@ -70,6 +70,7 @@ class LoadTimeStreamSidereal(pipeline.TaskBase):
 
             # Filter our days with only a few files in them.
             filemap = [ (day, dmap) for day, dmap in filemap if dmap.size > 1 ]
+            filemap.sort()
 
         self.filemap = mpiutil.world.bcast(filemap, root=0)
 
@@ -85,8 +86,11 @@ class LoadTimeStreamSidereal(pipeline.TaskBase):
         if len(self.filemap) == 0:
             raise pipeline.PipelineStopIteration
 
-        csd, fmap = self.filemap.pop()
+        csd, fmap = self.filemap.pop(0)
         dfiles = [ self.files[fi] for fi in fmap ]
+
+        if mpiutil.rank0:
+            print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
 
         ts = containers.TimeStream.from_acq_files(dfiles)
         ts.attrs['tag'] = ('csd_%i' % csd)
@@ -115,7 +119,7 @@ class RFIFilter(pipeline.TaskBase):
                                                   threshold=self.threshold_mad)
 
         # Turn mask into MPIArray
-        mask = mpidataset.MPIArray.wrap(mask, axis=2)
+        mask = mpidataset.MPIArray.wrap(mask.view(np.uint8), axis=2)
 
         # Create MaskedTimeStream instance and redistribute back over frequency
         mts = containers.MaskedTimeStream.from_timestream_and_mask(data, mask)
