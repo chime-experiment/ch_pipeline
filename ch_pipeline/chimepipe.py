@@ -92,7 +92,7 @@ class LoadTimeStreamSidereal(pipeline.TaskBase):
         if mpiutil.rank0:
             print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
 
-        ts = containers.TimeStream.from_acq_files(dfiles)
+        ts = containers.TimeStream.from_acq_files(sorted(dfiles))  # Ensure file list if sorted
         ts.attrs['tag'] = ('csd_%i' % csd)
         ts.attrs['csd'] = csd
 
