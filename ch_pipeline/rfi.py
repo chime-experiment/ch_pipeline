@@ -1,3 +1,20 @@
+"""
+================================================
+Tasks for RFI cleaning (:mod:`~ch_pipeline.rfi`)
+================================================
+
+.. currentmodule:: ch_pipeline.rfi
+
+Tasks for calculating RFI masks for timestream data.
+
+Tasks
+=====
+
+.. autosummary::
+    :toctree: generated/
+
+    RFIFilter
+"""
 
 import numpy as np
 
@@ -10,6 +27,9 @@ import containers
 
 class RFIFilter(pipeline.TaskBase):
     """Filter RFI from a Timestream.
+
+    This task works on the parallel
+    :class:`~ch_pipeline.containers.TimeStream` objects.
 
     Attributes
     ----------
