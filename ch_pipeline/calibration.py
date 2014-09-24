@@ -89,7 +89,7 @@ def solve_gain(data, nfeed, feed_loc=False):
 
      return gain_arr
 
-def interp_gains(transit_times, gain_mat):
+def interp_gains(transit_times, gain_mat, times):
      """ Linearly interpolates gain solutions in 
      sidereal day.
      """
@@ -99,11 +99,10 @@ def interp_gains(transit_times, gain_mat):
 
 class PointSourceCalibration(pipeline.TaskBase):
 
+    files = config.Property(proptype=list)
+
     def setup(self, files):
-        """ Derive calibration solution from input
-        start with the calibration solution itself
-        How much time do I want from each transit? 
-        Enough to actually get the transit at all frequencies 
+        """ 
         Do I want to fringestop? Yes probably yes.
         Really do need the layout information. 
 
@@ -114,35 +113,46 @@ class PointSourceCalibration(pipeline.TaskBase):
         Should the linear interpolation go in here? I'll have 
         one gain per feed per frequency per sidereal day. 
         """
-        #ts = containers.TimeStream.from_acq_files(files)
-        data = andata.AnData.from_acq_h5(files)
-        # Need to select subset of this data with only, say, 10 minutes of data. 
-        # Need to figure out a way to select pols
-        # Will this handle an MPIdataset? 
-
         xfeeds = [0,1,2,12,13,14,15]
         yfeeds = [4,5,6,8,9,10,11]
         nfeed = 16
+        self.gain_mat = []
 
-        print "Starting x-decomp on corrs:", xfeeds
-        gain_arr_x = solve_gain(data.vis, nfeed, feed_loc=xfeeds)
+        #ts = containers.TimeStream.from_acq_files(files)
+        k=0
+        for file in files:
+          data = andata.andata.from_acq_h5(file)
+          self.nfreq = data.nfreq
+          self.ntime = data.ntime
+          transit_times = eph.transit_times(eph.CasA, data.timestamps[0])
 
-        print "Starting y-decomp on corrs:", yfeeds
-        gain_arr_y = solve_gain(data.vis, nfeed, feed_loc=yfeeds)
+          print "Starting x-decomp on corrs:", xfeeds
+          gain_arr_x = solve_gain(data.vis, nfeed, feed_loc=xfeeds)
 
-        # Use ones since we'll be dividing in PointSourceCalibration.next
-        gains = np.ones([data.nfreq, nfeed, data.ntime], np.complex128) 
+          print "Starting y-decomp on corrs:", yfeeds
+          gain_arr_y = solve_gain(data.vis, nfeed, feed_loc=yfeeds)
 
-        gains[:, xfeeds] = gain_arr_x
-        gains[:, yfeeds] = gain_arr_y
-        
-        print "Computing gain matrix for sidereal day"
-        self.gain_mat = gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis])
+          # Use ones since we'll be dividing in PointSourceCalibration.next
+          gains = np.ones([self.nfreq, nfeed], np.complex128) 
+
+          gains[:, xfeeds] = np.median(gain_arr_x, axis=-1) # Take time avg of gains solution
+          gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
+
+          print "Computing gain matrix for sidereal day %d" % d
+          self.gain_mat.append(gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis]))
+          k+=1
 
     def next(self, data):
         # Should already have N_sidereal gain matrices, doens't do the linear interpolation 
         # until here. 
         # Calibrate data as it comes in.
-         
+        # self.next method is run everytime data is sent through
+        # Pretend we have extactly two CasA transits
+        times = data.times
+        #gain_mat_full should be the gains for each freq at all times in a sidereal day
+        
+        gain_mat_full = interp_gains(self.transit_times, self.gain_mat, times)
+     
+        calibrated_data = data.vis / gain_mat_full
 
         return calibrated_data
