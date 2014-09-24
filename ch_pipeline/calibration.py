@@ -15,6 +15,7 @@ Tasks
 
     PointSourceCalibration
 """
+import numpy as np
 
 from caput import pipeline
 from caput import config
@@ -24,7 +25,7 @@ from ch_util import tools
 import gain_sol_transit as gsol # Temp until the eigensolver is in ch_util. 
 # Or should the gainsol code go here?
 
-def gen_corr_matrix(data, nfeed, feed_loc=False):
+def gen_corr_matrix(data, nfeed, feed_loc=False): # Should probably be in ch_util.tools 
      """Generates Hermitian (nfeed, nfeed) correlation matrix from unique correlations
 
      Parameters
@@ -88,6 +89,13 @@ def solve_gain(data, nfeed, feed_loc=False):
 
      return gain_arr
 
+def interp_gains(transit_times, gain_mat):
+     """ Linearly interpolates gain solutions in 
+     sidereal day.
+     """
+     f = interpolate.interp1d(transit_times, gain_mat, axis=-1)
+     return f(times)
+     
 
 class PointSourceCalibration(pipeline.TaskBase):
 
@@ -108,18 +116,33 @@ class PointSourceCalibration(pipeline.TaskBase):
         """
         #ts = containers.TimeStream.from_acq_files(files)
         data = andata.AnData.from_acq_h5(files)
-        # Need to select subset of this data
-        data_xpol, data_ypol = data.vis, data.vis # Need to figure out a way to select pols
+        # Need to select subset of this data with only, say, 10 minutes of data. 
+        # Need to figure out a way to select pols
         # Will this handle an MPIdataset? 
-        nfeed = 16
-        gain_arr_x = gsol.solve_gain(data_xpol, nfeed)
-        gain_arr_y = gsol.solve_gain(data_ypol, nfeed)
 
-        gain_sol = np.concatenate([gain_arr_x[np.newaxis], gain_arr_y[np.newaxis]])
-        return gain_sol
+        xfeeds = [0,1,2,12,13,14,15]
+        yfeeds = [4,5,6,8,9,10,11]
+        nfeed = 16
+
+        print "Starting x-decomp on corrs:", xfeeds
+        gain_arr_x = solve_gain(data.vis, nfeed, feed_loc=xfeeds)
+
+        print "Starting y-decomp on corrs:", yfeeds
+        gain_arr_y = solve_gain(data.vis, nfeed, feed_loc=yfeeds)
+
+        # Use ones since we'll be dividing in PointSourceCalibration.next
+        gains = np.ones([data.nfreq, nfeed, data.ntime], np.complex128) 
+
+        gains[:, xfeeds] = gain_arr_x
+        gains[:, yfeeds] = gain_arr_y
+        
+        print "Computing gain matrix for sidereal day"
+        self.gain_mat = gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis])
 
     def next(self, data):
-
+        # Should already have N_sidereal gain matrices, doens't do the linear interpolation 
+        # until here. 
         # Calibrate data as it comes in.
+         
 
         return calibrated_data
