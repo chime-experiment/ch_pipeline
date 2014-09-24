@@ -16,11 +16,14 @@ Tasks
     PointSourceCalibration
 """
 import numpy as np
+from scipy import interpolate
 
 from caput import pipeline
 from caput import config
+
 from ch_util import andata
 from ch_util import tools 
+from ch_util import ephemeris
 
 import gain_sol_transit as gsol # Temp until the eigensolver is in ch_util. 
 # Or should the gainsol code go here?
@@ -99,7 +102,7 @@ def interp_gains(transit_times, gain_mat, times):
 
 class PointSourceCalibration(pipeline.TaskBase):
 
-    files = config.Property(proptype=list)
+#    files = config.Property(proptype=list)
 
     def setup(self, files):
         """ 
@@ -113,18 +116,20 @@ class PointSourceCalibration(pipeline.TaskBase):
         Should the linear interpolation go in here? I'll have 
         one gain per feed per frequency per sidereal day. 
         """
-        xfeeds = [0,1,2,12,13,14,15]
-        yfeeds = [4,5,6,8,9,10,11]
+        xfeeds = [0,1]#,2,12,13,14,15]
+        yfeeds = [4,5]#,6,8,9,10,11]
         nfeed = 16
         self.gain_mat = []
-
+        self.transit_times = []
         #ts = containers.TimeStream.from_acq_files(files)
         k=0
-        for file in files:
-          data = andata.andata.from_acq_h5(file)
+        for f in files:
+          print "Starting with", f
+          data = andata.AnData.from_acq_h5(f)
           self.nfreq = data.nfreq
           self.ntime = data.ntime
-          transit_times = eph.transit_times(eph.CasA, data.timestamps[0])
+          self.transit_times.append(ephemeris.transit_times(
+                    ephemeris.CasA, data.timestamp[0]))
 
           print "Starting x-decomp on corrs:", xfeeds
           gain_arr_x = solve_gain(data.vis, nfeed, feed_loc=xfeeds)
@@ -138,7 +143,7 @@ class PointSourceCalibration(pipeline.TaskBase):
           gains[:, xfeeds] = np.median(gain_arr_x, axis=-1) # Take time avg of gains solution
           gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
 
-          print "Computing gain matrix for sidereal day %d" % d
+          print "Computing gain matrix for sidereal day %d" % k
           self.gain_mat.append(gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis]))
           k+=1
 
@@ -148,10 +153,10 @@ class PointSourceCalibration(pipeline.TaskBase):
         # Calibrate data as it comes in.
         # self.next method is run everytime data is sent through
         # Pretend we have extactly two CasA transits
-        times = data.times
+        times = data.timestamp
         #gain_mat_full should be the gains for each freq at all times in a sidereal day
         
-        gain_mat_full = interp_gains(self.transit_times, self.gain_mat, times)
+        gain_mat_full = interp_gains(np.concatenate(self.transit_times)[:2], self.gain_mat, times)
      
         calibrated_data = data.vis / gain_mat_full
 
