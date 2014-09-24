@@ -92,11 +92,11 @@ def solve_gain(data, nfeed, feed_loc=False):
 
      return gain_arr
 
-def interp_gains(transit_times, gain_mat, times):
+def interp_gains(transit_times, gain_mat, times, axis=0):
      """ Linearly interpolates gain solutions in 
      sidereal day.
      """
-     f = interpolate.interp1d(transit_times, gain_mat, axis=-1)
+     f = interpolate.interp1d(transit_times, gain_mat, axis=axis)
      return f(times)
      
 
@@ -144,10 +144,14 @@ class PointSourceCalibration(pipeline.TaskBase):
           gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
 
           print "Computing gain matrix for sidereal day %d" % k
-          self.gain_mat.append(gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis]))
+          self.gain_mat.append(gains[:, :, np.newaxis] * np.conj(
+                                        gains[:, np.newaxis]))[...,np.newaxis]
           k+=1
 
-    def next(self, data):
+        self.gain_mat = np.concatenate(self.gain_mat, axis=-1)
+        self.transit_times = np.concatenate(self.transit_times)
+
+    def next(data):
         # Should already have N_sidereal gain matrices, doens't do the linear interpolation 
         # until here. 
         # Calibrate data as it comes in.
@@ -156,7 +160,7 @@ class PointSourceCalibration(pipeline.TaskBase):
         times = data.timestamp
         #gain_mat_full should be the gains for each freq at all times in a sidereal day
         
-        gain_mat_full = interp_gains(np.concatenate(self.transit_times)[:2], self.gain_mat, times)
+        gain_mat_full = interp_gains(transit_times[:2], gain_mat[:2], times)
      
         calibrated_data = data.vis / gain_mat_full
 
