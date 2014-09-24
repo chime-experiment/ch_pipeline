@@ -18,10 +18,11 @@ Tasks
 
 from caput import pipeline
 from caput import config
-from ch_util import anddata
+from ch_util import andata
 
 import gain_sol_transit as gsol # Temp until the eigensolver is in ch_util. 
 # Or should the gainsol code go here?
+
 
 class PointSourceCalibration(pipeline.TaskBase):
 
@@ -30,7 +31,8 @@ class PointSourceCalibration(pipeline.TaskBase):
         start with the calibration solution itself
         How much time do I want from each transit? 
         Enough to actually get the transit at all frequencies 
-        Do I want to fringestop? No prolly not
+        Do I want to fringestop? Yes probably yes.
+        Really do need the layout information. 
 
         Need to know feed layout. Which are P0 which are P1? 
 
@@ -44,13 +46,12 @@ class PointSourceCalibration(pipeline.TaskBase):
         # Need to select subset of this data
         data_xpol, data_ypol = data.vis, data.vis # Need to figure out a way to select pols
         # Will this handle an MPIdataset? 
-        
-        gain_arr_x = gsol.solve_gain(data_xpol)
-        gain_arr_y = gsol.solve_gain(data_ypol)
+        nfeed = 16
+        gain_arr_x = gsol.solve_gain(data_xpol, nfeed)
+        gain_arr_y = gsol.solve_gain(data_ypol, nfeed)
 
         gain_sol = np.concatenate([gain_arr_x[np.newaxis], gain_arr_y[np.newaxis]])
-
-    return gain_sol
+        return gain_sol
 
     def next(self, data):
 
