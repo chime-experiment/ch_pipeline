@@ -19,7 +19,7 @@ Tasks
 import numpy as np
 
 from caput import pipeline, config
-from caput import mpidataset
+from caput import mpidataset, mpiutil
 from ch_util import rfi_pipeline
 
 import containers
@@ -40,6 +40,9 @@ class RFIFilter(pipeline.TaskBase):
     threshold_mad = config.Property(proptype=float, default=5.0)
 
     def next(self, data):
+
+        if mpiutil.rank0:
+            print "RFI filtering %s" % data.attrs['tag']
 
         data.redistribute(axis=2)
 
