@@ -113,6 +113,8 @@ def files_from_spec(spec, archive_root=None):
     """
     # Get a list of files in a dataset from an instrument name and timerange.
 
+    files = None
+
     if mpiutil.rank0:
 
         # Get the finder object
