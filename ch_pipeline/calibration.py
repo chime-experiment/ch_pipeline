@@ -257,6 +257,10 @@ class PointSourceCalibration(pipeline.TaskBase):
 
 if __name__ == '__main__':
      import h5py
+     from mpi4py import MPI
+     comm = MPI.COMM_WORLD
+     rank = comm.rank
+
      flpass0 = [u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00206207_0000.h5',
                 u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00288671_0000.h5',
                 u'/scratch/k/krs/jrs65/chime_archive/20140827T174947Z_blanchard_corr/00042126_0000.h5']
@@ -277,16 +281,20 @@ if __name__ == '__main__':
      print "Writing cal sol to file"
      print ""
 
-     ff = h5py.File('/scratch/k/krs/connor/calpass0_out.hdf5','w')     
-     ff.create_dataset('solution', data=P.gain_mat)
+     if rank==0:
+          ff = h5py.File('/scratch/k/krs/connor/calpass0_out.hdf5','w')     
+          ff.create_dataset('solution', data=P.gain_mat)
      
-     data_obj = andata.AnData.from_acq_h5(data_file)
-     datacal, solution = P.next(data_obj)
+#     data_obj = andata.AnData.from_acq_h5(data_file)
+     datacal, solution = P.next_parallel(data_file)
 
-     del data_obj
+#     del data_obj
+     
+     outfile = '/scratch/k/krs/connor/caldata_pass0.hdf5'
+     datacal.to_hdf5(outfile)
 
-     ff.create_dataset('datacal', data=datacal)
-     ff.close()
+#     ff.create_dataset('datacal', data=datacal)
+#     ff.close()
 
 """
 Layout 42 Pass 0 Conf B
