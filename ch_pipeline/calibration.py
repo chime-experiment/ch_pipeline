@@ -225,19 +225,19 @@ class PointSourceCalibration(pipeline.TaskBase):
 
         trans_times = self.trans_times
 
-        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))
-        gain_mat_full = interp_gains(trans_times, self.gain_mat, times[ind_cal[0]])
+        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))[0]
+        gain_mat_full = interp_gains(trans_times, self.gain_mat, times[ind_cal])
      
-        calibrated_data = data.vis[..., ind_cal[0]] / gain_mat_full
+        calibrated_data = data.vis[..., ind_cal] / gain_mat_full
 
         return calibrated_data, gain_mat_full
 
-    def next2(self, files):
+    def next_parallel(self, files):
         ts = containers.TimeStream.from_acq_files(files)
         ts.redistribute(0)
         
         freq_low = ts.vis.local_offset[0]
-        freq_up = ts.vis.local_offset[0] + ts.vis.local_shape[0]
+        freq_up = freq_low + ts.vis.local_shape[0]
 
         times = ts.timestamp 
 
@@ -246,10 +246,10 @@ class PointSourceCalibration(pipeline.TaskBase):
         ct = np.where(self.trans_times==trans_cent)[0]
         trans_times = self.trans_times[ct-1:ct+1]
         
-        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))
+        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))[0]
         gain_mat_full = interp_gains(trans_times, self.gain_mat[freq_low:freq_up], times[ind_cal])
         
-        calibrated_data = data.vis / gain_mat_full
+        calibrated_data = data.vis[..., ind_cal] / gain_mat_full
 
         return calibrated_data, gain_mat_full
         
@@ -261,9 +261,9 @@ if __name__ == '__main__':
                 u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00288671_0000.h5',
                 u'/scratch/k/krs/jrs65/chime_archive/20140827T174947Z_blanchard_corr/00042126_0000.h5']
      
-     start_time, end_time = datetime.datetime(2014, 8, 24), datetime.datetime(2014,8,29)
+     start_time, end_time = datetime.datetime(2014, 8, 24), datetime.datetime(2014,8,28)
 
-     data_file = flpass0[:]
+     data_file = flpass0[1]
      
      print "Attempting to generate cal solutions between", start_time, "and", end_time
      print ""
