@@ -30,6 +30,7 @@ from ch_util import ephemeris
 from ch_util import data_index
 
 import containers
+import dataspec
 
 
 def gen_corr_matrix(data, nfeed, feed_loc=False):
@@ -120,15 +121,13 @@ def interp_gains(trans_times, gain_mat, times, axis=-1):
     return f(times)
 
 
-def list_transits(start_time, end_time, obj=ephemeris.CasA, tdel=600):
+def list_transits(dspec, obj=ephemeris.CasA, tdel=600):
     """Get a list of files that contain point source transits
 
     Parameter
     ---------
-    start_time : float or :class:`datetime.datetime`, optional
-        Unix/POSIX time or UTC start of desired time range.
-    end_time : float or :class:`datetime.datetime`, optional
-        Unix/POSIX time or UTC start of desired time range.
+    dspec : dictionary
+        Dataset specification.
     obj : ephem.Body, optional
         Body for which to find transits.
     tdel : float, optional
@@ -139,12 +138,10 @@ def list_transits(start_time, end_time, obj=ephemeris.CasA, tdel=600):
     interval_list : :class:`DataIntervalList`
         Search results.
     """
-    f = data_index.Finder()
-    f.set_time_range(start_time, end_time)
-    f.filter_acqs(data_index.ArchiveInst.name == 'blanchard')
-    f.include_transits(obj, time_delta=tdel)
+    fi = dataspec.finder_from_spec(dspec)
+    fi.include_transits(obj, time_delta=tdel)
 
-    return f.get_results()
+    return fi.get_results()
 
 
 class PointSourceCalibration(pipeline.TaskBase):
@@ -153,11 +150,16 @@ class PointSourceCalibration(pipeline.TaskBase):
     start_time = config.Property(proptype=float)
     end_time = config.Property(proptype=float)
 
-    def setup(self, start_time, end_time):
+    def setup(self, dspec):
+        """Use a dataspec to derive the calibration solutions.
+
+        Parameters
+        ----------
+        dspec : dictionary
+            Dataspec as a dictionary.
         """
-        """
-        data_dir = '/scratch/k/krs/jrs65/chime_archive/'
-        transit_list = list_transits(start_time, end_time, obj=ephemeris.CasA)
+
+        transit_list = list_transits(dspec, obj=ephemeris.CasA)
 
         ndays = len(transit_list)
 
@@ -175,10 +177,7 @@ class PointSourceCalibration(pipeline.TaskBase):
             if len(files[0]) > 3:
                 continue  # Skip large acqquisitions. Usually high-cadence observations
 
-            flist = []
-
-            for f in files[0]:
-                flist.append(data_dir + f)
+            flist = files[0]
 
             print "Reading in:", flist
 
@@ -217,7 +216,7 @@ class PointSourceCalibration(pipeline.TaskBase):
         self.gain_mat = self.gain_mat[:, np.triu_indices(self.nfeed)[0], np.triu_indices(self.nfeed)[1]]
         self.trans_times = np.concatenate(self.trans_times)
 
-    def next(self, data):
+    def next_old(self, data):
 
         times = data.timestamp
         trans_cent = ephemeris.transit_times(ephemeris.CasA, times[0])
@@ -234,10 +233,26 @@ class PointSourceCalibration(pipeline.TaskBase):
 
         return calibrated_data, gain_mat_full
 
-    def next_parallel(self, files):
-        ts = containers.TimeStream.from_acq_files(files)
+    def next(self, ts):
+        """Apply calibration to a timestream.
+
+        Parameters
+        ----------
+        ts : containers.TimeStream
+            Parallel timestream class.
+
+        Returns
+        -------
+        calibrated_ts : containers.TimeStream
+            Calibrated timestream.
+        gains : np.ndarray
+            Array of gains.
+        """
+
+        # Ensure that we are distributed over frequency
         ts.redistribute(0)
 
+        # Find the local frequencies
         freq_low = ts.vis.local_offset[0]
         freq_up = freq_low + ts.vis.local_shape[0]
 
