@@ -159,6 +159,7 @@ class PointSourceCalibration(pipeline.TaskBase):
             Dataspec as a dictionary.
         """
 
+        data_dir = '/scratch/k/krs/jrs65/chime_archive/'
         transit_list = list_transits(dspec, obj=ephemeris.CasA)
 
         ndays = len(transit_list)
@@ -177,8 +178,13 @@ class PointSourceCalibration(pipeline.TaskBase):
             if len(files[0]) > 3:
                 continue  # Skip large acqquisitions. Usually high-cadence observations
 
-            flist = files[0]
+            flist = []
 
+            for f in files[0]:
+                flist.append(data_dir + f)
+            
+#            flist = files[0]
+            
             print "Reading in:", flist
 
             reader = andata.Reader(flist)
@@ -264,7 +270,8 @@ class PointSourceCalibration(pipeline.TaskBase):
         trans_times = self.trans_times[ct-1:ct+1]
 
         ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))[0]
-        gain_mat_full = interp_gains(trans_times, self.gain_mat[freq_low:freq_up], times[ind_cal])
+
+        gain_mat_full = interp_gains(trans_times, self.gain_mat[freq_low:freq_up, :2], times[ind_cal])
 
         calibrated_data = ts.vis[..., ind_cal] / gain_mat_full
 
@@ -298,6 +305,10 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD
     rank = comm.rank
 
+    dspec = {'name':test, 
+             'instrument':'blanchard', 
+             'timerange':{'start':datetime.datetime(2014, 8, 24), 'end':datetime.datetime(2014, 8, 28)}}
+
     flpass0 = [u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00206207_0000.h5',
                u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00288671_0000.h5',
                u'/scratch/k/krs/jrs65/chime_archive/20140827T174947Z_blanchard_corr/00042126_0000.h5']
@@ -310,7 +321,8 @@ if __name__ == '__main__':
     print ""
 
     P = PointSourceCalibration()
-    P.setup(start_time, end_time)
+#    P.setup(start_time, end_time)
+    P.setup(dspec)
 
     os.system('rm -f /scratch/k/krs/connor/calpass0_out.hdf5')
 
@@ -321,9 +333,10 @@ if __name__ == '__main__':
     if rank == 0:
         ff = h5py.File('/scratch/k/krs/connor/calpass0_out.hdf5', 'w')
         ff.create_dataset('solution', data=P.gain_mat)
-
+        
+    ts = containers.TimeStream.from_acq_files(files)
     #     data_obj = andata.AnData.from_acq_h5(data_file)
-    datacal, solution = P.next_parallel(data_file)
+    datacal, solution = P.next_parallel(ts)
 
     #     del data_obj
 
