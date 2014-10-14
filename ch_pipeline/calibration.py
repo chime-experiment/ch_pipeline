@@ -25,6 +25,7 @@ from caput import config
 from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
+from ch_util import ni_utils
 
 from . import dataspec
 
@@ -275,13 +276,17 @@ class PointSourceCalibration(pipeline.TaskBase):
 
 class NoiseSourceCalibration(pipeline.TaskBase):
 
-    def setup(self):
+    #def setup(self):
         # Initialise any required products in here. This function is only
         # called as the task is being setup, and before any actual data has
         # been sent through
 
-        pass
-
+    Nadc_channels = config.Property(proptype=int, default=16)
+    adc_ch_ref = config.Property(proptype=int, default=None)
+    fbin_ref = config.Property(proptype=int, default=None)
+    normalize_vis = config.Property(proptype=bool, default=False)
+    masked_channels = config.Property(proptype=list, default=None)
+        
     def next(self, data):
         # This method should derive the gains from the data as it comes in,
         # and apply the corrections to rigidise the data
@@ -289,6 +294,10 @@ class NoiseSourceCalibration(pipeline.TaskBase):
         # The data will come be received as a containers.TimeStream type. In
         # some ways this looks a little like AnData, but it works in parallel
 
-        calibrated_data = data
+        nidata = ni_utils.ni_data(data, self.Nadc_channels, self.adc_ch_ref, self.fbin_ref)
+        nidata.get_ni_gains(self.normalize_vis, self.masked_channels)
+        ni_gains = nidata.ni_gains
+        ni_evals = nidata.ni_evals
+        ni_gain_timestamp = nidata.timestamp_dec
 
-        return calibrated_data
+        return ni_gains, ni_evals, ni_gain_timestamp
