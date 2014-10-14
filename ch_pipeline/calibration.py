@@ -14,10 +14,8 @@ Tasks
     :toctree: generated/
 
     PointSourceCalibration
+    NoiseSourceCalibration
 """
-import os
-import datetime
-
 import numpy as np
 from scipy import interpolate
 
@@ -27,10 +25,8 @@ from caput import config
 from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
-from ch_util import data_index
 
-import containers
-import dataspec
+from . import dataspec
 
 
 def gen_corr_matrix(data, nfeed, feed_loc=False):
@@ -145,10 +141,15 @@ def list_transits(dspec, obj=ephemeris.CasA, tdel=600):
 
 
 class PointSourceCalibration(pipeline.TaskBase):
+    """Use CasA transits as point source calibrators.
 
-    files = config.Property(proptype=list)
-    start_time = config.Property(proptype=float)
-    end_time = config.Property(proptype=float)
+    Attributes
+    ----------
+    source : str
+        Point source to use as calibrator. Only CasA is supported at this time.
+    """
+
+    source = config.Property(proptype=str, default='CasA')
 
     def setup(self, dspec):
         """Use a dataspec to derive the calibration solutions.
@@ -159,7 +160,6 @@ class PointSourceCalibration(pipeline.TaskBase):
             Dataspec as a dictionary.
         """
 
-        data_dir = '/scratch/k/krs/jrs65/chime_archive/'
         transit_list = list_transits(dspec, obj=ephemeris.CasA)
 
         ndays = len(transit_list)
@@ -178,13 +178,8 @@ class PointSourceCalibration(pipeline.TaskBase):
             if len(files[0]) > 3:
                 continue  # Skip large acqquisitions. Usually high-cadence observations
 
-            flist = []
+            flist = files[0]
 
-            for f in files[0]:
-                flist.append(data_dir + f)
-            
-#            flist = files[0]
-            
             print "Reading in:", flist
 
             reader = andata.Reader(flist)
@@ -297,74 +292,3 @@ class NoiseSourceCalibration(pipeline.TaskBase):
         calibrated_data = data
 
         return calibrated_data
-
-
-if __name__ == '__main__':
-    import h5py
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-    rank = comm.rank
-
-    dspec = {'name':test, 
-             'instrument':'blanchard', 
-             'timerange':{'start':datetime.datetime(2014, 8, 24), 'end':datetime.datetime(2014, 8, 28)}}
-
-    flpass0 = [u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00206207_0000.h5',
-               u'/scratch/k/krs/jrs65/chime_archive/20140822T193501Z_blanchard_corr/00288671_0000.h5',
-               u'/scratch/k/krs/jrs65/chime_archive/20140827T174947Z_blanchard_corr/00042126_0000.h5']
-
-    start_time, end_time = datetime.datetime(2014, 8, 24), datetime.datetime(2014, 8, 28)
-
-    data_file = flpass0[1]
-
-    print "Attempting to generate cal solutions between", start_time, "and", end_time
-    print ""
-
-    P = PointSourceCalibration()
-#    P.setup(start_time, end_time)
-    P.setup(dspec)
-
-    os.system('rm -f /scratch/k/krs/connor/calpass0_out.hdf5')
-
-    print ""
-    print "Writing cal sol to file"
-    print ""
-
-    if rank == 0:
-        ff = h5py.File('/scratch/k/krs/connor/calpass0_out.hdf5', 'w')
-        ff.create_dataset('solution', data=P.gain_mat)
-        
-    ts = containers.TimeStream.from_acq_files(files)
-    #     data_obj = andata.AnData.from_acq_h5(data_file)
-    datacal, solution = P.next_parallel(ts)
-
-    #     del data_obj
-
-    outfile = '/scratch/k/krs/connor/caldata_pass0.hdf5'
-    datacal.to_hdf5(outfile)
-
-#     ff.create_dataset('datacal', data=datacal)
-#     ff.close()
-
-"""
-Layout 42 Pass 0 Conf B
------------------------
-
-1948.24 CSS016C0 P1 CXA0202B CANBH0B 29821-0000-0029-C12
-1948.24 CSS016C0 P2 CXA0233B CANBH4B 29821-0000-0029-C08
-1978.72 CSS016C1 P1 CXA0236C CANBH1B 29821-0000-0029-C13
-1978.72 CSS016C1 P2 CXA0010B CANBH5B 29821-0000-0029-C09
-2009.20 CSS016C2 P1 CXA0239C CANBH2B 29821-0000-0029-C14
-2009.20 CSS016C2 P2 CXA0067B CANBH6B 29821-0000-0029-C10
-2039.68 CSS016C3 P1 CXA0006B CANBH3B 29821-0000-0029-C15
-2039.68 CSS016C3 P2 CXA0113B CANBH7B 29821-0000-0029-C11
-2069.24 CSS019C0 P2 CXA0171B CANBG0B 29821-0000-0029-C04
-2069.24 CSS019C0 P1 CXA0200B CANBG4B 29821-0000-0029-C00
-2099.72 CSS019C1 P2 CXA0189B CANBG1B 29821-0000-0029-C05
-2099.72 CSS019C1 P1 CXA0208B CANBG5B 29821-0000-0029-C01
-2130.20 CSS019C2 P2 CXA0185B CANBG2B 29821-0000-0029-C06
-2130.20 CSS019C2 P1 CXA0240C CANBG6B 29821-0000-0029-C02
-2160.68 CSS019C3 P2 CXA0169B CANBG3B 29821-0000-0029-C07
-2160.68 CSS019C3 P1 CXA0063B CANBG7B 29821-0000-0029-C03
-
-"""
