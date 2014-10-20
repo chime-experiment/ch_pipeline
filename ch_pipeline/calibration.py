@@ -21,11 +21,14 @@ from scipy import interpolate
 
 from caput import pipeline
 from caput import config
+from caput import mpidataset
 
 from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
+
+import containers
 
 from . import dataspec
 
@@ -274,30 +277,82 @@ class PointSourceCalibration(pipeline.TaskBase):
         return calibrated_data, gain_mat_full
 
 
-class NoiseSourceCalibration(pipeline.TaskBase):
+class NoiseInjCalibration(pipeline.TaskBase):
+    """Calibration using Noise Injection
 
+    Attributes
+    ----------
+    Nchannels : int, optional
+        Number of channels (default 16).    
+    ch_ref : int in the range 0 <= ch_ref <= Nchannels-1, optional
+        Reference channel (default 0).
+    fbin_ref : int, optional
+        Reference frequency bin
+    """
     #def setup(self):
         # Initialise any required products in here. This function is only
         # called as the task is being setup, and before any actual data has
         # been sent through
 
-    Nadc_channels = config.Property(proptype=int, default=16)
-    adc_ch_ref = config.Property(proptype=int, default=None)
+    Nchannels = config.Property(proptype=int, default=16)
+    ch_ref = config.Property(proptype=int, default=None)
     fbin_ref = config.Property(proptype=int, default=None)
-    normalize_vis = config.Property(proptype=bool, default=False)
-    masked_channels = config.Property(proptype=list, default=None)
+    #normalize_vis = config.Property(proptype=bool, default=False)
+    #masked_channels = config.Property(proptype=list, default=None)
         
-    def next(self, data):
+    def next(self, ts):
+        """Find gains from noise injection data and apply them to visibilities.
+        
+        Parameters
+        ----------
+        ts : containers.TimeStream
+            Parallel timestream class containing noise injection data.
+
+        Returns
+        -------
+        nits : containers.NoiseInjTimeStream
+            Timestream with calibrated (decimated) visibilities, gains and 
+            respective timestamps.
+        """
         # This method should derive the gains from the data as it comes in,
         # and apply the corrections to rigidise the data
         #
         # The data will come be received as a containers.TimeStream type. In
         # some ways this looks a little like AnData, but it works in parallel
 
-        nidata = ni_utils.ni_data(data, self.Nadc_channels, self.adc_ch_ref, self.fbin_ref)
-        nidata.get_ni_gains(self.normalize_vis, self.masked_channels)
-        ni_gains = nidata.ni_gains
-        ni_evals = nidata.ni_evals
-        ni_gain_timestamp = nidata.timestamp_dec
+        
+        # Ensure that we are distributed over frequency
+        ts.redistribute(0)
+        
+        # Create noise injection data object from input timestream
+        nidata = ni_utils.ni_data(ts, self.Nchannels, self.ch_ref, self.fbin_ref)
+        
+        # Decimated visibilities without calibration
+        vis_uncal = nidata.vis_off_dec 
+        
+        # Timestamp corresponding to decimated visibilities
+        timestamp = nidata.timestamp_dec
+        
+        # Find gains
+        nidata.get_ni_gains() 
+        g = nidata.ni_gains
+        gains = ni_utils.gains2utvec_tf(g) # Convert to gain array
+        
+        # Correct decimated visibilities
+        vis = vis_uncal/gains
+        
+        # Calculate dynamic range
+        ev = ni_utils.sort_evalues_mag(nidata.ni_evals) # Sort evalues
+        dr = abs(ev[:, -1, :]/ev[:, -2, :])
+        dr = dr[:, np.newaxis, :]
+           
+        # Turn vis, gains and dr into MPIArray
+        vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)  
+        gains = mpidataset.MPIArray.wrap(gains, axis=0, comm=ts.comm) 
+        dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)   
+        
+        # Create NoiseInjTimeStream
+        nits = containers.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)  
+        nits.redistribute(0)  
 
-        return ni_gains, ni_evals, ni_gain_timestamp
+        return nits
