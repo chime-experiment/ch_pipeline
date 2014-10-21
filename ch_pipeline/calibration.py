@@ -352,7 +352,7 @@ class NoiseInjCalibration(pipeline.TaskBase):
         dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)   
         
         # Create NoiseInjTimeStream
-        nits = containers.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)  
+        nits = containers.NoiseInjTimeStream.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)  
         nits.redistribute(0)  
 
         return nits
