@@ -38,7 +38,20 @@ A dataspec is just a dictionary with three required keys.
 
 The time range is specified either as a dictionary with `start` and `end`
 keys, containing datetime objects (in UTC). Or it can be a list of such
-ditionaries, to specify multiple time ranges to include.
+ditionaries, to specify multiple time ranges to include. This can be contained
+in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
+
+.. codeblock:: yaml
+
+    datasets:
+        -   name:       A
+            instrument: blanchard
+            timerange:
+                -   start:  2014-07-26 03:00:00
+                    end:    2014-07-28 01:00:00
+
+                -   start:  2014-07-28 11:00:00
+                    end:    2014-07-31 00:00:00
 """
 
 import os
