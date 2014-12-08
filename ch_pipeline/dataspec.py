@@ -14,6 +14,7 @@ Tasks
     :toctree: generated/
 
     LoadDataspec
+    CreateInputMap
 
 Routines
 ========
@@ -24,8 +25,8 @@ Routines
     finder_from_spec
     files_from_spec
 
-Format
-======
+Dataspec Format
+===============
 
 A dataspec is just a dictionary with three required keys.
 
@@ -57,6 +58,7 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
 import os
 
 from caput import mpiutil, pipeline, config
+from ch_util import andata, tools, ephemeris
 
 
 def finder_from_spec(spec, archive_root=None):
@@ -207,3 +209,47 @@ class LoadDataspec(pipeline.TaskBase):
             dspec['archive_root'] = self.archive_root
 
         return dspec
+
+
+class CreateInputMap(pipeline.TaskBase):
+    """From a dataspec describing the data create a list of objects describing
+    the inputs in the files.
+    """
+
+    def setup(self, dspec):
+        """Generate an input description from the dataspec.
+
+        Parameters
+        ----------
+        dspec : dict
+            Dataspec as dictionary.
+
+        Returns
+        -------
+        inputs : list of :class:`CorrInput`s
+            A list of describing the inputs as they are in the file.
+        """
+        file0 = files_from_spec(dspec)[0]
+        inputs = None
+
+        if mpiutil.rank0:
+            # Open up the first file to extract metadata
+            ad0 = andata.CorrData.from_acq_h5(file0, datasets=())
+
+            # Get the start time of the data
+            time0 = ephemeris.unix2datetime(ad0.timestamp[0])
+
+            # Fetch the serial numbers of the inputs in the file
+            input_serials = list(ad0.index_map['input']['correlator_input'])
+
+            # Fetch input description from database, and turn into dict for querying
+            inputs = tools.get_correlator_inputs(time0, correlator=dspec['instrument'])
+            input_dict = { input_.input_sn: input_ for input_ in inputs }
+
+            # Use a dict lookup to get the inputs as they are arranged in this file
+            inputs = [ input_dict[serial] for serial in input_serials ]
+
+        # Broadcast input description to all ranks
+        inputs = mpiutil.world.bcast(inputs, root=0)
+
+        return inputs
