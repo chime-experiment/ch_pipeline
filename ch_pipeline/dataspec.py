@@ -60,8 +60,10 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import andata, tools, ephemeris
 
+_DEFAULT_NODE_SPOOF = {'scinet_scratch': '/scratch/k/krs/jrs65/chime_archive/'}
 
-def finder_from_spec(spec, archive_root=None):
+
+def finder_from_spec(spec, node_spoof=None):
     """Get a `Finder` object from the dataspec.
 
     Parameters
@@ -93,13 +95,13 @@ def finder_from_spec(spec, archive_root=None):
         earliest = min([ tr['start'] for tr in timerange ])
         latest   = max([ tr['end']   for tr in timerange ])
 
-        # Create a finder object limited to the relevant time
-        fi = di.Finder()
-
         # Set the archive_root
-        if archive_root is None:
-            archive_root = spec['archive_root'] if 'archive_root' in spec else ''
-        fi.archive_root = archive_root
+        if node_spoof is None and 'node_spoof' in spec:
+            node_spoof = spec['node_spoof']
+
+        # Create a finder object limited to the relevant time
+        fi = di.Finder(node_spoof=node_spoof)
+        #fi.only_corr()
 
         # Set the time range that encapsulates all the intervals
         fi.set_time_range(earliest, latest)
@@ -114,7 +116,7 @@ def finder_from_spec(spec, archive_root=None):
     return fi
 
 
-def files_from_spec(spec, archive_root=None):
+def files_from_spec(spec, node_spoof=None):
     """Get the names of files in a dataset.
 
     Parameters
@@ -133,7 +135,7 @@ def files_from_spec(spec, archive_root=None):
     if mpiutil.rank0:
 
         # Get the finder object
-        fi = finder_from_spec(spec, archive_root)
+        fi = finder_from_spec(spec, node_spoof)
 
         # Pull out the results and extract all the files
         results = fi.get_results()
@@ -161,7 +163,7 @@ class LoadDataspec(pipeline.TaskBase):
 
     dataset_file = config.Property(proptype=str, default='')
     dataset_name = config.Property(proptype=str, default='')
-    archive_root = config.Property(proptype=str, default='')
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
     def setup(self):
         """Fetch the dataspec from the parameters.
@@ -205,8 +207,8 @@ class LoadDataspec(pipeline.TaskBase):
             raise Exception("Invalid dataset.")
 
         # Add archive root if exists
-        if self.archive_root != '':
-            dspec['archive_root'] = self.archive_root
+        if self.node_spoof is not None:
+            dspec['node_spoof'] = self.node_spoof
 
         return dspec
 
@@ -233,11 +235,14 @@ class CreateInputMap(pipeline.TaskBase):
         inputs = None
 
         if mpiutil.rank0:
+            print "Reading file to construct inputmap...",
             # Open up the first file to extract metadata
             ad0 = andata.CorrData.from_acq_h5(file0, datasets=())
+            
+            print "done."
 
             # Get the start time of the data
-            time0 = ephemeris.unix2datetime(ad0.timestamp[0])
+            time0 = ephemeris.unix_to_datetime(ad0.timestamp[0])
 
             # Fetch the serial numbers of the inputs in the file
             input_serials = list(ad0.index_map['input']['correlator_input'])
@@ -248,6 +253,8 @@ class CreateInputMap(pipeline.TaskBase):
 
             # Use a dict lookup to get the inputs as they are arranged in this file
             inputs = [ input_dict[serial] for serial in input_serials ]
+
+            print "Finished input map."
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)

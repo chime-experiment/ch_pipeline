@@ -21,7 +21,7 @@ from scipy import interpolate
 
 from caput import pipeline
 from caput import config
-from caput import mpidataset
+from caput import mpidataset, mpiutil
 
 from ch_util import andata
 from ch_util import tools
@@ -33,10 +33,10 @@ import containers
 from . import dataspec
 
 
-def gen_corr_matrix(data, nfeed, feed_loc=False):
-    """Generates Hermitian (nfeed, nfeed) correlation matrix from unique
-    correlations (should probably be in ch_util.tools, or at least not in
-    here)
+def gen_corr_matrix(data, nfeed, feed_loc=None):
+    """Generates Hermitian correlation matrix from unique correlations.
+
+    Should probably be in ch_util.tools, or at least not in here.
 
     Parameters
     ----------
@@ -44,14 +44,16 @@ def gen_corr_matrix(data, nfeed, feed_loc=False):
         Visibility array to be decomposed.
     nfeed : int
         Number of feeds.
+    feed_loc : list of ints
+        Which feeds to include. If :obj:`None` include all feeds.
 
     Returns
     -------
-    corr_mat : array_like
+    corr_mat : np.ndarray[len(feed_loc), len(feed_loc)]
         Hermitian correlation matrix.
     """
 
-    if not feed_loc:
+    if feed_loc is None:
         feed_loc = range(nfeed)
 
     corr_mat = np.zeros((len(feed_loc), len(feed_loc)), np.complex128)
@@ -64,10 +66,10 @@ def gen_corr_matrix(data, nfeed, feed_loc=False):
     return corr_mat
 
 
-def solve_gain(data, nfeed, feed_loc=False):
+def solve_gain(data, nfeed, feed_loc=None):
     """
-    Steps through each time/freq pixel, generates a Hermitian (nfeed,nfeed)
-    matrix and calculates gains from its largest eigenvector.
+    Steps through each time/freq pixel, generates a Hermitian matrix and
+    calculates gains from its largest eigenvector.
 
     Parameters
     ----------
@@ -76,11 +78,11 @@ def solve_gain(data, nfeed, feed_loc=False):
     nfeed : number
         Number of feeds in configuration
     feed_loc : list
-        Which feeds to include
+        Which feeds to include. If :obj:`None` include all feeds.
 
     Returns
     -------
-    gain_arr : array_like
+    gain_arr : np.ndarray
         Gain solution for each feed, time, and frequency
     """
     if not feed_loc:
@@ -111,14 +113,20 @@ def interp_gains(trans_times, gain_mat, times, axis=-1):
         Array of gains shaped (freq, ncorr, ndays)
     times : array_like
         Timestamps onto which gain solution is interpolated
+    axis : int
+        Axis along which to interpolate.
 
     Returns
     -------
     Array of interpolated gains
     """
-    f = interpolate.interp1d(trans_times, gain_mat, kind='linear', axis=axis)
+    f = interpolate.interp1d(trans_times, gain_mat, kind='linear', axis=axis, bounds_error=False)
 
-    return f(times)
+    gains = f(times)
+    gains[..., times < trans_times[0]] = gain_mat[..., 0, np.newaxis]
+    gains[..., times > trans_times[-1]] = gain_mat[..., -1, np.newaxis]
+
+    return gains
 
 
 def list_transits(dspec, obj=ephemeris.CasA, tdel=600):
@@ -144,6 +152,77 @@ def list_transits(dspec, obj=ephemeris.CasA, tdel=600):
     return fi.get_results()
 
 
+# A few internal routines for figuring things out from the input map.
+def _is_chime_x(inp):
+    return isinstance(inp, tools.CHIMEAntenna) and inp.pol == 'E'
+
+
+def _is_chime_y(inp):
+    return isinstance(inp, tools.CHIMEAntenna) and inp.pol == 'S'
+
+
+def _get_noise_channel(inputs):
+    noise_sources = [ ix for ix, inp in enumerate(inputs) if isinstance(inp, tools.NoiseSource) ]
+
+    return noise_sources[0]
+
+
+def _apply_gains(vis, gains, axis=1, out=None):
+    """Apply per input gains to a set of visibilities packed in upper
+    triangular format.
+
+    This allows us to apply the gains while minimising the intermediate products created.
+
+    Parameters
+    ----------
+    vis : np.ndarray[..., nprod, ...]
+        Array of visibility products.
+    gains : np.ndarray[..., ninput, ...]
+        Array of gains. One gain per input.
+    axis : integer, optional
+        The axis along which the inputs (or visibilities) are
+        contained. Currently only supports axis=1.
+    out : np.ndarray
+        Array to place output in. If :obj:`None` create a new
+        array. This routine can safely use `out = vis`.
+
+    Returns
+    -------
+    out : np.ndarray
+        Visibility array with gains applied. Same shape as :obj:`vis`.
+    """
+
+    from ch_util import tools
+
+    ninput = gains.shape[axis]
+    
+    if vis.shape[axis] != (ninput * (ninput + 1) / 2):
+        raise Exception("Number of inputs does not match the number of products.")
+
+    if out is None:
+        out = np.empty_like(vis)
+    elif out.shape != vis.shape:
+        raise Exception("Output array is wrong shape.")
+
+    # Iterate over input pairs and set gains
+    for ii in range(ninput):
+
+        for ij in range(ii, ninput):
+            
+            # Calculate the product index
+            ik = tools.cmap(ii, ij, ninput)
+            
+            # Fetch the gains
+            gi = gains[:, ii]
+            gj = gains[:, ij].conj()
+
+            # Apply the gains and save into the output array.
+            out[:, ik] = vis[:, ik] * gi * gj
+
+    return out
+            
+
+
 class PointSourceCalibration(pipeline.TaskBase):
     """Use CasA transits as point source calibrators.
 
@@ -155,88 +234,87 @@ class PointSourceCalibration(pipeline.TaskBase):
 
     source = config.Property(proptype=str, default='CasA')
 
-    def setup(self, dspec):
+    _source_dict = { 'CasA': ephemeris.CasA }
+
+    def setup(self, dspec, inputmap):
         """Use a dataspec to derive the calibration solutions.
 
         Parameters
         ----------
         dspec : dictionary
             Dataspec as a dictionary.
+        inputmap : list of :class:`tools.CorrInputs`
+            Describing the inputs to the correlator.
         """
 
-        transit_list = list_transits(dspec, obj=ephemeris.CasA)
+        # Use input map to figure out which are the X and Y feeds
+        xfeeds = [idx for idx, inp in enumerate(inputmap) if _is_chime_x(inp)]
+        yfeeds = [idx for idx, inp in enumerate(inputmap) if _is_chime_y(inp)]
 
-        ndays = len(transit_list)
-
-        # Assumed to be layout 42
-        xfeeds = [0, 1, 2, 3, 12, 13, 14, 15]
-        yfeeds = [4, 5, 6, 7, 8, 9, 10, 11]
-
-        self.nfeed = 16
+        self.nfeed = len(inputmap)
         self.gain_mat = []
         self.trans_times = []
 
-        k = 0
-        for files in transit_list:
+        if mpiutil.rank0:
 
-            if len(files[0]) > 3:
-                continue  # Skip large acqquisitions. Usually high-cadence observations
+            # Fetch source and transit
+            source = self._source_dict[self.source]
+            transit_list = list_transits(dspec, obj=source)
 
-            flist = files[0]
+            # Number of transits
+            ndays = len(transit_list)
 
-            print "Reading in:", flist
+            # Loop to find gain solutions for each transit
+            for k, files in enumerate(transit_list):
 
-            reader = andata.Reader(flist)
-            reader.freq_sel = range(1024)
-            data = reader.read()
+                if len(files[0]) > 3:
+                    print "Skipping as too many files."
+                    continue  # Skip large acqquisitions. Usually high-cadence observations
 
-            times = data.timestamp
-            self.nfreq = data.nfreq
-            self.ntime = data.ntime
-            self.trans_times.append(ephemeris.transit_times(
-                                    ephemeris.CasA, times[0]))
+                flist = files[0]
 
-            times_ind = np.where((times > self.trans_times[k] - 60.) & (times < self.trans_times[k] + 60.))
-            vis = data.vis[..., times_ind[0]]
+                print "Reading in:", flist
 
-            del data
+                # Read in the data
+                reader = andata.Reader(flist)
+                reader.freq_sel = range(1024)
+                data = reader.read()
 
-            gain_arr_x = solve_gain(vis, self.nfeed, feed_loc=xfeeds)
-            gain_arr_y = solve_gain(vis, self.nfeed, feed_loc=yfeeds)
+                times = data.timestamp
+                self.nfreq = data.nfreq
+                self.ntime = data.ntime
 
-            print "Finished eigendecomposition"
-            print ""
+                # Find the exact transit time for this transit
+                trans_time = ephemeris.transit_times(source, times[0])
+                self.trans_times.append(trans_time)
 
-            # Use ones since we'll be dividing in PointSourceCalibration.next
-            gains = np.ones([self.nfreq, self.nfeed], np.complex128)
+                # Select only data within a minute of the transit
+                times_ind = np.where((times > trans_time - 60.) & (times < trans_time + 60.))
+                vis = data.vis[..., times_ind[0]]
+                del data
 
-            gains[:, xfeeds] = np.median(gain_arr_x, axis=-1)  # Take time avg of gains solution
-            gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
+                print "Solving gains."
+                # Solve for the gains of each set of polarisations
+                gain_arr_x = solve_gain(vis, self.nfeed, feed_loc=xfeeds)
+                gain_arr_y = solve_gain(vis, self.nfeed, feed_loc=yfeeds)
 
-            print "Computing gain matrix for sidereal day %d of %d" % (k+1, ndays)
-            self.gain_mat.append((gains[:, :, np.newaxis] * np.conj(gains[:, np.newaxis]))[..., np.newaxis])
-            k += 1
+                print "Finished eigendecomposition"
+                print ""
 
-        self.gain_mat = np.concatenate(self.gain_mat, axis=-1)
-        self.gain_mat = self.gain_mat[:, np.triu_indices(self.nfeed)[0], np.triu_indices(self.nfeed)[1]]
-        self.trans_times = np.concatenate(self.trans_times)
+                # Construct the final gain arrays
+                gains = np.ones([self.nfreq, self.nfeed], np.complex128)
+                gains[:, xfeeds] = np.median(gain_arr_x, axis=-1)  # Take time avg of gains solution
+                gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
 
-    def next_old(self, data):
+                print "Computing gain matrix for transit %d of %d" % (k+1, ndays)
+                self.gain_mat.append(gains[:, :, np.newaxis])
 
-        times = data.timestamp
-        trans_cent = ephemeris.transit_times(ephemeris.CasA, times[0])
-        print trans_cent
+            self.gain_mat = np.concatenate(self.gain_mat, axis=-1)
+            self.trans_times = np.concatenate(self.trans_times)
+            print "Broadcasting solutions to all ranks."
 
-        #ct = np.where(self.trans_times == trans_cent)[0]
-
-        trans_times = self.trans_times
-
-        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))[0]
-        gain_mat_full = interp_gains(trans_times, self.gain_mat, times[ind_cal])
-
-        calibrated_data = data.vis[..., ind_cal] / gain_mat_full
-
-        return calibrated_data, gain_mat_full
+        self.gain_mat = mpiutil.world.bcast(self.gain_mat, root=0)
+        self.trans_times = mpiutil.world.bcast(self.trans_times, root=0)
 
     def next(self, ts):
         """Apply calibration to a timestream.
@@ -261,48 +339,60 @@ class PointSourceCalibration(pipeline.TaskBase):
         freq_low = ts.vis.local_offset[0]
         freq_up = freq_low + ts.vis.local_shape[0]
 
+        # Find times that are within the calibrated region
         times = ts.timestamp
+        #ind_cal = np.where((times > self.trans_times[0]) & (times < self.trans_times[-1]))[0]
 
-        trans_cent = ephemeris.transit_times(ephemeris.CasA, times[0])
+        # Construct the gain matrix at all times (using liner interpolation)
+        gains = interp_gains(self.trans_times, self.gain_mat[freq_low:freq_up], times)
 
-        ct = np.where(self.trans_times == trans_cent)[0]
-        trans_times = self.trans_times[ct-1:ct+1]
+        # Create CalibratedTimeStream
+        cts = containers.CalibratedTimeStream(times, ts.vis.global_shape[0], ts.vis.global_shape[1], comm=ts.comm)
 
-        ind_cal = np.where((times > trans_times[0]) & (times < trans_times[-1]))[0]
+        # Apply gains to visibility matrix and copy into cts
+        _apply_gains(ts.vis, 1.0 / gains, out=cts.vis)
 
-        gain_mat_full = interp_gains(trans_times, self.gain_mat[freq_low:freq_up, :2], times[ind_cal])
+        # Save gains into cts instance
+        cts.gains[:] = mpidataset.MPIArray.wrap(gains, axis=0, comm=cts.comm)
 
-        calibrated_data = ts.vis[..., ind_cal] / gain_mat_full
+        # Ensure distributed over frequency axis
+        cts.redistribute(0)
 
-        return calibrated_data, gain_mat_full
+        return cts
 
 
-class NoiseInjCalibration(pipeline.TaskBase):
+class NoiseInjectionCalibration(pipeline.TaskBase):
     """Calibration using Noise Injection
 
     Attributes
     ----------
-    Nchannels : int, optional
-        Number of channels (default 16).    
+    nchannels : int, optional
+        Number of channels (default 16).
     ch_ref : int in the range 0 <= ch_ref <= Nchannels-1, optional
         Reference channel (default 0).
     fbin_ref : int, optional
         Reference frequency bin
     """
-    #def setup(self):
-        # Initialise any required products in here. This function is only
-        # called as the task is being setup, and before any actual data has
-        # been sent through
 
-    Nchannels = config.Property(proptype=int, default=16)
+    nchannels = config.Property(proptype=int, default=16)
     ch_ref = config.Property(proptype=int, default=None)
     fbin_ref = config.Property(proptype=int, default=None)
-    #normalize_vis = config.Property(proptype=bool, default=False)
-    #masked_channels = config.Property(proptype=list, default=None)
-        
+
+    def setup(self, inputmap):
+        """Use the input map to set up the calibrator.
+
+        Parameters
+        ----------
+        inputmap : list of :class:`tools.CorrInputs`
+            Describing the inputs to the correlator.
+        """
+        self.ch_ref = _get_noise_channel(inputmap)
+        if mpiutil.rank0:
+            print "Using input=%i as noise channel" % self.ch_ref
+
     def next(self, ts):
         """Find gains from noise injection data and apply them to visibilities.
-        
+
         Parameters
         ----------
         ts : containers.TimeStream
@@ -310,8 +400,8 @@ class NoiseInjCalibration(pipeline.TaskBase):
 
         Returns
         -------
-        nits : containers.NoiseInjTimeStream
-            Timestream with calibrated (decimated) visibilities, gains and 
+        cts : containers.CalibratedTimeStream
+            Timestream with calibrated (decimated) visibilities, gains and
             respective timestamps.
         """
         # This method should derive the gains from the data as it comes in,
@@ -320,39 +410,38 @@ class NoiseInjCalibration(pipeline.TaskBase):
         # The data will come be received as a containers.TimeStream type. In
         # some ways this looks a little like AnData, but it works in parallel
 
-        
         # Ensure that we are distributed over frequency
+
         ts.redistribute(0)
-        
+
         # Create noise injection data object from input timestream
-        nidata = ni_utils.ni_data(ts, self.Nchannels, self.ch_ref, self.fbin_ref)
-        
+        nidata = ni_utils.ni_data(ts, self.nchannels, self.ch_ref, self.fbin_ref)
+
         # Decimated visibilities without calibration
-        vis_uncal = nidata.vis_off_dec 
-        
+        vis_uncal = nidata.vis_off_dec
+
         # Timestamp corresponding to decimated visibilities
         timestamp = nidata.timestamp_dec
-        
+
         # Find gains
-        nidata.get_ni_gains() 
-        g = nidata.ni_gains
-        gains = ni_utils.gains2utvec_tf(g) # Convert to gain array
-        
+        nidata.get_ni_gains()
+        gains = nidata.ni_gains
+
         # Correct decimated visibilities
-        vis = vis_uncal/gains
-        
+        vis = _apply_gains(vis_uncal, 1.0 / gains)
+
         # Calculate dynamic range
-        ev = ni_utils.sort_evalues_mag(nidata.ni_evals) # Sort evalues
+        ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
         dr = abs(ev[:, -1, :]/ev[:, -2, :])
         dr = dr[:, np.newaxis, :]
-           
-        # Turn vis, gains and dr into MPIArray
-        vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)  
-        gains = mpidataset.MPIArray.wrap(gains, axis=0, comm=ts.comm) 
-        dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)   
-        
-        # Create NoiseInjTimeStream
-        nits = containers.NoiseInjTimeStream.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)  
-        nits.redistribute(0)  
 
-        return nits
+        # Turn vis, gains and dr into MPIArray
+        vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)
+        gains = mpidataset.MPIArray.wrap(gains, axis=0, comm=ts.comm)
+        dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)
+
+        # Create NoiseInjTimeStream
+        cts = containers.CalibratedTimeStream.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)
+        cts.redistribute(0)
+
+        return cts
