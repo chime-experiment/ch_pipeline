@@ -167,7 +167,7 @@ def _get_noise_channel(inputs):
     return noise_sources[0]
 
 
-def _apply_gains(vis, gains, axis=1, out=None):
+def _apply_gain(vis, gain, axis=1, out=None):
     """Apply per input gains to a set of visibilities packed in upper
     triangular format.
 
@@ -177,7 +177,7 @@ def _apply_gains(vis, gains, axis=1, out=None):
     ----------
     vis : np.ndarray[..., nprod, ...]
         Array of visibility products.
-    gains : np.ndarray[..., ninput, ...]
+    gain : np.ndarray[..., ninput, ...]
         Array of gains. One gain per input.
     axis : integer, optional
         The axis along which the inputs (or visibilities) are
@@ -194,8 +194,8 @@ def _apply_gains(vis, gains, axis=1, out=None):
 
     from ch_util import tools
 
-    ninput = gains.shape[axis]
-    
+    ninput = gain.shape[axis]
+
     if vis.shape[axis] != (ninput * (ninput + 1) / 2):
         raise Exception("Number of inputs does not match the number of products.")
 
@@ -208,19 +208,18 @@ def _apply_gains(vis, gains, axis=1, out=None):
     for ii in range(ninput):
 
         for ij in range(ii, ninput):
-            
+
             # Calculate the product index
             ik = tools.cmap(ii, ij, ninput)
-            
+
             # Fetch the gains
-            gi = gains[:, ii]
-            gj = gains[:, ij].conj()
+            gi = gain[:, ii]
+            gj = gain[:, ij].conj()
 
             # Apply the gains and save into the output array.
             out[:, ik] = vis[:, ik] * gi * gj
 
     return out
-            
 
 
 class PointSourceCalibration(pipeline.TaskBase):
@@ -302,12 +301,12 @@ class PointSourceCalibration(pipeline.TaskBase):
                 print ""
 
                 # Construct the final gain arrays
-                gains = np.ones([self.nfreq, self.nfeed], np.complex128)
-                gains[:, xfeeds] = np.median(gain_arr_x, axis=-1)  # Take time avg of gains solution
-                gains[:, yfeeds] = np.median(gain_arr_y, axis=-1)
+                gain = np.ones([self.nfreq, self.nfeed], np.complex128)
+                gain[:, xfeeds] = np.median(gain_arr_x, axis=-1)  # Take time avg of gains solution
+                gain[:, yfeeds] = np.median(gain_arr_y, axis=-1)
 
                 print "Computing gain matrix for transit %d of %d" % (k+1, ndays)
-                self.gain_mat.append(gains[:, :, np.newaxis])
+                self.gain_mat.append(gain[:, :, np.newaxis])
 
             self.gain_mat = np.concatenate(self.gain_mat, axis=-1)
             self.trans_times = np.concatenate(self.trans_times)
@@ -344,16 +343,17 @@ class PointSourceCalibration(pipeline.TaskBase):
         #ind_cal = np.where((times > self.trans_times[0]) & (times < self.trans_times[-1]))[0]
 
         # Construct the gain matrix at all times (using liner interpolation)
-        gains = interp_gains(self.trans_times, self.gain_mat[freq_low:freq_up], times)
+        gain = interp_gains(self.trans_times, self.gain_mat[freq_low:freq_up], times)
 
-        # Create CalibratedTimeStream
-        cts = containers.CalibratedTimeStream(times, ts.vis.global_shape[0], ts.vis.global_shape[1], comm=ts.comm)
+        # Create TimeStream
+        cts = ts.copy(deep=True)
+        cts.add_gain()
 
         # Apply gains to visibility matrix and copy into cts
-        _apply_gains(ts.vis, 1.0 / gains, out=cts.vis)
+        _apply_gain(ts.vis, 1.0 / gain, out=cts.vis)
 
         # Save gains into cts instance
-        cts.gains[:] = mpidataset.MPIArray.wrap(gains, axis=0, comm=cts.comm)
+        cts.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cts.comm)
 
         # Ensure distributed over frequency axis
         cts.redistribute(0)
@@ -425,10 +425,10 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Find gains
         nidata.get_ni_gains()
-        gains = nidata.ni_gains
+        gain = nidata.ni_gains
 
         # Correct decimated visibilities
-        vis = _apply_gains(vis_uncal, 1.0 / gains)
+        vis = _apply_gain(vis_uncal, 1.0 / gain)
 
         # Calculate dynamic range
         ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
@@ -437,11 +437,17 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Turn vis, gains and dr into MPIArray
         vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)
-        gains = mpidataset.MPIArray.wrap(gains, axis=0, comm=ts.comm)
+        gain = mpidataset.MPIArray.wrap(gain, axis=0, comm=ts.comm)
         dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
-        cts = containers.CalibratedTimeStream.from_base_timestream_attrs(vis, gains, dr, timestamp, ts)
+        cts = containers.TimeStream(timestamp, vis.global_shape[0], vis.global_shape[1],
+                                    comm=vis.comm, copy_attrs=ts, gain=True)
+
+        cts.vis[:] = vis
+        cts.gain[:] = gain
+        cts.gain_dr[:] = dr
+
         cts.redistribute(0)
 
         return cts
