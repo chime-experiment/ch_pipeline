@@ -62,16 +62,17 @@ class SimulateSidereal(pipeline.TaskBase):
     ----------
     maps : list
         List of map filenames. The sum of these form the simulated sky.
-    ndays : int, optional
+    ndays : float, optional
         Number of days of observation. Setting `ndays = None` (default) uses
         the default stored in the telescope object; `ndays = 0`, assumes the
-        observation time is infinite so that the noise is zero.
+        observation time is infinite so that the noise is zero. This allows a
+        fractional number to account for higher noise.
     seed : integer, optional
         Set the random seed used for the noise simulations. Default (None) is
         to choose a random seed.
     """
     maps = config.Property(proptype=list)
-    ndays = config.Property(proptype=int, default=0)
+    ndays = config.Property(proptype=float, default=0.0)
     seed = config.Property(proptype=int, default=None)
 
     done = False
@@ -96,6 +97,8 @@ class SimulateSidereal(pipeline.TaskBase):
         -------
         ss : SiderealStream
             Stacked sidereal day.
+        feeds : list of CorrInput
+            Description of the feeds simulated.
         """
 
         if self.done:
@@ -211,7 +214,9 @@ class SimulateSidereal(pipeline.TaskBase):
 
         self.done = True
 
-        return sstream
+        feeds = self.telescope.feeds
+
+        return sstream, feeds
 
 
 class DayMask(pipeline.TaskBase):

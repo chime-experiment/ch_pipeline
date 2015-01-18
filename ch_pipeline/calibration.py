@@ -222,6 +222,36 @@ def _apply_gain(vis, gain, axis=1, out=None):
     return out
 
 
+def fringestop_phase(ha, lat, dec, u, v):
+    """Return the phase required to fringestop. All angle inputs are radians.
+
+    Parameter
+    ---------
+    ha : array_like
+         The Hour Angle of the source to fringestop too.
+    lat : array_like
+         The latitude of the observatory.
+    dec : array_like
+         The declination of the source.
+    u : array_like
+         The EW separation in wavelengths (increases to the E)
+    v : array_like
+         The NS separation in wavelengths (increases to the N)
+
+    Returns
+    -------
+    phase : np.ndarray
+        The phase required to *correct* the fringeing. Shape is
+        given by the broadcast of the arguments together.
+    """
+
+    uhdotn = np.cos(dec) * np.sin(-ha)
+    vhdotn = np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(-ha)
+    phase = uhdotn * u + vhdotn * v
+
+    return np.exp(2.0J * np.pi * phase)
+
+
 class PointSourceCalibration(pipeline.TaskBase):
     """Use CasA transits as point source calibrators.
 
@@ -451,3 +481,124 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         cts.redistribute(0)
 
         return cts
+
+
+class StackCalibration(pipeline.TaskBase):
+    """Use CasA as a point source calibrator for a sidereal stack.
+
+    Attributes
+    ----------
+    source : str
+        Point source to use as calibrator. Only CasA is supported at this time.
+    """
+
+    source = config.Property(proptype=str, default='CasA')
+
+    _source_dict = { 'CasA': ephemeris.CasA }
+
+    def setup(self, inputmap):
+
+        self.inputmap = inputmap
+
+    def next(self, sstream):
+        """Apply calibration to a timestream.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream
+            Rigidized sidereal timestream to calibrate.
+
+        Returns
+        -------
+        sstream : containers.SiderealStream
+            Calibrated sidereal timestream.
+        gains : np.ndarray
+            Array of gains.
+        """
+
+        from ch_util import ni_utils
+        from ch_pipeline import pathfinder
+
+        # Ensure that we are distributed over frequency
+        sstream.redistribute(0)
+
+        # Find the local frequencies
+        nfreq = sstream.vis.local_shape[0]
+        sfreq = sstream.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        # Use input map to figure out which are the X and Y feeds
+        xfeeds = [idx for idx, inp in enumerate(self.inputmap) if _is_chime_x(inp)]
+        yfeeds = [idx for idx, inp in enumerate(self.inputmap) if _is_chime_y(inp)]
+
+        nfeed = len(self.inputmap)
+
+        # Fetch source
+        source = self._source_dict[self.source]
+        ra = source._ra
+        dec = source._dec
+
+        _PF_ROT = np.radians(1.986)  # Rotation angle of pathfinder
+        _PF_LAT = np.radians(49.0)   # Latitude of pathfinder
+
+        # Estimate the RA at which the transiting source peaks
+        peak_ra = ra + np.tan(_PF_ROT) * (dec - _PF_LAT) / np.cos(_PF_LAT)
+
+        # Find closest array index
+        idx = np.abs(sstream.ra - np.degrees(peak_ra)).argmin()
+        # Fetch the transit into this visibility array
+        vis = sstream.vis[..., idx].copy()
+
+        if mpiutil.rank0:
+            print "Using peak RA=%f, index=%i" % (np.degrees(peak_ra), idx)
+            print np.degrees(ra)
+
+        ## Attempt to fringestop the data
+        ha = np.radians(sstream.ra[idx]) - ra
+
+        # Get feed positions
+        feedpos = pathfinder.get_feed_positions(self.inputmap)
+        xp, yp = feedpos[:, 0], feedpos[:, 1]
+
+        # Calculate baseline separations
+        xd = xp[np.newaxis, :] - xp[:, np.newaxis]
+        yd = yp[np.newaxis, :] - yp[:, np.newaxis]
+        xd = ni_utils.mat2utvec(xd)
+        yd = ni_utils.mat2utvec(yd)
+
+        f = np.linspace(400.0, 800.0, 1024)[sfreq:efreq]
+        wv = 3e8 / f
+
+        u = xd[np.newaxis, :] / wv[:, np.newaxis]
+        v = yd[np.newaxis, :] / wv[:, np.newaxis]
+
+        # Construct fringestop phase and set any non CHIME feeds to have zero phase
+        fs_phase = fringestop_phase(ha, _PF_LAT, dec, u, v)
+        fs_phase = np.where(np.isnan(fs_phase), np.zeros_like(fs_phase), fs_phase)
+
+        vis *= fs_phase
+
+        # Solve for the gains of each set of polarisations
+        gain_arr_x = solve_gain(vis[:, :, np.newaxis], nfeed, feed_loc=xfeeds)[:, :, 0]
+        gain_arr_y = solve_gain(vis[:, :, np.newaxis], nfeed, feed_loc=yfeeds)[:, :, 0]
+
+        # Construct the final gain arrays
+        gain = np.ones([nfreq, nfeed], np.complex128)
+        gain[:, xfeeds] = gain_arr_x
+        gain[:, yfeeds] = gain_arr_y
+
+        # Create TimeStream
+        cstream = sstream.copy(deep=True)
+
+        # Apply gains to visibility matrix and copy into cts
+        _apply_gain(cstream.vis, 1.0 / gain[:, :, np.newaxis], out=cstream.vis)
+
+        print gain
+
+        # Save gains into cts instance
+        cstream._distributed['gain'] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
+
+        # Ensure distributed over frequency axis
+        cstream.redistribute(0)
+
+        return cstream
