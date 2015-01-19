@@ -24,11 +24,7 @@ from drift.core import telescope
 from drift.telescope import cylbeam
 
 from drift.util import config, mpiutil
-from ch_util import ephemeris
-
-
-_PF_ROT = 1.986  # Anti-clockwise looking at the ground (degrees)
-_PF_SPACE = 22.0
+from ch_util import ephemeris, tools
 
 
 class CHIMEPathfinder(telescope.PolarisedTelescope):
@@ -50,10 +46,10 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     num_cylinders = 2
     cylinder_width = 20.0
-    cylinder_spacing = _PF_SPACE
+    cylinder_spacing = tools._PF_SPACE
     cylinder_length = 40.0
 
-    rotation_angle = _PF_ROT
+    rotation_angle = tools._PF_ROT
 
     zenith = telescope.latlon_to_sphpol([ephemeris.CHIMELATITUDE, 0.0])
     # zenith = telescope.latlon_to_sphpol([0.0, 0.0])
@@ -96,8 +92,6 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         if self.layout is None:
             raise Exception("Layout attributes not set.")
-
-        from ch_util import tools
 
         # Fetch feed layout from database
         feeds = tools.get_correlator_inputs(self.layout, self.correlator)
@@ -207,7 +201,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         """
 
         # Fetch cylinder relative positions
-        pos = get_feed_positions(self.feeds)
+        pos = tools.get_feed_positions(self.feeds)
 
         return pos  # Transpose to get into correct shape
 
@@ -248,55 +242,3 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
                                   self.fwhm_e, self.fwhm_h, rot=rot)
         else:
             raise Exception("Polarisation not supported.")
-
-
-def is_chime(feed):
-    """Is this feed a CHIME antenna?
-
-    Parameters
-    ----------
-    feed : CorrInput
-
-    Returns
-    -------
-    ischime : bool
-    """
-    from ch_util import tools
-
-    return isinstance(feed, tools.CHIMEAntenna)
-
-
-def get_feed_positions(feeds, rotation=_PF_ROT):
-    """Get the positions of the CHIME antennas.
-
-    Parameters
-    ----------
-    feeds : list of CorrInput
-        List of feeds to compute positions of.
-    rotation : float, optional
-        Rotation of the telescope from true north. By default it uses the
-        pathfinders rotation offset.
-
-    Returns
-    -------
-    positions : np.ndarray[nfeed, 2]
-        Array of feed positions. The first column is the E-W position
-        (increasing to the E), and the second is the N-S position (increasing
-        to the N). Non CHIME feeds get set to `NaN`.
-    """
-
-    # Fetch cylinder relative positions
-    pos_x = np.array([ (f.cyl if is_chime(f) else np.nan) for f in feeds ]) * _PF_SPACE
-    pos_y = np.array([ (f.pos if is_chime(f) else np.nan) for f in feeds ])
-    pos_y = 20.0 - pos_y  # Turn into distance increasing from South to North.
-
-    # Combine to get set of vector positions
-    pos = np.vstack([pos_x, pos_y])
-
-    # Apply cylinder rotation
-    t = np.radians(_PF_ROT)
-    c, s = np.cos(t), np.sin(t)
-    rotmatrix = np.array([[c, -s], [s, c]])
-    pos = np.dot(rotmatrix, pos)
-
-    return pos.T
