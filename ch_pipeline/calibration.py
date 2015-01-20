@@ -436,8 +436,9 @@ class StackCalibration(pipeline.TaskBase):
         # Fringestop the data
         vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, self.inputmap, source)
 
-        # Subtract nearby values
-        vis_slice = _cdiff(vis_slice, 5)
+        # Figure out how many samples is ~ 2 degrees, then subtract nearby values
+        diff = int(2.0 / np.median(np.abs(np.diff(sstream.ra))))
+        vis_slice = _cdiff(vis_slice, diff)
 
         # Solve for the gains of each set of polarisations
         dr_x, gain_x = solve_gain(vis_slice, feeds=xfeeds)
