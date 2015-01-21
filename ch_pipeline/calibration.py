@@ -144,7 +144,7 @@ class PointSourceCalibration(pipeline.TaskBase):
 
     source = config.Property(proptype=str, default='CasA')
 
-    _source_dict = { 'CasA': ephemeris.CasA }
+    _source_dict = {'CasA': ephemeris.CasA}
 
     def setup(self, dspec, inputmap):
         """Use a dataspec to derive the calibration solutions.
@@ -352,7 +352,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
-        cts = containers.TimeStream(timestamp, vis.global_shape[0], vis.global_shape[1],
+        cts = containers.TimeStream(timestamp, ts.freq, vis.global_shape[1],
                                     comm=vis.comm, copy_attrs=ts, gain=True)
 
         cts.vis[:] = vis
@@ -375,7 +375,7 @@ class StackCalibration(pipeline.TaskBase):
 
     source = config.Property(proptype=str, default='CasA')
 
-    _source_dict = { 'CasA': ephemeris.CasA }
+    _source_dict = {'CasA': ephemeris.CasA}
 
     def setup(self, inputmap):
 
@@ -405,8 +405,8 @@ class StackCalibration(pipeline.TaskBase):
         sfreq = sstream.vis.local_offset[0]
         efreq = sfreq + nfreq
 
-        # Hack the frequency axis
-        freq = np.linspace(400.0, 410.0, 5)[sfreq:efreq]
+        # Get the local frequency axis
+        freq = sstream.freq['centre'][sfreq:efreq]
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = [idx for idx, inp in enumerate(self.inputmap) if tools.is_chime_x(inp)]

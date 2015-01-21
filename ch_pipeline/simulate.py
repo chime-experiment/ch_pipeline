@@ -209,7 +209,12 @@ class SimulateSidereal(pipeline.TaskBase):
         vis_stream = np.fft.ifft(col_vis, axis=-1) * ntime
         vis_stream = vis_stream.reshape(tel.npairs, lfreq, ntime)
 
-        sstream = containers.SiderealStream(ntime, nfreq, tel.npairs)
+        # Construct frequency array
+        freq = np.zeros(nfreq, dtype=[('centre', np.float64), ('width', np.float64)])
+        freq['centre'][:] = tel.frequencies
+        freq['width'][:] = np.diff(tel.frequencies)[0]
+
+        sstream = containers.SiderealStream(ntime, freq, tel.npairs)
         sstream['vis'][:] = vis_stream.transpose((1, 0, 2))
 
         self.done = True
