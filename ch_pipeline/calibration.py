@@ -358,6 +358,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         cts.vis[:] = vis
         cts.gain[:] = gain
         cts.gain_dr[:] = dr
+        cts.common['input'] = ts.input
 
         cts.redistribute(0)
 
