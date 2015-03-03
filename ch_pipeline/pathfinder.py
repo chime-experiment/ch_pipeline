@@ -55,6 +55,9 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     # zenith = telescope.latlon_to_sphpol([0.0, 0.0])
 #                                         ephemeris.CHIMELONGITUDE])
 
+    start_channel = config.Property(proptype=int, default=None)
+    end_channel = config.Property(proptype=int, default=None)
+
     auto_correlations = True
 
     _pickle_keys = ['_feeds']
@@ -79,6 +82,15 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     @property
     def v_width(self):
         return 1.0
+
+    def calculate_frequencies(self):
+        # Override to give support for specifying channels
+
+        if self.start_channel is not None and self.end_channel is not None:
+            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+            self._frequencies = basefreq[self.start_channel:self.end_channel]
+        else:
+            telescope.TransitTelescope.calculate_frequencies(self)
 
     @property
     def feeds(self):

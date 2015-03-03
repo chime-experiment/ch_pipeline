@@ -52,7 +52,7 @@ class LoadBeamTransfer(pipeline.TaskBase):
 
         tel = bt.telescope
 
-        return tel, bt
+        return tel, bt, tel.feeds
 
 
 class SimulateSidereal(pipeline.TaskBase):
@@ -275,6 +275,12 @@ class DayMask(pipeline.TaskBase):
 
         return sstream
 
+def _list_of_timeranges(dlist):
+
+    if not isinstance(list, dlist):
+        pass
+
+
 
 class Unroll(pipeline.TaskBase):
     """Unroll a sidereal stack.
@@ -313,7 +319,7 @@ class Unroll(pipeline.TaskBase):
         # Iterate over all feed pairs and work out which is the correct index in the sidereal stack.
         for fi in range(tel.nfeed):
             for fj in range(fi, tel.nfeed):
-                pair_ind = tools.fmap(fi, fj, tel.nfeed)
+                pair_ind = tools.cmap(fi, fj, tel.nfeed)
                 upair_ind = tel.feedmap[fi, fj]
 
                 # Skip if upair is not a proper index (has been masked)
