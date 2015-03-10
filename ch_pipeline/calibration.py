@@ -365,7 +365,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         return cts
 
 
-class StackCalibration(pipeline.TaskBase):
+class SiderealCalibration(pipeline.TaskBase):
     """Use CasA as a point source calibrator for a sidereal stack.
 
     Attributes

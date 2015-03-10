@@ -238,7 +238,7 @@ class CreateInputMap(pipeline.TaskBase):
             print "Reading file to construct inputmap...",
             # Open up the first file to extract metadata
             ad0 = andata.CorrData.from_acq_h5(file0, datasets=())
-            
+
             print "done."
 
             # Get the start time of the data
