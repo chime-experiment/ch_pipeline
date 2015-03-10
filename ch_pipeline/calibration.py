@@ -64,6 +64,11 @@ def solve_gain(data, feeds=None):
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
+            data = corr_data[fi, :, :, ti]
+
+            if not np.isfinite(data).all():
+                continue
+
             # Normalise and solve for eigenvectors
             xc, ach = tools.normalise_correlations(corr_data[fi, :, :, ti])
             evals, evecs = tools.eigh_no_diagonal(xc, niter=5)
