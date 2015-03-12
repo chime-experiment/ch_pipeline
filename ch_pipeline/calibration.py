@@ -64,13 +64,13 @@ def solve_gain(data, feeds=None):
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
-            data = corr_data[fi, :, :, ti]
+            cd = corr_data[fi, :, :, ti]
 
-            if not np.isfinite(data).all():
+            if not np.isfinite(cd).all():
                 continue
 
             # Normalise and solve for eigenvectors
-            xc, ach = tools.normalise_correlations(corr_data[fi, :, :, ti])
+            xc, ach = tools.normalise_correlations(cd)
             evals, evecs = tools.eigh_no_diagonal(xc, niter=5)
 
             # Construct dynamic range and gain
@@ -452,19 +452,30 @@ class SiderealCalibration(pipeline.TaskBase):
 
         # Construct the final gain arrays
         gain = np.ones([nfreq, nfeed], np.complex128)
-        gain[:, xfeeds] = gain_x[:, :, slice_width]
+        gain[:, xfeeds] = gain_x[:, :, slice_width]  # slice_width should be the central value i.e. transit
         gain[:, yfeeds] = gain_y[:, :, slice_width]
 
         # Create TimeStream
         cstream = sstream.copy(deep=True)
 
         # Apply gains to visibility matrix and copy into cts
-        tools.apply_gain(cstream.vis, 1.0 / gain[:, :, np.newaxis], out=cstream.vis)
-
-        print np.degrees(np.angle(gain))
+        gain_inv = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
+        tools.apply_gain(cstream.vis, gain_inv[:, :, np.newaxis], out=cstream.vis)
 
         # Save gains into cts instance
         cstream._distributed['gain'] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
+
+        # == Modify the dataset weight according to the dynamic range ==
+        # Copy the dynamic range into a full array
+        dr_weight = np.zeros(gain.shape, dtype=np.float64)
+        dr_weight[:, xfeeds] = dr_x[:, np.newaxis, slice_width]
+        dr_weight[:, yfeeds] = dr_y[:, np.newaxis, slice_width]
+
+        # Convert dynamic range to a binary weight
+        dr_weight = (dr_weight > 2.0).astype(np.float64)
+
+        # Apply the per feed weight to the full weight array
+        tools.apply_gain(cstream.weight, dr_weight[:, :, np.newaxis], out=cstream.weight)
 
         # Ensure distributed over frequency axis
         cstream.redistribute(0)

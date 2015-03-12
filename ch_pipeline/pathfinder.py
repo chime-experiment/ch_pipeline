@@ -20,10 +20,11 @@ Classes
 
 import numpy as np
 
+from caput import config, mpiutil
+
 from drift.core import telescope
 from drift.telescope import cylbeam
 
-from drift.util import config, mpiutil
 from ch_util import ephemeris, tools
 
 
@@ -110,7 +111,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         if mpiutil.size > 1:
             feeds = mpiutil.world.bcast(feeds, root=0)
-
+            
         if not self.skip_non_chime:
             raise Exception("Not supported.")
 
