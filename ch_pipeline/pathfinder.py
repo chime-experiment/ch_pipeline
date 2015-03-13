@@ -111,7 +111,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         if mpiutil.size > 1:
             feeds = mpiutil.world.bcast(feeds, root=0)
-            
+
         if not self.skip_non_chime:
             raise Exception("Not supported.")
 
@@ -155,6 +155,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         # configuring from YAML.
 
         if self.layout is not None:
+            print "Loading layout: %s" % str(self.layout)
             self.load_layout()
 
     def _sort_pairs(self):
