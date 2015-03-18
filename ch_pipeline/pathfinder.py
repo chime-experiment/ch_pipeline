@@ -39,6 +39,17 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         Restrict to a specific correlator.
     skip_non_chime : boolean
         Ignore non CHIME feeds in the BeamTransfers.
+    freq_use_channels : bool, optional
+        Whether to specify the frequencies in terms of channel parameters
+        (default), or specify them use physical frequencies.
+    channel_start : int, optional
+        Which channel to start at. Default is 0.
+    channel_end : int, optional
+        The last channel to use. Like using a standard python range, this should
+        be one larger than the last channel number you actually want. Defualt is 1024.
+    channel_bin : int, optional
+        Number of channels to bin together. Must exactly divide the total
+        number. Default is 1.
     """
 
     layout = config.Property(default=None)
@@ -53,11 +64,12 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     rotation_angle = tools._PF_ROT
 
     zenith = telescope.latlon_to_sphpol([ephemeris.CHIMELATITUDE, 0.0])
-    # zenith = telescope.latlon_to_sphpol([0.0, 0.0])
-#                                         ephemeris.CHIMELONGITUDE])
 
-    start_channel = config.Property(proptype=int, default=None)
-    end_channel = config.Property(proptype=int, default=None)
+    freq_use_channels = config.Property(proptype=bool, default=True)
+
+    channel_start = config.Property(proptype=int, default=0)
+    channel_end = config.Property(proptype=int, default=1024)
+    channel_bin = config.Property(proptype=int, default=1)
 
     auto_correlations = True
 
@@ -87,9 +99,14 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     def calculate_frequencies(self):
         # Override to give support for specifying channels
 
-        if self.start_channel is not None and self.end_channel is not None:
+        if self.freq_use_channels:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self._frequencies = basefreq[self.start_channel:self.end_channel]
+            tfreq = basefreq[self.channel_start:self.channel_end]
+
+            if len(tfreq) % self.channel_bin != 0:
+                raise Exception("Channel binning must exactly divide the total number of channels")
+
+            self._frequencies = tfreq.reshape(-1, self.channel_bin).mean(axis=-1)
         else:
             telescope.TransitTelescope.calculate_frequencies(self)
 
