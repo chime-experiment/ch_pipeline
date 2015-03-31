@@ -1,4 +1,5 @@
 -e git+https://github.com/radiocosmology/caput#egg=caput
+-e git+ssh://git@github.com/CITA/ch_analysis.git#egg=ch_analysis
 -e git+ssh://git@bitbucket.org/chime/ch_util.git#egg=ch_util
 -e git+https://github.com/radiocosmology/cora@v1.0.0#egg=cora
 -e git+https://github.com/radiocosmology/driftscan#egg=driftscan
