@@ -15,14 +15,9 @@ Tasks
 
     RFIFilter
 """
-
-import numpy as np
-
 from caput import pipeline, config
-from caput import mpidataset, mpiutil
+from caput import mpiutil
 from ch_util import rfi_pipeline
-
-import containers
 
 
 class RFIFilter(pipeline.TaskBase):
@@ -50,11 +45,11 @@ class RFIFilter(pipeline.TaskBase):
         mask = rfi_pipeline.flag_dataset_with_mad(data, only_autos=False,
                                                   threshold=self.threshold_mad)
 
-        # Turn mask into MPIArray
-        mask = mpidataset.MPIArray.wrap(mask.view(np.uint8), axis=2)
+        # Add weight dataset, and copy mask into it
+        data.add_weight()
+        data.weight[:] = (1 - mask)  # Switch from mask to inverse noise weight
 
-        # Create MaskedTimeStream instance and redistribute back over frequency
-        mts = containers.MaskedTimeStream.from_timestream_and_mask(data, mask)
-        mts.redistribute(0)
+        # Redistribute across frequency
+        data.redistribute(0)
 
-        return mts
+        return data
