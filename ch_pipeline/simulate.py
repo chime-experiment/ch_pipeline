@@ -208,6 +208,7 @@ class SimulateSidereal(pipeline.TaskBase):
         # Fourier transform m-modes back to get timestream.
         vis_stream = np.fft.ifft(col_vis, axis=-1) * ntime
         vis_stream = vis_stream.reshape(tel.npairs, lfreq, ntime)
+        vis_stream = vis_stream.transpose((1, 0, 2)).copy()
 
         # Construct frequency array
         freq = np.zeros(nfreq, dtype=[('centre', np.float64), ('width', np.float64)])
@@ -215,7 +216,9 @@ class SimulateSidereal(pipeline.TaskBase):
         freq['width'][:] = np.diff(tel.frequencies)[0]
 
         sstream = containers.SiderealStream(ntime, freq, tel.npairs)
-        sstream['vis'][:] = vis_stream.transpose((1, 0, 2))
+        sstream['vis'][:] = mpidataset.MPIArray.wrap(vis_stream, axis=0)
+
+        sstream._distributed['weight'] = mpidataset.MPIArray.wrap(np.ones(vis_stream.shape, dtype=np.float64), axis=0)
 
         self.done = True
 
