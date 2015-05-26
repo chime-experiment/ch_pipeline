@@ -17,7 +17,7 @@ Tasks
 """
 from caput import pipeline, config
 from caput import mpiutil
-from ch_util import rfi_pipeline
+from ch_util import rfi
 
 
 class RFIFilter(pipeline.TaskBase):
@@ -42,8 +42,7 @@ class RFIFilter(pipeline.TaskBase):
         data.redistribute(axis=2)
 
         # Construct RFI mask
-        mask = rfi_pipeline.flag_dataset_with_mad(data, only_autos=False,
-                                                  threshold=self.threshold_mad)
+        mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad)
 
         # Add weight dataset, and copy mask into it
         data.add_weight()

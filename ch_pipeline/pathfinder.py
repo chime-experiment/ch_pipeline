@@ -39,6 +39,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         Restrict to a specific correlator.
     skip_non_chime : boolean
         Ignore non CHIME feeds in the BeamTransfers.
+    redundant : boolean
+        Use only redundant baselines (default is False).
     freq_use_channels : bool, optional
         Whether to specify the frequencies in terms of channel parameters
         (default), or specify them use physical frequencies.
@@ -52,10 +54,21 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         number. Default is 1.
     """
 
+    # Configure which feeds and layout to use
     layout = config.Property(default=None)
     correlator = config.Property(proptype=str, default=None)
     skip_non_chime = config.Property(proptype=bool, default=True)
 
+    # Redundancy settings
+    redundant = config.Property(proptype=bool, default=False)
+
+    # Configure frequency properties
+    freq_use_channels = config.Property(proptype=bool, default=True)
+    channel_start = config.Property(proptype=int, default=0)
+    channel_end = config.Property(proptype=int, default=1024)
+    channel_bin = config.Property(proptype=int, default=1)
+
+    # Fix base properties
     num_cylinders = 2
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
@@ -64,12 +77,6 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     rotation_angle = tools._PF_ROT
 
     zenith = telescope.latlon_to_sphpol([ephemeris.CHIMELATITUDE, 0.0])
-
-    freq_use_channels = config.Property(proptype=bool, default=True)
-
-    channel_start = config.Property(proptype=int, default=0)
-    channel_end = config.Property(proptype=int, default=1024)
-    channel_bin = config.Property(proptype=int, default=1)
 
     auto_correlations = True
 
@@ -243,8 +250,19 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     @property
     def beamclass(self):
-        ## Make beam class just channel number.
-        return np.arange(len(self.feeds))
+        # Make beam class just channel number.
+
+        def _feedclass(f):
+            if tools.is_chime_x(f):
+                return 0
+            if tools.is_chime_y(f):
+                return 1
+            return 2
+
+        if self.redundant:
+            return np.array([_feedclass(f) for f in self.feeds])
+        else:
+            return np.arange(len(self.feeds))
 
     def beam(self, feed, freq):
         ## Fetch beam parameters out of config database.
