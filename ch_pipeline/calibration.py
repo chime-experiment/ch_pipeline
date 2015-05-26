@@ -288,11 +288,16 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         Reference channel (default 0).
     fbin_ref : int, optional
         Reference frequency bin
+    decimate_only : bool, optional
+        If set (not default), then we do not apply the gain solution
+        and return a decimated but uncalibrated timestream.
     """
 
     nchannels = config.Property(proptype=int, default=16)
     ch_ref = config.Property(proptype=int, default=None)
     fbin_ref = config.Property(proptype=int, default=None)
+
+    decimate_only = config.Property(proptype=bool, default=False)
 
     def setup(self, inputmap):
         """Use the input map to set up the calibrator.
@@ -344,7 +349,10 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         gain = nidata.ni_gains
 
         # Correct decimated visibilities
-        vis = tools.apply_gain(vis_uncal, 1.0 / gain)
+        if self.decimate_only:
+            vis = vis_uncal.copy()
+        else:  # Apply the gain solution
+            vis = tools.apply_gain(vis_uncal, 1.0 / gain)
 
         # Calculate dynamic range
         ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
