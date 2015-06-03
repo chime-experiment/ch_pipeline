@@ -489,3 +489,40 @@ class SiderealCalibration(pipeline.TaskBase):
         cstream.redistribute(0)
 
         return cstream
+
+
+class ApplyExternalGain(pipeline.TaskBase):
+    
+    gainfile = config.Property(proptype=str)
+
+    inverse = config.Property(proptype=bool, default=False)
+
+    def setup(self):
+
+        self.gain = containers.GainData.from_hdf5(self.gainfile)
+        self.gain.redistribute(axis=0)
+
+    def next(self, tstream):
+
+        tstream.redistribute(axis=0)
+
+        # Construct the gain matrix at all times (using liner interpolation)
+        gain = interp_gains(self.gain.timestamp, self.gain.gain, tstream.timestamp)
+
+        # Create TimeStream
+        cts = tstream.copy(deep=True)
+        cts.add_gains()
+
+        if self.inverse:
+            gain = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
+
+        # Apply gains to visibility matrix and copy into cts
+        tools.apply_gain(tstream.vis, gain, out=cts.vis)
+
+        # Save gains into cts instance
+        cts.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cts.comm)
+
+        # Ensure distributed over frequency axis
+        cts.redistribute(0)
+
+        return cts
