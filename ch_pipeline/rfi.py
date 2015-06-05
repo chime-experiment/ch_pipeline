@@ -19,8 +19,10 @@ from caput import pipeline, config
 from caput import mpiutil
 from ch_util import rfi
 
+from . import task
 
-class RFIFilter(pipeline.TaskBase):
+
+class RFIFilter(task.SingleTask):
     """Filter RFI from a Timestream.
 
     This task works on the parallel
@@ -39,16 +41,14 @@ class RFIFilter(pipeline.TaskBase):
         if mpiutil.rank0:
             print "RFI filtering %s" % data.attrs['tag']
 
-        data.redistribute(axis=2)
+        data.redistribute('time')
 
         # Construct RFI mask
         mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad)
 
-        # Add weight dataset, and copy mask into it
-        data.add_weight()
-        data.weight[:] = (1 - mask)  # Switch from mask to inverse noise weight
+        data.weight[:] *= (1 - mask)  # Switch from mask to inverse noise weight
 
         # Redistribute across frequency
-        data.redistribute(0)
+        data.redistribute('freq')
 
         return data
