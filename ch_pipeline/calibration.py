@@ -19,16 +19,14 @@ Tasks
 import numpy as np
 from scipy import interpolate
 
-from caput import pipeline
 from caput import config
-from caput import mpidataset, mpiutil
+from caput import mpiarray, mpiutil
 
-from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
 
-import containers
+from . import containers, task
 
 from . import dataspec
 
@@ -161,6 +159,8 @@ class PointSourceCalibration(pipeline.TaskBase):
         inputmap : list of :class:`tools.CorrInputs`
             Describing the inputs to the correlator.
         """
+
+        from ch_util import andata
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp)]
@@ -333,7 +333,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Ensure that we are distributed over frequency
 
-        ts.redistribute(0)
+        ts.redistribute('freq')
 
         # Create noise injection data object from input timestream
         nidata = ni_utils.ni_data(ts, self.nchannels, self.ch_ref, self.fbin_ref)
@@ -352,7 +352,8 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         if self.decimate_only:
             vis = vis_uncal.copy()
         else:  # Apply the gain solution
-            vis = tools.apply_gain(vis_uncal, 1.0 / gain)
+            gain_inv = np.where(gain == 0.0, 0.0, 1.0 / gain)
+            vis = tools.apply_gain(vis_uncal, gain_inv)
 
         # Calculate dynamic range
         ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
@@ -378,7 +379,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         return cts
 
 
-class SiderealCalibration(pipeline.TaskBase):
+class SiderealCalibration(task.SingleTask):
     """Use CasA as a point source calibrator for a sidereal stack.
 
     Attributes
@@ -395,7 +396,7 @@ class SiderealCalibration(pipeline.TaskBase):
 
         self.inputmap = inputmap
 
-    def next(self, sstream):
+    def process(self, sstream):
         """Apply calibration to a timestream.
 
         Parameters
@@ -412,7 +413,7 @@ class SiderealCalibration(pipeline.TaskBase):
         """
 
         # Ensure that we are distributed over frequency
-        sstream.redistribute(0)
+        sstream.redistribute('freq')
 
         # Find the local frequencies
         nfreq = sstream.vis.local_shape[0]
@@ -463,15 +464,14 @@ class SiderealCalibration(pipeline.TaskBase):
         gain[:, xfeeds] = gain_x[:, :, slice_width]  # slice_width should be the central value i.e. transit
         gain[:, yfeeds] = gain_y[:, :, slice_width]
 
-        # Create TimeStream
-        cstream = sstream.copy(deep=True)
-
         # Apply gains to visibility matrix and copy into cts
         gain_inv = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
-        tools.apply_gain(cstream.vis, gain_inv[:, :, np.newaxis], out=cstream.vis)
+        tools.apply_gain(sstream.vis[:], gain_inv[:, :, np.newaxis], out=sstream.vis[:])
+
+        sstream.add_dataset('gain')
 
         # Save gains into cts instance
-        cstream._distributed['gain'] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
+        sstream.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
 
         # == Modify the dataset weight according to the dynamic range ==
         # Copy the dynamic range into a full array
@@ -483,16 +483,13 @@ class SiderealCalibration(pipeline.TaskBase):
         dr_weight = (dr_weight > 2.0).astype(np.float64)
 
         # Apply the per feed weight to the full weight array
-        tools.apply_gain(cstream.weight, dr_weight[:, :, np.newaxis], out=cstream.weight)
+        tools.apply_gain(sstream.weight[:], dr_weight[:, :, np.newaxis], out=sstream.weight[:])
 
-        # Ensure distributed over frequency axis
-        cstream.redistribute(0)
-
-        return cstream
+        return sstream
 
 
 class ApplyExternalGain(pipeline.TaskBase):
-    
+
     gainfile = config.Property(proptype=str)
 
     inverse = config.Property(proptype=bool, default=False)
