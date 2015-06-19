@@ -36,7 +36,7 @@ class RFIFilter(task.SingleTask):
 
     threshold_mad = config.Property(proptype=float, default=5.0)
 
-    def next(self, data):
+    def process(self, data):
 
         if mpiutil.rank0:
             print "RFI filtering %s" % data.attrs['tag']

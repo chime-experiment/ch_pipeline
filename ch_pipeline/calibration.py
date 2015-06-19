@@ -19,7 +19,7 @@ Tasks
 import numpy as np
 from scipy import interpolate
 
-from caput import config
+from caput import config, pipeline
 from caput import mpiarray, mpiutil
 
 from ch_util import tools
@@ -269,7 +269,7 @@ class PointSourceCalibration(pipeline.TaskBase):
         tools.apply_gain(ts.vis, 1.0 / gain, out=cts.vis)
 
         # Save gains into cts instance
-        cts.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cts.comm)
+        cts.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=cts.comm)
 
         # Ensure distributed over frequency axis
         cts.redistribute(0)
@@ -361,9 +361,9 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         dr = dr[:, np.newaxis, :]
 
         # Turn vis, gains and dr into MPIArray
-        vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)
-        gain = mpidataset.MPIArray.wrap(gain, axis=0, comm=ts.comm)
-        dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)
+        vis = mpiarray.MPIArray.wrap(vis, axis=0, comm=ts.comm)
+        gain = mpiarray.MPIArray.wrap(gain, axis=0, comm=ts.comm)
+        dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
         cts = containers.TimeStream(timestamp, ts.freq, vis.global_shape[1],
@@ -444,7 +444,9 @@ class SiderealCalibration(task.SingleTask):
 
         # Cut out a snippet of the timestream
         slice_width = 40
+        slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width
+
         vis_slice = sstream.vis[..., st:et].copy()
         ra_slice = sstream.ra[st:et]
 
@@ -461,29 +463,30 @@ class SiderealCalibration(task.SingleTask):
 
         # Construct the final gain arrays
         gain = np.ones([nfreq, nfeed], np.complex128)
-        gain[:, xfeeds] = gain_x[:, :, slice_width]  # slice_width should be the central value i.e. transit
-        gain[:, yfeeds] = gain_y[:, :, slice_width]
+        gain[:, xfeeds] = gain_x[:, :, slice_centre]  # slice_width should be the central value i.e. transit
+        gain[:, yfeeds] = gain_y[:, :, slice_centre]
+        gain = gain[:, :, np.newaxis]
 
         # Apply gains to visibility matrix and copy into cts
         gain_inv = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
-        tools.apply_gain(sstream.vis[:], gain_inv[:, :, np.newaxis], out=sstream.vis[:])
+        tools.apply_gain(sstream.vis[:], gain_inv, out=sstream.vis[:])
 
         sstream.add_dataset('gain')
 
         # Save gains into cts instance
-        sstream.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
+        sstream.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=sstream.vis.comm)
 
         # == Modify the dataset weight according to the dynamic range ==
         # Copy the dynamic range into a full array
         dr_weight = np.zeros(gain.shape, dtype=np.float64)
-        dr_weight[:, xfeeds] = dr_x[:, np.newaxis, slice_width]
-        dr_weight[:, yfeeds] = dr_y[:, np.newaxis, slice_width]
+        dr_weight[:, xfeeds] = dr_x[:, slice_centre][:, np.newaxis, np.newaxis]
+        dr_weight[:, yfeeds] = dr_y[:, slice_centre][:, np.newaxis, np.newaxis]
 
         # Convert dynamic range to a binary weight
         dr_weight = (dr_weight > 2.0).astype(np.float64)
 
         # Apply the per feed weight to the full weight array
-        tools.apply_gain(sstream.weight[:], dr_weight[:, :, np.newaxis], out=sstream.weight[:])
+        tools.apply_gain(sstream.weight[:], dr_weight, out=sstream.weight[:])
 
         return sstream
 
