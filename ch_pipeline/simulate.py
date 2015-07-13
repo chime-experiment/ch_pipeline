@@ -1,7 +1,7 @@
 """
-=====================================================
-Timestreaam Simulation (:mod:`~ch_pipeline.simulate`)
-=====================================================
+====================================================
+Timestream Simulation (:mod:`~ch_pipeline.simulate`)
+====================================================
 
 .. currentmodule:: ch_pipeline.simulate
 
@@ -28,78 +28,6 @@ from ch_util import tools
 from ch_analysis.map import sidereal
 
 from . import containers, task
-
-
-class LoadBasicCont(pipeline.TaskBase):
-    """Load a series of files from disk and pass them through the pipeline.
-
-    Uses the ability of :class:`memh5.BasicCont` to return the data in the class
-    it was saved in.
-
-    Attributes
-    ----------
-    files : list
-        A list containing the paths of files to load.
-    """
-
-    files = config.Property(proptype=list)
-
-    def next(self):
-        """Load the given files in turn and pass on.
-
-        Returns
-        -------
-        cont : subclass of `memh5.BasicCont`
-        """
-
-        # Fetch and remove the first item in the list
-        file = self.files.pop(0)
-
-        cont = memh5.BasicCont.from_file(file, distributed=True)
-
-        return cont
-
-
-class LoadBeamTransfer(pipeline.TaskBase):
-    """Loads a beam transfer manager from disk.
-
-    Attributes
-    ----------
-    product_directory : str
-        Path to the saved Beam Transfer products.
-    """
-
-    product_directory = config.Property(proptype=str)
-
-    def setup(self):
-        """Load the beam transfer matrices.
-
-        Returns
-        -------
-        tel : TransitTelescope
-            Object describing the telescope.
-        bt : BeamTransfer
-            BeamTransfer manager.
-        feed_info : list, optional
-            Optional list providing additional information about each feed.
-        """
-
-        import os
-
-        from drift.core import beamtransfer
-
-        if not os.path.exists(self.product_directory):
-            raise RuntimeError('BeamTransfers do not exist.')
-
-        bt = beamtransfer.BeamTransfer(self.product_directory)
-
-        tel = bt.telescope
-
-        try:
-            feed_info = tel.feed_info
-            return tel, bt, feed_info
-        except AttributeError:
-            return tel, bt
 
 
 class SimulateSidereal(task.SingleTask):
