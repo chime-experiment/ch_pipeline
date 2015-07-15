@@ -392,11 +392,7 @@ class SiderealCalibration(task.SingleTask):
 
     _source_dict = {'CasA': ephemeris.CasA}
 
-    def setup(self, inputmap):
-
-        self.inputmap = inputmap
-
-    def process(self, sstream):
+    def process(self, sstream, inputmap):
         """Apply calibration to a timestream.
 
         Parameters
@@ -424,10 +420,10 @@ class SiderealCalibration(task.SingleTask):
         freq = sstream.freq['centre'][sfreq:efreq]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = [idx for idx, inp in enumerate(self.inputmap) if tools.is_chime_x(inp)]
-        yfeeds = [idx for idx, inp in enumerate(self.inputmap) if tools.is_chime_y(inp)]
+        xfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp)]
+        yfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp)]
 
-        nfeed = len(self.inputmap)
+        nfeed = len(inputmap)
 
         # Fetch source
         source = self._source_dict[self.source]
@@ -451,7 +447,7 @@ class SiderealCalibration(task.SingleTask):
         ra_slice = sstream.ra[st:et]
 
         # Fringestop the data
-        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, self.inputmap, source)
+        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, inputmap, source)
 
         # Figure out how many samples is ~ 2 degrees, then subtract nearby values
         diff = int(2.0 / np.median(np.abs(np.diff(sstream.ra))))
