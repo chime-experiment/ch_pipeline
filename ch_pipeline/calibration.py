@@ -19,16 +19,14 @@ Tasks
 import numpy as np
 from scipy import interpolate
 
-from caput import pipeline
-from caput import config
-from caput import mpidataset, mpiutil
+from caput import config, pipeline
+from caput import mpiarray, mpiutil
 
-from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
 
-import containers
+from . import containers, task
 
 from . import dataspec
 
@@ -162,6 +160,8 @@ class PointSourceCalibration(pipeline.TaskBase):
             Describing the inputs to the correlator.
         """
 
+        from ch_util import andata
+
         # Use input map to figure out which are the X and Y feeds
         xfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp)]
         yfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp)]
@@ -269,7 +269,7 @@ class PointSourceCalibration(pipeline.TaskBase):
         tools.apply_gain(ts.vis, 1.0 / gain, out=cts.vis)
 
         # Save gains into cts instance
-        cts.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cts.comm)
+        cts.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=cts.comm)
 
         # Ensure distributed over frequency axis
         cts.redistribute(0)
@@ -333,7 +333,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Ensure that we are distributed over frequency
 
-        ts.redistribute(0)
+        ts.redistribute('freq')
 
         # Create noise injection data object from input timestream
         nidata = ni_utils.ni_data(ts, self.nchannels, self.ch_ref, self.fbin_ref)
@@ -352,7 +352,8 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         if self.decimate_only:
             vis = vis_uncal.copy()
         else:  # Apply the gain solution
-            vis = tools.apply_gain(vis_uncal, 1.0 / gain)
+            gain_inv = np.where(gain == 0.0, 0.0, 1.0 / gain)
+            vis = tools.apply_gain(vis_uncal, gain_inv)
 
         # Calculate dynamic range
         ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
@@ -360,9 +361,9 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         dr = dr[:, np.newaxis, :]
 
         # Turn vis, gains and dr into MPIArray
-        vis = mpidataset.MPIArray.wrap(vis, axis=0, comm=ts.comm)
-        gain = mpidataset.MPIArray.wrap(gain, axis=0, comm=ts.comm)
-        dr = mpidataset.MPIArray.wrap(dr, axis=0, comm=ts.comm)
+        vis = mpiarray.MPIArray.wrap(vis, axis=0, comm=ts.comm)
+        gain = mpiarray.MPIArray.wrap(gain, axis=0, comm=ts.comm)
+        dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
         cts = containers.TimeStream(timestamp, ts.freq, vis.global_shape[1],
@@ -378,7 +379,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         return cts
 
 
-class SiderealCalibration(pipeline.TaskBase):
+class SiderealCalibration(task.SingleTask):
     """Use CasA as a point source calibrator for a sidereal stack.
 
     Attributes
@@ -391,11 +392,7 @@ class SiderealCalibration(pipeline.TaskBase):
 
     _source_dict = {'CasA': ephemeris.CasA}
 
-    def setup(self, inputmap):
-
-        self.inputmap = inputmap
-
-    def next(self, sstream):
+    def process(self, sstream, inputmap):
         """Apply calibration to a timestream.
 
         Parameters
@@ -412,7 +409,7 @@ class SiderealCalibration(pipeline.TaskBase):
         """
 
         # Ensure that we are distributed over frequency
-        sstream.redistribute(0)
+        sstream.redistribute('freq')
 
         # Find the local frequencies
         nfreq = sstream.vis.local_shape[0]
@@ -423,10 +420,10 @@ class SiderealCalibration(pipeline.TaskBase):
         freq = sstream.freq['centre'][sfreq:efreq]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = [idx for idx, inp in enumerate(self.inputmap) if tools.is_chime_x(inp)]
-        yfeeds = [idx for idx, inp in enumerate(self.inputmap) if tools.is_chime_y(inp)]
+        xfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp)]
+        yfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp)]
 
-        nfeed = len(self.inputmap)
+        nfeed = len(inputmap)
 
         # Fetch source
         source = self._source_dict[self.source]
@@ -443,12 +440,14 @@ class SiderealCalibration(pipeline.TaskBase):
 
         # Cut out a snippet of the timestream
         slice_width = 40
+        slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width
+
         vis_slice = sstream.vis[..., st:et].copy()
         ra_slice = sstream.ra[st:et]
 
         # Fringestop the data
-        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, self.inputmap, source)
+        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, inputmap, source)
 
         # Figure out how many samples is ~ 2 degrees, then subtract nearby values
         diff = int(2.0 / np.median(np.abs(np.diff(sstream.ra))))
@@ -460,39 +459,36 @@ class SiderealCalibration(pipeline.TaskBase):
 
         # Construct the final gain arrays
         gain = np.ones([nfreq, nfeed], np.complex128)
-        gain[:, xfeeds] = gain_x[:, :, slice_width]  # slice_width should be the central value i.e. transit
-        gain[:, yfeeds] = gain_y[:, :, slice_width]
-
-        # Create TimeStream
-        cstream = sstream.copy(deep=True)
+        gain[:, xfeeds] = gain_x[:, :, slice_centre]  # slice_width should be the central value i.e. transit
+        gain[:, yfeeds] = gain_y[:, :, slice_centre]
+        gain = gain[:, :, np.newaxis]
 
         # Apply gains to visibility matrix and copy into cts
         gain_inv = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
-        tools.apply_gain(cstream.vis, gain_inv[:, :, np.newaxis], out=cstream.vis)
+        tools.apply_gain(sstream.vis[:], gain_inv, out=sstream.vis[:])
+
+        sstream.add_dataset('gain')
 
         # Save gains into cts instance
-        cstream._distributed['gain'] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cstream.comm)
+        sstream.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=sstream.vis.comm)
 
         # == Modify the dataset weight according to the dynamic range ==
         # Copy the dynamic range into a full array
         dr_weight = np.zeros(gain.shape, dtype=np.float64)
-        dr_weight[:, xfeeds] = dr_x[:, np.newaxis, slice_width]
-        dr_weight[:, yfeeds] = dr_y[:, np.newaxis, slice_width]
+        dr_weight[:, xfeeds] = dr_x[:, slice_centre][:, np.newaxis, np.newaxis]
+        dr_weight[:, yfeeds] = dr_y[:, slice_centre][:, np.newaxis, np.newaxis]
 
         # Convert dynamic range to a binary weight
         dr_weight = (dr_weight > 2.0).astype(np.float64)
 
         # Apply the per feed weight to the full weight array
-        tools.apply_gain(cstream.weight, dr_weight[:, :, np.newaxis], out=cstream.weight)
+        tools.apply_gain(sstream.weight[:], dr_weight, out=sstream.weight[:])
 
-        # Ensure distributed over frequency axis
-        cstream.redistribute(0)
-
-        return cstream
+        return sstream
 
 
 class ApplyExternalGain(pipeline.TaskBase):
-    
+
     gainfile = config.Property(proptype=str)
 
     inverse = config.Property(proptype=bool, default=False)

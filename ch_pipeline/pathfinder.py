@@ -121,6 +121,43 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     def feeds(self):
         return list(self._feeds)
 
+    @property
+    def feed_index(self):
+        feed_sn = [feed.input_sn for feed in self.feeds]
+
+        # Parse a serial number into sma and slot number
+        def parse_sn(sn):
+            import re
+
+            mo = re.match('(\w{6}\-\d{4})(\d{2})(\d{2})', sn)
+
+            try:
+                crate = mo.group(1)
+                slot = int(mo.group(2))
+                sma = int(mo.group(3))
+
+                return crate, slot, sma
+            except:
+                raise RuntimeError('Serial number %s does not match expected format.' % sn)
+
+        # Map a slot and SMA to channel id
+        def get_channel(slot, sma):
+            c = [None, 80, 16, 64, 0, 208, 144, 192, 128, 240, 176, 224, 160, 112, 48, 96, 32]
+            channel = c[slot] + sma if slot > 0 else sma
+            return channel
+
+        channels = [get_channel(*(parse_sn(sn)[1:])) for sn in feed_sn]
+
+        from ch_util import andata
+
+        return andata._generate_input_map(feed_sn, channels)
+
+
+    @property
+    def feed_info(self):
+        return self.feeds
+
+
     def __init__(self, feeds=None):
 
         self._feeds = feeds
