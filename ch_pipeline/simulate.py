@@ -138,7 +138,7 @@ class SimulateSidereal(task.SingleTask):
         col_alm = col_alm.transpose((2, 0, 1)).reshape((None, nfreq, npol, lmax+1))
 
         # Create storage for visibility data
-        vis_data = mpiarray.MPIArray((lm, nfreq, bt.ntel), axis=0, dtype=np.complex128)
+        vis_data = mpiarray.MPIArray((mmax+1, nfreq, bt.ntel), axis=0, dtype=np.complex128)
         vis_data[:] = 0.0
 
         # Iterate over m's local to this process and generate the corresponding
