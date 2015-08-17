@@ -259,7 +259,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     def _make_ew(self):
         ## Reimplemented to make sure entries we always pick the upper
         ## triangle (and do not reorder to make EW baselines)
-        return
+        if self.redundant:
+            super(CHIMEPathfinder, self)._make_ew()
 
     @property
     def feedpositions(self):
@@ -276,7 +277,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         """
 
         # Fetch cylinder relative positions
-        pos = tools.get_feed_positions(self.feeds)
+        pos = tools.get_feed_positions(self.feeds, rotation=self.rotation_angle)
 
         return pos  # Transpose to get into correct shape
 
