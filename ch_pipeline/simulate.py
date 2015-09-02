@@ -213,7 +213,7 @@ class SimulateSidereal(task.SingleTask):
         return sstream
 
 
-class DayMask(pipeline.TaskBase):
+class DayMask(task.SingleTask):
     """Crudely simulate a masking out of the daytime data.
 
     Attributes
@@ -223,6 +223,9 @@ class DayMask(pipeline.TaskBase):
     width : float
         Use a smooth transition of given width between the fully masked and
         unmasked data. This is interior to the region marked by start and end.
+    zero_data : bool, optional
+        Zero the data in addition to modifying the noise weights
+        (default is True).
     """
 
     start = config.Property(proptype=float, default=90.0)
@@ -230,7 +233,9 @@ class DayMask(pipeline.TaskBase):
 
     width = config.Property(proptype=float, default=60.0)
 
-    def next(self, sstream):
+    zero_data = config.Property(proptype=bool, default=True)
+
+    def process(self, sstream):
         """Apply a day time mask.
 
         Parameters
@@ -244,23 +249,30 @@ class DayMask(pipeline.TaskBase):
             Masked sidereal stream.
         """
 
-        ra = sstream.ra
+        sstream.redistribute('freq')
+
+        ra_shift = (sstream.ra[:] - self.start) % 360.0
+        end_shift = (self.end - self.start) % 360.0
 
         # Crudely mask the on and off regions
-        mask = np.logical_or(ra < self.start, ra > self.end).astype(np.float64)
+        mask = ra_shift > end_shift
 
         # Put in the transition at the start of the day
-        mask = np.where(np.logical_and(ra > self.start, ra < self.start + self.width),
-                        0.5 * (1 + np.cos(np.pi * ((ra - self.start) / self.width))),
+        mask = np.where(ra_shift < self.width,
+                        0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
                         mask)
 
         # Put the transition at the end of the day
-        mask = np.where(np.logical_and(ra > self.end - self.width, ra < self.end),
-                        0.5 * (1 + np.cos(np.pi * ((ra - self.end) / self.width))),
+        mask = np.where(np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
+                        0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
                         mask)
 
         # Apply the mask to the data
-        sstream.vis[:] *= mask
+        if self.zero_data:
+            sstream.vis[:] *= mask
+
+        # Modify the noise weights
+        sstream.weight[:] *= mask
 
         return sstream
 

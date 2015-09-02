@@ -28,8 +28,6 @@ from ch_util import ni_utils
 
 from . import containers, task
 
-from . import dataspec
-
 
 def solve_gain(data, feeds=None):
     """
@@ -40,7 +38,7 @@ def solve_gain(data, feeds=None):
     ----------
     data : np.ndarray[nfreq, nprod, ntime]
         Visibility array to be decomposed
-    feed_loc : list
+    feeds : list
         Which feeds to include. If :obj:`None` include all feeds.
 
     Returns
@@ -51,18 +49,21 @@ def solve_gain(data, feeds=None):
         Gain solution for each feed, time, and frequency
     """
 
-    # Expand the products to correlation matrices
-    corr_data = tools.unpack_product_array(data, axis=1, feeds=feeds)
+    # Turn into numpy array to avoid any unfortunate indexing issues
+    data = data[:].view(np.ndarray)
 
-    nfeed = corr_data.shape[1]
+    # Calcuate the number of feeds in the output
+    nfeed = int((2*data.shape[1])**0.5) if feeds is None else len(feeds)
 
-    gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex128)
+    gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex64)
     dr = np.zeros((data.shape[0], data.shape[-1]), np.float64)
 
+    # Iterate over frequency/time and solve gains
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
-            cd = corr_data[fi, :, :, ti]
+            # Unpack visibility array into square matrix
+            cd = tools.unpack_product_array(data[fi, :, ti], axis=0, feeds=feeds)
 
             if not np.isfinite(cd).all():
                 continue
@@ -277,6 +278,39 @@ class PointSourceCalibration(pipeline.TaskBase):
         return cts
 
 
+class NoiseSourceFold(task.SingleTask):
+    """Fold the noise source for synced data.
+
+    Attributes
+    ----------
+    period : int, optional
+        Period of the noise source in integration samples.
+    phase : int, optional
+        Phase of noise source on sample.
+    """
+
+    period = config.Property(proptype=int, default=None)
+    phase = config.Property(proptype=int, default=None)
+    
+    def process(self, ts):
+        """Fold on the noise source and generate a gated dataset.
+
+        Parameters
+        ----------
+        ts : andata.CorrData object
+            Timestream to fold on.
+            
+        Returns
+        -------
+        folded_ts : andata.CorrData
+            Timestream with a gated_vis0 dataset containing the noise
+            source data.
+        """
+        folded_ts = ni_utils.process_synced_data(ts, period=self.period, phase=self.phase)
+
+        return folded_ts
+
+
 class NoiseInjectionCalibration(pipeline.TaskBase):
     """Calibration using Noise Injection
 
@@ -377,6 +411,82 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         cts.redistribute(0)
 
         return cts
+
+
+class GatedNoiseCalibration(task.SingleTask):
+    """Calibration using Noise Injection
+    """
+
+    smoothing_length = config.Property(proptype=int, default=15)
+
+    def process(self, ts, inputmap):
+        """Find gains from noise injection data and apply them to visibilities.
+
+        Parameters
+        ----------
+        ts : andata.CorrData
+            Parallel timestream class containing noise injection data.
+        inputmap : list of CorrInputs
+            List describing the inputs to the correlator.
+
+        Returns
+        -------
+        ts : andata.CorrData
+            Timestream with calibrated (decimated) visibilities, gains and
+            respective timestamps.
+        """
+
+        # Ensure that we are distributed over frequency
+        ts.redistribute('freq')
+
+        # Figure out which input channel is the noise source (used as gain reference)
+        noise_channel = tools.get_noise_channel(inputmap)
+
+        # Find gains, normalising by the noise source gain
+        dr, gain = solve_gain(ts.datasets['gated_vis0'])
+        gain /= gain[:, np.newaxis, noise_channel, :].copy()
+        gain = np.nan_to_num(gain)
+
+        if self.smoothing_length > 1:
+            import scipy.signal as ss
+
+            # Ensure smoothing length is odd
+            l = 2 * (self.smoothing_length / 2) + 1
+
+            # Turn into 2D array (required by smoothing routines)
+            gain_r = gain.reshape(-1, gain.shape[-1])
+
+            # Smooth amplitude and phase separately
+            smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
+            smooth_phase = ss.medfilt2d(np.angle(gain_r), kernel_size=[1, l])
+
+            # Recombine and reshape back to original shape
+            smooth_gain = smooth_amp * np.exp(1.0J * smooth_phase)
+            smooth_gain = smooth_gain.reshape(gain.shape)
+        else:
+            # If smoothing length is one, just use the same array
+            smooth_gain = gain
+
+        # Apply the inverse gain to the data
+        gain_inv = np.where(smooth_gain != 0.0, 1.0 / smooth_gain, 0.0)
+        gain_inv = np.nan_to_num(gain_inv)
+        tools.apply_gain(ts.vis[:], gain_inv, out=ts.vis[:])
+
+        # Add the dynamic range dataset
+        dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
+        dr_dset = ts.create_dataset('dynamic_range', data=dr, distributed=True)
+        dr_dset.attrs['axis'] = np.array(['freq', 'time'])
+
+        # Replace the gain dataset with the noise source solutions
+        ts.gain[:] = gain
+
+        # Add in a dataset for the smoothed gain solution
+        if self.smoothing_length > 1:
+            sg = mpiarray.MPIArray.wrap(smooth_gain, axis=0, comm=ts.comm)
+            sg_dset = ts.create_dataset('smooth_gain', data=sg, distributed=True)
+            sg_dset.attrs['axis'] = np.array(['freq', 'input', 'time'])
+
+        return ts
 
 
 class SiderealCalibration(task.SingleTask):
