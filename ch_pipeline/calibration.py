@@ -30,6 +30,7 @@ from ch_util import ephemeris
 from ch_util import ni_utils
 
 from . import containers, task
+from . import _fast_tools
 
 
 def solve_gain(data, feeds=None):
@@ -56,27 +57,34 @@ def solve_gain(data, feeds=None):
     data = data[:].view(np.ndarray)
 
     # Calcuate the number of feeds in the output
-    nfeed = int((2*data.shape[1])**0.5) if feeds is None else len(feeds)
+
+    tfeed = int((2*data.shape[1])**0.5)
+    nfeed = tfeed if feeds is None else len(feeds)
 
     gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex64)
     dr = np.zeros((data.shape[0], data.shape[-1]), np.float64)
+
+    # Temporary array for unpacked products
+    cd = np.zeros((nfeed, nfeed), dtype=data.dtype)
+
+    feeds = np.array(feeds) if feeds is not None else np.arange(nfeed)
 
     # Iterate over frequency/time and solve gains
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
             # Unpack visibility array into square matrix
-            cd = tools.unpack_product_array(data[fi, :, ti], axis=0, feeds=feeds)
+            _fast_tools._unpack_product_array_fast(data[fi, :, ti].copy(), cd, feeds, tfeed)
 
             if not np.isfinite(cd).all():
                 continue
 
             # Normalise and solve for eigenvectors
             xc, ach = tools.normalise_correlations(cd)
-            evals, evecs = tools.eigh_no_diagonal(xc, niter=5)
+            evals, evecs = tools.eigh_no_diagonal(xc, niter=5, eigvals=(nfeed-2, nfeed-1))
 
             # Construct dynamic range and gain
-            dr[fi, ti] = evals[-1] / np.abs(evals[:-1]).max()
+            dr[fi, ti] = evals[-1] / evals[-2] #np.abs(evals[:-1]).max()
             gain[fi, :, ti] = ach * evecs[:, -1] * evals[-1]**0.5
 
     return dr, gain
