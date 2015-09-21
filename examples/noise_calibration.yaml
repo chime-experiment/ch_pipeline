@@ -1,0 +1,45 @@
+cluster:
+    name:      calibration_1G
+    directory: $SCRATCH/calibration_1g/
+
+    nodes:     64
+    ompnum:    8
+    time:      120:00
+
+    venv:      /home/k/krs/jrs65/ch_pipeline/venv
+
+pipeline :
+    tasks:
+
+        -   type:       ch_pipeline.dataquery.QueryRun
+            out:        filelist
+            params:
+                run_name:   "run_pass1_g"
+
+        -   type:       ch_pipeline.io.LoadCorrDataFiles
+            requires:   filelist
+            out:        tstream
+            
+        -   type:       ch_pipeline.dataquery.QueryInputs
+            in:         tstream
+            out:        inputmap
+
+        -   type:       ch_pipeline.calibration.NoiseSourceFold
+            in:         tstream
+            out:        foldedday
+            params:
+                period:   2
+                phase:    1
+
+        -   type:       ch_pipeline.flagging.BadNodeFlagger
+            in:         foldedday
+            out:        foldedday2
+            params:
+                nodes:  [2, 6, 9, 10, 15]
+
+        -   type:       ch_pipeline.calibration.GatedNoiseCalibration
+            in:         [foldedday2, inputmap]
+            out:        noisecalday
+            params:
+                save:   Yes
+                output_root: cal_
