@@ -13,8 +13,11 @@ Tasks
 .. autosummary::
     :toctree: generated/
 
-    PointSourceCalibration
     NoiseSourceCalibration
+    NoiseSourceFold
+    GatedNoiseCalibration
+    SiderealCalibration
+    ApplyGain
 """
 import numpy as np
 from scipy import interpolate
@@ -27,6 +30,7 @@ from ch_util import ephemeris
 from ch_util import ni_utils
 
 from . import containers, task
+from . import _fast_tools
 
 
 def solve_gain(data, feeds=None):
@@ -53,27 +57,34 @@ def solve_gain(data, feeds=None):
     data = data[:].view(np.ndarray)
 
     # Calcuate the number of feeds in the output
-    nfeed = int((2*data.shape[1])**0.5) if feeds is None else len(feeds)
+
+    tfeed = int((2*data.shape[1])**0.5)
+    nfeed = tfeed if feeds is None else len(feeds)
 
     gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex64)
     dr = np.zeros((data.shape[0], data.shape[-1]), np.float64)
+
+    # Temporary array for unpacked products
+    cd = np.zeros((nfeed, nfeed), dtype=data.dtype)
+
+    feeds = np.array(feeds) if feeds is not None else np.arange(nfeed)
 
     # Iterate over frequency/time and solve gains
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
             # Unpack visibility array into square matrix
-            cd = tools.unpack_product_array(data[fi, :, ti], axis=0, feeds=feeds)
+            _fast_tools._unpack_product_array_fast(data[fi, :, ti].copy(), cd, feeds, tfeed)
 
             if not np.isfinite(cd).all():
                 continue
 
             # Normalise and solve for eigenvectors
             xc, ach = tools.normalise_correlations(cd)
-            evals, evecs = tools.eigh_no_diagonal(xc, niter=5)
+            evals, evecs = tools.eigh_no_diagonal(xc, niter=5, eigvals=(nfeed-2, nfeed-1))
 
             # Construct dynamic range and gain
-            dr[fi, ti] = evals[-1] / np.abs(evals[:-1]).max()
+            dr[fi, ti] = evals[-1] / evals[-2] #np.abs(evals[:-1]).max()
             gain[fi, :, ti] = ach * evecs[:, -1] * evals[-1]**0.5
 
     return dr, gain
@@ -106,176 +117,12 @@ def interp_gains(trans_times, gain_mat, times, axis=-1):
     return gains
 
 
-def list_transits(dspec, obj=ephemeris.CasA, tdel=600):
-    """Get a list of files that contain point source transits
-
-    Parameter
-    ---------
-    dspec : dictionary
-        Dataset specification.
-    obj : ephem.Body, optional
-        Body for which to find transits.
-    tdel : float, optional
-        Total amount of time to include surrounding the transit in sec.
-
-    Returns
-    -------
-    interval_list : :class:`DataIntervalList`
-        Search results.
-    """
-    fi = dataspec.finder_from_spec(dspec)
-    fi.include_transits(obj, time_delta=tdel)
-
-    return fi.get_results()
-
-
 def _cdiff(ts, dt):
     # Subtract the average of two nearby points from every point in the timestream
     if dt is None:
         return ts
 
     return ts - 0.5*(np.roll(ts, dt, axis=-1) + np.roll(ts, -dt, axis=-1))
-
-
-class PointSourceCalibration(pipeline.TaskBase):
-    """Use CasA transits as point source calibrators.
-
-    Attributes
-    ----------
-    source : str
-        Point source to use as calibrator. Only CasA is supported at this time.
-    """
-
-    source = config.Property(proptype=str, default='CasA')
-
-    _source_dict = {'CasA': ephemeris.CasA}
-
-    def setup(self, dspec, inputmap):
-        """Use a dataspec to derive the calibration solutions.
-
-        Parameters
-        ----------
-        dspec : dictionary
-            Dataspec as a dictionary.
-        inputmap : list of :class:`tools.CorrInputs`
-            Describing the inputs to the correlator.
-        """
-
-        from ch_util import andata
-
-        # Use input map to figure out which are the X and Y feeds
-        xfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp)]
-        yfeeds = [idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp)]
-
-        self.nfeed = len(inputmap)
-        self.gain_mat = []
-        self.trans_times = []
-
-        if mpiutil.rank0:
-
-            # Fetch source and transit
-            source = self._source_dict[self.source]
-            transit_list = list_transits(dspec, obj=source)
-
-            # Number of transits
-            ndays = len(transit_list)
-
-            # Loop to find gain solutions for each transit
-            for k, files in enumerate(transit_list):
-
-                if len(files[0]) > 3:
-                    print "Skipping as too many files."
-                    continue  # Skip large acqquisitions. Usually high-cadence observations
-
-                flist = files[0]
-
-                print "Reading in:", flist
-
-                # Read in the data
-                reader = andata.Reader(flist)
-                reader.freq_sel = range(1024)
-                data = reader.read()
-
-                times = data.timestamp
-                self.nfreq = data.nfreq
-                self.ntime = data.ntime
-
-                # Find the exact transit time for this transit
-                trans_time = ephemeris.transit_times(source, times[0])
-                self.trans_times.append(trans_time)
-
-                # Select only data within a minute of the transit
-                times_ind = np.where((times > trans_time - 60.) & (times < trans_time + 60.))
-                vis = data.vis[..., times_ind[0]]
-                del data
-
-                print "Solving gains."
-                # Solve for the gains of each set of polarisations
-                gain_arr_x = solve_gain(vis, feeds=xfeeds)
-                gain_arr_y = solve_gain(vis, feeds=yfeeds)
-
-                print "Finished eigendecomposition"
-                print ""
-
-                # Construct the final gain arrays
-                gain = np.ones([self.nfreq, self.nfeed], np.complex128)
-                gain[:, xfeeds] = np.median(gain_arr_x, axis=-1)  # Take time avg of gains solution
-                gain[:, yfeeds] = np.median(gain_arr_y, axis=-1)
-
-                print "Computing gain matrix for transit %d of %d" % (k+1, ndays)
-                self.gain_mat.append(gain[:, :, np.newaxis])
-
-            self.gain_mat = np.concatenate(self.gain_mat, axis=-1)
-            self.trans_times = np.concatenate(self.trans_times)
-            print "Broadcasting solutions to all ranks."
-
-        self.gain_mat = mpiutil.world.bcast(self.gain_mat, root=0)
-        self.trans_times = mpiutil.world.bcast(self.trans_times, root=0)
-
-    def next(self, ts):
-        """Apply calibration to a timestream.
-
-        Parameters
-        ----------
-        ts : containers.TimeStream
-            Parallel timestream class.
-
-        Returns
-        -------
-        calibrated_ts : containers.TimeStream
-            Calibrated timestream.
-        gains : np.ndarray
-            Array of gains.
-        """
-
-        # Ensure that we are distributed over frequency
-        ts.redistribute(0)
-
-        # Find the local frequencies
-        freq_low = ts.vis.local_offset[0]
-        freq_up = freq_low + ts.vis.local_shape[0]
-
-        # Find times that are within the calibrated region
-        times = ts.timestamp
-        # ind_cal = np.where((times > self.trans_times[0]) & (times < self.trans_times[-1]))[0]
-
-        # Construct the gain matrix at all times (using liner interpolation)
-        gain = interp_gains(self.trans_times, self.gain_mat[freq_low:freq_up], times)
-
-        # Create TimeStream
-        cts = ts.copy(deep=True)
-        cts.add_gain()
-
-        # Apply gains to visibility matrix and copy into cts
-        tools.apply_gain(ts.vis, 1.0 / gain, out=cts.vis)
-
-        # Save gains into cts instance
-        cts.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=cts.comm)
-
-        # Ensure distributed over frequency axis
-        cts.redistribute(0)
-
-        return cts
 
 
 class NoiseSourceFold(task.SingleTask):
@@ -291,7 +138,7 @@ class NoiseSourceFold(task.SingleTask):
 
     period = config.Property(proptype=int, default=None)
     phase = config.Property(proptype=int, default=None)
-    
+
     def process(self, ts):
         """Fold on the noise source and generate a gated dataset.
 
@@ -299,7 +146,7 @@ class NoiseSourceFold(task.SingleTask):
         ----------
         ts : andata.CorrData object
             Timestream to fold on.
-            
+
         Returns
         -------
         folded_ts : andata.CorrData
@@ -325,6 +172,10 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
     decimate_only : bool, optional
         If set (not default), then we do not apply the gain solution
         and return a decimated but uncalibrated timestream.
+
+    .. deprecated:: pass1G
+        This calibration technique only works on old data from before Pass 1G.
+        For more recent data, look at :class:`GatedNoiseCalibration`.
     """
 
     nchannels = config.Property(proptype=int, default=16)
@@ -447,46 +298,15 @@ class GatedNoiseCalibration(task.SingleTask):
         gain /= gain[:, np.newaxis, noise_channel, :].copy()
         gain = np.nan_to_num(gain)
 
-        if self.smoothing_length > 1:
-            import scipy.signal as ss
+        # Create container from gains
+        gain_data = containers.GainData(axes_from=ts)
+        gain_data.add_dataset('weight')
 
-            # Ensure smoothing length is odd
-            l = 2 * (self.smoothing_length / 2) + 1
+        # Copy data into container
+        gain_data.gain[:] = gain
+        gain_data.weight[:] = dr
 
-            # Turn into 2D array (required by smoothing routines)
-            gain_r = gain.reshape(-1, gain.shape[-1])
-
-            # Smooth amplitude and phase separately
-            smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
-            smooth_phase = ss.medfilt2d(np.angle(gain_r), kernel_size=[1, l])
-
-            # Recombine and reshape back to original shape
-            smooth_gain = smooth_amp * np.exp(1.0J * smooth_phase)
-            smooth_gain = smooth_gain.reshape(gain.shape)
-        else:
-            # If smoothing length is one, just use the same array
-            smooth_gain = gain
-
-        # Apply the inverse gain to the data
-        gain_inv = np.where(smooth_gain != 0.0, 1.0 / smooth_gain, 0.0)
-        gain_inv = np.nan_to_num(gain_inv)
-        tools.apply_gain(ts.vis[:], gain_inv, out=ts.vis[:])
-
-        # Add the dynamic range dataset
-        dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
-        dr_dset = ts.create_dataset('dynamic_range', data=dr, distributed=True)
-        dr_dset.attrs['axis'] = np.array(['freq', 'time'])
-
-        # Replace the gain dataset with the noise source solutions
-        ts.gain[:] = gain
-
-        # Add in a dataset for the smoothed gain solution
-        if self.smoothing_length > 1:
-            sg = mpiarray.MPIArray.wrap(smooth_gain, axis=0, comm=ts.comm)
-            sg_dset = ts.create_dataset('smooth_gain', data=sg, distributed=True)
-            sg_dset.attrs['axis'] = np.array(['freq', 'input', 'time'])
-
-        return ts
+        return gain_data
 
 
 class SiderealCalibration(task.SingleTask):
@@ -500,7 +320,8 @@ class SiderealCalibration(task.SingleTask):
 
     source = config.Property(proptype=str, default='CasA')
 
-    _source_dict = {'CasA': ephemeris.CasA}
+    _source_dict = {'CasA': ephemeris.CasA,
+                    'CygA': ephemeris.CygA}
 
     def process(self, sstream, inputmap):
         """Apply calibration to a timestream.
@@ -573,62 +394,104 @@ class SiderealCalibration(task.SingleTask):
         gain[:, yfeeds] = gain_y[:, :, slice_centre]
         gain = gain[:, :, np.newaxis]
 
-        # Apply gains to visibility matrix and copy into cts
-        gain_inv = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
-        tools.apply_gain(sstream.vis[:], gain_inv, out=sstream.vis[:])
+        # Combine both dynamic range estimates
+        dr = np.minimum(dr_x, dr_y)
 
-        sstream.add_dataset('gain')
+        # Create container from gains
+        gain_data = containers.StaticGainData(axes_from=sstream)
+        gain_data.add_dataset('weight')
 
-        # Save gains into cts instance
-        sstream.gain[:] = mpiarray.MPIArray.wrap(gain, axis=0, comm=sstream.vis.comm)
+        # Copy data into container
+        gain_data.gain[:] = gain
+        gain_data.weight[:] = dr
 
-        # == Modify the dataset weight according to the dynamic range ==
-        # Copy the dynamic range into a full array
-        dr_weight = np.zeros(gain.shape, dtype=np.float64)
-        dr_weight[:, xfeeds] = dr_x[:, slice_centre][:, np.newaxis, np.newaxis]
-        dr_weight[:, yfeeds] = dr_y[:, slice_centre][:, np.newaxis, np.newaxis]
-
-        # Convert dynamic range to a binary weight
-        dr_weight = (dr_weight > 2.0).astype(np.float64)
-
-        # Apply the per feed weight to the full weight array
-        tools.apply_gain(sstream.weight[:], dr_weight, out=sstream.weight[:])
-
-        return sstream
+        return gain_data
 
 
-class ApplyExternalGain(pipeline.TaskBase):
+class ApplyGain(task.SingleTask):
+    """Apply a set of gains to a timestream or sidereal stack.
 
-    gainfile = config.Property(proptype=str)
+    Attributes
+    ----------
+    inverse : bool, optional
+        Apply the gains directly, or their inverse.
+    smoothing_length : float, optional
+        Smooth the gain timestream across the given number of seconds.
+    """
 
     inverse = config.Property(proptype=bool, default=False)
+    smoothing_length = config.Property(proptype=float, default=None)
 
-    def setup(self):
+    def process(self, tstream, gain):
 
-        self.gain = containers.GainData.from_hdf5(self.gainfile)
-        self.gain.redistribute(axis=0)
+        tstream.redistribute('freq')
+        gain.redistribute('freq')
 
-    def next(self, tstream):
+        if isinstance(gain, containers.StaticGainData):
 
-        tstream.redistribute(axis=0)
+            # Extract gain array and add in a time axis
+            gain_arr = gain.gain[:, :, np.newaxis]
 
-        # Construct the gain matrix at all times (using liner interpolation)
-        gain = interp_gains(self.gain.timestamp, self.gain.gain, tstream.timestamp)
+            # Get the weight array if it's there
+            weight_arr = gain.weight[:, np.newaxis] if gain.weight is not None else None
 
-        # Create TimeStream
-        cts = tstream.copy(deep=True)
-        cts.add_gains()
+        elif isinstance(gain, containers.GainData):
 
+            # Extract gain array
+            gain_arr = gain.gain[:]
+
+            # Regularise any crazy entries
+            gain_arr = np.nan_to_num(gain_arr)
+
+            # Get the weight array if it's there
+            weight_arr = gain.weight[:] if gain.weight is not None else None
+
+            # Check that we are defined at the same time samples
+            if (gain.time != tstream.time).all():
+                raise RuntimeError('Gain data and timestream defined at different time samples.')
+
+            # Smooth the gain data if required
+            if self.smoothing_length is not None:
+                import scipy.signal as ss
+
+                # Turn smoothing length into a number of samples
+                tdiff = gain.time[1] - gain.time[0]
+                samp = int(np.ceil(self.smoothing_length / tdiff))
+
+                # Ensure smoothing length is odd
+                l = 2 * (samp / 2) + 1
+
+                # Turn into 2D array (required by smoothing routines)
+                gain_r = gain_arr.reshape(-1, gain.shape[-1])
+
+                # Smooth amplitude and phase separately
+                smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
+                smooth_phase = ss.medfilt2d(np.angle(gain_r), kernel_size=[1, l])
+
+                # Recombine and reshape back to original shape
+                gain_arr = smooth_amp * np.exp(1.0J * smooth_phase)
+                gain_arr = gain_arr.reshape(gain.shape)
+
+                # Smooth weight array if it exists
+                if weight_arr is not None:
+                    weight_arr = ss.medfilt2d(weight_arr, kernel_size=[1, l])
+
+        # Regularise any crazy entries
+        gain_arr = np.nan_to_num(gain_arr)
+
+        # Invert the gains if needed
         if self.inverse:
-            gain = np.where(gain != 0.0, 1.0 / gain, np.zeros_like(gain))
+            with np.errstate(divide='ignore'):
+                gain_arr = np.where(gain_arr != 0.0, 1.0 / gain_arr, np.zeros_like(gain_arr))
 
-        # Apply gains to visibility matrix and copy into cts
-        tools.apply_gain(tstream.vis, gain, out=cts.vis)
+        # Apply gains to visibility matrix
+        tools.apply_gain(tstream.vis[:], gain_arr, out=tstream.vis[:])
 
-        # Save gains into cts instance
-        cts.gain[:] = mpidataset.MPIArray.wrap(gain, axis=0, comm=cts.comm)
+        # Modify the weight array according to the gain weights
+        if gain.weight is not None:
 
-        # Ensure distributed over frequency axis
-        cts.redistribute(0)
+            # Convert dynamic range to a binary weight and apply to data
+            gain_weight = (gain.weight[:] > 2.0).astype(np.float64)
+            tstream.weight[:] *= gain_weight
 
-        return cts
+        return tstream
