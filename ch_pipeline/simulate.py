@@ -25,7 +25,6 @@ from cora.util import hputil
 from caput import mpiutil, pipeline, config, memh5, mpiarray
 
 from ch_util import tools
-from ch_analysis.map import sidereal
 
 from . import containers, task
 
@@ -306,6 +305,8 @@ class Unroll(pipeline.TaskBase):
         self.telescope = telescope
 
     def next(self, sstream):
+    
+        from ch_analysis.map import sidereal
 
         tel = self.telescope
 
