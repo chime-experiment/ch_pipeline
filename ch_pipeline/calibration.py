@@ -33,7 +33,46 @@ from . import containers, task
 from . import _fast_tools
 
 
-def solve_gain(data, feeds=None):
+def _extract_diagonal(utmat, axis=1):
+    """Extract the diagonal elements of an upper triangular array.
+
+    Parameters
+    ----------
+    utmat : np.ndarray[..., nprod, ...]
+        Upper triangular array.
+    axis : int, optional
+        Axis of array that is upper triangular.
+
+    Returns
+    -------
+    diag : np.ndarray[..., ninput, ...]
+        Diagonal of the array.
+    """
+
+    # Estimate nside from the array shape
+    nside = int((2 * utmat.shape[axis])**0.5)
+
+    # Check that this nside is correct
+    if utmat.shape[axis] != (nside * (nside + 1) / 2):
+        msg = ('Array length (%i) of axis %i does not correspond upper triangle\
+                of square matrix' % (utmat.shape[axis], axis))
+        raise RuntimeError(msg)
+
+    # Find indices of the diagonal
+    diag_ind = [tools.cmap(ii, ii, nside) for ii in range(nside)]
+
+    # Construct slice objects representing the axes before and after the product axis
+    slice0 = (np.s_[:],) * axis
+    slice1 = (np.s_[:],) * (len(utmat.shape) - axis - 1)
+
+    # Extract wanted elements with a giant slice
+    sl = slice0 + (diag_ind,) + slice1
+    diag_array = utmat[sl]
+
+    return diag_array
+
+
+def solve_gain(data, feeds=None, norm=None):
     """
     Steps through each time/freq pixel, generates a Hermitian matrix and
     calculates gains from its largest eigenvector.
@@ -44,6 +83,8 @@ def solve_gain(data, feeds=None):
         Visibility array to be decomposed
     feeds : list
         Which feeds to include. If :obj:`None` include all feeds.
+    norm : np.ndarray[nfreq, nfeed, ntime], optional
+        Array to use for weighting.
 
     Returns
     -------
@@ -56,36 +97,53 @@ def solve_gain(data, feeds=None):
     # Turn into numpy array to avoid any unfortunate indexing issues
     data = data[:].view(np.ndarray)
 
-    # Calcuate the number of feeds in the output
+    # Calcuate the number of feeds in the data matrix
+    tfeed = int((2 * data.shape[1])**0.5)
 
-    tfeed = int((2*data.shape[1])**0.5)
-    nfeed = tfeed if feeds is None else len(feeds)
+    # If not set, create the list of included feeds (i.e. all feeds)
+    feeds = np.array(feeds) if feeds is not None else np.arange(tfeed)
+    nfeed = len(feeds)
 
+    # Create empty arrays to store the outputs
     gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex64)
     dr = np.zeros((data.shape[0], data.shape[-1]), np.float64)
 
-    # Temporary array for unpacked products
-    cd = np.zeros((nfeed, nfeed), dtype=data.dtype)
+    # Set up normalisation matrix
+    if norm is None:
+        norm = _extract_diagonal(data, axis=1)**0.5
 
-    feeds = np.array(feeds) if feeds is not None else np.arange(nfeed)
+    # Extract only the required feeds for the normalisation
+    norm = norm[:, feeds]
+
+    # Pre-generate the array of inverted norms
+    inv_norm = tools.invert_no_zero(norm)
+
+    # Initialise a temporary array for unpacked products
+    cd = np.zeros((nfeed, nfeed), dtype=data.dtype)
 
     # Iterate over frequency/time and solve gains
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
 
-            # Unpack visibility array into square matrix
+            # Unpack visibility and normalisation array into square matrix
             _fast_tools._unpack_product_array_fast(data[fi, :, ti].copy(), cd, feeds, tfeed)
 
             if not np.isfinite(cd).all():
                 continue
 
-            # Normalise and solve for eigenvectors
-            xc, ach = tools.normalise_correlations(cd)
-            evals, evecs = tools.eigh_no_diagonal(xc, niter=5, eigvals=(nfeed-2, nfeed-1))
+            # Apply weighting
+            w = norm[fi, :, ti]
+            cd *= np.outer(w, w.conj())
 
-            # Construct dynamic range and gain
-            dr[fi, ti] = evals[-1] / evals[-2] #np.abs(evals[:-1]).max()
-            gain[fi, :, ti] = ach * evecs[:, -1] * evals[-1]**0.5
+            # Solve for eigenvectors
+            evals, evecs = tools.eigh_no_diagonal(cd, niter=5, eigvals=(nfeed - 2, nfeed - 1))
+
+            # Construct dynamic range and gain, but only if the two highest
+            # eigenvalues are positive. If not, we just let the gain and dynamic
+            # range stay as zero.
+            if evals[-1] > 0 and evals[-2] > 0:
+                dr[fi, ti] = evals[-1] / evals[-2]
+                gain[fi, :, ti] = inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
 
     return dr, gain
 
@@ -237,7 +295,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         if self.decimate_only:
             vis = vis_uncal.copy()
         else:  # Apply the gain solution
-            gain_inv = np.where(gain == 0.0, 0.0, 1.0 / gain)
+            gain_inv = tools.invert_no_zero(gain)
             vis = tools.apply_gain(vis_uncal, gain_inv)
 
         # Calculate dynamic range
@@ -266,9 +324,14 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
 class GatedNoiseCalibration(task.SingleTask):
     """Calibration using Noise Injection
+
+    Attributes
+    ----------
+    norm : ['gated', 'off', 'identity']
+        Specify what to use to normalise the matrix.
     """
 
-    smoothing_length = config.Property(proptype=int, default=15)
+    norm = config.Property(proptype=str, default='off')
 
     def process(self, ts, inputmap):
         """Find gains from noise injection data and apply them to visibilities.
@@ -290,12 +353,73 @@ class GatedNoiseCalibration(task.SingleTask):
         # Ensure that we are distributed over frequency
         ts.redistribute('freq')
 
+        # Decide which feeds to use in the gain solution by iterating over auto
+        # correlations and excluding them if too many of their weight entries
+        # are zero
+        # input_sel = []
+        #
+        # for ii in range(ts.ninput):
+        #
+        #     # Extract auto-correlation
+        #     pi = tools.cmap(ii, ii, ts.ninput)
+        #     auto_weight = ts.weight[:, pi]
+        #
+        #     # Decide whether to use channel based on the average number of non-zero weights
+        #     use_channel = (auto_weight != 0.0).mean() > 0.2
+        #
+        #     if use_channel:
+        #         input_sel.append(ii)
+
         # Figure out which input channel is the noise source (used as gain reference)
         noise_channel = tools.get_noise_channel(inputmap)
 
-        # Find gains, normalising by the noise source gain
-        dr, gain = solve_gain(ts.datasets['gated_vis0'])
-        gain /= gain[:, np.newaxis, noise_channel, :].copy()
+        # Warn if the noise channel was not in the list of inputs to be included.
+        # if noise_channel not in input_sel:
+        #     import warnings
+        #     warnings.warn("Noise channel is not a good input")
+        #
+        #     input_sel.append(noise_channel)
+        #     input_sel.sort()
+        #
+        # print "Number of inputs %i" % len(input_sel)
+        # print input_sel
+
+
+        # # Initialise default arrays
+        # gain = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.complex128)
+        # dr = np.zeros([ts.vis[:].shape[0], ts.ntime], dtype=np.float64)
+
+        # Get the norm matrix
+        if self.norm == 'gated':
+            norm_array = _extract_diagonal(ts.datasets['gated_vis0'][:])**0.5
+            norm_array = tools.invert_no_zero(norm_array)
+        elif self.norm == 'off':
+            norm_array = _extract_diagonal(ts.vis[:])**0.5
+            norm_array = tools.invert_no_zero(norm_array)
+
+            # Extract the points with zero weight (these will get zero norm)
+            w = (_extract_diagonal(ts.weight[:]) > 0)
+            w[:, noise_channel] = True  # Make sure we keep the noise channel though!
+
+            norm_array *= w
+
+        elif self.norm == 'none':
+            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
+        else:
+            raise RuntimeError('Value of norm not recognised.')
+
+        # Take a view now to avoid some MPI issues
+        gate_view = ts.datasets['gated_vis0'][:].view(np.ndarray)
+        norm_view = norm_array[:].view(np.ndarray)
+
+        # Find gains with the eigenvalue method
+        dr, gain = solve_gain(gate_view, norm=norm_view)
+
+        # Copy solved gains back into full gain array
+        # gain[:, input_sel] = gain_t
+
+        # Normalise by the noise source channel
+        gain *= tools.invert_no_zero(gain[:, np.newaxis, noise_channel, :])
         gain = np.nan_to_num(gain)
 
         # Create container from gains
@@ -392,10 +516,9 @@ class SiderealCalibration(task.SingleTask):
         gain = np.ones([nfreq, nfeed], np.complex128)
         gain[:, xfeeds] = gain_x[:, :, slice_centre]  # slice_width should be the central value i.e. transit
         gain[:, yfeeds] = gain_y[:, :, slice_centre]
-        gain = gain[:, :, np.newaxis]
 
         # Combine both dynamic range estimates
-        dr = np.minimum(dr_x, dr_y)
+        dr = np.minimum(dr_x[:, slice_centre], dr_y[:, slice_centre])
 
         # Create container from gains
         gain_data = containers.StaticGainData(axes_from=sstream)
@@ -419,7 +542,7 @@ class ApplyGain(task.SingleTask):
         Smooth the gain timestream across the given number of seconds.
     """
 
-    inverse = config.Property(proptype=bool, default=False)
+    inverse = config.Property(proptype=bool, default=True)
     smoothing_length = config.Property(proptype=float, default=None)
 
     def process(self, tstream, gain):
@@ -447,7 +570,7 @@ class ApplyGain(task.SingleTask):
             weight_arr = gain.weight[:] if gain.weight is not None else None
 
             # Check that we are defined at the same time samples
-            if (gain.time != tstream.time).all():
+            if (gain.index_map['time'][:] != tstream.index_map['time'][:]).all():
                 raise RuntimeError('Gain data and timestream defined at different time samples.')
 
             # Smooth the gain data if required
@@ -462,7 +585,7 @@ class ApplyGain(task.SingleTask):
                 l = 2 * (samp / 2) + 1
 
                 # Turn into 2D array (required by smoothing routines)
-                gain_r = gain_arr.reshape(-1, gain.shape[-1])
+                gain_r = gain_arr.reshape(-1, gain_arr.shape[-1])
 
                 # Smooth amplitude and phase separately
                 smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
@@ -470,28 +593,30 @@ class ApplyGain(task.SingleTask):
 
                 # Recombine and reshape back to original shape
                 gain_arr = smooth_amp * np.exp(1.0J * smooth_phase)
-                gain_arr = gain_arr.reshape(gain.shape)
+                gain_arr = gain_arr.reshape(gain.gain[:].shape)
 
                 # Smooth weight array if it exists
                 if weight_arr is not None:
                     weight_arr = ss.medfilt2d(weight_arr, kernel_size=[1, l])
+
+        else:
+            raise RuntimeError('Format of `gain` argument is unknown.')
 
         # Regularise any crazy entries
         gain_arr = np.nan_to_num(gain_arr)
 
         # Invert the gains if needed
         if self.inverse:
-            with np.errstate(divide='ignore'):
-                gain_arr = np.where(gain_arr != 0.0, 1.0 / gain_arr, np.zeros_like(gain_arr))
+            gain_arr = tools.invert_no_zero(gain_arr)
 
         # Apply gains to visibility matrix
         tools.apply_gain(tstream.vis[:], gain_arr, out=tstream.vis[:])
 
         # Modify the weight array according to the gain weights
-        if gain.weight is not None:
+        if weight_arr is not None:
 
             # Convert dynamic range to a binary weight and apply to data
-            gain_weight = (gain.weight[:] > 2.0).astype(np.float64)
-            tstream.weight[:] *= gain_weight
+            gain_weight = (weight_arr[:] > 2.0).astype(np.float64)
+            tstream.weight[:] *= gain_weight[:, np.newaxis, :]
 
         return tstream
