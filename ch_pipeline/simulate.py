@@ -225,6 +225,9 @@ class DayMask(task.SingleTask):
     zero_data : bool, optional
         Zero the data in addition to modifying the noise weights
         (default is True).
+    remove_average : bool, optional
+        Estimate and remove the mean level from each visibilty. This estimate
+        does not use data from the masked region.
     """
 
     start = config.Property(proptype=float, default=90.0)
@@ -233,6 +236,7 @@ class DayMask(task.SingleTask):
     width = config.Property(proptype=float, default=60.0)
 
     zero_data = config.Property(proptype=bool, default=True)
+    remove_average = config.Property(proptype=bool, default=True)
 
     def process(self, sstream):
         """Apply a day time mask.
@@ -254,24 +258,33 @@ class DayMask(task.SingleTask):
         end_shift = (self.end - self.start) % 360.0
 
         # Crudely mask the on and off regions
-        mask = ra_shift > end_shift
+        mask_bool = ra_shift > end_shift
 
         # Put in the transition at the start of the day
         mask = np.where(ra_shift < self.width,
                         0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
-                        mask)
+                        mask_bool)
 
         # Put the transition at the end of the day
         mask = np.where(np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
                         0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
                         mask)
 
+        if self.remove_average:
+            # Estimate the mean level from unmasked data
+            import scipy.stats
+
+            nanvis = sstream.vis[:] * np.where(mask_bool, 1.0, np.nan)[np.newaxis, np.newaxis, :]
+            #average = np.nanmean(nanvis, axis=-1)[:, :, np.newaxis]
+            average = scipy.stats.nanmedian(nanvis, axis=-1)[:, :, np.newaxis]
+            sstream.vis[:] -= average
+
         # Apply the mask to the data
         if self.zero_data:
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask
+        sstream.weight[:] *= mask**2
 
         return sstream
 
@@ -305,7 +318,7 @@ class Unroll(pipeline.TaskBase):
         self.telescope = telescope
 
     def next(self, sstream):
-    
+
         from ch_analysis.map import sidereal
 
         tel = self.telescope
