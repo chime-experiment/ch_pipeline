@@ -353,41 +353,8 @@ class GatedNoiseCalibration(task.SingleTask):
         # Ensure that we are distributed over frequency
         ts.redistribute('freq')
 
-        # Decide which feeds to use in the gain solution by iterating over auto
-        # correlations and excluding them if too many of their weight entries
-        # are zero
-        # input_sel = []
-        #
-        # for ii in range(ts.ninput):
-        #
-        #     # Extract auto-correlation
-        #     pi = tools.cmap(ii, ii, ts.ninput)
-        #     auto_weight = ts.weight[:, pi]
-        #
-        #     # Decide whether to use channel based on the average number of non-zero weights
-        #     use_channel = (auto_weight != 0.0).mean() > 0.2
-        #
-        #     if use_channel:
-        #         input_sel.append(ii)
-
         # Figure out which input channel is the noise source (used as gain reference)
         noise_channel = tools.get_noise_channel(inputmap)
-
-        # Warn if the noise channel was not in the list of inputs to be included.
-        # if noise_channel not in input_sel:
-        #     import warnings
-        #     warnings.warn("Noise channel is not a good input")
-        #
-        #     input_sel.append(noise_channel)
-        #     input_sel.sort()
-        #
-        # print "Number of inputs %i" % len(input_sel)
-        # print input_sel
-
-
-        # # Initialise default arrays
-        # gain = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.complex128)
-        # dr = np.zeros([ts.vis[:].shape[0], ts.ntime], dtype=np.float64)
 
         # Get the norm matrix
         if self.norm == 'gated':
@@ -414,9 +381,6 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Find gains with the eigenvalue method
         dr, gain = solve_gain(gate_view, norm=norm_view)
-
-        # Copy solved gains back into full gain array
-        # gain[:, input_sel] = gain_t
 
         # Normalise by the noise source channel
         gain *= tools.invert_no_zero(gain[:, np.newaxis, noise_channel, :])
