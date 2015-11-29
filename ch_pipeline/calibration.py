@@ -111,6 +111,7 @@ def solve_gain(data, feeds=None, norm=None):
     # Set up normalisation matrix
     if norm is None:
         norm = _extract_diagonal(data, axis=1)**0.5
+        norm = tools.invert_no_zero(norm)
 
     # Extract only the required feeds for the normalisation
     norm = norm[:, feeds]
