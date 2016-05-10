@@ -146,7 +146,7 @@ class QueryRun(pipeline.TaskBase):
         return files
 
 
-class QueryDataspec(pipeline.TaskBase):
+class QueryDataspecFile(pipeline.TaskBase):
     """Find the available files given a dataspec from a file.
 
     .. deprecated:: pass1
@@ -208,6 +208,44 @@ class QueryDataspec(pipeline.TaskBase):
 
         if ('instrument' not in dspec) or ('timerange' not in dspec):
             raise Exception("Invalid dataset.")
+
+        # Add archive root if exists
+        if self.node_spoof is not None:
+            dspec['node_spoof'] = self.node_spoof
+
+        files = files_from_spec(dspec, node_spoof=self.node_spoof)
+
+        return files
+
+
+class QueryDataspec(pipeline.TaskBase):
+    """Find the available files given a dataspec in the config file.
+
+    Attributes
+    ----------
+    instrument : str
+        Name of the instrument.
+    timerange : list
+        List of time ranges as documented above.
+    node_spoof : dict, optional
+        Optional node spoof argument.
+    """
+
+    instrument = config.Property(proptype=str)
+    timerange = config.Property(proptype=list)
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+
+    def setup(self):
+        """Fetch the files in the given dataspec.
+
+        Returns
+        -------
+        files : list
+            List of files to load
+        """
+
+        dspec = { 'instrument' : self.instrument,
+                  'timerange' : self.timerange }
 
         # Add archive root if exists
         if self.node_spoof is not None:
