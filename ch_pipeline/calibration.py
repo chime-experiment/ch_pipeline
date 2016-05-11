@@ -191,12 +191,12 @@ class NoiseSourceFold(task.SingleTask):
     ----------
     period : int, optional
         Period of the noise source in integration samples.
-    phase : int, optional
+    phase : list, optional
         Phase of noise source on sample.
     """
 
     period = config.Property(proptype=int, default=None)
-    phase = config.Property(proptype=int, default=None)
+    phase = config.Property(proptype=list, default=[])
 
     def process(self, ts):
         """Fold on the noise source and generate a gated dataset.
@@ -212,7 +212,13 @@ class NoiseSourceFold(task.SingleTask):
             Timestream with a gated_vis0 dataset containing the noise
             source data.
         """
-        folded_ts = ni_utils.process_synced_data(ts, period=self.period, phase=self.phase)
+
+        if (self.period is None) or (not self.phase):
+            ni_params = None
+        else:
+            ni_params = {'ni_period':self.period, 'ni_on_bins':self.phase}
+        
+        folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params)
 
         return folded_ts
 
