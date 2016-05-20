@@ -217,7 +217,7 @@ class NoiseSourceFold(task.SingleTask):
             ni_params = None
         else:
             ni_params = {'ni_period':self.period, 'ni_on_bins':self.phase}
-        
+
         folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params)
 
         return folded_ts
@@ -541,7 +541,7 @@ class ApplyGain(task.SingleTask):
             weight_arr = gain.weight[:] if gain.weight is not None else None
 
             # Check that we are defined at the same time samples
-            if (gain.index_map['time'][:] != tstream.index_map['time'][:]).all():
+            if (gain.time != tstream.time).any():
                 raise RuntimeError('Gain data and timestream defined at different time samples.')
 
             # Smooth the gain data if required

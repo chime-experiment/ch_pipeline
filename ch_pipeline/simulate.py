@@ -442,7 +442,7 @@ class SampleNoise(task.SingleTask):
         for fi in range(data_exp.vis[:].shape[0]):
 
             # Get the time and frequency intervals
-            dt = data_exp.index_map['time'][1]['ctime'] - data_exp.index_map['time'][0]['ctime']
+            dt = data_exp.time[1] - data_exp.time[0]
             df = data_exp.index_map['freq']['width'][fi] * 1e6
 
             # Calculate the number of samples
@@ -557,7 +557,7 @@ class RandomGains(task.SingleTask):
 
         data.redistribute('freq')
 
-        time = data.index_map['time']['ctime']
+        time = data.time
 
         gain_data = containers.GainData(time=time, axes_from=data)
         gain_data.redistribute('freq')
