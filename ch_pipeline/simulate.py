@@ -338,7 +338,7 @@ class MakeCorrDataFiles(task.SingleTask):
 
         # Calculate number of samples in file and timestamps
         nsamp = min(int(np.ceil((self.end_time - self._cur_time) / int_time)), self.samples_per_file)
-        timestamps = self._cur_time + (np.arange(nsamp) + 0.5) * int_time  # Time stamps are at the centre of each sample
+        timestamps = self._cur_time + (np.arange(nsamp) + 1) * int_time  # +1 as timestamps are at the end of each sample
 
         # Construct the time axis index map
         if self.integration_time is not None:
@@ -353,13 +353,16 @@ class MakeCorrDataFiles(task.SingleTask):
         tstream = containers.make_empty_corrdata(axes_from=self.sstream, time=time)
 
         # Make the interpolation array
-        ra = ephemeris.transit_RA(timestamps)
+        ra = ephemeris.transit_RA(tstream.time)
         lza = regrid.lanczos_forward_matrix(self.sstream.ra, ra, periodic=True)
         lza = lza.T.astype(np.complex64)
 
         # Apply the interpolation matrix to construct the new timestream, place
         # the output directly into the container
         np.dot(self.sstream.vis[:], lza, out=tstream.vis[:])
+
+        # Set the weights array to the maximum value for CHIME
+        tstream.weight[:] = 255.0
 
         # Increment the current start time for the next iteration
         self._cur_time += nsamp * int_time
@@ -442,7 +445,7 @@ class SampleNoise(task.SingleTask):
         for fi in range(data_exp.vis[:].shape[0]):
 
             # Get the time and frequency intervals
-            dt = data_exp.index_map['time'][1]['ctime'] - data_exp.index_map['time'][0]['ctime']
+            dt = data_exp.time[1] - data_exp.time[0]
             df = data_exp.index_map['freq']['width'][fi] * 1e6
 
             # Calculate the number of samples
@@ -557,7 +560,7 @@ class RandomGains(task.SingleTask):
 
         data.redistribute('freq')
 
-        time = data.index_map['time']['ctime']
+        time = data.time
 
         gain_data = containers.GainData(time=time, axes_from=data)
         gain_data.redistribute('freq')
