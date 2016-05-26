@@ -1,9 +1,9 @@
 """
-==========================================================
-Pathfinder Telescope Model (:mod:`ch_pipeline.pathfinder`)
-==========================================================
+===============================================================
+Pathfinder Telescope Model (:mod:`ch_pipeline.core.pathfinder`)
+===============================================================
 
-.. currentmodule:: ch_pipeline.pathfinder
+.. currentmodule:: ch_pipeline.core.pathfinder
 
 A model for the CHIME Pathfinder telescope. This attempts to query the
 configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of

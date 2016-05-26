@@ -1,9 +1,9 @@
 """
-=====================================================
-Dataset Specification (:mod:`~ch_pipeline.dataquery`)
-=====================================================
+==========================================================
+Dataset Specification (:mod:`~ch_pipeline.core.dataquery`)
+==========================================================
 
-.. currentmodule:: ch_pipeline.dataquery
+.. currentmodule:: ch_pipeline.core.dataquery
 
 Lookup information from the database about the data, particularly which files
 are contained in a specific dataset (defined by a `run` global flag) and what
@@ -64,7 +64,7 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
 import os
 
 from caput import mpiutil, pipeline, config
-from ch_util import andata, tools, ephemeris
+from ch_util import tools, ephemeris
 
 _DEFAULT_NODE_SPOOF = {'scinet_scratch': '/scratch/k/krs/jrs65/chime_archive/'}
 
@@ -244,8 +244,8 @@ class QueryDataspec(pipeline.TaskBase):
             List of files to load
         """
 
-        dspec = { 'instrument' : self.instrument,
-                  'timerange' : self.timerange }
+        dspec = { 'instrument': self.instrument,
+                  'timerange': self.timerange }
 
         # Add archive root if exists
         if self.node_spoof is not None:
@@ -320,7 +320,7 @@ def finder_from_spec(spec, node_spoof=None):
 
         # Find the earliest and latest times
         earliest = min([ tr['start'] for tr in timerange ])
-        latest   = max([ tr['end']   for tr in timerange ])
+        latest = max([ tr['end'] for tr in timerange ])
 
         # Set the archive_root
         if node_spoof is None and 'node_spoof' in spec:
@@ -328,7 +328,6 @@ def finder_from_spec(spec, node_spoof=None):
 
         # Create a finder object limited to the relevant time
         fi = di.Finder(node_spoof=node_spoof)
-        #fi.only_corr()
 
         # Set the time range that encapsulates all the intervals
         fi.set_time_range(earliest, latest)

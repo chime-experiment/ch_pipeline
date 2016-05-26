@@ -1,9 +1,9 @@
 """
-=======================================================
-Tasks for Calibration (:mod:`~ch_pipeline.calibration`)
-=======================================================
+================================================================
+Tasks for Calibration (:mod:`~ch_pipeline.analysis.calibration`)
+================================================================
 
-.. currentmodule:: ch_pipeline.calibration
+.. currentmodule:: ch_pipeline.analysis.calibration
 
 Tasks for calibrating the data.
 
@@ -29,8 +29,8 @@ from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
 
-from . import containers, task
-from . import _fast_tools
+from ..core import containers, task
+from ..util import _fast_tools
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -181,7 +181,7 @@ def _cdiff(ts, dt):
     if dt is None:
         return ts
 
-    return ts - 0.5*(np.roll(ts, dt, axis=-1) + np.roll(ts, -dt, axis=-1))
+    return ts - 0.5 * (np.roll(ts, dt, axis=-1) + np.roll(ts, -dt, axis=-1))
 
 
 class NoiseSourceFold(task.SingleTask):
@@ -216,7 +216,7 @@ class NoiseSourceFold(task.SingleTask):
         if (self.period is None) or (not self.phase):
             ni_params = None
         else:
-            ni_params = {'ni_period':self.period, 'ni_on_bins':self.phase}
+            ni_params = {'ni_period': self.period, 'ni_on_bins': self.phase}
 
         folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params)
 
@@ -307,7 +307,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Calculate dynamic range
         ev = ni_utils.sort_evalues_mag(nidata.ni_evals)  # Sort evalues
-        dr = abs(ev[:, -1, :]/ev[:, -2, :])
+        dr = abs(ev[:, -1, :] / ev[:, -2, :])
         dr = dr[:, np.newaxis, :]
 
         # Turn vis, gains and dr into MPIArray
