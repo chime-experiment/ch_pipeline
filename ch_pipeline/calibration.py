@@ -522,12 +522,12 @@ class ApplyGain(task.SingleTask):
         gain.redistribute('freq')
 
         if isinstance(gain, containers.StaticGainData):
-
+            
             # Extract gain array and add in a time axis
-            gain_arr = gain.gain[:, :, np.newaxis]
-
+            gain_arr = gain.gain[:][...,np.newaxis]
+            
             # Get the weight array if it's there
-            weight_arr = gain.weight[:, np.newaxis] if gain.weight is not None else None
+            weight_arr = gain.weight[:][...,np.newaxis] if gain.weight is not None else None
 
         elif isinstance(gain, containers.GainData):
 
