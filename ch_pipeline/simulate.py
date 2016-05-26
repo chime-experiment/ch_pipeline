@@ -98,31 +98,27 @@ class SimulateSidereal(task.SingleTask):
         # If we want to add maps use the m-mode formalism to project a skymap
         # into visibility space
 
-        if lfreq > 0:
 
-            # Allocate array to store the local frequencies
-            row_map = None
+        # Allocate array to store the local frequencies
+        row_map = None
 
-            # Read in and sum up the local frequencies of the supplied maps.
-            for mapfile in self.maps:
+        # Read in and sum up the local frequencies of the supplied maps.
+        for mapfile in self.maps:
 
-                mc = containers.Map.from_file(mapfile, distributed=True)
-                mc.redistribute('freq')
-                freqmap = mc.index_map['freq'][:]
+            mc = containers.Map.from_file(mapfile, distributed=True)
+            mc.redistribute('freq')
+            freqmap = mc.index_map['freq'][:]
 
-                if (tel.frequencies != freqmap['centre']).all():
-                    raise RuntimeError('Frequencies in map file (%s) do not match those in Beam Transfers.' % mapfile)
+            if (tel.frequencies != freqmap['centre']).all():
+                raise RuntimeError('Frequencies in map file (%s) do not match those in Beam Transfers.' % mapfile)
 
-                if row_map is None:
-                    row_map = mc.map[:]
-                else:
-                    row_map += mc.map[:]
+            if row_map is None:
+                row_map = mc.map[:]
+            else:
+                row_map += mc.map[:]
 
-            # Calculate the alm's for the local sections
-            row_alm = hputil.sphtrans_sky(row_map, lmax=lmax).reshape((lfreq, npol * (lmax+1), lmax+1))
-
-        else:
-            row_alm = np.zeros((lfreq, npol * (lmax+1), lmax+1), dtype=np.complex128)
+        # Calculate the alm's for the local sections
+        row_alm = hputil.sphtrans_sky(row_map, lmax=lmax).reshape((lfreq, npol * (lmax+1), lmax+1))
 
         # Trim off excess m's and wrap into MPIArray
         row_alm = row_alm[..., :(mmax+1)]
@@ -441,8 +437,13 @@ class SampleNoise(task.SingleTask):
 
         nfeed = len(data_exp.index_map['input'])
 
+        # Get a reference to the base MPIArray. Attempting to do this in the
+        # loop fails if not all ranks enter the loop (as there is an implied MPI
+        # Barrier)
+        vis_data = data_exp.vis[:]
+
         # Iterate over frequencies
-        for fi in range(data_exp.vis[:].shape[0]):
+        for lfi, fi in vis_data.enumerate(0):
 
             # Get the time and frequency intervals
             dt = data_exp.time[1] - data_exp.time[0]
@@ -452,16 +453,16 @@ class SampleNoise(task.SingleTask):
             nsamp = int(self.sample_frac * dt * df)
 
             # Iterate over time
-            for ti in range(data_exp.vis[:].shape[2]):
+            for lti, ti in vis_data.enumerate(2):
 
                 # Unpack visibilites into full matrix
-                vis_utv = data_exp.vis[:][fi, :, ti].view(np.ndarray).copy()
+                vis_utv = vis_data[lfi, :, lti].view(np.ndarray).copy()
                 vis_mat = np.zeros((nfeed, nfeed), dtype=vis_utv.dtype)
                 _fast_tools._unpack_product_array_fast(vis_utv, vis_mat, np.arange(nfeed), nfeed)
 
                 vis_samp = draw_complex_wishart(vis_mat, nsamp) / nsamp
 
-                data_exp.vis[:][fi, :, ti] = vis_samp[np.triu_indices(nfeed)]
+                vis_data[lfi, :, lti] = vis_samp[np.triu_indices(nfeed)]
 
         return data_exp
 
@@ -594,8 +595,8 @@ class RandomGains(task.SingleTask):
             # need to remove one from the amplitude, and unwrap the phase to
             # make it smooth
             prev_time = self._prev_gain.index_map['time'][:]
-            prev_amp = (np.abs(self._prev_gain.gain[:].view(np.ndarray)) - 1.0).reshape(nsamp, -1)
-            prev_phase = np.unwrap(np.angle(self._prev_gain.gain[:].view(np.ndarray))).reshape(nsamp, -1)
+            prev_amp = (np.abs(self._prev_gain.gain[:].view(np.ndarray)) - 1.0).reshape(nsamp, len(prev_time))
+            prev_phase = np.unwrap(np.angle(self._prev_gain.gain[:].view(np.ndarray))).reshape(nsamp, len(prev_time))
 
             # Generate amplitude and phase fluctuations consistent with the existing data
             gain_amp = 1.0 + constrained_gaussian_realisation(time, cf_amp, nsamp,
