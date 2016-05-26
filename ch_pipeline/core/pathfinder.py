@@ -82,7 +82,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     _pickle_keys = ['_feeds']
 
-    ## Tweak the following two properties to change the beam width
+    # Tweak the following two properties to change the beam width
     @property
     def fwhm_e(self):
         """Full width half max of the E-plane antenna beam."""
@@ -93,12 +93,12 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         """Full width half max of the H-plane antenna beam."""
         return 2.0 * np.pi / 3.0 * 1.2
 
-    ## u-width property override
+    # u-width property override
     @property
     def u_width(self):
         return self.cylinder_width
 
-    ## v-width property override
+    # v-width property override
     @property
     def v_width(self):
         return 1.0
@@ -152,11 +152,9 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         return andata._generate_input_map(feed_sn, channels)
 
-
     @property
     def feed_info(self):
         return self.feeds
-
 
     def __init__(self, feeds=None):
 
@@ -220,8 +218,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
             self.load_layout()
 
     def _sort_pairs(self):
-        ## Reimplemented sort pairs to ensure that returned array is in
-        ## channel order.
+        # # Reimplemented sort pairs to ensure that returned array is in
+        # # channel order.
 
         # Create mask of included pairs, that are not conjugated
         tmask = np.logical_and(self._feedmask, np.logical_not(self._feedconj))
@@ -233,8 +231,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         ci = fi
         cj = fj
 
-        ## Sort by constructing a numpy array with the keys as fields, and use
-        ## np.argsort to get the indices
+        # # Sort by constructing a numpy array with the keys as fields, and use
+        # # np.argsort to get the indices
 
         # Create array of keys to sort
         dt = np.dtype('i4,i4')
@@ -257,8 +255,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         self._feedmap = fm_copy
 
     def _make_ew(self):
-        ## Reimplemented to make sure entries we always pick the upper
-        ## triangle (and do not reorder to make EW baselines)
+        # # Reimplemented to make sure entries we always pick the upper
+        # # triangle (and do not reorder to make EW baselines)
         if self.redundant:
             super(CHIMEPathfinder, self)._make_ew()
 
@@ -283,7 +281,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     @property
     def channels(self):
-        ## Return channel numbers. Currently the same as beamclass but might change.
+        # # Return channel numbers. Currently the same as beamclass but might change.
         return np.array([ f.channel for f in self._feeds ])
 
     @property
@@ -303,7 +301,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
             return np.arange(len(self.feeds))
 
     def beam(self, feed, freq):
-        ## Fetch beam parameters out of config database.
+        # # Fetch beam parameters out of config database.
 
         feed_obj = self.feeds[feed]
 
