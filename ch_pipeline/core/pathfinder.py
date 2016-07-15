@@ -373,4 +373,117 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         beam_mask = np.logical_and(beam_mask, bc_mask)
 
-        return beam_map, beam_mask
+	return beam_map, beam_mask
+
+class CHIMEPathfinder_Meilings_beam(pathfinder.CHIMEPathfinder):
+    """Model telescope for the CHIME Pathfinder.
+
+    This class uses a one bounce model, simulated with Grasp by Meilings Deng,
+    for the primary beams. 
+    """
+		
+    def beam(self, feed, freq_id):
+        ## Fetch beam parameters out of config database.
+
+        feed_obj = self.feeds[feed]
+        tel_freq = self.frequencies
+        nside = self._nside
+        npix = healpy.nside2npix(nside)	
+	
+        if feed_obj is None:
+            raise Exception("Craziness. The requested feed doesn't seem to exist.")
+  		
+        if feed_obj.pol == "N" or feed_obj.pol == "S":
+            try:
+                print "Attempting to read beam_y from disk..."
+	        with h5py.File('/project/k/krs/cahofer/pass1/beams/beam_y_400_800.hdf5', 'r') as f:
+		    map_freq = f['freq'][:]
+		    freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
+		    map = f['beam_y'][freq_sel,:]
+		
+	    except IOError:
+                raise Exception("Could not load beams from disk.")
+		
+	    if len(freq_sel) == 1:
+		return map
+		
+	    else:
+		freq_high = map_freq[freq_sel[1]]
+		freq_low = map_freq[freq_sel[0]]
+		freq_int = tel_freq[freq_id]
+
+		alpha = (freq_high - freq_int) / (freq_high - freq_low)
+		beta =  (freq_int - freq_low) / (freq_high - freq_low)
+	
+		map_int = np.empty(map.shape[1], dtype=np.dtype([('Et',complex),('Ep',complex)]))
+		map_int['Et'] = map['Et'][0] * alpha  + map['Et'][1] * beta	
+		map_int['Ep'] = map['Ep'][0] * alpha + map['Ep'][1] * beta
+		
+		map_out = np.empty((npix,2), dtype=np.complex128)
+		map_out[:, 0] = healpy.pixelfunc.ud_grade(map_int['Et'], nside)
+		map_out[:, 1] = healpy.pixelfunc.ud_grade(map_int['Ep'], nside)
+		
+		return map_out
+	
+	
+        if feed_obj.pol == "E" or feed_obj.pol == "W":
+            try:
+                print "Attempting to read beam_x from disk..."
+	        with h5py.File('/project/k/krs/cahofer/pass1/beams/beam_x_400_800.hdf5', 'r') as f:
+		    map_freq = f['freq'][:]
+		    freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)		
+		    map = f['beam_x'][freq_sel,:]
+		
+	    except IOError:
+                raise Exception("Could not load beams from disk.")
+		
+	    if len(freq_sel) == 1:
+		return map
+		
+	    else:
+		freq_high = map_freq[freq_sel[1]]
+		freq_low = map_freq[freq_sel[0]]
+		freq_int = tel_freq[freq_id]
+		alpha = (freq_high - freq_int) / (freq_high - freq_low)
+		beta =  (freq_int - freq_low) / (freq_high - freq_low)
+	
+		map_int = np.empty(map.shape[1], dtype=np.dtype([('Et',complex),('Ep',complex)]))
+		map_int['Et'] = map['Et'][0] * alpha  + map['Et'][1] * beta	
+		map_int['Ep'] = map['Ep'][0] * alpha + map['Ep'][1] * beta
+
+		
+		map_out = np.empty((npix,2), dtype=np.complex128)
+		map_out[:, 0] = healpy.pixelfunc.ud_grade(map_int['Et'], nside)
+		map_out[:, 1] = healpy.pixelfunc.ud_grade(map_int['Ep'], nside)
+
+	        return map_out
+
+        else:
+            raise Exception("Polarisation not supported.")
+
+
+def _nearest_freq(tel_freq, map_freq, freq_id):
+	
+    """Find nearest neighbor frequencies.
+	
+    Parameters
+    ----------
+    tel_freq : frequencies from telescope object
+    map_freq : frequencies for which beams exist from meiling.
+    freq_id : frequency selection.
+	
+    Returns
+    -------
+    freq_ind : list of neighboring map frequencies matched to tel_freq.
+
+    """
+	
+    diff_freq = abs(map_freq - tel_freq[freq_id])
+    map_freq_width = abs(map_freq[1] - map_freq[0])
+	
+    match_mask = diff_freq < map_freq_width
+	
+    freq_ind = np.where(match_mask ==True)[0].tolist()
+
+    return freq_ind	
+
