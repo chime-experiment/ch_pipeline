@@ -66,7 +66,7 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {'scinet_scratch': '/scratch/k/krs/jrs65/chime_archive/'}
+_DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
 
 
 class QueryRun(pipeline.TaskBase):
