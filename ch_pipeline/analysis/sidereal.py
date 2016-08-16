@@ -28,12 +28,12 @@ Generally you would want to use these tasks together. Starting with a
 :class:`SiderealStacker` if you want to combine the different days.
 """
 
-
+import gc
 import numpy as np
 
 from caput import pipeline, config
 from caput import mpiutil, mpiarray
-from ch_util import andata, ephemeris
+from ch_util import andata, ephemeris, data_quality
 
 from ..core import task, containers
 from . import regrid
@@ -58,8 +58,10 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
     padding = config.Property(proptype=float, default=0.005)
 
-    freq_start = config.Property(proptype=int, default=None)
-    freq_end = config.Property(proptype=int, default=None)
+    freq_range = config.Property(proptype=list, default=[])
+    freq_index = config.Property(proptype=list, default=[])
+    
+    only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
         """Divide the list of files up into sidereal days.
@@ -87,13 +89,23 @@ class LoadTimeStreamSidereal(task.SingleTask):
             filemap.sort()
 
         self.filemap = mpiutil.world.bcast(filemap, root=0)
+            
+        # Set up frequency selection.
+        if self.freq_range and (len(self.freq_range) <= 3):
+            # First check if a range was specified in the form of a list.
+            # Either [start, stop, step], [start, stop], [stop] will work.
+            self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
+            
+        elif self.freq_index:
+            # Next check if a list of indices was supplied.
+            self.freq_sel = self.freq_index
 
-        # Set up frequency selection
-        if self.freq_start is not None:
-            self.freq_sel = np.arange(self.freq_start, self.freq_end)
         else:
+            # Otherwise set freq_sel to None, which will result in 
+            # all frequencies being read.
             self.freq_sel = None
-
+            
+            
     def process(self):
         """Load in each sidereal day.
 
@@ -106,24 +118,39 @@ class LoadTimeStreamSidereal(task.SingleTask):
         if len(self.filemap) == 0:
             raise pipeline.PipelineStopIteration
 
+        # Extract filelist for this CSD
         csd, fmap = self.filemap.pop(0)
-        dfiles = [ self.files[fi] for fi in fmap ]
+        dfiles = sorted([ self.files[fi] for fi in fmap ])
 
         if mpiutil.rank0:
             print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
-
-        ts = andata.CorrData.from_acq_h5(sorted(dfiles), distributed=True, freq_sel=self.freq_sel)
+            
+        # Set up product selection
+        prod_sel = None
+        if self.only_autos:
+            rd = andata.CorrReader(dfiles)
+            prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
+            
+        # Load files
+        ts = andata.CorrData.from_acq_h5(dfiles, distributed=True, 
+                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         # Add attributes for the CSD and a tag for labelling saved files
         ts.attrs['tag'] = ('csd_%i' % csd)
         ts.attrs['csd'] = csd
 
         # Add a weight dataset if needed
-        if 'vis_weight' not in ts.datasets:
-            weight_dset = ts.create_dataset('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                            distributed=True, distributed_axis=0)
+        if 'vis_weight' not in ts.flags:
+            weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
+                                                       distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
-            weight_dset[:] = 128
+            
+            # Set weight to maximum value (255), unless the vis value is
+            # zero which presumably came from missing data. NOTE: this may have
+            # a small bias
+            weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
+            
+        gc.collect()
 
         return ts
 
@@ -289,20 +316,48 @@ class SiderealRegridder(task.SingleTask):
         # Mask data
         imask = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
+                
+        # Convert mask to number of samples
+        if imask.dtype == np.uint8:
+
+            # Extract number of samples per integration period
+            max_nsamples = data.attrs['gpu.gpu_intergration_period'][0]
+
+            # Extract the maximum possible value of vis_weight
+            max_vw = np.iinfo(imask.dtype).max
+
+            # Calculate the scaling factor that converts from
+            # vis_weight value to number of samples
+            vw_to_nsamples = max_nsamples / float(max_vw)
+
+            # Convert to float32
+            imask = imask.astype(np.float32)*vw_to_nsamples
 
         # Reshape data
         vr = vis_data.reshape(-1, vis_data.shape[-1])
         nr = imask.reshape(-1, vis_data.shape[-1])
+        
+        # Scale weights to values between 0.0 and 1.0 to prevent issues during interpolation
+        scale_factor = np.max(imask)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            inv_scale_factor = 1.0 / scale_factor if scale_factor > 0.0 else 0.0
 
+        nr *= inv_scale_factor
+        
         # Construct a signal 'covariance'
         Si = np.ones_like(csd_grid) * 1e-8
 
         # Calculate the interpolated data and a noise weight at the points in the padded grid
         sts, ni = regrid.band_wiener(lzf, nr, Si, vr, 2 * self.lanczos_width - 1)
 
+        # Multiply the scale factor back in
+        ni *= scale_factor
+
         # Throw away the padded ends
-        sts = sts[:, pad:-pad].copy()
-        ni = ni[:, pad:-pad].copy()
+        # sts = sts[:, pad:-pad].copy()
+        # ni = ni[:, pad:-pad].copy()
+        sts = sts[:, pad:-pad]
+        ni = ni[:, pad:-pad]
 
         # Reshape to the correct shape
         sts = sts.reshape(vis_data.shape[:-1] + (self.samples,))
@@ -318,9 +373,19 @@ class SiderealRegridder(task.SingleTask):
         sdata.redistribute('freq')
         sdata.vis[:] = sts
         sdata.weight[:] = ni
+        if 'input' in data.flags:
+            sdata.input_flag[:] = data.flags['input']
+        else:
+            sdata.input_flag[:] = np.ones(len(sdata.input), dtype=np.bool)
         sdata.attrs['csd'] = csd
         sdata.attrs['tag'] = 'csd_%i' % csd
+        
+        # Now that we have the regridded timestream, 
+        # delete the original timestream and collect garbage.
+        del data
+        gc.collect()
 
+        # Return regridded timestream
         return sdata
 
 

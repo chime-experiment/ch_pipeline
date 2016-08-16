@@ -256,9 +256,11 @@ class LoadCorrDataFiles(task.SingleTask):
     files = None
 
     _file_ptr = 0
-
-    freq_start = config.Property(proptype=int, default=None)
-    freq_end = config.Property(proptype=int, default=None)
+    
+    freq_range = config.Property(proptype=list, default=[])
+    freq_index = config.Property(proptype=list, default=[])
+    
+    only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
         """Set the list of files to load.
@@ -272,10 +274,19 @@ class LoadCorrDataFiles(task.SingleTask):
 
         self.files = files
 
-        # Set up frequency selection
-        if self.freq_start is not None:
-            self.freq_sel = np.arange(self.freq_start, self.freq_end)
+        # Set up frequency selection.
+        if self.freq_range and (len(self.freq_range) <= 3):
+            # First check if a range was specified in the form of a list.
+            # Either [start, stop, step], [start, stop], [stop] will work.
+            self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
+            
+        elif self.freq_index:
+            # Next check if a list of indices was supplied.
+            self.freq_sel = self.freq_index
+
         else:
+            # Otherwise set freq_sel to None, which will result in 
+            # all frequencies being read.
             self.freq_sel = None
 
     def process(self):
@@ -298,8 +309,15 @@ class LoadCorrDataFiles(task.SingleTask):
 
         if mpiutil.rank0:
             print "Reading file %i of %i." % (self._file_ptr, len(self.files))
+            
+        # Set up product selection
+        prod_sel = None
+        if self.only_autos:
+            rd = andata.CorrReader(file_)
+            prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
 
-        ts = andata.CorrData.from_acq_h5(file_, distributed=True, freq_sel=self.freq_sel)
+        ts = andata.CorrData.from_acq_h5(file_, distributed=True, 
+                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         if 'tag' not in ts.attrs:
             # Use a simple incrementing string as the tag
@@ -307,15 +325,18 @@ class LoadCorrDataFiles(task.SingleTask):
             ts.attrs['tag'] = tag
 
         # Add a weight dataset if needed
-        if 'vis_weight' not in ts.datasets:
-            weight_dset = ts.create_dataset('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                            distributed=True, distributed_axis=0)
+        if 'vis_weight' not in ts.flags:
+                        
+            weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
+                                                       distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
 
-            # Set weight to a reasonable value (128), unless the vis value is
+            # Set weight to maximum value (255), unless the vis value is
             # zero which presumably came from missing data. NOTE: this may have
             # a small bias
-            weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 128)
+            weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
+            
+            print weight_dset
 
         return ts
 
