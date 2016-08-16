@@ -386,6 +386,11 @@ class RingMapMaker(task.SingleTask):
             bfm = np.fft.irfft(np.dot(vdr[lfi], pa.T.conj()), 2 * ncyl - 1, axis=2)
             rm.map[fi] = bfm
 
+        # Copy units
+        units = sstream.vis.attrs.get('units')
+        if units:
+            rm.map.attrs['units'] = units
+
         return rm
 
 
