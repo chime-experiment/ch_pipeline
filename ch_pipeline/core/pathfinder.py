@@ -50,10 +50,10 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         Which channel to start at. Default is 0.
     channel_end : int, optional
         The last channel to use. Like using a standard python range, this should
-        be one larger than the last channel number you actually want. Defualt is 1024.
+        be one larger than the last channel number you actually want. Default is 1024.
     channel_bin : int, optional
-        Number of channels to bin together. Must exactly divide the total
-        number. Default is 1.
+        Number of channels to bin together (or downsample by if freq_downsample is True). 
+        Must exactly divide the total number. Default is 1.
     input_sel : list, optional
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
@@ -69,8 +69,10 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     # Configure frequency properties
     freq_use_channels = config.Property(proptype=bool, default=True)
-    channel_start = config.Property(proptype=int, default=0)
-    channel_end = config.Property(proptype=int, default=1024)
+    freq_range = config.Property(proptype=list, default=[])
+    freq_index = config.Property(proptype=list, default=[])
+    # channel_start = config.Property(proptype=int, default=0)
+    # channel_end = config.Property(proptype=int, default=1024)
     channel_bin = config.Property(proptype=int, default=1)
 
     # Input selection
@@ -186,12 +188,22 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         if self.freq_use_channels:
             # Calculate frequencies in terms of the channel numbers (assume the Pathfinder setup).
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            tfreq = basefreq[self.channel_start:self.channel_end]
+            
+            # Set up frequency selection.
+            if self.freq_range and (len(self.freq_range) <= 3):
+                # First check if a range was specified in the form of a list.
+                # Either [start, stop, step], [start, stop], [stop] will work.
+                basefreq = basefreq[slice(*self.freq_range)]
+            
+            elif self.freq_index:
+                # Next check if a list of indices was supplied.
+                basefreq = basefreq[self.freq_index]
+            
+            if len(basefreq) % self.channel_bin != 0:
+                raise Exception("Channel binning must exactly divide the total number of channels")
 
-            if len(tfreq) % self.channel_bin != 0:
-                raise ValueError("Channel binning must exactly divide the total number of channels")
-
-            self._frequencies = tfreq.reshape(-1, self.channel_bin).mean(axis=-1)
+            self._frequencies = basefreq.reshape(-1, self.channel_bin).mean(axis=-1)
+            
         else:
             # Otherwise use the standard method
             telescope.TransitTelescope.calculate_frequencies(self)
