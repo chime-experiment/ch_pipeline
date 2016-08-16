@@ -247,6 +247,13 @@ class SiderealStream(ContainerBase):
             'distributed': True,
             'distributed_axis': 'freq'
         },
+            
+        'input_flag': {
+            'axes': ['input'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False
+        },
 
         'gain': {
             'axes': ['freq', 'input', 'ra'],
@@ -293,6 +300,10 @@ class SiderealStream(ContainerBase):
     @property
     def gain(self):
         return self.datasets['gain']
+        
+    @property
+    def input_flag(self):
+        return self.datasets['input_flag']
 
     @property
     def weight(self):
@@ -435,6 +446,121 @@ class GainData(ContainerBase):
     @property
     def input(self):
         return self.index_map['input']
+        
+        
+class CorrInputMask(ContainerBase):
+    """Container for holding mask indicating good correlator inputs.
+    """
+    
+    _axes = ('input', )
+    
+    _dataset_spec = {
+        'input_mask': {
+            'axes': ['input'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            }
+        }
+
+    @property
+    def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+
+
+class CorrInputTest(ContainerBase):
+    """Container for holding results of tests for good correlator inputs.
+    """
+
+    _axes = ('freq', 'input', 'test')
+
+    _dataset_spec = {
+        'input_mask': {
+            'axes': ['input'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            },
+        'passed_test': {
+            'axes': ['freq', 'input', 'test'],
+            'dtype': np.bool,
+            'initialise': False,
+            'distributed': False,
+            }
+        }
+
+    def __init__(self, *args, **kwargs):
+        
+        if 'test' not in kwargs:
+            kwargs['test'] = np.array(['is_chime', 'not_known_bad', 'digital_gain', 'radiometer', 'sky_fit'])
+        
+        super(CorrInputTest, self).__init__(*args, **kwargs)
+
+    @property
+    def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def passed_test(self):
+        return self.datasets['passed_test']
+        
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def test(self):
+        return self.index_map['test']
+
+
+
+class SiderealDayFlag(ContainerBase):
+    """Container for holding flag that indicates
+       good chime sidereal days.
+    """
+
+    _axes = ('csd', 'input')
+
+    _dataset_spec = {
+        'csd_flag': {
+            'axes': ['csd'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            },
+        'input_mask': {
+            'axes': ['csd', 'input'],
+            'dtype': np.bool,
+            'initialise': False,
+            'distributed': False,
+            }
+        }
+        
+    @property
+    def csd_flag(self):
+        return self.datasets['csd_flag']
+
+    @property
+    def input_mask(self):
+        return self.datasets['input_mask']
+        
+    @property
+    def csd(self):
+        return self.index_map['csd']
+
+    @property
+    def input(self):
+        return self.index_map['input']      
+
 
 
 class StaticGainData(ContainerBase):
@@ -475,6 +601,144 @@ class StaticGainData(ContainerBase):
     @property
     def input(self):
         return self.index_map['input']
+
+
+class PointSourceTransit(ContainerBase):
+    """Parallel container for holding the results of a fit to a point source transit.
+    """
+
+    _axes = ('freq', 'input', 'ra', 'pol_x', 'pol_y',
+             'param', 'param_cov1', 'param_cov2')
+
+    _dataset_spec = {
+        'gain': {
+            'axes': ['freq', 'input'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'weight': {
+            'axes': ['freq'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'evalue_x': {
+            'axes': ['freq', 'pol_x', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'evalue_y': {
+            'axes': ['freq', 'pol_y', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'response': {
+            'axes': ['freq', 'input', 'ra'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'response_error': {
+            'axes': ['freq', 'input', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'flag': {
+            'axes': ['freq', 'input', 'ra'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'parameter': {
+            'axes': ['freq', 'input', 'param'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'parameter_cov': {
+            'axes': ['freq', 'input', 'param_cov1', 'param_cov2'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }
+        }
+        
+    def __init__(self, *args, **kwargs):
+
+        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        kwargs['param_cov1'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        kwargs['param_cov2'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        
+        super(PointSourceTransit, self).__init__(*args, **kwargs)
+
+    @property
+    def gain(self):
+        return self.datasets['gain']
+
+    @property
+    def weight(self):
+        return self.datasets['weight']
+        
+    @property
+    def evalue_x(self):
+        return self.datasets['evalue_x']
+        
+    @property
+    def evalue_y(self):
+        return self.datasets['evalue_y']
+        
+    @property
+    def response(self):
+        return self.datasets['response']
+        
+    @property
+    def response_error(self):
+        return self.datasets['response_error']
+        
+    @property
+    def flag(self):
+        return self.datasets['flag']
+        
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+        
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+        
+    @property
+    def param(self):
+        return self.index_map['param']
+        
+    @property
+    def param_cov1(self):
+        return self.index_map['param_cov1']
+        
+    @property
+    def param_cov2(self):
+        return self.index_map['param_cov2']
 
 
 class RingMap(ContainerBase):
@@ -591,7 +855,7 @@ def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0
 
-    dset = data.create_dataset('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.uint16,
+    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.uint8,
                                distributed=distributed, distributed_axis=distributed_axis)
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0
