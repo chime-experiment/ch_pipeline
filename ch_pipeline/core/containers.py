@@ -247,7 +247,7 @@ class SiderealStream(ContainerBase):
             'distributed': True,
             'distributed_axis': 'freq'
         },
-            
+
         'input_flag': {
             'axes': ['input'],
             'dtype': np.bool,
@@ -300,7 +300,7 @@ class SiderealStream(ContainerBase):
     @property
     def gain(self):
         return self.datasets['gain']
-        
+
     @property
     def input_flag(self):
         return self.datasets['input_flag']
@@ -446,14 +446,14 @@ class GainData(ContainerBase):
     @property
     def input(self):
         return self.index_map['input']
-        
-        
+
+
 class CorrInputMask(ContainerBase):
     """Container for holding mask indicating good correlator inputs.
     """
-    
+
     _axes = ('input', )
-    
+
     _dataset_spec = {
         'input_mask': {
             'axes': ['input'],
@@ -495,10 +495,10 @@ class CorrInputTest(ContainerBase):
         }
 
     def __init__(self, *args, **kwargs):
-        
+
         if 'test' not in kwargs:
             kwargs['test'] = np.array(['is_chime', 'not_known_bad', 'digital_gain', 'radiometer', 'sky_fit'])
-        
+
         super(CorrInputTest, self).__init__(*args, **kwargs)
 
     @property
@@ -508,7 +508,7 @@ class CorrInputTest(ContainerBase):
     @property
     def passed_test(self):
         return self.datasets['passed_test']
-        
+
     @property
     def freq(self):
         return self.index_map['freq']
@@ -544,7 +544,7 @@ class SiderealDayFlag(ContainerBase):
             'distributed': False,
             }
         }
-        
+
     @property
     def csd_flag(self):
         return self.datasets['csd_flag']
@@ -552,14 +552,14 @@ class SiderealDayFlag(ContainerBase):
     @property
     def input_mask(self):
         return self.datasets['input_mask']
-        
+
     @property
     def csd(self):
         return self.index_map['csd']
 
     @property
     def input(self):
-        return self.index_map['input']      
+        return self.index_map['input']
 
 
 
@@ -675,13 +675,13 @@ class PointSourceTransit(ContainerBase):
             'distributed_axis': 'freq'
             }
         }
-        
+
     def __init__(self, *args, **kwargs):
 
         kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
         kwargs['param_cov1'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
         kwargs['param_cov2'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
-        
+
         super(PointSourceTransit, self).__init__(*args, **kwargs)
 
     @property
@@ -691,31 +691,31 @@ class PointSourceTransit(ContainerBase):
     @property
     def weight(self):
         return self.datasets['weight']
-        
+
     @property
     def evalue_x(self):
         return self.datasets['evalue_x']
-        
+
     @property
     def evalue_y(self):
         return self.datasets['evalue_y']
-        
+
     @property
     def response(self):
         return self.datasets['response']
-        
+
     @property
     def response_error(self):
         return self.datasets['response_error']
-        
+
     @property
     def flag(self):
         return self.datasets['flag']
-        
+
     @property
     def parameter(self):
         return self.datasets['parameter']
-        
+
     @property
     def parameter_cov(self):
         return self.datasets['parameter_cov']
@@ -727,15 +727,15 @@ class PointSourceTransit(ContainerBase):
     @property
     def input(self):
         return self.index_map['input']
-        
+
     @property
     def param(self):
         return self.index_map['param']
-        
+
     @property
     def param_cov1(self):
         return self.index_map['param_cov1']
-        
+
     @property
     def param_cov2(self):
         return self.index_map['param_cov2']

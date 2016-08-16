@@ -256,10 +256,10 @@ class LoadCorrDataFiles(task.SingleTask):
     files = None
 
     _file_ptr = 0
-    
+
     freq_range = config.Property(proptype=list, default=[])
     freq_index = config.Property(proptype=list, default=[])
-    
+
     only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
@@ -279,13 +279,13 @@ class LoadCorrDataFiles(task.SingleTask):
             # First check if a range was specified in the form of a list.
             # Either [start, stop, step], [start, stop], [stop] will work.
             self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
-            
+
         elif self.freq_index:
             # Next check if a list of indices was supplied.
             self.freq_sel = self.freq_index
 
         else:
-            # Otherwise set freq_sel to None, which will result in 
+            # Otherwise set freq_sel to None, which will result in
             # all frequencies being read.
             self.freq_sel = None
 
@@ -309,14 +309,14 @@ class LoadCorrDataFiles(task.SingleTask):
 
         if mpiutil.rank0:
             print "Reading file %i of %i." % (self._file_ptr, len(self.files))
-            
+
         # Set up product selection
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
             prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
 
-        ts = andata.CorrData.from_acq_h5(file_, distributed=True, 
+        ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         if 'tag' not in ts.attrs:
@@ -326,7 +326,7 @@ class LoadCorrDataFiles(task.SingleTask):
 
         # Add a weight dataset if needed
         if 'vis_weight' not in ts.flags:
-                        
+
             weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
                                                        distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
@@ -335,7 +335,7 @@ class LoadCorrDataFiles(task.SingleTask):
             # zero which presumably came from missing data. NOTE: this may have
             # a small bias
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
-            
+
             print weight_dset
 
         return ts

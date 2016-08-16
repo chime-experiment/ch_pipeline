@@ -155,7 +155,7 @@ class ChannelFlagger(task.SingleTask):
 
         return timestream
 
-        
+
 class FindGoodCorrInputs(task.SingleTask):
     """Apply a series of tests to find the good correlator inputs.
 
@@ -181,24 +181,24 @@ class FindGoodCorrInputs(task.SingleTask):
     ignore_gains = config.Property(proptype=bool, default=False)
     ignore_noise = config.Property(proptype=bool, default=False)
     ignore_fit = config.Property(proptype=bool, default=False)
-    
+
     threshold = config.Property(proptype=float, default=0.7)
-    
+
     known_bad = config.Property(proptype=list, default=[])
-    
+
     def __init__(self):
-        """ Set up variables that gives names to the various test 
+        """ Set up variables that gives names to the various test
             and specify which tests will be applied.
         """
-        
+
         # Gives names to the tests that will be run
         self.test = np.array(['is_chime', 'not_known_bad', 'digital_gain', 'radiometer', 'sky_fit'])
         self.ntest = len(self.test)
-    
+
         # Determine what tests we will use
         self.use_test = ~np.array([False, False, self.ignore_gains, self.ignore_noise, self.ignore_fit])
-        
-        
+
+
     def process(self, timestream, inputmap):
         """Find good inputs using timestream.
 
@@ -213,13 +213,13 @@ class FindGoodCorrInputs(task.SingleTask):
             Container with the results of all tests and a
             input mask that combines all tests and frequencies.
         """
-        
+
         # Redistribute over the frequency direction
         timestream.redistribute('freq')
-        
+
         # Extract the frequency map
         freqmap = timestream.index_map['freq'][:]
-        
+
         # Find the indices for frequencies in this timestream nearest
         # to the requested test frequencies.
         if self.test_freq is None:
@@ -231,12 +231,10 @@ class FindGoodCorrInputs(task.SingleTask):
         nfreq = timestream.vis.local_shape[0]
         sfreq = timestream.vis.local_offset[0]
         efreq = sfreq + nfreq
-                
+
         # Create local flag arrays (inputs are good by default)
         passed_test = np.ones((nfreq, timestream.ninput, self.ntest), dtype=np.int)
         is_test_freq = np.zeros(nfreq, dtype=np.bool)
-        
-        print "%d:  here1" % mpiutil.rank
 
         # Mark any non-CHIME inputs as bad
         for i in range(timestream.ninput):
@@ -246,88 +244,74 @@ class FindGoodCorrInputs(task.SingleTask):
         # Mark already known bad inputs
         for ch in self.known_bad:
             passed_test[:, ch, 1] = 0
-            
-        print "%d:  here2" % mpiutil.rank
-                            
+
         # Iterate over frequencies and find bad inputs
         for fi_local, fi_dist in enumerate(range(sfreq, efreq)):
-            
+
             if fi_dist in freq_ind:
-                
+
                 # Check if vis_weight is zero for this frequency,
                 # which would imply a bad GPU node.
                 if 'vis_weight' in timestream.flags:
                     if not np.any(timestream.weight[fi_dist]):
                         continue
-                        
-                print "%d:  here3" % mpiutil.rank
 
                 # Run good channels code and unpack arguments
                 res = data_quality.good_channels(timestream, test_freq=fi_dist, inputs=inputmap, verbose=False)
                 good_gains, good_noise, good_fit, test_inputs = res
-                                                        
+
                 # Save the results to local array
                 if good_gains is not None:
                     passed_test[fi_local, test_inputs, 2] = good_gains
-                    
+
                 if good_noise is not None:
                     passed_test[fi_local, test_inputs, 3] = good_noise
-                    
+
                 if good_fit is not None:
                     passed_test[fi_local, test_inputs, 4] = good_fit
-                
+
                 is_test_freq[fi_local] = True
 
                 # Print results for this frequency
                 print ("Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
-                         fi_dist, timestream.ninput - len(test_inputs), 
+                         fi_dist, timestream.ninput - len(test_inputs),
                          np.sum(good_gains == 0) if good_gains is not None else 'failed', ' [ignored]' if self.ignore_gains else '',
                          np.sum(good_noise == 0) if good_noise is not None else 'failed', ' [ignored]' if self.ignore_noise else '',
                          np.sum(good_fit == 0) if good_fit is not None else 'failed', ' [ignored]' if self.ignore_fit else ''))
 
-        print "%d:  here4" % mpiutil.rank
-
         # Gather the input flags from all nodes
         passed_test_all = np.zeros((timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int)
         is_test_freq_all = np.zeros(timestream.comm.size, dtype=np.bool)
-                
+
         timestream.comm.Allgather(passed_test, passed_test_all)
         timestream.comm.Allgather(is_test_freq, is_test_freq_all)
-        
-        print "%d:  here5" % mpiutil.rank
-                
+
         # Keep only the test frequencies
         passed_test_all = passed_test_all[is_test_freq_all, ...]
         freqmap = freqmap[is_test_freq_all]
-        
+
         # Average over frequencies
         input_mask_all = (np.sum(passed_test_all, axis=0) / float(passed_test_all.shape[0])) >= self.threshold
-        
+
         # Take the product along the test direction to determine good inputs for each frequency
         input_mask = np.prod(input_mask_all[:, self.use_test], axis=-1)
-        
-        print "%d:  here6" % mpiutil.rank
-        
+
         # # Take the product along the test direction to determine good inputs for each frequency
         # input_mask_all = np.prod(passed_test_all[:, :, self.use_test], axis=-1)
         #
         # # Average over frequencies
         # input_mask = (np.sum(input_mask_all, axis=0) / float(input_mask_all.shape[0])) >= self.threshold
-        
+
         # Create container to hold results
-        corr_input_test = containers.CorrInputTest(freq=freqmap, test=self.test, 
+        corr_input_test = containers.CorrInputTest(freq=freqmap, test=self.test,
                                               axes_from=timestream, attrs_from=timestream)
-                                              
-        print "%d:  here7" % mpiutil.rank
-        
+
         # Save flags to container, return container
         corr_input_test.input_mask[:] = input_mask
-        
+
         corr_input_test.add_dataset('passed_test')
         corr_input_test.passed_test[:] = passed_test_all
-        
-        print "%d:  here8" % mpiutil.rank
-        
+
         return corr_input_test
 
 
@@ -364,8 +348,8 @@ class LoadCorrInputMask(task.SingleTask):
 
 class ApplyCorrInputMask(task.SingleTask):
     """ Flag out bad correlator inputs from a timestream or sidereal stack.
-    """    
-        
+    """
+
     def process(self, timestream, corr_input_mask):
         """Flag out bad inputs by giving them zero weight.
 
@@ -378,43 +362,43 @@ class ApplyCorrInputMask(task.SingleTask):
         -------
         flagged_timestream : same type as timestream
         """
-        
+
         # Make sure that timestream is distributed over frequency
         timestream.redistribute('freq')
-        
+
         # Extract the input mask
         input_mask = corr_input_mask.datasets['input_mask'][:]
-        
+
         # Apply mask to the vis_weight array
         weight = timestream.weight[:]
         tools.apply_gain(weight, input_mask[np.newaxis, :, np.newaxis], out=weight)
-        
+
         # Add flag dataset
         flag_dataset = timestream.create_flag('input', data=input_mask, distributed=False)
         flag_dataset.attrs['axis'] = ('input', )
-        
+
         # Return timestream
         return timestream
-        
-        
+
+
 class AccumulateGoodCorrInputs(task.SingleTask):
     """ Find good correlator inputs over multiple sidereal days.
         Also determine bad days as those with a lack of good
         correlator inputs.
     """
-    
+
     threshold = config.Property(proptype=float, default=0.7)
-    
+
     def __init__(self):
-        """ Create empty list.  As we iterate through 
+        """ Create empty list.  As we iterate through
             sidereal days, we will append the corr_input_mask
             from each day to this list.
         """
-        
+
         self._accumulated_input_mask = []
         self._csd = []
-        
-        
+
+
     def process(self, corr_input_mask):
         """ Append corr_input_mask to list.
 
@@ -422,7 +406,7 @@ class AccumulateGoodCorrInputs(task.SingleTask):
         ----------
         corr_input_mask : container.CorrInputMask
         """
-        
+
         if not self._accumulated_input_mask:
             self.input = corr_input_mask.input[:]
 
@@ -434,130 +418,130 @@ class AccumulateGoodCorrInputs(task.SingleTask):
         """ Determine good days as those where the fraction
         of good inputs is above some user specified
         threshold.  Then create accumulated input mask
-        by taking the product of the input mask for all 
+        by taking the product of the input mask for all
         good days.
-    
+
         Returns
         --------
         corr_input_mask : container.CorrInputMask
         """
 
         ninput = len(self.input)
-        
+
         input_mask_all = np.asarray(self._accumulated_input_mask)
-                    
+
         # Calculate the fraction of inputs that are good each day
         frac_good_input = np.sum(input_mask_all, axis=-1) / float(ninput)
-        
+
         # Find days where the fraction of good inputs
         # is greater than the user specified threshold
         good_day_flag = frac_good_input > self.threshold
-        
+
         if not np.any(good_day_flag):
             ValueError("More than %d%% of inputs flagged bad every day." % 100.0*self.threshold)
-                    
+
         # Write csd flag to file
         if self.save:
-                        
+
             # Create container
             csd_flag = containers.SiderealDayFlag(input=self.input, csd=np.array(self._csd))
-                    
+
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag
-        
+
             csd_flag.add_dataset('input_mask')
             csd_flag.input_mask[:] = input_mask_all
-            
+
             csd_flag.attrs['tag'] = 'flag_csd'
-                        
+
             # Write output to hdf5 file
             self._save_output(csd_flag)
-                    
+
         # Take the product of the input mask for all days that made threshold cut
         input_mask = np.all(input_mask_all[good_day_flag, :], axis=0)
-                
+
         # Create container to hold results
         corr_input_mask = containers.CorrInputMask(input=self.input)
-        
+
         corr_input_mask.attrs['tag'] = 'for_pass'
-        
+
         # Save input_mask to container, return container
         corr_input_mask.input_mask[:] = input_mask
-                
+
         return corr_input_mask
 
 
 class RadiometerWeight(task.SingleTask):
     """ Update vis_weight according to the radiometer equation:
-    
+
             vis_weight_ij = Nsamples / V_ii V_jj
     """
-    
+
     def process(self, timestream):
-        """ Takes the input vis_weight, recasts it from uint8 to float32, 
+        """ Takes the input vis_weight, recasts it from uint8 to float32,
         multiplies by the total number of samples, and divides by the
         autocorrelations of the two feeds that form each baseline.
-        
+
         Parameters
         ----------
         timestream : andata.CorrData
-        
+
         Returns
         --------
         timestream : andata.CorrData
         """
-        
+
         from calibration import _extract_diagonal as diag
 
         # Redistribute over the frequency direction
         timestream.redistribute('freq')
-        
+
         # Extract number of samples per integration period
         max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
-        
+
         # Extract the maximum possible value of vis_weight
         max_vis_weight = np.iinfo(timestream.flags['vis_weight'].dtype).max
-        
+
         # Calculate the scaling factor that converts from vis_weight value
         # to number of samples
         vw_to_nsamp = max_nsamples / float(max_vis_weight)
-        
+
         # Extract the autocorrelation
         Trec = diag(timestream.vis).real
-        
+
         # Calculate the inverse autocorrelation
         with np.errstate(divide='ignore', invalid='ignore'):
             inv_Trec = np.where(Trec > 0.0, 1.0 / Trec, 0.0)
-        
+
         # Determine product map for loop
         nprod = timestream.nprod
         ninput = timestream.ninput
         prod_map = [tools.icmap(pp, ninput) for pp in range(nprod)]
 
         vis_weight = np.zeros(timestream.flags['vis_weight'].local_shape, dtype=np.float32)
-        
+
         # Loop over products to save memory
         for pp, prod in enumerate(prod_map):
 
             # Determine the inputs.
             ii, jj = prod
-                        
+
             # Scale vis_weight by input autocorrelation and effective number of samples
             vis_weight[:,pp] = inv_Trec[:,ii]*inv_Trec[:,jj]*timestream.flags['vis_weight'][:, pp]*vw_to_nsamp
-            
+
         # Recast vis_weight as float32
         # Wrap to produce MPIArray
         vis_weight = mpiarray.MPIArray.wrap(vis_weight, axis=0, comm=timestream.comm)
-                
+
         # Extract attributes
         vis_weight_attrs = memh5.attrs2dict(timestream.flags['vis_weight'].attrs)
-        
+
         # Delete current uint8 dataset
         timestream['flags'].__delitem__('vis_weight')
-        
+
         # Create new float32 dataset
         vis_weight_dataset = timestream.create_flag('vis_weight', data=vis_weight, distributed=True)
-        
+
         # Copy attributes
         memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
@@ -591,16 +575,16 @@ class BadNodeFlagger(task.SingleTask):
         -------
         flagged_timestream : same type as timestream
         """
-        
+
         # Redistribute over time
         timestream.redistribute(['time', 'gated_time0'])
-        
+
         # Extract autocorrelation indices
         auto_pi, _ = data_quality._get_autos_index(timestream.index_map['prod'])
-        
+
         good_freq_flag = np.any(timestream.vis[:, auto_pi, :].real > 0.0, axis=1)
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
-        
+
         # If requested, flag the first frequency
         if self.flag_freq_zero:
             timestream.weight[0] = 0

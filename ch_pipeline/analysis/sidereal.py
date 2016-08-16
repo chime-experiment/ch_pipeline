@@ -60,7 +60,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
     freq_range = config.Property(proptype=list, default=[])
     freq_index = config.Property(proptype=list, default=[])
-    
+
     only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
@@ -89,23 +89,23 @@ class LoadTimeStreamSidereal(task.SingleTask):
             filemap.sort()
 
         self.filemap = mpiutil.world.bcast(filemap, root=0)
-            
+
         # Set up frequency selection.
         if self.freq_range and (len(self.freq_range) <= 3):
             # First check if a range was specified in the form of a list.
             # Either [start, stop, step], [start, stop], [stop] will work.
             self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
-            
+
         elif self.freq_index:
             # Next check if a list of indices was supplied.
             self.freq_sel = self.freq_index
 
         else:
-            # Otherwise set freq_sel to None, which will result in 
+            # Otherwise set freq_sel to None, which will result in
             # all frequencies being read.
             self.freq_sel = None
-            
-            
+
+
     def process(self):
         """Load in each sidereal day.
 
@@ -124,15 +124,15 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
         if mpiutil.rank0:
             print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
-            
+
         # Set up product selection
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(dfiles)
             prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
-            
+
         # Load files
-        ts = andata.CorrData.from_acq_h5(dfiles, distributed=True, 
+        ts = andata.CorrData.from_acq_h5(dfiles, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         # Add attributes for the CSD and a tag for labelling saved files
@@ -144,12 +144,12 @@ class LoadTimeStreamSidereal(task.SingleTask):
             weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
                                                        distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
-            
+
             # Set weight to maximum value (255), unless the vis value is
             # zero which presumably came from missing data. NOTE: this may have
             # a small bias
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
-            
+
         gc.collect()
 
         return ts
@@ -316,7 +316,7 @@ class SiderealRegridder(task.SingleTask):
         # Mask data
         imask = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
-                
+
         # Convert mask to number of samples
         if imask.dtype == np.uint8:
 
@@ -336,14 +336,14 @@ class SiderealRegridder(task.SingleTask):
         # Reshape data
         vr = vis_data.reshape(-1, vis_data.shape[-1])
         nr = imask.reshape(-1, vis_data.shape[-1])
-        
+
         # Scale weights to values between 0.0 and 1.0 to prevent issues during interpolation
         scale_factor = np.max(imask)
         with np.errstate(divide='ignore', invalid='ignore'):
             inv_scale_factor = 1.0 / scale_factor if scale_factor > 0.0 else 0.0
 
         nr *= inv_scale_factor
-        
+
         # Construct a signal 'covariance'
         Si = np.ones_like(csd_grid) * 1e-8
 
@@ -379,8 +379,8 @@ class SiderealRegridder(task.SingleTask):
             sdata.input_flag[:] = np.ones(len(sdata.input), dtype=np.bool)
         sdata.attrs['csd'] = csd
         sdata.attrs['tag'] = 'csd_%i' % csd
-        
-        # Now that we have the regridded timestream, 
+
+        # Now that we have the regridded timestream,
         # delete the original timestream and collect garbage.
         del data
         gc.collect()

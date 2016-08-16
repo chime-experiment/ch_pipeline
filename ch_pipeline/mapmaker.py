@@ -177,7 +177,7 @@ class FrequencyDownsample(task.SingleTask):
         # Get all frequencies onto same node
         ss.redistribute(['time', 'gated_time0'])
 
-        # Extract the downsampled frequency centres and widths        
+        # Extract the downsampled frequency centres and widths
         fc = ss.index_map['freq']['centre'][self.phase::self.period]
         fw = ss.index_map['freq']['width'][self.phase::self.period]
 
@@ -199,7 +199,7 @@ class FrequencyDownsample(task.SingleTask):
 
         # Copy over the tag attribute
         ssd.attrs['tag'] = ss.attrs['tag']
-        
+
         # Downsample the arrays
         ssd.vis[:] = np.copy(ss.vis[self.phase::self.period])
         ssd.gain[:] = np.copy(ss.gain[self.phase::self.period])
@@ -857,11 +857,11 @@ class RingMapMaker(task.SingleTask):
 
             bfm = np.fft.irfft(np.dot(vdr[lfi], pa.T.conj()), 2 * ncyl - 1, axis=2)
             rm.map[fi] = bfm
-            
+
         # Copy units
         units = sstream.vis.attrs.get('units')
         if units:
             rm.map.attrs['units'] = units
-            
+
         # Return container
         return rm
