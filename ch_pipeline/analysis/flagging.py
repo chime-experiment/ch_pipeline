@@ -156,6 +156,240 @@ class ChannelFlagger(task.SingleTask):
         return timestream
 
 
+class MonitorCorrInputs(task.SingleTask):
+    """ Monitor good correlator inputs over several sidereal days.
+
+    Parameters
+    ----------
+    padding : float
+        Extend start and stop time of each file by padding (in days) 
+        when determining what files are in each sidereal day.
+    threshold : float
+        Flag a sidereal day as bad if the fraction of correlator
+        inputs powered ON that pass the test is less than threshold.
+    """
+    
+    padding = config.Property(proptype=float, default=0.005)
+    threshold = config.Property(proptype=float, default=0.7)
+    
+    def setup(self, files):
+        """Divide list of files up into sidereal days.
+
+        Parameters
+        ----------
+        files : list
+            List of filenames to monitor good correlator inputs.
+        """
+        
+        from sidereal import get_times, _days_in_csd
+
+        self.files = files
+
+        # Create a map from csd to time range
+        timemap = None
+        if mpiutil.rank0:
+
+            # Determine the days in each file and 
+            # the days in all files
+            se_times = get_times(self.files)
+            se_csd = ephemeris.csd(se_times)
+            days = np.unique(np.floor(se_csd).astype(np.int))
+
+            # Construct list of files in each day
+            filemap = [ (day, _days_in_csd(day, se_csd, extra=self.padding)) for day in days ]
+
+            # Filter our days with only a few files in them.
+            filemap = [ (day, dmap) for day, dmap in filemap if dmap.size > 1 ]
+            filemap.sort()
+
+            # Construct a list of the time range for each day
+            timemap = [ (day, np.array([np.min(se_times[dmap,0]), 
+                                        np.max(se_times[dmap,1])])) for day, dmap in filemap ]
+
+        # Broadcast timemap to all processes
+        self.timemap = mpiutil.world.bcast(timemap, root=0)
+        
+        self.ndays = len(self.timemap)
+
+
+    def process(self):
+        """Calls ch_util.ChanMonitor for each sidereal day.
+        
+        Returns
+        -------
+        input_monitor : containers.CorrInputMonitor
+            Saved for each sidereal day.  Contains the 
+            correlator input mask and frequency mask.
+            Note that this is not output to the pipeline.  It is an
+            ancillary data product that is saved when one sets the
+            'save' parameter in the configuration file.
+        csd_flag : container.SiderealDayFlag
+            Contains a mask that indicates bad sidereal days, determined as 
+            days when the fraction of good correlator inputs is less than 
+            'threshold'.  Note that this is not output to the pipeline.  
+            It is anancillary data product that is saved when one sets the
+            'save' parameter in the configuration file. 
+        input_monitor_all : containers.CorrInputMonitor
+            Contains the correlator input mask and frequency mask
+            obtained from taking AND of the masks from the individual
+            sidereal days.
+        """
+        
+        from ch_util import chan_monitor
+        
+        # Get a range of days for this process to analyze
+        n_local, i_day_start, i_day_end = mpiutil.split_local(self.ndays)
+        i_day = np.arange(i_day_start, i_day_end)
+        
+        # Loop over days
+        for i_local, i_dist in enumerate(i_day):
+
+            csd, time_range = self.timemap[i_dist]
+            
+            # Print status
+            print "Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd)
+                        
+            # Create an instance of chan_monitor for this day
+            cm = chan_monitor.ChanMonitor(*time_range)
+            
+            # Run the full test
+            cm.full_check()
+            
+            # If requested, write to disk
+            if self.save:
+                
+                # Create a container to hold the results
+                input_mon = containers.CorrInputMonitor(freq=cm.freq, input=cm.input_map)
+
+                # Place the results in the container
+                input_mon.input_mask[:] = cm.good_ipts
+                input_mon.powered_on[:] = cm.pwds
+                input_mon.freq_mask[:] = cm.good_freqs
+                
+                input_mon.add_dataset('position')
+                input_mon.position[:] = cm.postns
+                
+                input_mon.add_dataset('expected_position')
+                input_mon.expected_position[:] = cm.expostns
+
+                # Construct tag from csd
+                tag = 'csd_%d' % csd
+                input_mon.attrs['tag'] = tag
+
+                # Save results to disk
+                self._save_output(input_mon)
+
+            # If this is the first local day, then create local arrays
+            # and index maps to be filled
+            if i_local == 0:
+                
+                csd_ref = csd
+
+                input_map = cm.input_map
+                freq = cm.freqs
+
+                ninput = len(input_map)
+                nfreq = len(freqs)
+                
+                input_mask = np.ones((n_local, ninput), dtype=np.bool)
+                powered_on = np.ones((n_local, ninput), dtype=np.bool)
+                freq_mask = np.ones((n_local, nfreq), dtype=np.bool)
+
+            else:
+                
+                # Otherwise ensure that we are examining the same 
+                # frequencies and inputs as the first local day
+                
+                # Check inputs
+                if len(cm.input_map) != ninput:
+                    ValueError("Differing number of corr inputs for csd %d and csd %d." % (csd, csd_ref))
+                elif np.sum([ cm.input_map[ii][1] != input_map[ii][1] for ii in range(ninput) ]) > 0:
+                    ValueError("Different corr inputs for csd %d and csd %d." % (csd, csd_ref))
+                    
+                # Check frequencies
+                if len(cm.freqs) != nfreq:
+                    ValueError("Differing number of frequencies for csd %d and csd %d." % (csd, csd_ref))
+                elif np.sum(cm.freqs != freq) > 0:
+                    ValueError("Different frequencies for csd %d and csd %d." % (csd, csd_ref))
+
+            # Accumulate flags over multiple days                
+            input_mask[i_local, :] = cm.good_ipts
+            freq_mask[i_local, :] = cm.good_freqs
+            powered_on[i_local, :] = cm.pwds
+
+        # Check that the inputs and frequencies are the same for all days
+        ref_input_map = mpiutil.world.bcast(input_map, root=0)
+        ref_freq = mpiutil.world.bcast(freq, root=0)
+        ref_csd = mpiutil.world.bcast(csd_ref, root=0)
+        
+        ninput = len(ref_input_map)
+        nfreq = len(ref_freq)
+        
+        if len(input_map) != ninput:
+            ValueError("Differing number of corr inputs for csd %d and csd %d." % (csd_ref, ref_csd))
+        elif np.sum([ input_map[ii][1] != ref_input_map[ii][1] for ii in range(len(input_map)) ]) > 0:
+            ValueError("Different corr inputs for csd %d and csd %d." % (csd_ref, ref_csd))
+            
+        if len(freq) != nfreq:
+            ValueError("Differing number of frequencies for csd %d and csd %d." % (csd_ref, ref_csd))
+        elif np.sum(freq != ref_freq) > 0:
+            ValueError("Different frequencies for csd %d and csd %d." % (csd_ref, ref_csd))
+
+        # Gather the flags from all nodes
+        input_mask_all = np.zeros((self.ndays, ninput), dtype=np.bool)
+        powered_on_all = np.zeros((self.ndays, ninput, dtype=np.bool))
+        freq_mask_all = np.zeros((self.ndays, nfreq), dtype=np.bool)
+
+        mpiutil.world.Allgather(input_mask, input_mask_all)
+        mpiutil.world.Allgather(powered_on, powered_on_all)
+        mpiutil.world.Allgather(freq_mask, freq_mask_all)
+
+        # Look for bad days
+        # Calculate the fraction of inputs that are good each day
+        frac_good_input = np.sum(input_mask_all, axis=-1) / float(ninput)
+
+        # Find days where the fraction of good inputs
+        # is greater than the user specified threshold
+        good_day_flag = frac_good_input > self.threshold
+
+        if not np.any(good_day_flag):
+            ValueError("More than %d%% of inputs flagged bad every day." % 100.0*self.threshold)
+
+        # Write csd flag to file
+        if self.save:
+
+            # Create container
+            csd_flag = containers.SiderealDayFlag(input=ref_input_map, csd=np.array([ tmap[0] for tmap in self.timemap ]))
+
+            # Save flags to container
+            csd_flag.csd_flag[:] = good_day_flag
+
+            csd_flag.add_dataset('input_mask')
+            csd_flag.input_mask[:] = input_mask_all
+
+            csd_flag.attrs['tag'] = 'flag_csd'
+
+            # Write output to hdf5 file
+            self._save_output(csd_flag)
+        
+        # Take the product of the input mask for all days that made threshold cut
+        input_mask = np.all(input_mask_all[good_day_flag, :], axis=0)
+        powered_on = np.all(powered_on_all[good_day_flag, :], axis=0)
+        freq_mask = np.all(freq_mask_all[good_day_flag, :], axis=0)
+        
+        # Create a container to hold the results
+        input_mon = containers.CorrInputMonitor(freq=ref_freq, input=ref_input_map)
+
+        # Place the results in the container
+        input_mon.input_mask[:] = input_mask
+        input_mon.powered_on[:] = powered_on
+        input_mon.freq_mask[:] = freq_mask
+        
+        input_mon.attrs['tag'] = 'for_pass'
+
+        return input_mon
+
+
 class FindGoodCorrInputs(task.SingleTask):
     """Apply a series of tests to find the good correlator inputs.
 
@@ -296,12 +530,6 @@ class FindGoodCorrInputs(task.SingleTask):
         # Take the product along the test direction to determine good inputs for each frequency
         input_mask = np.prod(input_mask_all[:, self.use_test], axis=-1)
 
-        # # Take the product along the test direction to determine good inputs for each frequency
-        # input_mask_all = np.prod(passed_test_all[:, :, self.use_test], axis=-1)
-        #
-        # # Average over frequencies
-        # input_mask = (np.sum(input_mask_all, axis=0) / float(input_mask_all.shape[0])) >= self.threshold
-
         # Create container to hold results
         corr_input_test = containers.CorrInputTest(freq=freqmap, test=self.test,
                                               axes_from=timestream, attrs_from=timestream)
@@ -313,72 +541,6 @@ class FindGoodCorrInputs(task.SingleTask):
         corr_input_test.passed_test[:] = passed_test_all
 
         return corr_input_test
-
-
-# class LoadCorrInputMask(pipeline.TaskBase, pipeline.BasicContMixin):
-#     """ Load correlator input mask from an hdf5 file specified
-#         in the configuration.
-#     """
-#
-#     file_name = config.Property(proptype=str)
-#
-#     def setup(self):
-#
-#         file_name = os.path.expandvars(os.path.expanduser(self.file_name))
-#         corr_input_mask = self.read_input(file_name)
-#
-#         return corr_input_mask
-
-class LoadCorrInputMask(task.SingleTask):
-    """ Load correlator input mask from an hdf5 file specified
-        in the configuration.
-    """
-
-    file_name = config.Property(proptype=str)
-
-    def setup(self):
-
-        file_name = os.path.expandvars(os.path.expanduser(self.file_name))
-        self.corr_input_mask = self.read_input(file_name)
-
-    def process(self):
-
-        return self.corr_input_mask
-
-
-class ApplyCorrInputMask(task.SingleTask):
-    """ Flag out bad correlator inputs from a timestream or sidereal stack.
-    """
-
-    def process(self, timestream, corr_input_mask):
-        """Flag out bad inputs by giving them zero weight.
-
-        Parameters
-        ----------
-        timestream : andata.CorrData or containers.SiderealStream
-        corr_input_mask : containers.CorrInputMask or containers.CorrInputTest
-
-        Returns
-        -------
-        flagged_timestream : same type as timestream
-        """
-
-        # Make sure that timestream is distributed over frequency
-        timestream.redistribute('freq')
-
-        # Extract the input mask
-        input_mask = corr_input_mask.datasets['input_mask'][:]
-
-        # Apply mask to the vis_weight array
-        weight = timestream.weight[:]
-        tools.apply_gain(weight, input_mask[np.newaxis, :, np.newaxis], out=weight)
-
-        # Add flag dataset
-        flag_dataset = timestream.create_flag('input', data=input_mask, distributed=False)
-        flag_dataset.attrs['axis'] = ('input', )
-
-        # Return timestream
-        return timestream
 
 
 class AccumulateGoodCorrInputs(task.SingleTask):
@@ -471,6 +633,54 @@ class AccumulateGoodCorrInputs(task.SingleTask):
         return corr_input_mask
 
 
+class ApplyCorrInputMask(task.SingleTask):
+    """ Flag out bad correlator inputs from a timestream or sidereal stack.
+    
+    Attributes
+    ----------
+    file_name : str
+        Path to the hdf5 file that contains the correlator input mask.
+    """
+    
+    file_name = config.Property(proptype=str)
+    
+    def setup(self):
+        """ Load correlator input mask from disk.
+        """
+        
+        self.file_name = os.path.expandvars(os.path.expanduser(self.file_name))
+        
+        corr_input_mask = containers.CorrInputMask.from_file(self.file_name, distributed=False)
+        
+        self.input_mask = corr_input_mask.datasets['input_mask'][:]
+
+    def process(self, timestream):
+        """Flag out bad correlator inputs by giving them zero weight.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData or containers.SiderealStream
+
+        Returns
+        -------
+        timestream : andata.CorrData or containers.SiderealStream
+        """
+
+        # Make sure that timestream is distributed over frequency
+        timestream.redistribute('freq')
+
+        # Apply mask to the vis_weight array
+        weight = timestream.weight[:]
+        tools.apply_gain(weight, self.input_mask[np.newaxis, :, np.newaxis], out=weight)
+
+        # Add flag dataset
+        flag_dataset = timestream.create_flag('input', data=self.input_mask, distributed=False)
+        flag_dataset.attrs['axis'] = ('input', )
+
+        # Return timestream
+        return timestream
+
+
 class RadiometerWeight(task.SingleTask):
     """ Update vis_weight according to the radiometer equation:
 
@@ -478,9 +688,9 @@ class RadiometerWeight(task.SingleTask):
     """
 
     def process(self, timestream):
-        """ Takes the input vis_weight, recasts it from uint8 to float32,
-        multiplies by the total number of samples, and divides by the
-        autocorrelations of the two feeds that form each baseline.
+        """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
+        multiplies by the total number of samples, and divides by the autocorrelations of the 
+        two feeds that form each baseline.
 
         Parameters
         ----------

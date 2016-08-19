@@ -522,6 +522,80 @@ class CorrInputTest(ContainerBase):
         return self.index_map['test']
 
 
+class CorrInputMonitor(ContainerBase):
+    """Container for holding results of good correlator inputs monitor.
+    """
+
+    _axes = ('freq', 'input', 'dir')
+
+    _dataset_spec = {
+        'input_mask': {
+            'axes': ['input'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            },
+        'powered_on': {
+            'axes': ['input'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            }
+        'position': {
+            'axes': ['input', 'dir'],
+            'dtype': np.float,
+            'initialise': False,
+            'distributed': False,
+            }
+        'expected_position': {
+            'axes': ['input', 'dir'],
+            'dtype': np.float,
+            'initialise': False,
+            'distributed': False,
+            }
+        'freq_mask': {
+            'axes': ['freq'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            },
+        }
+
+    def __init__(self, *args, **kwargs):
+
+        if 'pos' not in kwargs:
+            kwargs['pos'] = np.array(['east_west', 'north_south'])
+
+        super(CorrInputMonitor, self).__init__(*args, **kwargs)
+
+    @property
+    def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def powered_on(self):
+        return self.datasets['powered_on']
+
+    @property
+    def position(self):
+        return self.datasets['position']
+        
+    @property
+    def expected_position(self):
+        return self.datasets['expected_position']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def dir(self):
+        return self.index_map['dir']
+
 
 class SiderealDayFlag(ContainerBase):
     """Container for holding flag that indicates
