@@ -36,7 +36,7 @@ from caput import mpiutil, mpiarray
 from ch_util import andata, ephemeris, data_quality
 
 from ..core import task, containers
-from . import regrid
+from ..util import regrid
 
 
 class LoadTimeStreamSidereal(task.SingleTask):

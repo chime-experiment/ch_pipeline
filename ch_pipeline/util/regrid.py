@@ -24,7 +24,7 @@ Tasks
 import numpy as np
 import scipy.linalg as la
 
-from ..util import _fast_tools
+from . import _fast_tools
 
 
 def band_wiener(R, Ni, Si, y, bw):
