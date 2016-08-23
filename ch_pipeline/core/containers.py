@@ -526,7 +526,7 @@ class CorrInputMonitor(ContainerBase):
     """Container for holding results of good correlator inputs monitor.
     """
 
-    _axes = ('freq', 'input', 'dir')
+    _axes = ('freq', 'input', 'coord')
 
     _dataset_spec = {
         'input_mask': {
@@ -535,36 +535,42 @@ class CorrInputMonitor(ContainerBase):
             'initialise': True,
             'distributed': False,
             },
-        'powered_on': {
+        'input_powered': {
             'axes': ['input'],
             'dtype': np.bool,
             'initialise': True,
             'distributed': False,
-            }
+            },
         'position': {
-            'axes': ['input', 'dir'],
+            'axes': ['input', 'coord'],
             'dtype': np.float,
             'initialise': False,
             'distributed': False,
-            }
+            },
         'expected_position': {
-            'axes': ['input', 'dir'],
+            'axes': ['input', 'coord'],
             'dtype': np.float,
             'initialise': False,
             'distributed': False,
-            }
+            },
         'freq_mask': {
             'axes': ['freq'],
             'dtype': np.bool,
             'initialise': True,
             'distributed': False,
             },
+        'freq_powered': {
+            'axes': ['freq'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+            }
         }
 
     def __init__(self, *args, **kwargs):
 
-        if 'pos' not in kwargs:
-            kwargs['pos'] = np.array(['east_west', 'north_south'])
+        if 'coord' not in kwargs:
+            kwargs['coord'] = np.array(['east_west', 'north_south'])
 
         super(CorrInputMonitor, self).__init__(*args, **kwargs)
 
@@ -573,8 +579,8 @@ class CorrInputMonitor(ContainerBase):
         return self.datasets['input_mask']
 
     @property
-    def powered_on(self):
-        return self.datasets['powered_on']
+    def input_powered(self):
+        return self.datasets['input_powered']
 
     @property
     def position(self):
@@ -585,6 +591,14 @@ class CorrInputMonitor(ContainerBase):
         return self.datasets['expected_position']
 
     @property
+    def freq_mask(self):
+        return self.datasets['freq_mask']
+
+    @property
+    def freq_powered(self):
+        return self.datasets['freq_powered']
+
+    @property
     def freq(self):
         return self.index_map['freq']
 
@@ -593,8 +607,8 @@ class CorrInputMonitor(ContainerBase):
         return self.index_map['input']
 
     @property
-    def dir(self):
-        return self.index_map['dir']
+    def coord(self):
+        return self.index_map['coord']
 
 
 class SiderealDayFlag(ContainerBase):
