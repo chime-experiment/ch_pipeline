@@ -43,17 +43,29 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         Ignore non CHIME feeds in the BeamTransfers.
     redundant : boolean
         Use only redundant baselines (default is False).
-    freq_use_channels : bool, optional
-        Whether to specify the frequencies in terms of channel parameters
-        (default), or specify them use physical frequencies.
-    channel_start : int, optional
-        Which channel to start at. Default is 0.
-    channel_end : int, optional
-        The last channel to use. Like using a standard python range, this should
-        be one larger than the last channel number you actually want. Default is 1024.
+    use_pathfinder_freq: boolean
+        Use the pathfinder channelization of 1024
+        frequencies between 400 and 800 MHz.  Setting
+        this to True also enables the specification of
+        a subset of these frequencies through the
+        four attributes below.  Default is True.
     channel_bin : int, optional
-        Number of channels to bin together (or downsample by if freq_downsample is True). 
-        Must exactly divide the total number. Default is 1.
+        Number of channels to bin together.
+        Must exactly divide the total number.
+        Binning is performed prior to selection
+        of any subset. Default is 1.
+    freq_physical : list, optional
+        Select subset of frequencies using a
+        list of physical frequencies in MHz.
+        Finds the closests pathfinder channel.
+    channel_range : list, optional
+        Select subset of frequencies using a
+        range of frequency channel indices, either
+        [start, stop, step], [start, stop], or [stop]
+        is acceptable.
+    channel_index : list, optional
+        Select subset of frequencies using a
+        list of frequency channel indices.
     input_sel : list, optional
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
@@ -68,12 +80,11 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     redundant = config.Property(proptype=bool, default=False)
 
     # Configure frequency properties
-    freq_use_channels = config.Property(proptype=bool, default=True)
-    freq_range = config.Property(proptype=list, default=[])
-    freq_index = config.Property(proptype=list, default=[])
-    # channel_start = config.Property(proptype=int, default=0)
-    # channel_end = config.Property(proptype=int, default=1024)
+    use_pathfinder_freq = config.Property(proptype=bool, default=True)
     channel_bin = config.Property(proptype=int, default=1)
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
 
     # Input selection
     input_sel = config.Property(proptype=list, default=None)
@@ -185,25 +196,29 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         """Override default version to give support for specifying by frequency
         channel number.
         """
-        if self.freq_use_channels:
-            # Calculate frequencies in terms of the channel numbers (assume the Pathfinder setup).
+        if self.use_pathfinder_freq:
+            # Use pathfinder channelization of 1024 bins between 400 and 800 MHz.
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            
-            # Set up frequency selection.
-            if self.freq_range and (len(self.freq_range) <= 3):
-                # First check if a range was specified in the form of a list.
-                # Either [start, stop, step], [start, stop], [stop] will work.
-                basefreq = basefreq[slice(*self.freq_range)]
-            
-            elif self.freq_index:
-                # Next check if a list of indices was supplied.
-                basefreq = basefreq[self.freq_index]
-            
+
+            # Bin the channels together
             if len(basefreq) % self.channel_bin != 0:
                 raise Exception("Channel binning must exactly divide the total number of channels")
 
-            self._frequencies = basefreq.reshape(-1, self.channel_bin).mean(axis=-1)
-            
+            basefreq = basefreq.reshape(-1, self.channel_bin).mean(axis=-1)
+
+            # If requested, select subset of frequencies.
+            if self.freq_physical:
+                basefreq = basefreq[ [ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ] ]
+
+            if self.channel_range and (len(self.channel_range) <= 3):
+                basefreq = basefreq[slice(*self.channel_range)]
+
+            elif self.channel_index:
+                basefreq = basefreq[self.channel_index]
+
+            # Save to object
+            self._frequencies = np.unique(basefreq)[::-1]
+
         else:
             # Otherwise use the standard method
             telescope.TransitTelescope.calculate_frequencies(self)

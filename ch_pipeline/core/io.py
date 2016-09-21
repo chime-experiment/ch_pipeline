@@ -45,7 +45,7 @@ Several tasks accept groups of files as arguments. These are specified in the YA
 """
 
 import os.path
-
+import gc
 import numpy as np
 
 from caput import pipeline
@@ -81,7 +81,6 @@ def _list_or_glob(files):
 
     if isinstance(files, str):
         files = sorted(glob.glob(files))
-        print files
     elif isinstance(files, list):
         pass
     else:
@@ -251,14 +250,28 @@ class LoadCorrDataFiles(task.SingleTask):
     """Load data from files passed into the setup routine.
 
     File must be a serialised subclass of :class:`memh5.BasicCont`.
+
+    freq_physical : list
+        List of physical frequencies in MHz.
+        Given first priority.
+    channel_range : list
+        Range of frequency channel indices, either
+        [start, stop, step], [start, stop], or [stop]
+        is acceptable.  Given second priority.
+    channel_index : list
+        List of frequency channel indices.
+        Given third priority.
+    only_autos : bool
+        Only load the autocorrelations.
     """
 
     files = None
 
     _file_ptr = 0
 
-    freq_range = config.Property(proptype=list, default=[])
-    freq_index = config.Property(proptype=list, default=[])
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
 
     only_autos = config.Property(proptype=bool, default=False)
 
@@ -275,18 +288,18 @@ class LoadCorrDataFiles(task.SingleTask):
         self.files = files
 
         # Set up frequency selection.
-        if self.freq_range and (len(self.freq_range) <= 3):
-            # First check if a range was specified in the form of a list.
-            # Either [start, stop, step], [start, stop], [stop] will work.
-            self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
+        if self.freq_physical:
+            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+            self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq))
+                                         for freq in self.freq_physical ]))
 
-        elif self.freq_index:
-            # Next check if a list of indices was supplied.
-            self.freq_sel = self.freq_index
+        elif self.channel_range and (len(self.channel_range) <= 3):
+            self.freq_sel = range(*self.channel_range)
+
+        elif self.channel_index:
+            self.freq_sel = self.channel_index
 
         else:
-            # Otherwise set freq_sel to None, which will result in
-            # all frequencies being read.
             self.freq_sel = None
 
     def process(self):
@@ -303,6 +316,9 @@ class LoadCorrDataFiles(task.SingleTask):
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
+        # Collect garbage to remove any prior CorrData objects
+        gc.collect()
+
         # Fetch and remove the first item in the list
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
@@ -314,19 +330,19 @@ class LoadCorrDataFiles(task.SingleTask):
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
-            prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
+            prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
+        # Load file
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
 
+        # Use a simple incrementing string as the tag
         if 'tag' not in ts.attrs:
-            # Use a simple incrementing string as the tag
             tag = 'file%03i' % self._file_ptr
             ts.attrs['tag'] = tag
 
         # Add a weight dataset if needed
         if 'vis_weight' not in ts.flags:
-
             weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
                                                        distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
@@ -336,8 +352,7 @@ class LoadCorrDataFiles(task.SingleTask):
             # a small bias
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
 
-            print weight_dset
-
+        # Return timestream
         return ts
 
 

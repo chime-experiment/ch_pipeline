@@ -33,7 +33,7 @@ import numpy as np
 
 from caput import pipeline, config
 from caput import mpiutil, mpiarray
-from ch_util import andata, ephemeris, data_quality
+from ch_util import andata, ephemeris
 
 from ..core import task, containers
 from ..util import regrid
@@ -54,12 +54,25 @@ class LoadTimeStreamSidereal(task.SingleTask):
     padding : float
         Extra amount of a sidereal day to pad each timestream by. Useful for
         getting rid of interpolation artifacts.
+    freq_physical : list
+        List of physical frequencies in MHz.
+        Given first priority.
+    channel_range : list
+        Range of frequency channel indices, either
+        [start, stop, step], [start, stop], or [stop]
+        is acceptable.  Given second priority.
+    channel_index : list
+        List of frequency channel indices.
+        Given third priority.
+    only_autos : bool
+        Only load the autocorrelations.
     """
 
     padding = config.Property(proptype=float, default=0.005)
 
-    freq_range = config.Property(proptype=list, default=[])
-    freq_index = config.Property(proptype=list, default=[])
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
 
     only_autos = config.Property(proptype=bool, default=False)
 
@@ -91,18 +104,17 @@ class LoadTimeStreamSidereal(task.SingleTask):
         self.filemap = mpiutil.world.bcast(filemap, root=0)
 
         # Set up frequency selection.
-        if self.freq_range and (len(self.freq_range) <= 3):
-            # First check if a range was specified in the form of a list.
-            # Either [start, stop, step], [start, stop], [stop] will work.
-            self.freq_sel = np.arange(*self.freq_range, dtype=np.int)
+        if self.freq_physical:
+            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+            self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ]))
 
-        elif self.freq_index:
-            # Next check if a list of indices was supplied.
-            self.freq_sel = self.freq_index
+        elif self.channel_range and (len(self.channel_range) <= 3):
+            self.freq_sel = range(*self.channel_range)
+
+        elif self.channel_index:
+            self.freq_sel = self.channel_index
 
         else:
-            # Otherwise set freq_sel to None, which will result in
-            # all frequencies being read.
             self.freq_sel = None
 
 
@@ -129,7 +141,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(dfiles)
-            prod_sel = np.array(data_quality._get_autos_index(rd.prod)[0])
+            prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load files
         ts = andata.CorrData.from_acq_h5(dfiles, distributed=True,
@@ -320,6 +332,9 @@ class SiderealRegridder(task.SingleTask):
         # Convert mask to number of samples
         if imask.dtype == np.uint8:
 
+            if mpiutil.rank0:
+                print "Converting weight into number of samples."
+
             # Extract number of samples per integration period
             max_nsamples = data.attrs['gpu.gpu_intergration_period'][0]
 
@@ -373,10 +388,9 @@ class SiderealRegridder(task.SingleTask):
         sdata.redistribute('freq')
         sdata.vis[:] = sts
         sdata.weight[:] = ni
-        if 'input' in data.flags:
-            sdata.input_flag[:] = data.flags['input']
-        else:
-            sdata.input_flag[:] = np.ones(len(sdata.input), dtype=np.bool)
+        if 'input_mask' in data.flags:
+            sdata.input_mask[:] = data.flags['input_mask'][:]
+
         sdata.attrs['csd'] = csd
         sdata.attrs['tag'] = 'csd_%i' % csd
 
@@ -396,6 +410,7 @@ class SiderealStacker(task.SingleTask):
     """
 
     stack = None
+    csd_list = None
 
     def process(self, sdata):
         """Stack up sidereal days.
@@ -408,27 +423,43 @@ class SiderealStacker(task.SingleTask):
 
         sdata.redistribute('freq')
 
+        input_csd = _ensure_list(sdata.attrs['csd'])
+
         if self.stack is None:
 
             self.stack = containers.SiderealStream(axes_from=sdata)
             self.stack.redistribute('freq')
 
-            self.stack.vis[:] = (sdata.vis[:] * sdata.weight[:])
+            self.stack.vis[:] = sdata.vis[:] * sdata.weight[:]
             self.stack.weight[:] = sdata.weight[:]
 
+            self.stack.input_mask[:] = sdata.input_mask[:]
+
+            self.csd_list = input_csd
+
+            units = sdata.vis.attrs.get('units')
+            if units:
+                self.stack.vis.attrs['units'] = units
+
             if mpiutil.rank0:
-                print "Starting stack with CSD:%i" % sdata.attrs['csd']
+                print("Starting stack with CSD: %s" %
+                        ', '.join(["%i" % csd for csd in input_csd]))
 
             return
 
         if mpiutil.rank0:
-            print "Adding CSD:%i to stack" % sdata.attrs['csd']
+            print("Adding to stack CSD: %s" %
+                        ', '.join(["%i" % csd for csd in input_csd]))
 
         # note: Eventually we should fix up gains
 
         # Combine stacks with inverse `noise' weighting
-        self.stack.vis[:] += (sdata.vis[:] * sdata.weight[:])
+        self.stack.vis[:] += sdata.vis[:] * sdata.weight[:]
         self.stack.weight[:] += sdata.weight[:]
+
+        self.stack.input_mask[:] &= sdata.input_mask[:]
+
+        self.csd_list += input_csd
 
     def process_finish(self):
         """Construct and emit sidereal stack.
@@ -439,11 +470,14 @@ class SiderealStacker(task.SingleTask):
             Stack of sidereal days.
         """
 
+        from ch_util import tools
+
         self.stack.attrs['tag'] = 'stack'
 
-        self.stack.vis[:] = np.where(self.stack.weight[:] == 0,
-                                     0.0,
-                                     self.stack.vis[:] / self.stack.weight[:])
+        self.stack.attrs['csd'] = np.array(self.csd_list)
+
+        self.stack.vis[:] *= tools.invert_no_zero(self.stack.weight[:])
+
 
         return self.stack
 
@@ -479,3 +513,13 @@ def _days_in_csd(day, se_csd, extra=0.005):
     etest = se_csd[:, 0] < day + 1 - extra
 
     return np.where(np.logical_and(stest, etest))[0]
+
+
+def _ensure_list(x):
+
+    if hasattr(x, '__iter__'):
+        y = [xx for xx in x]
+    else:
+        y = [x]
+
+    return y

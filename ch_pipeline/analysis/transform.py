@@ -102,72 +102,6 @@ class FrequencyRebin(task.SingleTask):
         return sb
 
 
-class FrequencyDownsample(task.SingleTask):
-    """Decrease the number of frequency channels by an integer factor.
-
-    Parameters
-    ----------
-    period : int
-        Downsampling factor.  Keep every 'period' frequency channel.
-    phase: int
-        Number of frequency channels to offset the downsampled sequence.  Integer from 0 to period-1.
-    """
-
-    period = config.Property(proptype=int, default=4)
-    phase = config.Property(proptype=int, default=0)
-
-    def process(self, ss):
-        """Take the input dataset and return a downsampled version.
-
-        Parameters
-        ----------
-        ss : SiderealStream
-
-        Returns
-        -------
-        ssd : SiderealStream
-        """
-
-        if 'freq' not in ss.index_map:
-            raise RuntimeError('Data does not have a frequency axis.')
-
-        # Get all frequencies onto same node
-        ss.redistribute('time')
-
-        # Extract the downsampled frequency centres and widths        
-        fc = ss.index_map['freq']['centre'][self.phase::self.period]
-        fw = ss.index_map['freq']['width'][self.phase::self.period]
-
-        freq_map = np.empty(fc.shape[0], dtype=ss.index_map['freq'].dtype)
-        freq_map['centre'] = fc
-        freq_map['width'] = fw
-
-        # Create new container for rebinned stream
-        if isinstance(ss, containers.ContainerBase):
-            ssd = ss.__class__(freq=freq_map, axes_from=ss)
-        elif isinstance(ss, andata.CorrData):
-            ssd = containers.make_empty_corrdata(freq=freq_map, axes_from=ss, distributed=True,
-                                                distributed_axis=2, comm=ss.comm)
-        else:
-            raise RuntimeError("I don't know how to deal with data type %s" % ss.__class__.__name__)
-
-        # Get all frequencies onto same node
-        ssd.redistribute('time')
-
-        # Copy over the tag attribute
-        ssd.attrs['tag'] = ss.attrs['tag']
-        
-        # Downsample the arrays
-        ssd.vis[:] = np.copy(ss.vis[self.phase::self.period])
-        ssd.gain[:] = np.copy(ss.gain[self.phase::self.period])
-        ssd.weight[:] = np.copy(ss.weight[self.phase::self.period])
-
-        # Redistribute over frequencies
-        ssd.redistribute('freq')
-
-        return ssd
-
-
 class CollateProducts(task.SingleTask):
     """Extract and order the correlation products for map-making.
 
@@ -211,7 +145,7 @@ class CollateProducts(task.SingleTask):
 
         # Figure the mapping between inputs for the beam transfers and the file
         try:
-            bt_keys = self.telescope.feeds
+            bt_keys = self.telescope.input_index
         except AttributeError:
             bt_keys = np.arange(self.telescope.nfeed)
 
@@ -289,11 +223,21 @@ class SelectFreq(task.SingleTask):
 
     Attributes
     ----------
-    frequencies : list
-        List of frequency indices.
+    freq_physical : list
+        List of physical frequencies in MHz.
+        Given first priority.
+    channel_range : list
+        Range of frequency channel indices, either
+        [start, stop, step], [start, stop], or [stop]
+        is acceptable.  Given second priority.
+    channel_index : list
+        List of frequency channel indices.
+        Given third priority.
     """
 
-    frequencies = config.Property(proptype=list)
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
 
     def process(self, data):
         """Selet a subset of the frequencies.
@@ -309,16 +253,32 @@ class SelectFreq(task.SingleTask):
             New container with trimmed frequencies.
         """
 
-        freq_map = data.index_map['freq'][self.frequencies]
+        freq_map = data.index_map['freq']
+
+        # Set up frequency selection.
+        if self.freq_physical:
+            newindex = sorted(set([np.argmin(np.abs(freq_map['centre'] - freq)) for freq in self.freq_physical]))
+
+        if self.channel_range and (len(self.channel_range) <= 3):
+            newindex = slice(*self.channel_range)
+
+        elif self.channel_index:
+            newindex = self.channel_index
+
+        else:
+            ValueError("Must specify either freq_physical, channel_range, or channel_index.")
+
+        freq_map = freq_map[newindex]
         data.redistribute(['ra', 'time'])
 
+        # Create new container with subset of frequencies
         newdata = data.__class__(freq=freq_map, axes_from=data, attrs_from=data)
         newdata.redistribute(['ra', 'time'])
 
         for name, dset in data.datasets.items():
 
             if 'freq' in dset.attrs['axis']:
-                newdata.datasets[name][:] = data.datasets[name][self.frequencies, ...]
+                newdata.datasets[name][:] = data.datasets[name][newindex, ...]
             else:
                 newdata.datasets[name][:] = data.datasets[name][:]
 
