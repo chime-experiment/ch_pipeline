@@ -248,7 +248,7 @@ class SiderealStream(ContainerBase):
             'distributed_axis': 'freq'
         },
 
-        'input_flag': {
+        'input_mask': {
             'axes': ['input'],
             'dtype': np.bool,
             'initialise': True,
@@ -291,7 +291,11 @@ class SiderealStream(ContainerBase):
             nfeed = inputs if isinstance(inputs, int) else len(inputs)
             kwargs['prod'] = np.array([[fi, fj] for fi in range(nfeed) for fj in range(fi, nfeed)])
 
+        # Initialize from parent class
         super(SiderealStream, self).__init__(*args, **kwargs)
+
+        # Default is set all inputs as good
+        self.input_mask[:].fill(True)
 
     @property
     def vis(self):
@@ -302,8 +306,8 @@ class SiderealStream(ContainerBase):
         return self.datasets['gain']
 
     @property
-    def input_flag(self):
-        return self.datasets['input_flag']
+    def input_mask(self):
+        return self.datasets['input_mask']
 
     @property
     def weight(self):
@@ -541,18 +545,6 @@ class CorrInputMonitor(ContainerBase):
             'initialise': True,
             'distributed': False,
             },
-        'position': {
-            'axes': ['input', 'coord'],
-            'dtype': np.float,
-            'initialise': False,
-            'distributed': False,
-            },
-        'expected_position': {
-            'axes': ['input', 'coord'],
-            'dtype': np.float,
-            'initialise': False,
-            'distributed': False,
-            },
         'freq_mask': {
             'axes': ['freq'],
             'dtype': np.bool,
@@ -563,6 +555,18 @@ class CorrInputMonitor(ContainerBase):
             'axes': ['freq'],
             'dtype': np.bool,
             'initialise': True,
+            'distributed': False,
+            },
+        'position': {
+            'axes': ['input', 'coord'],
+            'dtype': np.float,
+            'initialise': False,
+            'distributed': False,
+            },
+        'expected_position': {
+            'axes': ['input', 'coord'],
+            'dtype': np.float,
+            'initialise': False,
             'distributed': False,
             }
         }
@@ -585,7 +589,7 @@ class CorrInputMonitor(ContainerBase):
     @property
     def position(self):
         return self.datasets['position']
-        
+
     @property
     def expected_position(self):
         return self.datasets['expected_position']
@@ -616,19 +620,13 @@ class SiderealDayFlag(ContainerBase):
        good chime sidereal days.
     """
 
-    _axes = ('csd', 'input')
+    _axes = ('csd', )
 
     _dataset_spec = {
         'csd_flag': {
             'axes': ['csd'],
             'dtype': np.bool,
             'initialise': True,
-            'distributed': False,
-            },
-        'input_mask': {
-            'axes': ['csd', 'input'],
-            'dtype': np.bool,
-            'initialise': False,
             'distributed': False,
             }
         }
@@ -638,16 +636,8 @@ class SiderealDayFlag(ContainerBase):
         return self.datasets['csd_flag']
 
     @property
-    def input_mask(self):
-        return self.datasets['input_mask']
-
-    @property
     def csd(self):
         return self.index_map['csd']
-
-    @property
-    def input(self):
-        return self.index_map['input']
 
 
 
@@ -829,10 +819,150 @@ class PointSourceTransit(ContainerBase):
         return self.index_map['param_cov2']
 
 
+class SunTransit(ContainerBase):
+    """Parallel container for holding the results of a fit to a point source transit.
+    """
+
+    _axes = ('freq', 'input', 'time', 'pol_x', 'pol_y', 'coord', 'param')
+
+    _dataset_spec = {
+        'coord': {
+            'axes': ['time', 'coord'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': False,
+            },
+        'evalue_x': {
+            'axes': ['freq', 'pol_x', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'evalue_y': {
+            'axes': ['freq', 'pol_y', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'response': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'response_error': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'flag': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.bool,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'parameter': {
+            'axes': ['freq', 'input', 'param'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'parameter_cov': {
+            'axes': ['freq', 'input', 'param', 'param'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }
+        }
+
+    def __init__(self, *args, **kwargs):
+
+        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        kwargs['coord'] = np.array(['ha', 'dec', 'alt', 'az'])
+
+        super(SunTransit, self).__init__(*args, **kwargs)
+
+    @property
+    def coord(self):
+        return self.datasets['coord']
+
+    @property
+    def evalue_x(self):
+        return self.datasets['evalue_x']
+
+    @property
+    def evalue_y(self):
+        return self.datasets['evalue_y']
+
+    @property
+    def response(self):
+        return self.datasets['response']
+
+    @property
+    def response_error(self):
+        return self.datasets['response_error']
+
+    @property
+    def flag(self):
+        return self.datasets['flag']
+
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def time(self):
+        return self.index_map['time']
+
+    @property
+    def param(self):
+        return self.index_map['param']
+
+    @property
+    def ha(self):
+        ind = list(self.index_map['coord']).index('ha')
+        return self.datasets['coord'][:, ind]
+
+    @property
+    def dec(self):
+        ind = list(self.index_map['coord']).index('dec')
+        return self.datasets['coord'][:, ind]
+
+    @property
+    def alt(self):
+        ind = list(self.index_map['coord']).index('alt')
+        return self.datasets['coord'][:, ind]
+
+    @property
+    def az(self):
+        ind = list(self.index_map['coord']).index('az')
+        return self.datasets['coord'][:, ind]
+
+
 class RingMap(ContainerBase):
     """Container for holding multifrequency ring maps.
 
-    The maps are packed in format `[freq, pol, ra, EW beam, elevation]` where
+    The maps are packed in format `[freq, pol, ra, EW beam, el]` where
     the polarisations are Stokes I, Q, U and V.
 
     Parameters
@@ -853,12 +983,24 @@ class RingMap(ContainerBase):
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
-        }
+            },
+        'dirty_beam': {
+            'axes': ['freq', 'pol', 'ra', 'beam', 'el'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'rms': {
+            'axes': ['freq', 'pol', 'ra'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }
     }
 
-    def __init__(self, polarisation=True, *args, **kwargs):
-
-        kwargs['pol'] = np.array(['I', 'Q', 'U', 'V']) if polarisation else np.array(['I'])
+    def __init__(self, *args, **kwargs):
 
         super(RingMap, self).__init__(*args, **kwargs)
 
@@ -867,8 +1009,24 @@ class RingMap(ContainerBase):
         return self.index_map['freq']
 
     @property
+    def ra(self):
+        return self.index_map['ra']
+
+    @property
+    def el(self):
+        return self.index_map['el']
+
+    @property
     def map(self):
         return self.datasets['map']
+
+    @property
+    def rms(self):
+        return self.datasets['rms']
+
+    @property
+    def dirty_beam(self):
+        return self.datasets['dirty_beam']
 
 
 def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
