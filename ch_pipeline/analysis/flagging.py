@@ -17,9 +17,13 @@ Tasks
 
     RFIFilter
     ChannelFlagger
+    MonitorCorrInput
+    TestCorrInput
+    AccumulateCorrInputMask
+    ApplyCorrInputMask
+    ApplySiderealDayFlag
     BadNodeFlagger
     DayMask
-    SunClean
     MaskData
     MaskCHIMEData
 """
@@ -27,7 +31,7 @@ import os.path
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
-from ch_util import rfi, data_quality, tools
+from ch_util import rfi, data_quality, tools, ephemeris, cal_utils
 
 from ..core import containers, task
 
@@ -156,17 +160,23 @@ class ChannelFlagger(task.SingleTask):
         return timestream
 
 
-class MonitorCorrInputs(task.SingleTask):
+class MonitorCorrInput(task.SingleTask):
     """ Monitor good correlator inputs over several sidereal days.
 
     Parameters
     ----------
-    threshold : float
-        Flag a sidereal day as bad if the fraction of correlator
-        inputs powered ON that pass the test is less than threshold.
+    n_day_min : int
+        Do not apply a sidereal day flag if the number of days
+        in the pass is less than n_day_min.  Default is 3.
+
+    n_cut : int
+        Flag a sidereal day as bad if the number of correlator
+        inputs that are bad ONLY on this day is greater than n_cut.
+        Default is 5.
     """
 
-    threshold = config.Property(proptype=float, default=0.7)
+    n_day_min = config.Property(proptype=int, default=3)
+    n_cut = config.Property(proptype=int, default=5)
 
     def setup(self, files):
         """Divide list of files up into sidereal days.
@@ -178,7 +188,7 @@ class MonitorCorrInputs(task.SingleTask):
         """
 
         from sidereal import get_times, _days_in_csd
-        from ch_util import ephemeris, andata
+        from ch_util import andata
 
         self.files = np.array(files)
 
@@ -199,13 +209,13 @@ class MonitorCorrInputs(task.SingleTask):
             filemap = [ (day, _days_in_csd(day, se_csd, extra=0.005)) for day in days ]
 
             # Determine the time range for each day
-            timemap = [ (day, ephemeris.CSD_ZERO + 24.0 * 3600.0 * ephemeris.SIDEREAL_S * np.array([day, day+1]))
+            timemap = [ (day, ephemeris.csd_to_unix(np.array([day, day+1])))
                          for day in days ]
 
             # Extract the frequency and inputs for the first day
             data_r = andata.Reader(self.files[filemap[0][1]])
             input_map = data_r.input
-            freq = data_r.freq['centre']
+            freq = data_r.freq[:]
 
             ninput = len(input_map)
             nfreq = len(freq)
@@ -221,9 +231,9 @@ class MonitorCorrInputs(task.SingleTask):
                 elif np.sum(data_r.input['correlator_input'] != input_map['correlator_input']) > 0:
                     ValueError("Different corr inputs for csd %d and csd %d." % (fmap[0], filemap[0][0]))
 
-                if len(freq) != nfreq:
+                if len(data_r.freq) != nfreq:
                     ValueError("Differing number of frequencies for csd %d and csd %d." % (fmap[0], filemap[0][0]))
-                elif np.sum(data_r.freq['centre'] != freq) > 0:
+                elif np.sum(data_r.freq['centre'] != freq['centre']) > 0:
                     ValueError("Different frequencies for csd %d and csd %d." % (fmap[0], filemap[0][0]))
 
         # Broadcast results to all processes
@@ -250,14 +260,13 @@ class MonitorCorrInputs(task.SingleTask):
             'save' parameter in the configuration file.
         csd_flag : container.SiderealDayFlag
             Contains a mask that indicates bad sidereal days, determined as
-            days when the fraction of good correlator inputs is less than
-            'threshold'.  Note that this is not output to the pipeline.
+            days that contribute a large number of unique bad correlator
+            inputs.  Note that this is not output to the pipeline.
             It is ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        input_monitor_all : containers.CorrInputMonitor
-            Contains the correlator input mask and frequency mask
-            obtained from taking AND of the masks from the individual
-            sidereal days.
+        input_monitor_all : containers.CorrInputMask
+            Contains the correlator input mask obtained from taking AND
+            of the masks from the (good) sidereal days.
         """
 
         from ch_util import chan_monitor
@@ -272,10 +281,6 @@ class MonitorCorrInputs(task.SingleTask):
 
         # Create local arrays to hold results
         input_mask = np.ones((n_local, self.ninput), dtype=np.bool)
-        input_powered = np.ones((n_local, self.ninput), dtype=np.bool)
-        freq_mask = np.ones((n_local, self.nfreq), dtype=np.bool)
-        freq_powered = np.ones((n_local, self.nfreq), dtype=np.bool)
-
         good_day_flag = np.zeros(n_local, dtype=np.bool)
 
         # Loop over days
@@ -297,17 +302,14 @@ class MonitorCorrInputs(task.SingleTask):
                 continue
 
             # Accumulate flags over multiple days
-            input_mask[i_local, :] = cm.good_ipts
-            freq_mask[i_local, :] = cm.good_freqs
-            input_powered[i_local, :] = cm.pwds
-            freq_powered[i_local, :] = cm.gpu_node_flag
+            input_mask[i_local, :] = cm.good_ipts & cm.pwds
             good_day_flag[i_local] = True
 
             # If requested, write to disk
             if self.save:
 
                 # Create a container to hold the results
-                input_mon = containers.CorrInputMonitor(freq=cm.freqs, input=cm.input_map,
+                input_mon = containers.CorrInputMonitor(freq=self.freq, input=self.input_map,
                                                         distributed=False)
 
                 # Place the results in the container
@@ -340,41 +342,38 @@ class MonitorCorrInputs(task.SingleTask):
 
         # Gather the flags from all nodes
         input_mask_all = np.zeros((self.ndays, self.ninput), dtype=np.bool)
-        input_powered_all = np.zeros((self.ndays, self.ninput), dtype=np.bool)
-        freq_mask_all = np.zeros((self.ndays, self.nfreq), dtype=np.bool)
-        freq_powered_all = np.zeros((self.ndays, self.nfreq), dtype=np.bool)
         good_day_flag_all = np.zeros(self.ndays, dtype=np.bool)
 
         mpiutil.world.Allgather(input_mask, input_mask_all)
-        mpiutil.world.Allgather(input_powered, input_powered_all)
-        mpiutil.world.Allgather(freq_mask, freq_mask_all)
-        mpiutil.world.Allgather(freq_powered, freq_powered_all)
         mpiutil.world.Allgather(good_day_flag, good_day_flag_all)
 
-        # Look for bad days:
-        # Calculate the fraction of inputs that are good each day
-        n_good_input = np.sum(input_mask_all, axis=-1)
-        n_powered_input = np.sum(input_powered_all, axis=-1)
-
-        # Find days where the number of good correlator inputs is greater
-        # than some user specified fraction of the number of
-        # correlator inputs powered on
-        good_day_flag_all *= (n_good_input > self.threshold*n_powered_input)
-
         if not np.any(good_day_flag_all):
-            ValueError("More than %d%% of powered ON inputs flagged bad every day." % 100.0*(1.0 - self.threshold))
+            ValueError("Channel monitor failed for all days.")
+
+        # Find days where the number of correlator inputs that are bad
+        # ONLY for this day is greater than some user specified threshold
+        if np.sum(good_day_flag_all) >= max(2, self.n_day_min):
+
+            n_uniq_bad = np.zeros(self.ndays, dtype=np.int)
+            dindex = np.arange(self.ndays)[good_day_flag_all]
+
+            for ii, day in enumerate(dindex):
+                other_days = np.delete(dindex, ii)
+                n_uniq_bad[day] = np.sum(~input_mask_all[day, :] & np.all(input_mask_all[other_days, :], axis=0))
+
+            good_day_flag_all *= (n_uniq_bad <= self.n_cut)
+
+            if not np.any(good_day_flag_all):
+                ValueError("Significant number of new correlator inputs flagged bad each day.")
 
         # Write csd flag to file
         if self.save:
 
             # Create container
-            csd_flag = containers.SiderealDayFlag(input=self.input_map, csd=np.array([ tmap[0] for tmap in self.timemap ]))
+            csd_flag = containers.SiderealDayFlag(csd=np.array([ tmap[0] for tmap in self.timemap ]))
 
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag_all
-
-            csd_flag.add_dataset('input_mask')
-            csd_flag.input_mask[:] = input_mask_all
 
             csd_flag.attrs['tag'] = 'flag_csd'
 
@@ -383,18 +382,12 @@ class MonitorCorrInputs(task.SingleTask):
 
         # Take the product of the input mask for all days that made threshold cut
         input_mask = np.all(input_mask_all[good_day_flag_all, :], axis=0)
-        input_powered = np.all(input_powered_all[good_day_flag_all, :], axis=0)
-        freq_mask = np.all(freq_mask_all[good_day_flag_all, :], axis=0)
-        freq_powered = np.all(freq_powered_all[good_day_flag_all, :], axis=0)
 
         # Create a container to hold the results for the entire pass
-        input_mon = containers.CorrInputMonitor(freq=self.freq, input=self.input_map)
+        input_mon = containers.CorrInputMask(input=self.input_map)
 
         # Place the results for the entire pass in a container
         input_mon.input_mask[:] = input_mask
-        input_mon.input_powered[:] = input_powered
-        input_mon.freq_mask[:] = freq_mask
-        input_mon.freq_powered[:] = freq_powered
 
         input_mon.attrs['tag'] = 'for_pass'
 
@@ -406,7 +399,7 @@ class MonitorCorrInputs(task.SingleTask):
         return input_mon
 
 
-class FindGoodCorrInputs(task.SingleTask):
+class TestCorrInput(task.SingleTask):
     """Apply a series of tests to find the good correlator inputs.
 
     Parameters
@@ -456,6 +449,8 @@ class FindGoodCorrInputs(task.SingleTask):
         ----------
         timestream : andata.CorrData
             Apply series of tests to this timestream.
+        inputmap : list of :class:`CorrInput`s
+            A list of describing the inputs as they are in timestream.
 
         Returns
         -------
@@ -559,13 +554,23 @@ class FindGoodCorrInputs(task.SingleTask):
         return corr_input_test
 
 
-class AccumulateGoodCorrInputs(task.SingleTask):
+class AccumulateCorrInputMask(task.SingleTask):
     """ Find good correlator inputs over multiple sidereal days.
-        Also determine bad days as those with a lack of good
-        correlator inputs.
+
+    Parameters
+    ----------
+    n_day_min : int
+        Do not apply a sidereal day flag if the number of days
+        in the pass is less than n_day_min.  Default is 3.
+
+    n_cut : int
+        Flag a sidereal day as bad if the number of correlator
+        inputs that are uniquely flagged bad on that day is
+        greater than n_cut.  Default is 5.
     """
 
-    threshold = config.Property(proptype=float, default=0.7)
+    n_day_min = config.Property(proptype=int, default=3)
+    n_cut = config.Property(proptype=int, default=5)
 
     def __init__(self):
         """ Create empty list.  As we iterate through
@@ -605,30 +610,35 @@ class AccumulateGoodCorrInputs(task.SingleTask):
         """
 
         ninput = len(self.input)
+        ncsd = len(self._csd)
 
         input_mask_all = np.asarray(self._accumulated_input_mask)
 
-        # Calculate the fraction of inputs that are good each day
-        frac_good_input = np.sum(input_mask_all, axis=-1) / float(ninput)
+        good_day_flag = np.ones(ncsd, dtype=np.bool)
+        # Find days where the number of correlator inputs that are bad
+        # ONLY for this day is greater than some user specified threshold
+        if ncsd >= max(2, self.n_day_min):
 
-        # Find days where the fraction of good inputs
-        # is greater than the user specified threshold
-        good_day_flag = frac_good_input > self.threshold
+            n_uniq_bad = np.zeros(ncsd, dtype=np.int)
+            dindex = np.arange(ncsd)[good_day_flag]
 
-        if not np.any(good_day_flag):
-            ValueError("More than %d%% of inputs flagged bad every day." % 100.0*self.threshold)
+            for ii, day in enumerate(dindex):
+                other_days = np.delete(dindex, ii)
+                n_uniq_bad[day] = np.sum(~input_mask_all[day, :] & np.all(input_mask_all[other_days, :], axis=0))
+
+            good_day_flag *= (n_uniq_bad <= self.n_cut)
+
+            if not np.any(good_day_flag):
+                ValueError("Significant number of new correlator inputs flagged bad each day.")
 
         # Write csd flag to file
         if self.save:
 
             # Create container
-            csd_flag = containers.SiderealDayFlag(input=self.input, csd=np.array(self._csd))
+            csd_flag = containers.SiderealDayFlag(csd=np.array(self._csd))
 
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag
-
-            csd_flag.add_dataset('input_mask')
-            csd_flag.input_mask[:] = input_mask_all
 
             csd_flag.attrs['tag'] = 'flag_csd'
 
@@ -682,6 +692,8 @@ class ApplyCorrInputMask(task.SingleTask):
         timestream : andata.CorrData or containers.SiderealStream
         """
 
+        from ch_util import andata
+
         # Make sure that timestream is distributed over frequency
         timestream.redistribute('freq')
 
@@ -689,9 +701,19 @@ class ApplyCorrInputMask(task.SingleTask):
         weight = timestream.weight[:]
         tools.apply_gain(weight, self.input_mask[np.newaxis, :, np.newaxis], out=weight)
 
-        # Add flag dataset
-        flag_dataset = timestream.create_flag('input', data=self.input_mask, distributed=False)
-        flag_dataset.attrs['axis'] = ('input', )
+        # Add input_mask to flags or dataset (depending on input class)
+        if isinstance(timestream, andata.CorrData):
+            if 'input_mask' in timestream.flags:
+                timestream.flags['input_mask'][:] = self.input_mask
+            else:
+                flag_dataset = timestream.create_flag('input_mask', data=self.input_mask, distributed=False)
+                flag_dataset.attrs['axis'] = ('input', )
+
+        elif isinstance(timestream, containers.SiderealStream):
+            timestream.input_mask[:] = self.input_mask
+
+        else:
+            raise RuntimeError('Format of `timestream` argument is unknown.')
 
         # Return timestream
         return timestream
@@ -716,11 +738,11 @@ class ApplySiderealDayFlag(task.SingleTask):
 
         self.file_name = os.path.expandvars(os.path.expanduser(self.file_name))
 
-        csd_flag = containers.SiderealDayFlag.from_file(self.file_name, distributed=False)
+        cnt = containers.SiderealDayFlag.from_file(self.file_name, distributed=False)
 
         self.csd_dict = {}
-        for cc, csd in enumerate(csd_flag.csd[:]):
-            self.csd_dict[csd] = csd_flag.csd_flag[cc]
+        for cc, csd in enumerate(cnt.csd[:]):
+            self.csd_dict[csd] = cnt.csd_flag[cc]
 
     def process(self, timestream):
         """ If this sidereal day is flagged as good or
@@ -730,48 +752,51 @@ class ApplySiderealDayFlag(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData / containers.SiderealStream
 
         Returns
         -------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData / containers.SiderealStream or None
         """
 
-        # Is this csd in the specified file?
+        # Fetch the csd from the timestream attributes
         this_csd = timestream.attrs.get('csd')
 
+        # Is this csd specified in the file?
         if this_csd not in self.csd_dict:
 
-            if mpiutil.rank0:
-                if this_csd is None:
-                    print("Warning: input timestream does not have 'csd' attribute.  " +
-                           "Continue pipeline processing.")
-                else:
-                    print(("Warning: status of CSD %d not given in %s.  " +
-                           "Continue pipeline processing.") %
-                           (this_csd, self.file_name))
+            output = timestream
 
-            return timestream
+            if this_csd is None:
+                msg = ("Warning: input timestream does not have 'csd' attribute.  " +
+                       "Will continue pipeline processing.")
+            else:
+                msg = (("Warning: status of CSD %d not given in %s.  " +
+                        "Will continue pipeline processing.") %
+                        (this_csd, self.file_name))
 
         else:
 
+            # Is this csd flagged good?
             this_flag = self.csd_dict[this_csd]
 
             if this_flag:
+                output = timestream
 
-                if mpiutil.rank0:
-                    print(("CSD %d flagged good.  " +
-                           "Continue pipeline processing.") % this_csd)
-
-                return timestream
-
+                msg = (("CSD %d flagged good.  " +
+                        "Will continue pipeline processing.") % this_csd)
             else:
+                output = None
 
-                if mpiutil.rank0:
-                    print(("CSD %d flagged bad.  " +
-                           "Halt pipeline processing.") % this_csd)
+                msg = (("CSD %d flagged bad.  " +
+                        "Will halt pipeline processing.") % this_csd)
 
-                return None
+        # Print whether or not we will continue processing this csd
+        if mpiutil.rank0:
+            print msg
+
+        # Return input timestream or None
+        return output
 
 
 
@@ -906,8 +931,209 @@ class BadNodeFlagger(task.SingleTask):
         return timestream
 
 
+def daytime_flag(time):
+    """ Return a flag that indicates if the input times
+    occur during the day.
+
+    Parameters
+    ----------
+    time : float (UNIX time)
+
+    Returns
+    -------
+    flag : np.ndarray, dtype=np.bool
+    """
+
+    flag = np.zeros(len(time), dtype=np.bool)
+    rise = ephemeris.solar_rising(time[0] - 24.0*3600.0, end_time=time[-1])
+    for rr in rise:
+        ss = ephemeris.solar_setting(rr)[0]
+        flag |= ((time >= rr) & (time <= ss))
+
+    return flag
+
+
+def solar_transit_flag(time, nsig=5.0):
+    """ Return a flag that indicates if the input times
+    occur near sun transit.
+
+    Parameters
+    ----------
+    time : float (UNIX time)
+
+    Returns
+    -------
+    flag : np.ndarray, dtype=np.bool
+    """
+
+    import ephem
+
+    deg_to_sec = 3600.0 * ephemeris.SIDEREAL_S / 15.0
+
+    # Create boolean flag
+    flag = np.zeros(len(time), dtype=np.bool)
+
+    # Get position of sun at every time sample
+    ra, dec = [], []
+    obs, sun = ephemeris._get_chime(), ephem.Sun()
+    for tt in time:
+        obs.date = ephemeris.unix_to_ephem_time(tt)
+        sun.compute(obs)
+
+        ra.append(sun.ra)
+        dec.append(sun.dec)
+
+    # Estimate the amount of time the sun is in the primary beam
+    # as +/- 5 sigma, where sigma denotes the width of the
+    # primary beam.  We use the lowest frequency and E polarisation,
+    # since this is the most conservative (largest sigma).
+    window_sec = nsig*cal_utils.guess_fwhm(400.0, pol='E', dec=np.median(dec), sigma=True)*deg_to_sec
+
+    # Sun transit
+    transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)
+    for mid in transit_times:
+
+        # Update peak location based on rotation of cylinder
+        obs.date = ephemeris.unix_to_ephem_time(mid)
+        sun.compute(obs)
+
+        peak_ra = ephemeris.peak_RA(sun, deg=True)
+        mid += (peak_ra - np.degrees(sun.ra))*deg_to_sec
+
+        # Flag +/- window_sec around peak location
+        begin = mid - window_sec
+        end = mid + window_sec
+        flag |= ((time >= begin) & (time <= end))
+
+    return flag
+
+
+def taper_mask(mask, nwidth, outer=False):
+
+    num = len(mask)
+    if outer:
+        tapered_mask = 1.0 - mask.astype(np.float)
+    else:
+        tapered_mask = mask.astype(np.float)
+
+    taper = np.hanning(2*nwidth - 1)
+
+    dmask = np.diff(tapered_mask)
+    transition = np.where(dmask != 0)[0]
+
+    for tt in transition:
+        if dmask[tt] > 0:
+            ind = np.arange(tt, tt+nwidth)
+            tapered_mask[ind % num] *= taper[:nwidth]
+        else:
+            ind = np.arange(tt+2-nwidth, tt+2)
+            tapered_mask[ind % num] *= taper[-nwidth:]
+
+    if outer:
+        tapered_mask = 1.0 - tapered_mask
+
+    return tapered_mask
+
+
 class DayMask(task.SingleTask):
-    """Crudely simulate a masking out of the daytime data.
+    """Mask out the daytime data.
+
+    Attributes
+    ----------
+    zero_data : bool, optional
+        Zero the data in addition to modifying the noise weights
+        (default is False).
+    remove_average : bool, optional
+        Estimate and remove the mean level from each visibilty. This estimate
+        does not use data from the masked region. (default is False)
+    only_sun : bool, optional
+        If only_sun is True, then a window of time around sun transit is flagged as bad.  
+        If only_sun is False, then all day time data is flagged as bad.  (default is False)
+    taper_width : float, optional
+        Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from 
+        masked to unmasked regions using a cosine function.  Default is 0.0 (no taper).
+    outer_taper : bool, optional
+        If outer_taper is True, then the taper occurs in the unmasked region.  
+        If outer_taper is False, then the taper occurs in the masked region.  
+        Default is False.
+    
+    """
+
+    zero_data = config.Property(proptype=bool, default=False)
+    remove_average = config.Property(proptype=bool, default=False)
+    only_sun = config.Property(proptype=bool, default=False)
+    taper_width = config.Property(proptype=float, default=0.0)
+    outer_taper = config.Property(proptype=bool, default=True)
+
+    def process(self, sstream):
+        """Apply a day time mask.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream
+            Unmasked sidereal stack.
+
+        Returns
+        -------
+        mstream : containers.SiderealStream
+            Masked sidereal stream.
+        """
+
+        # Determine the flagging function to use
+        if self.only_sun:
+            flag_function = solar_transit_flag
+        else:
+            flag_function = daytime_flag
+
+        # Redistribute over frequency
+        sstream.redistribute('freq')
+
+        # Get flag that indicates day times (RAs)
+        if hasattr(sstream, 'time'):
+            time = sstream.time
+            flag = flag_function(time)
+
+            ntaper = int(self.taper_width / np.abs(np.median(np.diff(time))))
+
+        else:
+            csd = sstream.attrs['csd']
+            ra = sstream.index_map['ra'][:]
+
+            if hasattr(csd, '__iter__'):
+                flag = np.zeros(len(ra), dtype=np.bool)
+                for cc in csd:
+                    flag |= flag_function(ephemeris.csd_to_unix(cc + ra/360.0))
+            else:
+                flag = flag_function(ephemeris.csd_to_unix(csd + ra/360.0))
+
+            ntaper = int(self.taper_width / np.abs(np.median(np.diff(ra))))
+
+        # If requested, estimate and subtract the mean level
+        if self.remove_average and not np.all(flag):
+            if mpiutil.rank0:
+                print("Subtracting mean visibility.")
+            sstream.vis[:] -= np.mean(sstream.vis[..., ~flag], axis=-1)[..., np.newaxis]
+
+        # Apply the mask
+        if np.any(flag):
+
+            # If requested, apply taper.
+            if ntaper > 0:
+                flag = taper_mask(flag, ntaper, outer=self.outer_taper)
+
+            # Apply the mask to the weights
+            sstream.weight[:] *= (1.0 - flag)
+
+            # If requested, apply the mask to the data
+            if self.zero_data:
+                sstream.vis[:] *= (1.0 - flag)
+
+        # Return masked sidereal stream
+        return sstream
+
+
+class MaskRA(task.SingleTask):
+    """Mask out a range in right ascension.
 
     Attributes
     ----------
@@ -980,136 +1206,6 @@ class DayMask(task.SingleTask):
         sstream.weight[:] *= mask**2
 
         return sstream
-
-
-class SunClean(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location.
-
-    Optionally flag out all data around transit, and sunrise/sunset.
-
-    Attributes
-    ----------
-    flag_time : float, optional
-        Flag out time around sun rise/transit/set. Should be set in degrees. If
-        :obj:`None` (default), then don't flag at all.
-    """
-
-    flag_time = config.Property(proptype=float, default=None)
-
-    def setup(self, inputmap):
-        self.inputmap = inputmap
-
-    def process(self, sstream):
-        """Apply a day time mask.
-
-        Parameters
-        ----------
-        sstream : containers.SiderealStream
-            Unmasked sidereal stack.
-
-        Returns
-        -------
-        mstream : containers.SiderealStream
-            Masked sidereal stream.
-        """
-
-        inputmap = self.inputmap
-
-        from ch_util import ephemeris
-        import ephem
-
-        sstream.redistribute('freq')
-
-        def ra_dec_of(body, time):
-            obs = ephemeris._get_chime()
-            obs.date = ephemeris.unix_to_ephem_time(time)
-
-            body.compute(obs)
-
-            return body.ra, body.dec, body.alt
-
-        # Get array of CSDs for each sample
-        ra = sstream.index_map['ra'][:]
-        csd = sstream.attrs['csd'] + ra / 360.0
-
-        # Get position of sun at every time sample
-        times = ephemeris.csd_to_unix(csd)
-        sun_pos = np.array([ra_dec_of(ephem.Sun(), t) for t in times])
-
-        # Get hour angle and dec of sun, in radians
-        ha = 2 * np.pi * (ra / 360.0) - sun_pos[:, 0]
-        dec = sun_pos[:, 1]
-        el = sun_pos[:, 2]
-
-        # Construct lengths for each visibility and determine what polarisation combination they are
-        feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
-
-        feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in sstream.index_map['prod'][:]]
-        pol_ind = np.array([ 2 * tools.is_chime_y(fi) + tools.is_chime_y(fj) for fi, fj in feed_list])
-
-        # Initialise new container
-        sscut = sstream.__class__(axes_from=sstream, attrs_from=sstream)
-        sscut.redistribute('freq')
-
-        wv = 3e2 / sstream.index_map['freq']['centre']
-
-        # Iterate over frequencies and polarisations to null out the sun
-        for lfi, fi in sstream.vis[:].enumerate(0):
-
-            # Get the baselines in wavelengths
-            u = vis_pos[:, 0] / wv[fi]
-            v = vis_pos[:, 1] / wv[fi]
-
-            # Calculate the phase that the sun would have using the fringestop routine
-            fsphase = tools.fringestop_phase(ha[np.newaxis, :], np.radians(ephemeris.CHIMELATITUDE),
-                                             dec[np.newaxis, :], u[:, np.newaxis], v[:, np.newaxis])
-
-            # Calculate the visibility vector for the sun
-            sun_vis = fsphase.conj() * (el > 0.0)
-
-            # Mask out the auto-correlations
-            sun_vis *= np.logical_or(u != 0.0, v != 0.0)[:, np.newaxis]
-
-            # Copy over the visiblities and weights
-            vis = sstream.vis[fi]
-            weight = sstream.weight[fi]
-            sscut.vis[fi] = vis
-            sscut.weight[fi] = weight
-
-            # Iterate over polarisations to do projection independently for each.
-            # This is needed because of the different beams for each pol.
-            for pol in range(4):
-
-                # Mask out other polarisations in the visibility vector
-                sun_vis_pol = sun_vis * (pol_ind == pol)[:, np.newaxis]
-
-                # Calculate various projections
-                vds = (vis * sun_vis_pol.conj() * weight).sum(axis=0)
-                sds = (sun_vis_pol * sun_vis_pol.conj() * weight).sum(axis=0)
-                isds = tools.invert_no_zero(sds)
-
-                # Subtract sun contribution from visibilities and place in new array
-                sscut.vis[fi] -= sun_vis_pol * vds * isds
-
-        # If needed mask out the regions around sun rise, set and transit
-        if self.flag_time is not None:
-
-            # Find the RAs of each event
-            transit_ra = ephemeris.transit_RA(ephemeris.solar_transit(times[0], times[-1]))
-            rise_ra = ephemeris.transit_RA(ephemeris.solar_rising(times[0], times[-1]))
-            set_ra = ephemeris.transit_RA(ephemeris.solar_setting(times[0], times[-1]))
-
-            # Construct a mask for each
-            rise_mask = ((ra - rise_ra) % 360.0) > self.flag_time
-            set_mask = ((ra - set_ra + self.flag_time) % 360.0) > self.flag_time
-            transit_mask = ((ra - transit_ra + self.flag_time / 2) % 360.0) > self.flag_time
-
-            # Combine the masks and apply to data
-            mask = np.logical_and(rise_mask, np.logical_and(set_mask, transit_mask))
-            sscut.weight[:] *= mask
-
-        return sscut
 
 
 class MaskData(task.SingleTask):
