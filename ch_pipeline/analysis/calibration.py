@@ -31,6 +31,7 @@ from ch_util import ephemeris
 from ch_util import ni_utils
 from ch_util import data_quality
 from ch_util import cal_utils
+from ch_util import fluxcat
 
 from ..core import containers, task
 from ..util import _fast_tools
@@ -445,27 +446,58 @@ class GatedNoiseCalibration(task.SingleTask):
         return gain_data
 
 
+def contiguous_flag(flag, centre=None):
+
+    nelem = flag.shape[-1]
+    shp = flag.shape[:-1]
+
+    if centre is None:
+        centre = nelem / 2
+
+    for index in np.ndindex(*shp):
+
+        for ii in range(centre, nelem, 1):
+            if not flag[index][ii]:
+                flag[index][ii:] = False
+                continue
+
+        for ii in range(centre, -1, -1):
+            if not flag[index][ii]:
+                flag[index][:ii] = False
+                continue
+
+    return flag
+
+
+
 class SiderealCalibration(task.SingleTask):
     """Use point source as a calibrator for a sidereal stack.
 
     Attributes
     ----------
-    source : str, default CygA
+    source : str
         Name of the point source to use as calibrator.
-    model_fit: bool, default False
+        Default CygA.
+    model_fit : bool
         Fit a model to the point source transit.
-    threshold: float, default 5
+        Default False.
+    use_peak : bool
+        Relevant if model_fit is True.  If set to True,
+        estimate the gain as the response at the
+        actual peak location. If set to False, estimate
+        the gain as the response at the expected peak location.
+        Default False.
+    threshold : float
         Relevant if model_fit is True.  The model is only fit to
         time samples with dynamic range greater than threshold.
+        Default is 5.
+
     """
 
     source = config.Property(proptype=str, default='CygA')
     model_fit = config.Property(proptype=bool, default=False)
-    threshold = config.Property(proptype=float, default=5.0)
-
-    _source_dict = {'CygA': ephemeris.CygA,
-                    'CasA': ephemeris.CasA,
-                    'TauA': ephemeris.TauA}
+    use_peak = config.Property(proptype=bool, default=False)
+    threshold = config.Property(proptype=float, default=3.0)
 
     def process(self, sstream, inputmap):
         """Determine calibration from a timestream.
@@ -493,20 +525,17 @@ class SiderealCalibration(task.SingleTask):
         freq = sstream.freq['centre'][sfreq:efreq]
 
         # Fetch source
-        source = self._source_dict[self.source]
-
-        _PF_ROT = np.radians(1.986)     # Rotation angle of pathfinder
-        _PF_LAT = np.radians(49.4991)   # Latitude of pathfinder
+        source = ephemeris.source_dictionary[self.source]
 
         # Estimate the RA at which the transiting source peaks
-        peak_ra = source._ra + np.tan(_PF_ROT) * (source._dec - _PF_LAT) / np.cos(_PF_LAT)
+        peak_ra = ephemeris.peak_RA(source, deg=True)
 
         # Find closest array index
-        idx = np.abs(sstream.ra - np.degrees(peak_ra)).argmin()
+        idx = np.argmin(np.abs(sstream.ra - peak_ra))
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 6.5 * np.cos(source._dec) / np.cos(_PF_LAT)
+        slice_width_deg = 3.0*cal_utils.guess_fwhm(400.0, pol='E', dec=source._dec, sigma=True)
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -516,9 +545,9 @@ class SiderealCalibration(task.SingleTask):
 
         nra = vis_slice.shape[-1]
 
-        # Determine good inputs, as indicated by nonzero weight in auto correlation
+        # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[sstream.input_flag[:]]
+        good_input = np.arange(nfeed, dtype=np.int)[sstream.input_mask[:]]
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp) and (idx in good_input)])
@@ -530,7 +559,7 @@ class SiderealCalibration(task.SingleTask):
 
         # Extract the diagonal (to be used for weighting)
         # prior to differencing on-source and off-source
-        norm = (_extract_diagonal(vis_slice, axis=1).real)**0.5
+        norm = np.sqrt(_extract_diagonal(vis_slice, axis=1).real)
         norm = tools.invert_no_zero(norm)
 
         # Subtract the average visibility at the start and end of the slice (off source)
@@ -549,8 +578,7 @@ class SiderealCalibration(task.SingleTask):
         evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
 
         # Extract flux density of the source
-        ttrans = ephemeris.CSD_ZERO + (sstream.attrs['csd'] + ra_slice[slice_centre]/360.0)*(24.0 * 3600.0 * ephemeris.SIDEREAL_S)
-        rt_flux_density = np.sqrt(cal_utils.get_source_flux_density(freq, self.source, time=ttrans))
+        rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict(freq))
 
         # Divide by the flux density of the point source
         # to convert the response and response_error into
@@ -574,17 +602,23 @@ class SiderealCalibration(task.SingleTask):
         if self.model_fit:
 
             # Only fit ra values above the specified dynamic range threshold
+            # that are contiguous about the expected peak position.
             fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
-            fit_flag[:, xfeeds, :] = (dr_x > self.threshold)[:, np.newaxis, :]
-            fit_flag[:, yfeeds, :] = (dr_y > self.threshold)[:, np.newaxis, :]
+            fit_flag[:, xfeeds, :] = contiguous_flag(dr_x > self.threshold, centre=slice_centre)[:, np.newaxis, :]
+            fit_flag[:, yfeeds, :] = contiguous_flag(dr_y > self.threshold, centre=slice_centre)[:, np.newaxis, :]
 
             # Fit model for the complex response of each feed to the point source
             param, param_cov = cal_utils.fit_point_source_transit(ra_slice, resp, resp_err, flag=fit_flag)
 
             # Overwrite the initial gain estimates for frequencies/feeds
             # where the model fit was successful
-            gain = np.where(np.isnan(param[:,:,0]), gain,
-                            param[:,:,0]*np.exp(1.0j*param[:,:,-2]*np.pi/180.0))
+            if self.use_peak:
+                gain = np.where(np.isnan(param[:,:,0]), gain,
+                                param[:,:,0]*np.exp(1.0j*np.deg2rad(param[:,:,-2])))
+            else:
+                for index in np.ndindex(nfreq, nfeed):
+                    if np.all(np.isfinite(param[index])):
+                        gain[index] = cal_utils.model_point_source_transit(peak_ra, *param[index])
 
             # Create container to hold results of fit
             gain_data = containers.PointSourceTransit(ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds,
@@ -608,7 +642,7 @@ class SiderealCalibration(task.SingleTask):
             gain_data = containers.StaticGainData(axes_from=sstream)
 
         # Combine dynamic range estimates for both polarizations
-        dr = np.minimum(dr_x[:,slice_centre], dr_y[:,slice_centre])
+        dr = np.minimum(dr_x[:, slice_centre], dr_y[:, slice_centre])
 
         # Copy to container all quantities that are common to both
         # StaticGainData and PointSourceTransit containers
@@ -620,6 +654,10 @@ class SiderealCalibration(task.SingleTask):
         # Update units and unit conversion
         gain_data.gain.attrs['units'] = unit_in + ' / ' + unit_out
         gain_data.gain.attrs['converts_units_to'] = 'Jy'
+
+        # Add attribute with the name of the point source
+        # that was used for calibration
+        gain_data.attrs['source'] = self.source
 
         # Return gain data
         return gain_data
@@ -701,7 +739,8 @@ class ApplyGain(task.SingleTask):
         gain_arr = np.nan_to_num(gain_arr)
 
         # If requested, scale the weights
-        if self.update_weight and (tstream.weight.dtype == np.float):
+        if self.update_weight:
+            print "Applying gain to weight."
             tools.apply_gain(tstream.weight[:], np.abs(gain_arr)**2, out=tstream.weight[:])
 
         # Invert the gains if needed
