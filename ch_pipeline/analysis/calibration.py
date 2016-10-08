@@ -578,7 +578,7 @@ class SiderealCalibration(task.SingleTask):
         evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
 
         # Extract flux density of the source
-        rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict(freq))
+        rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict_flux(freq))
 
         # Divide by the flux density of the point source
         # to convert the response and response_error into
