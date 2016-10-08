@@ -1029,6 +1029,61 @@ class RingMap(ContainerBase):
         return self.datasets['dirty_beam']
 
 
+class Photometry(ContainerBase):
+    """Parallel container for holding photometry extracted from a map.
+    """
+
+    _axes = ('freq', 'pol', 'param', 'source')
+
+    _dataset_spec = {
+        'parameter': {
+            'axes': ['freq', 'pol', 'param', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'parameter_cov': {
+            'axes': ['freq', 'pol', 'param', 'param', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'rms': {
+            'axes': ['freq', 'pol', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }
+    }
+
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def rms(self):
+        return self.datasets['rms']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def param(self):
+        return self.index_map['param']
+
+    @property
+    def source(self):
+        return self.index_map['source']
+
+
 def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
                         distributed=True, distributed_axis=0, comm=None):
     """Make an empty CorrData (i.e. timestream) container.
