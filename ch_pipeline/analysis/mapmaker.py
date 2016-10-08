@@ -296,10 +296,33 @@ class RingMapMaker(task.SingleTask):
 
     Attributes
     ----------
-    weighting : one of ['natural']
+    npix : int
+        Number of map pixels in the el dimension.  Default is 512.
+
+    weighting : string, one of 'uniform', 'natural', 'inverse_variance'
+        How to weight the non-redundant baselines:
+            'uniform' - all baselines given equal weight
+            'natural' - each baseline weighted by its redundancy
+            'inverse_variance' - each baselined weighted by the
+                                 inverse variance of visibility
+
+    intracyl : bool
+        Include intracylinder baselines in the calculation.
+        Default is True.
+
+    abs_map : bool
+        Only relevant if intracyl is False.  Take the absolute value
+        of the beams instead of the real component.  Default is True.
     """
 
     npix = config.Property(proptype=int, default=512)
+
+    weighting = config.Property(proptype=str, default='natural')
+
+    intracyl = config.Property(proptype=bool, default=True)
+
+    abs_map = config.Property(proptype=bool, default=True)
+
 
     def setup(self, bt):
         """Set the beamtransfer matrices to use.
@@ -314,7 +337,7 @@ class RingMapMaker(task.SingleTask):
         self.beamtransfer = bt
 
     def process(self, sstream):
-        """Perform the m-mode transform.
+        """Computes the ringmap.
 
         Parameters
         ----------
@@ -323,8 +346,10 @@ class RingMapMaker(task.SingleTask):
 
         Returns
         -------
-        bfmaps : containers.RingMap
+        rm : containers.RingMap
         """
+
+        from ch_util import tools
 
         tel = self.beamtransfer.telescope
 
@@ -333,63 +358,131 @@ class RingMapMaker(task.SingleTask):
 
         nfreq = sstream.vis.local_shape[0]
         nra = len(sstream.ra)
+
+        # Define several variables describing the baseline configuration.
+        # Currently pathfinder specific.
         nfeed = 64  # Fixed for pathfinder
-        ncyl = 2
-        sp = 0.3048
         nvis_1d = 2 * nfeed - 1
+        sp = 0.3048
+        ncyl = 1 + self.intracyl
+        nbeam = 2 * ncyl - 1
+
+        func = np.abs if self.abs_map else np.real
 
         # Construct mapping from vis array to unpacked 2D grid
         feed_list = [ (tel.feeds[fi], tel.feeds[fj]) for fi, fj in sstream.index_map['prod'][:]]
         feed_ind = [ ( 2 * int(fi.pol == 'S') + int(fj.pol == 'S'),
                        fi.cyl - fj.cyl, int(np.round((fi.pos - fj.pos) / sp))) for fi, fj in feed_list]
 
+        # Define polarisation axis
+        pol = np.array([x + y for x in ['E', 'S'] for y in ['E', 'S']])
+        npol = len(pol)
+
         # Empty array for output
-        vdr = np.zeros((nfreq, 4, nra, ncyl, nvis_1d), dtype=np.complex128)
+        vdr = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.complex128)
+        wgh = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
+        smp = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
 
         # Unpack visibilities into new array
         for vis_ind, ind in enumerate(feed_ind):
 
             p_ind, x_ind, y_ind = ind
 
-            w = tel.redundancy[vis_ind]
+            # Handle different options for weighting
+            if self.weighting == 'uniform':
+                w = 1.0
 
-            if x_ind == 0:
-                vdr[:, p_ind, :, x_ind, y_ind] = w * sstream.vis[:, vis_ind]
-                vdr[:, p_ind, :, x_ind, -y_ind] = w * sstream.vis[:, vis_ind].conj()
+            elif self.weighting  == 'natural':
+                w = tel.redundancy[vis_ind]
+
+            elif self.weighting == 'inverse_variance':
+                w = sstream.weight[:, vis_ind]
+
             else:
-                vdr[:, p_ind, :, x_ind, y_ind] = w * sstream.vis[:, vis_ind]
+                KeyError('Do not recognize requested weighting: %s' % self.weighting)
+
+            # Unpack visibilities
+            if (x_ind == 0) and self.intracyl:
+                vdr[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
+                vdr[:, p_ind, :, x_ind, -y_ind] = sstream.vis[:, vis_ind].conj()
+
+                wgh[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
+                wgh[:, p_ind, :, x_ind, -y_ind] = sstream.weight[:, vis_ind]
+
+                smp[:, p_ind, :, x_ind, y_ind] = w
+                smp[:, p_ind, :, x_ind, -y_ind] = w
+
+            else:
+                vdr[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.vis[:, vis_ind]
+
+                wgh[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.weight[:,vis_ind]
+
+                smp[:, p_ind, :, x_ind % ncyl, y_ind] = w
 
         # Remove auto-correlations
-        vdr[..., 0, 0] = 0.0
+        if self.intracyl:
+            smp[..., 0, 0] = 0.0
+
+        # Normalize the weighting function
+        coeff = np.full(ncyl, 2.0, dtype=np.float)
+        coeff[0] -= self.intracyl
+
+        smp *= tools.invert_no_zero(np.sum(np.dot(coeff, smp), axis=-1))[..., np.newaxis, np.newaxis]
 
         # Construct phase array
-        sin_el = np.linspace(-1.0, 1.0, self.npix)
+        el = np.linspace(-1.0, 1.0, self.npix)
+
         vis_pos_1d = np.fft.fftfreq(nvis_1d, d=(1.0 / (nvis_1d * sp)))
 
         # Create empty ring map
-        rm = containers.RingMap(beam=(2 * ncyl - 1), el=self.npix, polarisation=True, axes_from=sstream)
+        rm = containers.RingMap(beam=nbeam, el=el, pol=pol, axes_from=sstream)
         rm.redistribute('freq')
 
+        # Add datasets
+        rm.add_dataset('rms')
+        rm.add_dataset('dirty_beam')
+
+        # Estimate RMS thermal noise in ring map
+        rm.rms[:] = np.sqrt(np.sum(np.dot(coeff, tools.invert_no_zero(wgh) * smp**2.0), axis=-1))
+
+        # Loop over local frequencies and fill ring map
         for lfi, fi in sstream.vis[:].enumerate(0):
 
-            # Get the current freq (this try... except clause can be removed,
-            # its just to workaround a now fixed bug in SelectProductsRedundant)
-            try:
-                fr = sstream.freq['centre'][fi]
-            except:
-                fr = np.linspace(800.0, 400.0, 1024, endpoint=True).reshape(-1, 4).mean(axis=1)[sstream.freq[fi]]
+            # Get the current freq
+            fr = sstream.freq['centre'][fi]
 
             wv = 3e2 / fr
 
-            pa = np.exp(-2.0J * np.pi * vis_pos_1d[np.newaxis, :] * sin_el[:, np.newaxis] / wv)
+            # Create array that will be used for the inverse
+            # discrete Fourier transform in el direction
+            pa = np.exp(2.0J * np.pi * vis_pos_1d[:, np.newaxis] * el[np.newaxis, :] / wv)
 
-            bfm = np.fft.irfft(np.dot(vdr[lfi], pa.T.conj()), 2 * ncyl - 1, axis=2)
+            # Compute ring map and dirty beam
+            if self.intracyl:
+                bfm = np.fft.irfft(np.dot(smp[lfi] * vdr[lfi], pa), nbeam, axis=2) * nbeam
+                sb = np.fft.irfft(np.dot(smp[lfi], pa), nbeam, axis=2) * nbeam
+
+            else:
+                bfm = 2.0 * func(np.dot(smp[lfi] * vdr[lfi], pa))
+                sb = 2.0 * func(np.dot(smp[lfi], pa))
+
+            # Save to container
             rm.map[fi] = bfm
+            rm.dirty_beam[fi] = sb
 
         # Copy units
         units = sstream.vis.attrs.get('units')
-        if units:
+        if units is not None:
             rm.map.attrs['units'] = units
+
+        # Transfer over attributes
+        tag = sstream.attrs.get('tag')
+        if tag is not None:
+            rm.attrs['tag'] = tag
+
+        csd = sstream.attrs.get('csd')
+        if csd is not None:
+            rm.attrs['csd'] = csd
 
         return rm
 
