@@ -891,7 +891,7 @@ class BadNodeFlagger(task.SingleTask):
 
     nodes = config.Property(proptype=list, default=[])
 
-    flag_freq_zero = config.Property(proptype=bool, default=True)
+    flag_freq_zero = config.Property(proptype=bool, default=False)
 
     def process(self, timestream):
         """Flag out bad nodes by giving them zero weight.
@@ -905,18 +905,41 @@ class BadNodeFlagger(task.SingleTask):
         flagged_timestream : same type as timestream
         """
 
-        # Redistribute over time
-        timestream.redistribute(['time', 'gated_time0'])
+        import scipy.signal
+
+        # Redistribute over frequency
+        timestream.redistribute('freq')
 
         # Extract autocorrelation indices
-        auto_pi, _ = data_quality._get_autos_index(timestream.index_map['prod'])
+        auto_pi = np.array([ ii for (ii, pp) in enumerate(timestream.index_map['prod']) if pp[0] == pp[1] ])
 
+        # Create bad node flag by checking for frequencies/time samples where
+        # the autocorrelations are all zero
         good_freq_flag = np.any(timestream.vis[:, auto_pi, :].real > 0.0, axis=1)
+
+        # Add inverse radiometer test to bad node flag
+        if timestream.weight.dtype == np.float32:
+            print "Applying radiometer bad node flagger."
+
+            # Loop over frequencies
+            for lfi, fi in timestream.vis[:].enumerate(0):
+
+                avar = 0.5*np.diff(timestream.vis[fi][auto_pi, :].real, axis=-1)**2
+                weight = timestream.weight[fi][auto_pi, :-1]
+                ratio = np.median(weight*avar, axis=0)
+                ratio = scipy.signal.medfilt(ratio, kernel_size=21)
+
+                good_freq_flag[lfi, :-1] &= (ratio > 0.5)
+
+        # Apply bad node flag
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
 
         # If requested, flag the first frequency
         if self.flag_freq_zero:
             timestream.weight[0] = 0
+
+        # Redistribute over time
+        timestream.redistribute(['time', 'gated_time0'])
 
         # Manually flag frequencies corresponding to specific GPU nodes
         for node in self.nodes:
@@ -1047,16 +1070,16 @@ class DayMask(task.SingleTask):
         Estimate and remove the mean level from each visibilty. This estimate
         does not use data from the masked region. (default is False)
     only_sun : bool, optional
-        If only_sun is True, then a window of time around sun transit is flagged as bad.  
+        If only_sun is True, then a window of time around sun transit is flagged as bad.
         If only_sun is False, then all day time data is flagged as bad.  (default is False)
     taper_width : float, optional
-        Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from 
+        Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from
         masked to unmasked regions using a cosine function.  Default is 0.0 (no taper).
     outer_taper : bool, optional
-        If outer_taper is True, then the taper occurs in the unmasked region.  
-        If outer_taper is False, then the taper occurs in the masked region.  
-        Default is False.
-    
+        If outer_taper is True, then the taper occurs in the unmasked region.
+        If outer_taper is False, then the taper occurs in the masked region.
+        Default is True.
+
     """
 
     zero_data = config.Property(proptype=bool, default=False)
