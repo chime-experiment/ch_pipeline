@@ -297,8 +297,9 @@ class MonitorCorrInput(task.SingleTask):
             # Run the full test
             try:
                 cm.full_check()
-            except RuntimeError:
+            except (RuntimeError, ValueError) as error:
                 # No sources available for this csd
+                print("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
                 continue
 
             # Accumulate flags over multiple days
@@ -890,6 +891,7 @@ class BadNodeFlagger(task.SingleTask):
     """
 
     nodes = config.Property(proptype=list, default=[])
+    nodes_by_acq = config.Property(proptype=dict, default={})
 
     flag_freq_zero = config.Property(proptype=bool, default=False)
 
@@ -917,20 +919,6 @@ class BadNodeFlagger(task.SingleTask):
         # the autocorrelations are all zero
         good_freq_flag = np.any(timestream.vis[:, auto_pi, :].real > 0.0, axis=1)
 
-        # Add inverse radiometer test to bad node flag
-        if timestream.weight.dtype == np.float32:
-            print "Applying radiometer bad node flagger."
-
-            # Loop over frequencies
-            for lfi, fi in timestream.vis[:].enumerate(0):
-
-                avar = 0.5*np.diff(timestream.vis[fi][auto_pi, :].real, axis=-1)**2
-                weight = timestream.weight[fi][auto_pi, :-1]
-                ratio = np.median(weight*avar, axis=0)
-                ratio = scipy.signal.medfilt(ratio, kernel_size=21)
-
-                good_freq_flag[lfi, :-1] &= (ratio > 0.5)
-
         # Apply bad node flag
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
 
@@ -941,12 +929,33 @@ class BadNodeFlagger(task.SingleTask):
         # Redistribute over time
         timestream.redistribute(['time', 'gated_time0'])
 
+        # Set up map from frequency to node
+        basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+        nodelist = np.array([ np.argmin(np.abs(ff - basefreq)) % 16 for ff in timestream.freq ])
+
         # Manually flag frequencies corresponding to specific GPU nodes
         for node in self.nodes:
-            if node < 0 or node >= 16:
-                raise RuntimeError('Node index (%i) is invalid (should be 0-15).' % node)
+            nflag = (nodelist == node)
+            if np.any(nflag):
+                timestream.weight[nflag] = 0
 
-            timestream.weight[node::16] = 0
+        # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
+        this_acq = timestream.attrs.get('acquisition_name', None)
+        if this_acq in self.nodes_by_acq:
+
+            # Grab list of nodes from input dictionary
+            nodes_to_flag = self.nodes_by_acq[this_acq]
+            if not hasattr(nodes_to_flag, '__iter__'):
+                nodes_to_flag = [nodes_to_flag]
+
+            # Loop over nodes and perform flagging
+            for node in nodes_to_flag:
+                nflag = (nodelist == node)
+                if np.any(nflag):
+                    timestream.weight[nflag] = 0
+
+                    if mpiutil.rank0:
+                        print "Flagging node %d for %s." % (node, this_acq)
 
         # Redistribute over frequency
         timestream.redistribute('freq')
