@@ -211,6 +211,11 @@ class CollateProducts(task.SingleTask):
         # Divide through by weights to get properly weighted visibility average
         sp.vis[:] *= tools.invert_no_zero(sp.weight[:])
 
+        # Copy units
+        units = ss.vis.attrs.get('units')
+        if units is not None:
+            sp.vis.attrs['units'] = units
+
         # Switch back to frequency distribution
         ss.redistribute('freq')
         sp.redistribute('freq')
@@ -219,7 +224,7 @@ class CollateProducts(task.SingleTask):
 
 
 class SelectFreq(task.SingleTask):
-    """Select a subset of frequencies from the data.
+    """Select a subset of frequencies from a container.
 
     Attributes
     ----------
@@ -253,13 +258,13 @@ class SelectFreq(task.SingleTask):
             New container with trimmed frequencies.
         """
 
+        # Set up frequency selection.
         freq_map = data.index_map['freq']
 
-        # Set up frequency selection.
         if self.freq_physical:
             newindex = sorted(set([np.argmin(np.abs(freq_map['centre'] - freq)) for freq in self.freq_physical]))
 
-        if self.channel_range and (len(self.channel_range) <= 3):
+        elif self.channel_range and (len(self.channel_range) <= 3):
             newindex = slice(*self.channel_range)
 
         elif self.channel_index:
@@ -269,13 +274,22 @@ class SelectFreq(task.SingleTask):
             ValueError("Must specify either freq_physical, channel_range, or channel_index.")
 
         freq_map = freq_map[newindex]
+
+        # Destribute input container over ra or time.
         data.redistribute(['ra', 'time'])
 
-        # Create new container with subset of frequencies
+        # Create new container with subset of frequencies.
         newdata = data.__class__(freq=freq_map, axes_from=data, attrs_from=data)
+
+        # Redistribute new container over ra or time.
         newdata.redistribute(['ra', 'time'])
 
-        for name, dset in data.datasets.items():
+        # Copy over datasets.  If the dataset has a frequency axis,
+        # then we only copy over the subset.
+        for name, dset in data.datasets.iteritems():
+
+            if name not in newdata.datasets:
+                newdata.add_dataset(name)
 
             if 'freq' in dset.attrs['axis']:
                 newdata.datasets[name][:] = data.datasets[name][newindex, ...]

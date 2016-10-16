@@ -1084,7 +1084,8 @@ class Photometry(ContainerBase):
         return self.index_map['source']
 
 
-def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
+def make_empty_corrdata(freq=None, input=None, time=None,
+                        axes_from=None, attrs_from=None,
                         distributed=True, distributed_axis=0, comm=None):
     """Make an empty CorrData (i.e. timestream) container.
 
@@ -1098,6 +1099,8 @@ def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
         Time map.
     axes_from : BasicCont, optional
         Another container to copy any unspecified axes from.
+    attrs_from : BasicCont, optional
+        Another container to copy any unspecified attributes from.
     distributed : boolean, optional
         Whether to create the container in distributed mode.
     distributed_axis : int, optional
@@ -1138,6 +1141,11 @@ def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
     data = andata.CorrData.__new__(andata.CorrData)
     memh5.BasicCont.__init__(data, distributed=True, comm=comm)
 
+    # Copy over attributes
+    if attrs_from is not None:
+        memh5.copyattrs(attrs_from.attrs, data.attrs)
+
+    # Create index map
     data.create_index_map('freq', freq)
     data.create_index_map('input', input)
     data.create_index_map('time', time)
@@ -1156,7 +1164,7 @@ def make_empty_corrdata(freq=None, input=None, time=None, axes_from=None,
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0
 
-    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.uint8,
+    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.float32,
                                distributed=distributed, distributed_axis=distributed_axis)
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0

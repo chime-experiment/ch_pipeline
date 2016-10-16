@@ -303,8 +303,8 @@ class RingMapMaker(task.SingleTask):
         How to weight the non-redundant baselines:
             'uniform' - all baselines given equal weight
             'natural' - each baseline weighted by its redundancy
-            'inverse_variance' - each baselined weighted by the
-                                 inverse variance of visibility
+            'inverse_variance' - each baselined weighted by its inverse
+                                 variance according to radiometer equation
 
     intracyl : bool
         Include intracylinder baselines in the calculation.
@@ -361,7 +361,7 @@ class RingMapMaker(task.SingleTask):
 
         # Define several variables describing the baseline configuration.
         # Currently pathfinder specific.
-        nfeed = 64  # Fixed for pathfinder
+        nfeed = 64
         nvis_1d = 2 * nfeed - 1
         sp = 0.3048
         ncyl = 1 + self.intracyl

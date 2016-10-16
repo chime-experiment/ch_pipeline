@@ -210,7 +210,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
             if self.freq_physical:
                 basefreq = basefreq[ [ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ] ]
 
-            if self.channel_range and (len(self.channel_range) <= 3):
+            elif self.channel_range and (len(self.channel_range) <= 3):
                 basefreq = basefreq[slice(*self.channel_range)]
 
             elif self.channel_index:
