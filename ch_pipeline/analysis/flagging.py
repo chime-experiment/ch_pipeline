@@ -886,6 +886,9 @@ class BadNodeFlagger(task.SingleTask):
     ----------
     nodes : list of ints
         Indices of bad nodes to flag.
+    nodes_by_acq : dict
+        Dictionary whose entries have the name of the acquisition as keyword
+        and a list of the nodes to flag as bad for that acquisition as value.
     flag_freq_zero : boolean, optional
         Whether to flag out frequency zero.
     """
@@ -907,10 +910,12 @@ class BadNodeFlagger(task.SingleTask):
         flagged_timestream : same type as timestream
         """
 
-        import scipy.signal
-
         # Redistribute over frequency
         timestream.redistribute('freq')
+
+        # Determine local frequencies
+        sf = timestream.vis.local_offset[0]
+        ef = sf + timestream.vis.local_shape[0]
 
         # Extract autocorrelation indices
         auto_pi = np.array([ ii for (ii, pp) in enumerate(timestream.index_map['prod']) if pp[0] == pp[1] ])
@@ -923,11 +928,8 @@ class BadNodeFlagger(task.SingleTask):
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
 
         # If requested, flag the first frequency
-        if self.flag_freq_zero:
+        if self.flag_freq_zero and mpiutil.rank0:
             timestream.weight[0] = 0
-
-        # Redistribute over time
-        timestream.redistribute(['time', 'gated_time0'])
 
         # Set up map from frequency to node
         basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
@@ -935,9 +937,11 @@ class BadNodeFlagger(task.SingleTask):
 
         # Manually flag frequencies corresponding to specific GPU nodes
         for node in self.nodes:
-            nflag = (nodelist == node)
-            if np.any(nflag):
-                timestream.weight[nflag] = 0
+            for nind in np.flatnonzero(nodelist == node):
+                if nind >= sf and nind < ef:
+                    timestream.weight[nind] = 0
+
+                    print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
         this_acq = timestream.attrs.get('acquisition_name', None)
@@ -950,16 +954,13 @@ class BadNodeFlagger(task.SingleTask):
 
             # Loop over nodes and perform flagging
             for node in nodes_to_flag:
-                nflag = (nodelist == node)
-                if np.any(nflag):
-                    timestream.weight[nflag] = 0
+                for nind in np.flatnonzero(nodelist == node):
+                    if nind >= sf and nind < ef:
+                        timestream.weight[nind] = 0
 
-                    if mpiutil.rank0:
-                        print "Flagging node %d for %s." % (node, this_acq)
+                        print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
 
-        # Redistribute over frequency
-        timestream.redistribute('freq')
-
+        # Return timestream with bad nodes flagged
         return timestream
 
 
@@ -1016,7 +1017,7 @@ def solar_transit_flag(time, nsig=5.0):
         dec.append(sun.dec)
 
     # Estimate the amount of time the sun is in the primary beam
-    # as +/- 5 sigma, where sigma denotes the width of the
+    # as +/- nsig sigma, where sigma denotes the width of the
     # primary beam.  We use the lowest frequency and E polarisation,
     # since this is the most conservative (largest sigma).
     window_sec = nsig*cal_utils.guess_fwhm(400.0, pol='E', dec=np.median(dec), sigma=True)*deg_to_sec
