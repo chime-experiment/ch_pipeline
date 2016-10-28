@@ -19,6 +19,8 @@ Classes
 """
 
 import numpy as np
+import h5py
+import healpy
 
 from caput import config, mpiutil
 
@@ -399,7 +401,7 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
         if feed_obj is None:
             raise Exception("The requested feed doesn't seem to exist.")
 
-        if ch_util.tools.is_chime_y(feed_obj):
+        if tools.is_chime_y(feed_obj):
             try:
                 print "Attempting to read beam_y from disk..."
                 with h5py.File(self.primary_beamy_filename, 'r') as f:
@@ -409,7 +411,7 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
 
             except IOError:
                 raise IOError("Could not load beams from disk [path: %s]."
-                                % self.primary_beamy_filename)
+                              % self.primary_beamy_filename)
 
             if len(freq_sel) == 1:
                 return map_y
@@ -431,7 +433,7 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
 
             return map_out
 
-        if ch_util.tools.is_chime_x(feed_obj):
+        if tools.is_chime_x(feed_obj):
             try:
                 print "Attempting to read beam_x from disk..."
                 with h5py.File(self.primary_beamx_filename, 'r') as f:
