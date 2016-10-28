@@ -404,7 +404,7 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
         if tools.is_chime_x(feed_obj):
             fname = self.primary_beamx_filename
 
-        if tools.is_chime_y(feed_obj):
+        elif tools.is_chime_y(feed_obj):
             fname = self.primary_beamy_filename
 
         else:
