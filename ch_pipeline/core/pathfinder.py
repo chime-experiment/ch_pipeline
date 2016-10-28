@@ -386,9 +386,9 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
     """
 
     primary_beamx_filename = config.Property(proptype=str,
-                                             default='/project/k/krs/cahofer/pass1/beams/beam_x_400_800.hdf5')
+                                             default='/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5')
     primary_beamy_filename = config.Property(proptype=str,
-                                             default='/project/k/krs/cahofer/pass1/beams/beam_y_400_800.hdf5')
+                                             default='/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5')
 
     def beam(self, feed, freq_id):
         # Fetch beam parameters out of config database.
@@ -399,74 +399,47 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
         npix = healpy.nside2npix(nside)
 
         if feed_obj is None:
-            raise Exception("The requested feed doesn't seem to exist.")
-
-        if tools.is_chime_y(feed_obj):
-            try:
-                print "Attempting to read beam_y from disk..."
-                with h5py.File(self.primary_beamy_filename, 'r') as f:
-                    map_freq = f['freq'][:]
-                    freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
-                    map_y = f['beam_y'][freq_sel, :]
-
-            except IOError:
-                raise IOError("Could not load beams from disk [path: %s]."
-                              % self.primary_beamy_filename)
-
-            if len(freq_sel) == 1:
-                return map_y
-
-            else:
-                freq_high = map_freq[freq_sel[1]]
-                freq_low = map_freq[freq_sel[0]]
-                freq_int = tel_freq[freq_id]
-
-                alpha = (freq_high - freq_int) / (freq_high - freq_low)
-                beta = (freq_int - freq_low) / (freq_high - freq_low)
-
-                map_t = map_y['Et'][0] * alpha + map_y['Et'][1] * beta
-                map_p = map_y['Ep'][0] * alpha + map_y['Ep'][1] * beta
-
-                map_out = np.empty((npix, 2), dtype=np.complex128)
-                map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
-                map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
-
-            return map_out
+            raise ValueError("The requested feed doesn't seem to exist.")
 
         if tools.is_chime_x(feed_obj):
-            try:
-                print "Attempting to read beam_x from disk..."
-                with h5py.File(self.primary_beamx_filename, 'r') as f:
-                    map_freq = f['freq'][:]
-                    freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
-                    map_x = f['beam_x'][freq_sel, :]
+            fname = self.primary_beamx_filename
 
-            except IOError:
-                raise IOError("Could not load beams from disk [path: %s]."
-                              % self.primary_beamx_filename)
-
-            if len(freq_sel) == 1:
-                return map_x
-
-            else:
-                freq_high = map_freq[freq_sel[1]]
-                freq_low = map_freq[freq_sel[0]]
-                freq_int = tel_freq[freq_id]
-
-                alpha = (freq_high - freq_int) / (freq_high - freq_low)
-                beta = (freq_int - freq_low) / (freq_high - freq_low)
-
-                map_t = map_x['Et'][0] * alpha + map_x['Et'][1] * beta
-                map_p = map_x['Ep'][0] * alpha + map_x['Ep'][1] * beta
-
-                map_out = np.empty((npix, 2), dtype=np.complex128)
-                map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
-                map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
-
-            return map_out
+        if tools.is_chime_y(feed_obj):
+            fname = self.primary_beamy_filename
 
         else:
-            raise Exception("Polarisation not supported.")
+            raise ValueError("Polarisation not supported by this feed",
+                             feed_obj)
+        try:
+            print "Attempting to read beam file from disk..."
+            with h5py.File(fname, 'r') as f:
+                map_freq = f['freq'][:]
+                freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
+                beam_map = f['beam'][freq_sel, :]
+
+        except IOError:
+            raise IOError("Could not load beams from disk [path: %s]."
+                          % fname)
+
+        if len(freq_sel) == 1:
+            return beam_map
+
+        else:
+            freq_high = map_freq[freq_sel[1]]
+            freq_low = map_freq[freq_sel[0]]
+            freq_int = tel_freq[freq_id]
+
+            alpha = (freq_high - freq_int) / (freq_high - freq_low)
+            beta = (freq_int - freq_low) / (freq_high - freq_low)
+
+            map_t = beam_map['Et'][0] * alpha + beam_map['Et'][1] * beta
+            map_p = beam_map['Ep'][0] * alpha + beam_map['Ep'][1] * beta
+
+            map_out = np.empty((npix, 2), dtype=np.complex128)
+            map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
+            map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
+
+            return map_out
 
 
 def _nearest_freq(tel_freq, map_freq, freq_id):
@@ -490,9 +463,8 @@ def _nearest_freq(tel_freq, map_freq, freq_id):
 
     diff_freq = abs(map_freq - tel_freq[freq_id])
     map_freq_width = abs(map_freq[1] - map_freq[0])
-
     match_mask = diff_freq < map_freq_width
 
-    freq_ind = np.where(match_mask is True)[0].tolist()
+    freq_ind = np.nonzero(match_mask)[0]
 
     return freq_ind
