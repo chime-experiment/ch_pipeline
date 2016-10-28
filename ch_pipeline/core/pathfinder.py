@@ -19,6 +19,8 @@ Classes
 """
 
 import numpy as np
+import h5py
+import healpy
 
 from caput import config, mpiutil
 
@@ -49,8 +51,9 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     channel_start : int, optional
         Which channel to start at. Default is 0.
     channel_end : int, optional
-        The last channel to use. Like using a standard python range, this should
-        be one larger than the last channel number you actually want. Defualt is 1024.
+        The last channel to use. Like using a standard python range, this
+        should be one larger than the last channel number you actually want.
+        Default is 1024.
     channel_bin : int, optional
         Number of channels to bin together. Must exactly divide the total
         number. Default is 1.
@@ -104,10 +107,10 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         Parameters
         ----------
         layout : integer or datetime
-            Layout id number (corresponding to one in the database), or a datetime.
+            Layout id number (corresponding to one in database), or datetime
         correlator : string, optional
-            Name of the specific correlator. Needed to return a unique config in
-            some cases.
+            Name of the specific correlator. Needed to return a unique config
+            in some cases.
         skip : boolean, optional
             Whether to skip non-CHIME antennas. If False, leave them in but
             set them to infinite noise (unsupported at the moment).
@@ -204,7 +207,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         if self.input_sel is None:
             feeds = self._feeds
         else:
-            feeds = [ self._feeds[fi] for fi in self.input_sel ]
+            feeds = [self._feeds[fi] for fi in self.input_sel]
 
         return feeds
 
@@ -247,11 +250,11 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     def beamclass(self):
         """Beam class definition for the Pathfinder.
 
-        When `self.redundant` is set, the X-polarisation feeds gets `beamclass =
-        0`, and the Y-polarisation gets `beamclass = 1`. If `self.redundant` is
-        `False`, then the feeds are just give an increasing unique class. In
-        both cases, any other type of feed gets set to `-1` and should be
-        ignored.
+        When `self.redundant` is set, the X-polarisation feeds get
+        `beamclass = 0`, and the Y-polarisation gets `beamclass = 1`.
+        If `self.redundant` is `False`, then the feeds are just give an
+        increasing unique class. In both cases, any other type of feed gets set
+        to `-1` and should be ignored.
         """
         # Make beam class just channel number.
 
@@ -374,3 +377,94 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         beam_mask = np.logical_and(beam_mask, bc_mask)
 
         return beam_map, beam_mask
+
+
+class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
+    """Model telescope for the CHIME Pathfinder.
+
+    This class uses an external beam model that is read in from a file.
+    """
+
+    primary_beamx_filename = config.Property(proptype=str,
+                                             default='/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5')
+    primary_beamy_filename = config.Property(proptype=str,
+                                             default='/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5')
+
+    def beam(self, feed, freq_id):
+        # Fetch beam parameters out of config database.
+
+        feed_obj = self.feeds[feed]
+        tel_freq = self.frequencies
+        nside = self._nside
+        npix = healpy.nside2npix(nside)
+
+        if feed_obj is None:
+            raise ValueError("The requested feed doesn't seem to exist.")
+
+        if tools.is_chime_x(feed_obj):
+            fname = self.primary_beamx_filename
+
+        elif tools.is_chime_y(feed_obj):
+            fname = self.primary_beamy_filename
+
+        else:
+            raise ValueError("Polarisation not supported by this feed",
+                             feed_obj)
+        try:
+            print "Attempting to read beam file from disk..."
+            with h5py.File(fname, 'r') as f:
+                map_freq = f['freq'][:]
+                freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
+                beam_map = f['beam'][freq_sel, :]
+
+        except IOError:
+            raise IOError("Could not load beams from disk [path: %s]."
+                          % fname)
+
+        if len(freq_sel) == 1:
+            return beam_map
+
+        else:
+            freq_high = map_freq[freq_sel[1]]
+            freq_low = map_freq[freq_sel[0]]
+            freq_int = tel_freq[freq_id]
+
+            alpha = (freq_high - freq_int) / (freq_high - freq_low)
+            beta = (freq_int - freq_low) / (freq_high - freq_low)
+
+            map_t = beam_map['Et'][0] * alpha + beam_map['Et'][1] * beta
+            map_p = beam_map['Ep'][0] * alpha + beam_map['Ep'][1] * beta
+
+            map_out = np.empty((npix, 2), dtype=np.complex128)
+            map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
+            map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
+
+            return map_out
+
+
+def _nearest_freq(tel_freq, map_freq, freq_id):
+
+    """Find nearest neighbor frequencies.
+
+    Parameters
+    ----------
+    tel_freq : float
+        frequencies from telescope object.
+    map_freq : float
+        frequencies from beam map file.
+    freq_id : int
+        frequency selection.
+
+    Returns
+    -------
+    freq_ind : list of neighboring map frequencies matched to tel_freq.
+
+    """
+
+    diff_freq = abs(map_freq - tel_freq[freq_id])
+    map_freq_width = abs(map_freq[1] - map_freq[0])
+    match_mask = diff_freq < map_freq_width
+
+    freq_ind = np.nonzero(match_mask)[0]
+
+    return freq_ind
