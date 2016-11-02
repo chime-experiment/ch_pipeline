@@ -17,6 +17,8 @@ Tasks
     LoadFiles
     LoadMaps
     LoadFilesFromParams
+    LoadSetupFile
+    LoadFileFromTag
     Save
     Print
     LoadBeamTransfer
@@ -48,7 +50,7 @@ import os.path
 import gc
 import numpy as np
 
-from caput import pipeline
+from caput import pipeline, mpiutil
 from caput import config
 
 from ch_util import andata
@@ -311,8 +313,6 @@ class LoadCorrDataFiles(task.SingleTask):
             The timestream of each sidereal day.
         """
 
-        from caput import mpiutil
-
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -405,6 +405,123 @@ class Print(pipeline.TaskBase):
         print input_
 
         return input_
+
+
+class LoadSetupFile(pipeline.TaskBase):
+    """Loads a file from disk into a memh5 container
+    during setup.
+
+    Attributes
+    ----------
+    filename : str
+        Path to a saved container.
+    """
+
+    filename = config.Property(proptype=str)
+
+    def setup(self):
+        """Load the file into a container.
+
+        Returns
+        -------
+        cont : subclass of `memh5.BasicCont`
+        """
+
+        from caput import memh5
+
+        # Check that the file exists
+        if not os.path.exists(self.filename):
+            raise RuntimeError('File does not exist: %s' % self.filename)
+
+        print "Loading file: %s" % self.filename
+
+        # Load into container
+        cont = memh5.BasicCont.from_file(self.filename, distributed=True)
+
+        # Return container
+        return cont
+
+
+class LoadFileFromTag(task.SingleTask):
+    """Loads a file from disk into a memh5 container.
+    The suffix of the filename is extracted from the
+    tag of the input.
+
+    Attributes
+    ----------
+    prefix : str
+        Filename is assumed to have the format:
+            prefix + incont.attrs['tag] + '.h5'
+
+    only_prefix : bool
+        If True, then the class will return the same
+        container at each iteration.  The filename
+        is assumed to have the format:
+            prefix + '.h5'
+    """
+
+    prefix = config.Property(proptype=str)
+
+    only_prefix = config.Property(proptype=bool, default=False)
+
+    def setup(self):
+        """Determine filename convention.  Load the file into
+        a container if only_prefix is True.
+        """
+
+        from caput import memh5
+
+        if self.only_prefix:
+
+            filename = self.prefix
+
+            extension = os.path.splitext(filename)[1]
+            if extension not in [".h5", ".hdf5"]:
+                filename += ".h5"
+
+            # Check that the file exists
+            if not os.path.exists(filename):
+                raise RuntimeError('File does not exist: %s' % filename)
+
+            if mpiutil.rank0:
+                print "Loading file: %s" % filename
+
+            # Load into container
+            self.outcont = memh5.BasicCont.from_file(filename, distributed=True)
+
+        else:
+
+            self.prefix = os.path.splitext(self.prefix)[0]
+
+
+    def process(self, incont):
+        """ Determine filename from the input container.
+        Load file into the output container.
+
+        Parameters
+        ----------
+        incont : subclass of `memh5.BasicCont`
+
+        Returns
+        -------
+        outcont : subclass of `memh5.BasicCont`
+        """
+
+        if not self.only_prefix:
+
+            filename = self.prefix + incont.attrs['tag'] + '.h5'
+
+            # Check that the file exists
+            if not os.path.exists(filename):
+                raise RuntimeError('File does not exist: %s' % filename)
+
+            if mpiutil.rank0:
+                print "Loading file: %s" % filename
+
+            # Load into container
+            self.outcont = memh5.BasicCont.from_file(self.filename, distributed=True)
+
+        return self.outcont
 
 
 class LoadBeamTransfer(pipeline.TaskBase):

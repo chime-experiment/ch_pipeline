@@ -662,31 +662,16 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 class ApplyCorrInputMask(task.SingleTask):
     """ Flag out bad correlator inputs from a timestream or sidereal stack.
-
-    Attributes
-    ----------
-    file_name : str
-        Path to the hdf5 file that contains the correlator input mask.
     """
 
-    file_name = config.Property(proptype=str)
-
-    def setup(self):
-        """ Load correlator input mask from disk.
-        """
-
-        self.file_name = os.path.expandvars(os.path.expanduser(self.file_name))
-
-        corr_input_mask = containers.CorrInputMask.from_file(self.file_name, distributed=False)
-
-        self.input_mask = corr_input_mask.datasets['input_mask'][:]
-
-    def process(self, timestream):
+    def process(self, timestream, inputmask):
         """Flag out bad correlator inputs by giving them zero weight.
 
         Parameters
         ----------
         timestream : andata.CorrData or containers.SiderealStream
+
+        inputmask : containers.CorrInputMask
 
         Returns
         -------
@@ -698,23 +683,12 @@ class ApplyCorrInputMask(task.SingleTask):
         # Make sure that timestream is distributed over frequency
         timestream.redistribute('freq')
 
+        # Extract mask
+        mask = inputmask.datasets['input_mask'][:]
+
         # Apply mask to the vis_weight array
         weight = timestream.weight[:]
-        tools.apply_gain(weight, self.input_mask[np.newaxis, :, np.newaxis], out=weight)
-
-        # Add input_mask to flags or dataset (depending on input class)
-        if isinstance(timestream, andata.CorrData):
-            if 'input_mask' in timestream.flags:
-                timestream.flags['input_mask'][:] = self.input_mask
-            else:
-                flag_dataset = timestream.create_flag('input_mask', data=self.input_mask, distributed=False)
-                flag_dataset.attrs['axis'] = ('input', )
-
-        elif isinstance(timestream, containers.SiderealStream):
-            timestream.input_mask[:] = self.input_mask
-
-        else:
-            raise RuntimeError('Format of `timestream` argument is unknown.')
+        tools.apply_gain(weight, mask[np.newaxis, :, np.newaxis], out=weight)
 
         # Return timestream
         return timestream
@@ -724,26 +698,15 @@ class ApplySiderealDayFlag(task.SingleTask):
     """ Prevent certain sidereal days from progressing
         further in the pipeline processing (e.g.,
         exclude certain sidereal days from the sidereal stack).
-
-    Attributes
-    ----------
-    file_name : str
-        Path to the hdf5 file that contains the sidereal day flag.
     """
 
-    file_name = config.Property(proptype=str)
-
-    def setup(self):
-        """ Load sidereal day flag from disk.
+    def setup(self, csd_flag):
+        """ Create dictionary from input .
         """
 
-        self.file_name = os.path.expandvars(os.path.expanduser(self.file_name))
-
-        cnt = containers.SiderealDayFlag.from_file(self.file_name, distributed=False)
-
         self.csd_dict = {}
-        for cc, csd in enumerate(cnt.csd[:]):
-            self.csd_dict[csd] = cnt.csd_flag[cc]
+        for cc, csd in enumerate(csd_flag.csd[:]):
+            self.csd_dict[csd] = csd_flag.csd_flag[cc]
 
     def process(self, timestream):
         """ If this sidereal day is flagged as good or
@@ -799,6 +762,43 @@ class ApplySiderealDayFlag(task.SingleTask):
         # Return input timestream or None
         return output
 
+
+class NanToNum(task.SingleTask):
+    """ Finds NaN and replaces with 0.
+    """
+
+    def process(self, timestream):
+        """Converts any NaN in the vis dataset and weight dataset
+        to the value 0.0.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData or containers.SiderealStream
+
+        Returns
+        --------
+        timestream : andata.CorrData or containers.SiderealStream
+        """
+
+        # Make sure we are distributed over frequency
+        timestream.redistribute('freq')
+
+        # Loop over frequencies to reduce memory usage
+        for lfi, fi in timestream.vis[:].enumerate(0):
+
+            # Set non-finite values of the visibility equal to zero
+            flag = ~np.isfinite(timestream.vis[fi])
+            if np.any(flag):
+                print "Rank %d: %d visibilities are non-finite." % (mpiutil.rank, np.sum(flag))
+                timestream.vis[fi][flag] = 0.0
+
+            # Set non-finite values of the weight equal to zero
+            flag = ~np.isfinite(timestream.weight[fi])
+            if np.any(flag):
+                print "Rank %d: %d visibilities are non-finite." % (mpiutil.rank, np.sum(flag))
+                timestream.weight[fi][flag] = 0
+
+        return timestream
 
 
 class RadiometerWeight(task.SingleTask):
@@ -1020,7 +1020,7 @@ def solar_transit_flag(time, nsig=5.0):
     # as +/- nsig sigma, where sigma denotes the width of the
     # primary beam.  We use the lowest frequency and E polarisation,
     # since this is the most conservative (largest sigma).
-    window_sec = nsig*cal_utils.guess_fwhm(400.0, pol='E', dec=np.median(dec), sigma=True)*deg_to_sec
+    window_sec = nsig*cal_utils.guess_fwhm(400.0, pol='X', dec=np.median(dec), sigma=True)*deg_to_sec
 
     # Sun transit
     transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)

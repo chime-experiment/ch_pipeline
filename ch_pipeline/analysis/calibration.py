@@ -499,7 +499,7 @@ class SiderealCalibration(task.SingleTask):
     use_peak = config.Property(proptype=bool, default=False)
     threshold = config.Property(proptype=float, default=3.0)
 
-    def process(self, sstream, inputmap):
+    def process(self, sstream, inputmap, inputmask):
         """Determine calibration from a timestream.
 
         Parameters
@@ -535,7 +535,7 @@ class SiderealCalibration(task.SingleTask):
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 3.0*cal_utils.guess_fwhm(400.0, pol='E', dec=source._dec, sigma=True)
+        slice_width_deg = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -547,11 +547,11 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[sstream.input_mask[:]]
+        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp) and (idx in good_input)])
-        yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp) and (idx in good_input)])
+        xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
+        yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_y(inp)])
 
         if mpiutil.rank0:
             print("Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)." %

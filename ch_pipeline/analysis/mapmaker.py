@@ -375,7 +375,7 @@ class RingMapMaker(task.SingleTask):
                        fi.cyl - fj.cyl, int(np.round((fi.pos - fj.pos) / sp))) for fi, fj in feed_list]
 
         # Define polarisation axis
-        pol = np.array([x + y for x in ['E', 'S'] for y in ['E', 'S']])
+        pol = np.array([x + y for x in ['X', 'Y'] for y in ['X', 'Y']])
         npol = len(pol)
 
         # Empty array for output

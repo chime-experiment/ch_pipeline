@@ -248,13 +248,6 @@ class SiderealStream(ContainerBase):
             'distributed_axis': 'freq'
         },
 
-        'input_mask': {
-            'axes': ['input'],
-            'dtype': np.bool,
-            'initialise': True,
-            'distributed': False
-        },
-
         'gain': {
             'axes': ['freq', 'input', 'ra'],
             'dtype': np.complex64,
@@ -294,9 +287,6 @@ class SiderealStream(ContainerBase):
         # Initialize from parent class
         super(SiderealStream, self).__init__(*args, **kwargs)
 
-        # Default is set all inputs as good
-        self.input_mask[:].fill(True)
-
     @property
     def vis(self):
         return self.datasets['vis']
@@ -304,10 +294,6 @@ class SiderealStream(ContainerBase):
     @property
     def gain(self):
         return self.datasets['gain']
-
-    @property
-    def input_mask(self):
-        return self.datasets['input_mask']
 
     @property
     def weight(self):

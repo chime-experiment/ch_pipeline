@@ -18,6 +18,7 @@ Tasks
     SiderealGrouper
     SiderealRegridder
     SiderealStacker
+    MeanSubtract
 
 Usage
 =====
@@ -388,8 +389,6 @@ class SiderealRegridder(task.SingleTask):
         sdata.redistribute('freq')
         sdata.vis[:] = sts
         sdata.weight[:] = ni
-        if 'input_mask' in data.flags:
-            sdata.input_mask[:] = data.flags['input_mask'][:]
 
         sdata.attrs['csd'] = csd
         sdata.attrs['tag'] = 'csd_%i' % csd
@@ -427,13 +426,15 @@ class SiderealStacker(task.SingleTask):
 
         if self.stack is None:
 
+            if mpiutil.rank0:
+                print("Starting stack with CSD: %s" %
+                        ', '.join(["%i" % csd for csd in input_csd]))
+
             self.stack = containers.SiderealStream(axes_from=sdata)
             self.stack.redistribute('freq')
 
             self.stack.vis[:] = sdata.vis[:] * sdata.weight[:]
             self.stack.weight[:] = sdata.weight[:]
-
-            self.stack.input_mask[:] = sdata.input_mask[:]
 
             self.csd_list = input_csd
 
@@ -441,11 +442,8 @@ class SiderealStacker(task.SingleTask):
             if units:
                 self.stack.vis.attrs['units'] = units
 
-            if mpiutil.rank0:
-                print("Starting stack with CSD: %s" %
-                        ', '.join(["%i" % csd for csd in input_csd]))
-
             return
+
 
         if mpiutil.rank0:
             print("Adding to stack CSD: %s" %
@@ -457,9 +455,8 @@ class SiderealStacker(task.SingleTask):
         self.stack.vis[:] += sdata.vis[:] * sdata.weight[:]
         self.stack.weight[:] += sdata.weight[:]
 
-        self.stack.input_mask[:] &= sdata.input_mask[:]
-
         self.csd_list += input_csd
+
 
     def process_finish(self):
         """Construct and emit sidereal stack.
@@ -480,6 +477,108 @@ class SiderealStacker(task.SingleTask):
 
 
         return self.stack
+
+
+class MeanSubtract(task.SingleTask):
+    """Subtract the weighted mean (over time) of every element of the
+    visibility matrix excluding the auto-correlations.
+
+    Parameters
+    ----------
+    all_data : bool
+        If this is True, then use all of the input data to
+        calculate the weighted mean.  If False, then use only
+        night-time data away from the transit of bright
+        point sources.  Default is False.
+    """
+
+    all_data = config.Property(proptype=bool, default=False)
+
+    def process(self, sstream):
+        """
+        Parameters
+        ----------
+        sstream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream.
+
+        Returns
+        -------
+        sstream : same as input
+            Timestream or sidereal stream with mean subtracted.
+        """
+
+        from flagging import daytime_flag
+        from ch_util import cal_utils, tools
+
+        # Make sure we are distributed over frequency
+        sstream.redistribute('freq')
+
+        # Extract product map
+        prod = sstream.index_map['prod']
+
+        # Check if we are using all of the data to calculate the mean,
+        # or only "quiet" periods.
+        if self.all_data:
+
+            flag_quiet = np.ones(len(sstream.time), dtype=np.bool)
+
+        else:
+
+            # Check if we are dealing with CorrData or SiderealStream
+            if isinstance(sstream, andata.CorrData):
+                # Extract ra
+                ra = ephemeris.transit_RA(sstream.time)
+
+                # Find night time data
+                flag_quiet = daytime_flag(sstream.time)
+
+            elif isinstance(sstream, containers.SiderealStream):
+                # Extract csd and ra
+                csd = sstream.attrs['csd']
+                if hasattr(csd, '__iter__'):
+                    csd_list = csd
+                else:
+                    csd_list = [csd]
+
+                ra = sstream.index_map['ra']
+
+                # Find night time data
+                flag_quiet = np.ones(len(ra), dtype=np.bool)
+                for cc in csd_list:
+                    flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+
+            else:
+                raise RuntimeError('Format of `sstream` argument is unknown.')
+
+            # Find data free of bright point sources
+            for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
+
+                peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
+                src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
+
+                dra = (ra - peak_ra) % 360.0
+                dra -= (dra > 180.0)*360.0
+
+                flag_quiet &= np.abs(dra) > src_window
+
+        # Loop over frequencies and baselines to reduce memory usage
+        for lfi, fi in sstream.vis[:].enumerate(0):
+            for lbi, bi in sstream.vis[:].enumerate(1):
+
+                # Do not subtract mean of autocorrelation
+                if prod[bi][0] == prod[bi][1]:
+                    continue
+
+                # Extract visibility and weight
+                data = sstream.vis[fi, bi]
+                weight = sstream.weight[fi, bi] * flag_quiet
+
+                # Subtract mean value
+                norm = tools.invert_no_zero(np.sum(weight))
+                sstream.vis[fi, bi] -= norm * np.sum(weight*data)
+
+        # Return mean subtracted map
+        return sstream
 
 
 def get_times(acq_files):

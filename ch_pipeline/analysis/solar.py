@@ -6,7 +6,7 @@ Tasks for analysis of the radio sun. (:mod:`~ch_pipeline.analysis.solar`)
 .. currentmodule:: ch_pipeline.analysis.solar
 
 Tasks for analysis of the radio sun.  Includes grouping individual files 
-into a solar day; solar calibration; and sun excision on sidereal data.
+into a solar day; solar calibration; and sun excision from sidereal stream.
 
 Tasks
 =====
@@ -85,12 +85,11 @@ class SolarGrouper(task.SingleTask):
 
     Attributes
     ----------
-    padding : float
-        Extra amount of a sidereal day to pad each timestream by. Useful for
-        getting rid of interpolation artifacts.
+    min_span : float
+        The minimum solar day length (in hours) to process.
+        Default is 2.
     """
 
-    padding = config.Property(proptype=float, default=0.005)
     min_span = config.Property(proptype=float, default=2.0)
 
     def __init__(self):
@@ -98,7 +97,7 @@ class SolarGrouper(task.SingleTask):
         self._current_day = None
 
     def process(self, tstream):
-        """Load in each sidereal day.
+        """Load in each solar day.
 
         Parameters
         ----------
@@ -108,11 +107,11 @@ class SolarGrouper(task.SingleTask):
         Returns
         -------
         ts : andata.CorrData or None
-            Returns the timestream of each sidereal day when we have received
+            Returns the timestream of each solar day when we have received
             the last file, otherwise returns :obj:`None`.
         """
 
-        # Get the start and end CSDs of the file
+        # Get the start and end day of the file as an int with format YYYYMMDD
         day_start = int(unix_to_localtime(tstream.time[0]).strftime('%Y%m%d'))
         day_end = int(unix_to_localtime(tstream.time[-1]).strftime('%Y%m%d'))
 
@@ -147,12 +146,12 @@ class SolarGrouper(task.SingleTask):
             return None
 
     def process_finish(self):
-        """Return the final sidereal day.
+        """Return the final day.
 
         Returns
         -------
         ts : andata.CorrData or None
-            Returns the timestream of the final sidereal day if it's long
+            Returns the timestream of the final day if it's long
             enough, otherwise returns :obj:`None`.
         """
 
@@ -162,11 +161,12 @@ class SolarGrouper(task.SingleTask):
         return tstream_all
 
     def _process_current_day(self):
+
         # Combine the current set of files into a timestream
 
         day = str(self._current_day)
 
-        # Calculate the length of data in this current CSD
+        # Calculate the length of data in the current day
         start = datetime.utcfromtimestamp(self._timestream_list[0].time[0])
         end = datetime.utcfromtimestamp(self._timestream_list[-1].time[-1])
         tdelta = end - start
@@ -349,8 +349,8 @@ class SolarCalibration(task.SingleTask):
             dra = np.abs(dra - (dra > np.pi)*2.0*np.pi)[np.newaxis, np.newaxis, :]
             
             # Estimate FWHM
-            sig_x = cal_utils.guess_fwhm(freq, pol='S', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
-            sig_y = cal_utils.guess_fwhm(freq, pol='E', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
+            sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
+            sig_y = cal_utils.guess_fwhm(freq, pol='Y', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
 
             # Only fit ra values above the specified dynamic range threshold
             fit_flag = np.zeros([nfreq, nfeed, ntime], dtype=np.bool)
@@ -389,7 +389,7 @@ class SunClean(task.SingleTask):
     """
 
     def process(self, sstream, inputmap):
-        """Apply a day time mask.
+        """Clean the sun.
 
         Parameters
         ----------
