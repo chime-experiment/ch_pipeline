@@ -530,7 +530,7 @@ class MeanSubtract(task.SingleTask):
                 ra = ephemeris.transit_RA(sstream.time)
 
                 # Find night time data
-                flag_quiet = daytime_flag(sstream.time)
+                flag_quiet = ~daytime_flag(sstream.time)
 
             elif isinstance(sstream, containers.SiderealStream):
                 # Extract csd and ra
@@ -545,7 +545,7 @@ class MeanSubtract(task.SingleTask):
                 # Find night time data
                 flag_quiet = np.ones(len(ra), dtype=np.bool)
                 for cc in csd_list:
-                    flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                    flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
 
             else:
                 raise RuntimeError('Format of `sstream` argument is unknown.')
