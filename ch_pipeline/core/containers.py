@@ -995,6 +995,10 @@ class RingMap(ContainerBase):
         return self.index_map['freq']
 
     @property
+    def pol(self):
+        return self.index_map['pol']
+
+    @property
     def ra(self):
         return self.index_map['ra']
 
