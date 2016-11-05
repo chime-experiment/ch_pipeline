@@ -324,7 +324,7 @@ class LoadCorrDataFiles(task.SingleTask):
         self._file_ptr += 1
 
         if mpiutil.rank0:
-            print "Reading file %i of %i." % (self._file_ptr, len(self.files))
+            print "Reading file %i of %i.  (%s)" % (self._file_ptr, len(self.files), file_)
 
         # Set up product selection
         prod_sel = None
@@ -433,10 +433,11 @@ class LoadSetupFile(pipeline.TaskBase):
         if not os.path.exists(self.filename):
             raise RuntimeError('File does not exist: %s' % self.filename)
 
-        print "Loading file: %s" % self.filename
+        if mpiutil.rank0:
+            print "Loading file: %s" % self.filename
 
         # Load into container
-        cont = memh5.BasicCont.from_file(self.filename, distributed=True)
+        cont = memh5.BasicCont.from_file(self.filename, distributed=False)
 
         # Return container
         return cont
@@ -475,9 +476,9 @@ class LoadFileFromTag(task.SingleTask):
 
             filename = self.prefix
 
-            extension = os.path.splitext(filename)[1]
-            if extension not in [".h5", ".hdf5"]:
-                filename += ".h5"
+            split_ext = os.path.splitext(filename)
+            if split_ext[1] not in [".h5", ".hdf5"]:
+                filename = split_ext[0] + ".h5"
 
             # Check that the file exists
             if not os.path.exists(filename):
@@ -487,7 +488,7 @@ class LoadFileFromTag(task.SingleTask):
                 print "Loading file: %s" % filename
 
             # Load into container
-            self.outcont = memh5.BasicCont.from_file(filename, distributed=True)
+            self.outcont = memh5.BasicCont.from_file(filename, distributed=False)
 
         else:
 
@@ -519,7 +520,7 @@ class LoadFileFromTag(task.SingleTask):
                 print "Loading file: %s" % filename
 
             # Load into container
-            self.outcont = memh5.BasicCont.from_file(self.filename, distributed=True)
+            self.outcont = memh5.BasicCont.from_file(self.filename, distributed=False)
 
         return self.outcont
 
