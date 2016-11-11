@@ -500,17 +500,24 @@ class SiderealCalibration(task.SingleTask):
     threshold = config.Property(proptype=float, default=3.0)
 
     def process(self, sstream, inputmap, inputmask):
-        """Determine calibration from a timestream.
+        """Determine calibration from a sidereal stream.
 
         Parameters
         ----------
         sstream : containers.SiderealStream
             Rigidized sidereal timestream to calibrate.
+        inputmap : list of :class:`CorrInput`s
+            A list of describing the inputs as they are in the file.
+        inputmask : containers.CorrInputMask
+            Mask indicating which correlator inputs to use in the
+            eigenvalue decomposition.
 
         Returns
         -------
-        gains : np.ndarray
-            Array of gains.
+        gains : containers.PointSourceTransit or containers.StaticGainData
+            Response of each feed to the point source and best-fit model
+            (model_fit is True), or gains at the expected peak location
+            (model_fit is False).
         """
 
         # Ensure that we are distributed over frequency
@@ -738,17 +745,28 @@ class ApplyGain(task.SingleTask):
         # Regularise any crazy entries
         gain_arr = np.nan_to_num(gain_arr)
 
-        # If requested, scale the weights
-        if self.update_weight:
-            print "Applying gain to weight."
-            tools.apply_gain(tstream.weight[:], np.abs(gain_arr)**2, out=tstream.weight[:])
+        # If requested, invert the gains
+        inverse_gain_arr = tools.invert_no_zero(gain_arr)
 
-        # Invert the gains if needed
         if self.inverse:
-            gain_arr = tools.invert_no_zero(gain_arr)
+            gweight = gain_arr
+            gvis = inverse_gain_arr
+            if mpiutil.rank0:
+                print "Applying inverse gain."
+        else:
+            gweight = inverse_gain_arr
+            gvis = gain_arr
+            if mpiutil.rank0:
+                print "Applying gain."
+
+        # Apply gains to the weights
+        if self.update_weight:
+            tools.apply_gain(tstream.weight[:], np.abs(gweight)**2, out=tstream.weight[:])
+            if mpiutil.rank0:
+                print "Applying gain to weight."
 
         # Apply gains to visibility matrix
-        tools.apply_gain(tstream.vis[:], gain_arr, out=tstream.vis[:])
+        tools.apply_gain(tstream.vis[:], gvis, out=tstream.vis[:])
 
         # Update units
         convert_units_to = gain.gain.attrs.get('convert_units_to')
