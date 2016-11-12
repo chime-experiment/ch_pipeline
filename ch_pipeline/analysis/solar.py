@@ -5,7 +5,7 @@ Tasks for analysis of the radio sun. (:mod:`~ch_pipeline.analysis.solar`)
 
 .. currentmodule:: ch_pipeline.analysis.solar
 
-Tasks for analysis of the radio sun.  Includes grouping individual files 
+Tasks for analysis of the radio sun.  Includes grouping individual files
 into a solar day; solar calibration; and sun excision from sidereal stream.
 
 Tasks
@@ -45,24 +45,24 @@ def unix_to_localtime(unix_time):
     Returns
     --------
     dt : :class:`datetime.datetime`
-    
+
     """
     import pytz
-    
+
     utc_time = pytz.utc.localize(datetime.utcfromtimestamp(unix_time))
-    
+
     return utc_time.astimezone(pytz.timezone('Canada/Pacific'))
 
 
 def ra_dec_of(body, time):
     """ Calculate the coordinates of a celestial
     body at a particular time.
-    
+
     Parameters
     ----------
     body : ephem.Body
         PyEphem celestial body.
-    
+
     time : float
         Unix/POSIX time.
 
@@ -70,7 +70,7 @@ def ra_dec_of(body, time):
     --------
     coord : (ra, dec, alt, az)
         Coordinates of the sources
-    
+
     """
     obs = ephemeris._get_chime()
     obs.date = ephemeris.unix_to_ephem_time(time)
@@ -198,7 +198,7 @@ class SolarCalibration(task.SingleTask):
         Fit a model to the primary beam.
     nsig: float, default 2.0
         Relevant if model_fit is True.  The model is only fit to
-        time samples within +/- nsig sigma from the expected 
+        time samples within +/- nsig sigma from the expected
         peak location.
     """
 
@@ -218,7 +218,7 @@ class SolarCalibration(task.SingleTask):
         suntrans : containers.SunTransit
             Response to the sun.
         """
-        
+
         from operator import itemgetter
         from itertools import groupby
 
@@ -259,7 +259,7 @@ class SolarCalibration(task.SingleTask):
 
         # Convert boolean flag to slices
         time_index = np.where(time_flag)[0]
-        
+
         time_slice = []
         ntime = 0
         for key, group in groupby(enumerate(time_index), lambda (index, item): index - item):
@@ -276,7 +276,7 @@ class SolarCalibration(task.SingleTask):
 
         # Convert from ra to hour angle
         sun_pos[:, 0] = np.radians(ra) - sun_pos[:, 0]
-        
+
         # Determine good inputs
         nfeed = len(inputmap)
         good_input = np.arange(nfeed, dtype=np.int)[sstream.input_mask[:]]
@@ -293,7 +293,7 @@ class SolarCalibration(task.SingleTask):
         feed_pos = tools.get_feed_positions(inputmap)
         vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
         vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
-        
+
         u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
         v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
 
@@ -302,52 +302,52 @@ class SolarCalibration(task.SingleTask):
 
         # Set coordinates
         suntrans.coord[:] = sun_pos
-        
+
         # Loop over time slices
         for slc_in, slc_out in time_slice:
-            
+
             # Extract visibility slice
             vis_slice = sstream.vis[..., slc_in].copy()
-            
+
             ha  = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
             dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
-            
+
             # Extract the diagonal (to be used for weighting)
             norm = (_extract_diagonal(vis_slice, axis=1).real)**0.5
             norm = tools.invert_no_zero(norm)
-            
+
             # Fringestop
             vis_slice *= tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v)
 
             # Solve for the point source response of each set of polarisations
             ev_x, resp_x, err_resp_x = solve_gain(vis_slice, feeds=xfeeds, norm=norm[:, xfeeds])
             ev_y, resp_y, err_resp_y = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
-            
+
             # Save to container
             suntrans.evalue_x[..., slc_out] = ev_x
             suntrans.evalue_y[..., slc_out] = ev_y
-            
+
             suntrans.response[:, xfeeds, slc_out] = resp_x
             suntrans.response[:, yfeeds, slc_out] = resp_y
-            
+
             suntrans.response_error[:, xfeeds, slc_out] = err_resp_x
             suntrans.response_error[:, yfeeds, slc_out] = err_resp_y
 
         # If requested, fit a model to the primary beam of the sun transit
         if self.model_fit:
-            
+
             # Estimate peak RA
             i_transit = np.argmin(np.abs(sun_pos[:,0]))
-            
+
             body = ephem.Sun()
             obs = ephemeris._get_chime()
             obs.date = ephemeris.unix_to_ephem_time(time[i_transit])
             body.compute(obs)
-            
+
             peak_ra = ephemeris.peak_RA(body)
             dra = ra - peak_ra
             dra = np.abs(dra - (dra > np.pi)*2.0*np.pi)[np.newaxis, np.newaxis, :]
-            
+
             # Estimate FWHM
             sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
             sig_y = cal_utils.guess_fwhm(freq, pol='Y', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
@@ -358,17 +358,17 @@ class SolarCalibration(task.SingleTask):
             fit_flag[:, yfeeds, :] = dra < (self.nsig*sig_y)
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra_slice, suntrans.response[:], 
-                                                                            suntrans.response_error[:], 
+            param, param_cov = cal_utils.fit_point_source_transit(ra_slice, suntrans.response[:],
+                                                                            suntrans.response_error[:],
                                                                             flag=fit_flag)
 
             # Save to container
             suntrans.add_dataset('flag')
             suntrans.flag[:] = fit_flag
-            
+
             suntrans.add_dataset('parameter')
             suntrans.parameter[:] = param
-            
+
             suntrans.add_dataset('parameter_cov')
             suntrans.parameter_cov[:] = param_cov
 
@@ -377,7 +377,7 @@ class SolarCalibration(task.SingleTask):
         units = 'sqrt(' + sstream.vis.attrs.get('units', 'correlator-units') + ')'
         suntrans.response.attrs['units'] = units
         suntrans.response_error.attrs['units'] = units
-        
+
         suntrans.attrs['source'] = 'Sun'
 
         # Return sun transit
@@ -408,6 +408,8 @@ class SunClean(task.SingleTask):
         ra = sstream.index_map['ra'][:]
         csd = sstream.attrs['csd'] + ra / 360.0
 
+        nprod = len(sstream.index_map['prod'])
+
         # Get position of sun at every time sample
         times = ephemeris.csd_to_unix(csd)
         sun_pos = np.array([ra_dec_of(ephem.Sun(), t) for t in times])
@@ -422,7 +424,7 @@ class SunClean(task.SingleTask):
         vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
 
         feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in sstream.index_map['prod'][:]]
-        
+
         # Determine polarisation for each visibility
         pol_ind = np.full(len(feed_list), -1, dtype=np.int)
         for ii, (fi, fj) in enumerate(feed_list):
@@ -440,22 +442,32 @@ class SunClean(task.SingleTask):
 
         # Iterate over frequencies and polarisations to null out the sun
         for lfi, fi in sstream.vis[:].enumerate(0):
-            
+
             # Get the baselines in wavelengths
             u = vis_pos[:, 0] / wv[fi]
             v = vis_pos[:, 1] / wv[fi]
-            
+
+            # Estimate mean value
+            # mu_vis = np.zeros(nprod, dtype=np.complex64)
+            # for bi in range(nprod):
+            #     mw = sstream.weight[fi, bi, :] * (el > 0.0)
+            #     norm = tools.invert_no_zero(np.sum(mw))
+            #     mu_vis[bi] = norm * np.sum(mw * sstream.vis[fi, bi, :])
+
             # Loop over ra to reduce memory usage
             for ri in range(len(ra)):
-                
+
                 # Copy over the visiblities and weights
                 vis = sstream.vis[fi, :, ri]
                 weight = sstream.weight[fi, :, ri]
                 sscut.vis[fi, :, ri] = vis
                 sscut.weight[fi, :, ri] = weight
-                
+
                 # Check if sun has set
                 if el[ri] > 0.0:
+
+                    # Subtract mean value
+                    # visn = vis - mu_vis
 
                     # Calculate the phase that the sun would have using the fringestop routine
                     sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
