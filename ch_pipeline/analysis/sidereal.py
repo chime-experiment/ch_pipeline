@@ -353,25 +353,24 @@ class SiderealRegridder(task.SingleTask):
         vr = vis_data.reshape(-1, vis_data.shape[-1])
         nr = imask.reshape(-1, vis_data.shape[-1])
 
-        # Scale weights to values between 0.0 and 1.0 to prevent issues during interpolation
-        scale_factor = np.max(imask)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            inv_scale_factor = 1.0 / scale_factor if scale_factor > 0.0 else 0.0
-
-        nr *= inv_scale_factor
+        # # Scale weights to values between 0.0 and 1.0 to prevent issues during interpolation
+        # scale_factor = np.max(imask)
+        # with np.errstate(divide='ignore', invalid='ignore'):
+        #     inv_scale_factor = 1.0 / scale_factor if scale_factor > 0.0 else 0.0
+        #
+        # nr *= inv_scale_factor
 
         # Construct a signal 'covariance'
-        Si = np.ones_like(csd_grid) * 1e-8
+        #Si = np.ones_like(csd_grid) * 1e-8
+        Si = np.ones_like(csd_grid)
 
         # Calculate the interpolated data and a noise weight at the points in the padded grid
         sts, ni = regrid.band_wiener(lzf, nr, Si, vr, 2 * self.lanczos_width - 1)
 
-        # Multiply the scale factor back in
-        ni *= scale_factor
+        # # Multiply the scale factor back in
+        # ni *= scale_factor
 
         # Throw away the padded ends
-        # sts = sts[:, pad:-pad].copy()
-        # ni = ni[:, pad:-pad].copy()
         sts = sts[:, pad:-pad]
         ni = ni[:, pad:-pad]
 
@@ -530,7 +529,7 @@ class MeanSubtract(task.SingleTask):
                 ra = ephemeris.transit_RA(sstream.time)
 
                 # Find night time data
-                flag_quiet = ~daytime_flag(sstream.time)
+                flag_quiet = ~daytime_flag(sstream.time) & (np.fix(ephemeris.csd(sstream.time)) == sstream.attrs['csd'])
 
             elif isinstance(sstream, containers.SiderealStream):
                 # Extract csd and ra
