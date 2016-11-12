@@ -323,9 +323,6 @@ class LoadCorrDataFiles(task.SingleTask):
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
-        if mpiutil.rank0:
-            print "Reading file %i of %i.  (%s)" % (self._file_ptr, len(self.files), file_)
-
         # Set up product selection
         prod_sel = None
         if self.only_autos:
@@ -333,8 +330,14 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
+        #if mpiutil.rank0:
+        print "rank %03d, reading file %i of %i.  (%s)" % (mpiutil.rank, self._file_ptr, len(self.files), file_)
+
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
+
+        if mpiutil.rank0:
+            print "Done reading file."
 
         # Use a simple incrementing string as the tag
         if 'tag' not in ts.attrs:
@@ -429,6 +432,8 @@ class LoadSetupFile(pipeline.TaskBase):
 
         from caput import memh5
 
+        cont = None
+
         # Check that the file exists
         if not os.path.exists(self.filename):
             raise RuntimeError('File does not exist: %s' % self.filename)
@@ -436,8 +441,16 @@ class LoadSetupFile(pipeline.TaskBase):
         if mpiutil.rank0:
             print "Loading file: %s" % self.filename
 
-        # Load into container
-        cont = memh5.BasicCont.from_file(self.filename, distributed=False)
+            # Load into container
+            cont = memh5.BasicCont.from_file(self.filename, distributed=False)
+
+        # Broadcast to other nodes
+        cont = mpiutil.world.bcast(cont, root=0)
+
+        print "Load csd flag, rank %03d has data from %s" % (mpiutil.rank, self.filename)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
 
         # Return container
         return cont
@@ -474,6 +487,8 @@ class LoadFileFromTag(task.SingleTask):
 
         if self.only_prefix:
 
+            self.outcont = None
+
             filename = self.prefix
 
             split_ext = os.path.splitext(filename)
@@ -486,13 +501,22 @@ class LoadFileFromTag(task.SingleTask):
 
             if mpiutil.rank0:
                 print "Loading file: %s" % filename
+                self.outcont = memh5.BasicCont.from_file(filename, distributed=False)
 
-            # Load into container
-            self.outcont = memh5.BasicCont.from_file(filename, distributed=False)
+            # Broadcast to other nodes
+            self.outcont = mpiutil.world.bcast(self.outcont, root=0)
+
+            print "Load input mask, rank %03d has data from %s" % (mpiutil.rank, filename), np.sum(self.outcont.datasets['input_mask'][:])
+
+            # Make sure all nodes have container before return
+            mpiutil.world.Barrier()
 
         else:
 
             self.prefix = os.path.splitext(self.prefix)[0]
+
+        # Return
+        return
 
 
     def process(self, incont):
@@ -510,6 +534,8 @@ class LoadFileFromTag(task.SingleTask):
 
         if not self.only_prefix:
 
+            self.outcont = None
+
             filename = self.prefix + incont.attrs['tag'] + '.h5'
 
             # Check that the file exists
@@ -519,8 +545,14 @@ class LoadFileFromTag(task.SingleTask):
             if mpiutil.rank0:
                 print "Loading file: %s" % filename
 
-            # Load into container
-            self.outcont = memh5.BasicCont.from_file(self.filename, distributed=False)
+                # Load into container
+                self.outcont = memh5.BasicCont.from_file(self.filename, distributed=False)
+
+            # Broadcast to other nodes
+            self.outcont = mpiutil.world.bcast(self.outcont, root=0)
+
+            # Make sure all nodes have container before return
+            mpiutil.world.Barrier()
 
         return self.outcont
 

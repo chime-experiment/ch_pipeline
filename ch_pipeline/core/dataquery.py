@@ -67,7 +67,7 @@ from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
 _DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
-
+#_DEFAULT_NODE_SPOOF = {'scinet_processing': '/scratch/k/krs/jrs65/chime/archive/processing/'}
 
 class QueryRun(pipeline.TaskBase):
     """Find the files belonging to a specific `run`.
@@ -147,6 +147,9 @@ class QueryRun(pipeline.TaskBase):
             files.sort()
 
         files = mpiutil.world.bcast(files, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
 
         return files
 
@@ -291,6 +294,9 @@ class QueryInputs(pipeline.TaskBase):
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
 
         return inputs
 
