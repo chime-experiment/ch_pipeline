@@ -258,6 +258,8 @@ class SelectFreq(task.SingleTask):
             New container with trimmed frequencies.
         """
 
+        from caput import mpiutil
+
         # Set up frequency selection.
         freq_map = data.index_map['freq']
 
@@ -279,22 +281,46 @@ class SelectFreq(task.SingleTask):
         data.redistribute(['ra', 'time'])
 
         # Create new container with subset of frequencies.
-        newdata = data.__class__(freq=freq_map, axes_from=data, attrs_from=data)
+        if isinstance(data, containers.ContainerBase):
+            newdata = data.__class__(freq=freq_map, axes_from=data, attrs_from=data)
+
+        elif isinstance(data, andata.CorrData):
+            newdata = containers.make_empty_corrdata(freq=freq_map, axes_from=data, attrs_from=data,
+                                                distributed=True, distributed_axis=2, comm=data.comm)
+
+        else:
+            raise RuntimeError("I don't know how to deal with data type %s" % data.__class__.__name__)
+
 
         # Redistribute new container over ra or time.
         newdata.redistribute(['ra', 'time'])
 
         # Copy over datasets.  If the dataset has a frequency axis,
         # then we only copy over the subset.
-        for name, dset in data.datasets.iteritems():
+        if isinstance(data, containers.ContainerBase):
 
-            if name not in newdata.datasets:
-                newdata.add_dataset(name)
+            for name, dset in data.datasets.iteritems():
 
-            if 'freq' in dset.attrs['axis']:
-                newdata.datasets[name][:] = data.datasets[name][newindex, ...]
-            else:
-                newdata.datasets[name][:] = data.datasets[name][:]
+                if name not in newdata.datasets:
+                    newdata.add_dataset(name)
+
+                if 'freq' in dset.attrs['axis']:
+                    slc = [slice(None)] * len(dset.shape)
+                    slc[list(dset.attrs['axis']).index('freq')] = newindex
+                    newdata.datasets[name][:] = dset[slc]
+                else:
+                    newdata.datasets[name][:] = dset[:]
+
+        else:
+
+            newdata.vis[:] = data.vis[newindex, :, :]
+            newdata.weight[:] = data.weight[newindex, :, :]
+            newdata.gain[:] = data.gain[newindex, :, :]
+
+
+        # Switch back to frequency distribution
+        data.redistribute('freq')
+        newdata.redistribute('freq')
 
         return newdata
 

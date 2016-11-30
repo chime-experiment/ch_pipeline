@@ -54,7 +54,7 @@ class RFIFilter(task.SingleTask):
     def process(self, data):
 
         if mpiutil.rank0:
-            print "RFI filtering %s" % data.attrs['tag']
+            print "RFI filtering %s, flag1d = %s" % (data.attrs['tag'], self.flag1d)
 
         # Construct RFI mask
         mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad, flag1d=self.flag1d)
@@ -798,84 +798,6 @@ class NanToNum(task.SingleTask):
         return timestream
 
 
-# class RadiometerWeight(task.SingleTask):
-#     """ Update vis_weight according to the radiometer equation:
-#
-#             vis_weight_ij = Nsamples / V_ii V_jj
-#     """
-#
-#     def process(self, timestream):
-#         """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
-#         multiplies by the total number of samples, and divides by the autocorrelations of the
-#         two feeds that form each baseline.
-#
-#         Parameters
-#         ----------
-#         timestream : andata.CorrData
-#
-#         Returns
-#         --------
-#         timestream : andata.CorrData
-#         """
-#
-#         from calibration import _extract_diagonal as diag
-#
-#         # Redistribute over the frequency direction
-#         timestream.redistribute('freq')
-#
-#         # Extract number of samples per integration period
-#         max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
-#
-#         # Extract the maximum possible value of vis_weight
-#         max_vis_weight = np.iinfo(timestream.flags['vis_weight'].dtype).max
-#
-#         # Calculate the scaling factor that converts from vis_weight value
-#         # to number of samples
-#         vw_to_nsamp = max_nsamples / float(max_vis_weight)
-#
-#         # Extract the autocorrelation
-#         Trec = diag(timestream.vis).real
-#
-#         # Calculate the inverse autocorrelation
-#         with np.errstate(divide='ignore', invalid='ignore'):
-#             inv_Trec = np.where(Trec > 0.0, 1.0 / Trec, 0.0)
-#
-#         # Determine product map for loop
-#         nprod = timestream.nprod
-#         ninput = timestream.ninput
-#         prod_map = [tools.icmap(pp, ninput) for pp in range(nprod)]
-#
-#         vis_weight = np.zeros(timestream.flags['vis_weight'].local_shape, dtype=np.float32)
-#
-#         # Loop over products to save memory
-#         for pp, prod in enumerate(prod_map):
-#
-#             # Determine the inputs.
-#             ii, jj = prod
-#
-#             # Scale vis_weight by input autocorrelation and effective number of samples
-#             vis_weight[:,pp] = inv_Trec[:,ii]*inv_Trec[:,jj]*timestream.flags['vis_weight'][:, pp]*vw_to_nsamp
-#
-#         # Recast vis_weight as float32
-#         # Wrap to produce MPIArray
-#         vis_weight = mpiarray.MPIArray.wrap(vis_weight, axis=0, comm=timestream.comm)
-#
-#         # Extract attributes
-#         vis_weight_attrs = memh5.attrs2dict(timestream.flags['vis_weight'].attrs)
-#
-#         # Delete current uint8 dataset
-#         timestream['flags'].__delitem__('vis_weight')
-#
-#         # Create new float32 dataset
-#         vis_weight_dataset = timestream.create_flag('vis_weight', data=vis_weight, distributed=True)
-#
-#         # Copy attributes
-#         memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
-#
-#         # Return timestream with updated weights
-#         return timestream
-
-
 class RadiometerWeight(task.SingleTask):
     """ Update vis_weight according to the radiometer equation:
 
@@ -902,6 +824,9 @@ class RadiometerWeight(task.SingleTask):
         timestream.redistribute('freq')
 
         if isinstance(timestream, andata.CorrData):
+
+            if mpiutil.rank0:
+                print "Converting weights to effective number of samples."
 
             # Extract number of samples per integration period
             max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
@@ -935,6 +860,9 @@ class RadiometerWeight(task.SingleTask):
 
         elif isinstance(timestream, containers.SiderealStream):
 
+            if mpiutil.rank0:
+                print "Scaling weights by outer product of inverse receiver temperature."
+
             # Extract the autocorrelation
             Trec = diag(timestream.vis).real
 
@@ -949,6 +877,7 @@ class RadiometerWeight(task.SingleTask):
 
         # Return timestream with updated weights
         return timestream
+
 
 class BadNodeFlagger(task.SingleTask):
     """Flag out bad GPU nodes by giving zero weight to their frequencies.

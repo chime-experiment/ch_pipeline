@@ -353,22 +353,11 @@ class SiderealRegridder(task.SingleTask):
         vr = vis_data.reshape(-1, vis_data.shape[-1])
         nr = imask.reshape(-1, vis_data.shape[-1])
 
-        # # Scale weights to values between 0.0 and 1.0 to prevent issues during interpolation
-        # scale_factor = np.max(imask)
-        # with np.errstate(divide='ignore', invalid='ignore'):
-        #     inv_scale_factor = 1.0 / scale_factor if scale_factor > 0.0 else 0.0
-        #
-        # nr *= inv_scale_factor
-
         # Construct a signal 'covariance'
-        #Si = np.ones_like(csd_grid) * 1e-8
         Si = np.ones_like(csd_grid)
 
         # Calculate the interpolated data and a noise weight at the points in the padded grid
         sts, ni = regrid.band_wiener(lzf, nr, Si, vr, 2 * self.lanczos_width - 1)
-
-        # # Multiply the scale factor back in
-        # ni *= scale_factor
 
         # Throw away the padded ends
         sts = sts[:, pad:-pad]
@@ -489,9 +478,13 @@ class MeanSubtract(task.SingleTask):
         calculate the weighted mean.  If False, then use only
         night-time data away from the transit of bright
         point sources.  Default is False.
+    median : bool
+        Subtracted weighted median instead of weighted mean.
     """
 
     all_data = config.Property(proptype=bool, default=False)
+    daytime = config.Property(proptype=bool, default=False)
+    median = config.Property(proptype=bool, default=True)
 
     def process(self, sstream):
         """
@@ -508,6 +501,7 @@ class MeanSubtract(task.SingleTask):
 
         from flagging import daytime_flag
         from ch_util import cal_utils, tools
+        import weighted as wq
 
         # Make sure we are distributed over frequency
         sstream.redistribute('freq')
@@ -519,7 +513,14 @@ class MeanSubtract(task.SingleTask):
         # or only "quiet" periods.
         if self.all_data:
 
-            flag_quiet = np.ones(len(sstream.time), dtype=np.bool)
+            if isinstance(sstream, andata.CorrData):
+                flag_quiet = np.ones(len(sstream.time), dtype=np.bool)
+
+            elif isinstance(sstream, containers.SiderealStream):
+                flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
+
+            else:
+                raise RuntimeError('Format of `sstream` argument is unknown.')
 
         else:
 
@@ -529,7 +530,12 @@ class MeanSubtract(task.SingleTask):
                 ra = ephemeris.transit_RA(sstream.time)
 
                 # Find night time data
-                flag_quiet = ~daytime_flag(sstream.time) & (np.fix(ephemeris.csd(sstream.time)) == sstream.attrs['csd'])
+                if self.daytime:
+                    flag_quiet = daytime_flag(sstream.time)
+                else:
+                    flag_quiet = ~daytime_flag(sstream.time)
+
+                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == sstream.attrs['csd'])
 
             elif isinstance(sstream, containers.SiderealStream):
                 # Extract csd and ra
@@ -544,7 +550,10 @@ class MeanSubtract(task.SingleTask):
                 # Find night time data
                 flag_quiet = np.ones(len(ra), dtype=np.bool)
                 for cc in csd_list:
-                    flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                    if self.daytime:
+                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                    else:
+                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
 
             else:
                 raise RuntimeError('Format of `sstream` argument is unknown.')
@@ -572,9 +581,15 @@ class MeanSubtract(task.SingleTask):
                 data = sstream.vis[fi, bi]
                 weight = sstream.weight[fi, bi] * flag_quiet
 
-                # Subtract mean value
-                norm = tools.invert_no_zero(np.sum(weight))
-                sstream.vis[fi, bi] -= norm * np.sum(weight*data)
+                # Subtract weighted median or weighted mean value
+                if self.median:
+                    if np.any(weight > 0.0):
+                        med = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
+                        sstream.vis[fi, bi] -= med
+
+                else:
+                    norm = tools.invert_no_zero(np.sum(weight))
+                    sstream.vis[fi, bi] -= norm * np.sum(weight*data)
 
         # Return mean subtracted map
         return sstream
