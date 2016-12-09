@@ -330,8 +330,8 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        #if mpiutil.rank0:
-        print "rank %03d, reading file %i of %i.  (%s)" % (mpiutil.rank, self._file_ptr, len(self.files), file_)
+        if mpiutil.rank0:
+            print "Reading file %i of %i. (%s)" % (self._file_ptr, len(self.files), file_)
 
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
@@ -505,8 +505,6 @@ class LoadFileFromTag(task.SingleTask):
 
             # Broadcast to other nodes
             self.outcont = mpiutil.world.bcast(self.outcont, root=0)
-
-            print "Load input mask, rank %03d has data from %s" % (mpiutil.rank, filename), np.sum(self.outcont.datasets['input_mask'][:])
 
             # Make sure all nodes have container before return
             mpiutil.world.Barrier()
