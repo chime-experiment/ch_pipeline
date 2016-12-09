@@ -93,8 +93,6 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     rotation_angle = tools._PF_ROT
 
-    zenith = telescope.latlon_to_sphpol([ephemeris.CHIMELATITUDE, 0.0])
-
     auto_correlations = True
 
     _pickle_keys = ['_feeds']
@@ -104,7 +102,17 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     #
 
     def __init__(self, feeds=None):
+        import datetime
+
         self._feeds = feeds
+
+        # Set location properties
+        self.latitude = ephemeris.CHIMELATITUDE
+        self.longitude = ephemeris.CHIMELONGITUDE
+        self.altitude = ephemeris.CHIMEALTITUDE
+
+        # Set the LSD start epoch (i.e. CHIME Pathfinder first light)
+        self.lsd_start_day = datetime.datetime(2013, 11, 15)
 
     @classmethod
     def from_layout(cls, layout, correlator=None, skip=False):
