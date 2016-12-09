@@ -50,12 +50,12 @@ import os.path
 import gc
 import numpy as np
 
-from caput import pipeline, mpiutil
+from caput import pipeline, mpiutil, memh5
 from caput import config
 
 from ch_util import andata
 
-from . import task
+from draco.core import task
 
 
 def _list_of_filelists(files):
@@ -141,7 +141,7 @@ class LoadMaps(pipeline.TaskBase):
         map : :class:`containers.Map`
         """
 
-        from . import containers
+        from draco.core import containers
 
         # Exit this task if we have eaten all the file groups
         if len(self.maps) == 0:
@@ -347,7 +347,7 @@ class LoadCorrDataFiles(task.SingleTask):
         # Add a weight dataset if needed
         if 'vis_weight' not in ts.flags:
             weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                                       distributed=True, distributed_axis=0)
+                                         distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
 
             # Set weight to maximum value (255), unless the vis value is
@@ -512,12 +512,9 @@ class LoadFileFromTag(task.SingleTask):
             mpiutil.world.Barrier()
 
         else:
-
             self.prefix = os.path.splitext(self.prefix)[0]
 
-        # Return
         return
-
 
     def process(self, incont):
         """ Determine filename from the input container.
