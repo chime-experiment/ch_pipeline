@@ -24,15 +24,17 @@ Usage
 
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 import ephem
 
-from caput import pipeline, config
-from caput import mpiutil, mpiarray
+from caput import config
+from caput import mpiutil
 from ch_util import andata, ephemeris, tools, cal_utils
+from draco.core import task
 
-from ..core import task, containers
+from ..core import containers
+
 
 def unix_to_localtime(unix_time):
     """Converts unix time to a :class:`datetime.datetime` object.
@@ -170,7 +172,7 @@ class SolarGrouper(task.SingleTask):
         start = datetime.utcfromtimestamp(self._timestream_list[0].time[0])
         end = datetime.utcfromtimestamp(self._timestream_list[-1].time[-1])
         tdelta = end - start
-        day_length = tdelta.days*24.0 + tdelta.seconds / 3600.0
+        day_length = tdelta.days * 24.0 + tdelta.seconds / 3600.0
 
         # If the amount of data for this day is too small, then just skip
         if day_length < self.min_span:
@@ -245,7 +247,7 @@ class SolarCalibration(task.SingleTask):
 
         # Only examine data between sunrise and sunset
         time_flag = np.zeros(len(time), dtype=np.bool)
-        rise = ephemeris.solar_rising(time[0] - 24.0*3600.0, end_time=time[-1])
+        rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
         for rr in rise:
             ss = ephemeris.solar_setting(rr)[0]
             time_flag |= ((time >= rr) & (time <= ss))
@@ -253,8 +255,8 @@ class SolarCalibration(task.SingleTask):
         if not np.any(time_flag):
             if mpiutil.rank0:
                 print("No daytime data between %s and %s." %
-                        (ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
-                         ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M")))
+                      (ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
+                       ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M")))
             return None
 
         # Convert boolean flag to slices
@@ -265,7 +267,7 @@ class SolarCalibration(task.SingleTask):
         for key, group in groupby(enumerate(time_index), lambda (index, item): index - item):
             group = map(itemgetter(1), group)
             ngroup = len(group)
-            time_slice.append((slice(group[0], group[-1]+1), slice(count, count+ngroup)))
+            time_slice.append((slice(group[0], group[-1] + 1), slice(count, count + ngroup)))
             ntime += ngroup
 
         time = np.concatenate([time[slc[0]] for slc in time_slice])
@@ -309,7 +311,7 @@ class SolarCalibration(task.SingleTask):
             # Extract visibility slice
             vis_slice = sstream.vis[..., slc_in].copy()
 
-            ha  = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
+            ha = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
             dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
 
             # Extract the diagonal (to be used for weighting)
@@ -337,7 +339,7 @@ class SolarCalibration(task.SingleTask):
         if self.model_fit:
 
             # Estimate peak RA
-            i_transit = np.argmin(np.abs(sun_pos[:,0]))
+            i_transit = np.argmin(np.abs(sun_pos[:, 0]))
 
             body = ephem.Sun()
             obs = ephemeris._get_chime()
@@ -346,7 +348,7 @@ class SolarCalibration(task.SingleTask):
 
             peak_ra = ephemeris.peak_RA(body)
             dra = ra - peak_ra
-            dra = np.abs(dra - (dra > np.pi)*2.0*np.pi)[np.newaxis, np.newaxis, :]
+            dra = np.abs(dra - (dra > np.pi) * 2.0 * np.pi)[np.newaxis, np.newaxis, :]
 
             # Estimate FWHM
             sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
@@ -354,13 +356,13 @@ class SolarCalibration(task.SingleTask):
 
             # Only fit ra values above the specified dynamic range threshold
             fit_flag = np.zeros([nfreq, nfeed, ntime], dtype=np.bool)
-            fit_flag[:, xfeeds, :] = dra < (self.nsig*sig_x)
-            fit_flag[:, yfeeds, :] = dra < (self.nsig*sig_y)
+            fit_flag[:, xfeeds, :] = dra < (self.nsig * sig_x)
+            fit_flag[:, yfeeds, :] = dra < (self.nsig * sig_y)
 
             # Fit model for the complex response of each feed to the point source
             param, param_cov = cal_utils.fit_point_source_transit(ra_slice, suntrans.response[:],
-                                                                            suntrans.response_error[:],
-                                                                            flag=fit_flag)
+                                                                  suntrans.response_error[:],
+                                                                  flag=fit_flag)
 
             # Save to container
             suntrans.add_dataset('flag')
@@ -371,7 +373,6 @@ class SolarCalibration(task.SingleTask):
 
             suntrans.add_dataset('parameter_cov')
             suntrans.parameter_cov[:] = param_cov
-
 
         # Update attributes
         units = 'sqrt(' + sstream.vis.attrs.get('units', 'correlator-units') + ')'
@@ -495,4 +496,3 @@ class SunClean(task.SingleTask):
 
         # Return the clean sidereal stream
         return sscut
-

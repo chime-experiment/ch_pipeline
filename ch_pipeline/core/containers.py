@@ -6,8 +6,8 @@ Parallel data containers (:mod:`~ch_pipeline.core.containers`)
 .. currentmodule:: ch_pipeline.core.containers
 
 Containers for holding various types of CHIME specific analysis data in a
-distributed fashion. See `draco.core.containers` for more general data
-containers.
+distributed fashion. The module `draco.core.containers` contains general data
+containers which are imported into this module.
 
 Containers
 ==========
@@ -29,7 +29,7 @@ import numpy as np
 
 from caput import memh5
 
-from draco.core.containers import ContainerBase
+from draco.core.containers import *
 
 
 class CorrInputMask(ContainerBase):

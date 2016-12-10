@@ -27,8 +27,7 @@ import contextlib
 import numpy as np
 
 from caput import config
-
-from ..core import task
+from draco.core import task
 
 
 class ReceiverTemperature(task.SingleTask):

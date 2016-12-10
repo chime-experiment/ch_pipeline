@@ -27,13 +27,15 @@ Tasks
     MaskData
     MaskCHIMEData
 """
-import os.path
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
 
-from ..core import containers, task
+from draco.core import task
+
+from ..core import containers
+
 
 class RFIFilter(task.SingleTask):
     """Filter RFI from a Timestream.
@@ -208,8 +210,8 @@ class MonitorCorrInput(task.SingleTask):
             filemap = [ (day, _days_in_csd(day, se_csd, extra=0.005)) for day in days ]
 
             # Determine the time range for each day
-            timemap = [ (day, ephemeris.csd_to_unix(np.array([day, day+1])))
-                         for day in days ]
+            timemap = [(day, ephemeris.csd_to_unix(np.array([day, day + 1])))
+                       for day in days]
 
             # Extract the frequency and inputs for the first day
             data_r = andata.Reader(self.files[filemap[0][1]])
@@ -244,7 +246,6 @@ class MonitorCorrInput(task.SingleTask):
 
         self.freq = mpiutil.world.bcast(freq, root=0)
         self.nfreq = len(self.freq)
-
 
     def process(self):
         """Calls ch_util.ChanMonitor for each sidereal day.
@@ -441,7 +442,6 @@ class TestCorrInput(task.SingleTask):
         # Determine what tests we will use
         self.use_test = ~np.array([False, False, self.ignore_gains, self.ignore_noise, self.ignore_fit])
 
-
     def process(self, timestream, inputmap):
         """Find good inputs using timestream.
 
@@ -519,10 +519,10 @@ class TestCorrInput(task.SingleTask):
 
                 # Print results for this frequency
                 print ("Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
-                         fi_dist, timestream.ninput - len(test_inputs),
-                         np.sum(good_gains == 0) if good_gains is not None else 'failed', ' [ignored]' if self.ignore_gains else '',
-                         np.sum(good_noise == 0) if good_noise is not None else 'failed', ' [ignored]' if self.ignore_noise else '',
-                         np.sum(good_fit == 0) if good_fit is not None else 'failed', ' [ignored]' if self.ignore_fit else ''))
+                       fi_dist, timestream.ninput - len(test_inputs),
+                       np.sum(good_gains == 0) if good_gains is not None else 'failed', ' [ignored]' if self.ignore_gains else '',
+                       np.sum(good_noise == 0) if good_noise is not None else 'failed', ' [ignored]' if self.ignore_noise else '',
+                       np.sum(good_fit == 0) if good_fit is not None else 'failed', ' [ignored]' if self.ignore_fit else ''))
 
         # Gather the input flags from all nodes
         passed_test_all = np.zeros((timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int)
@@ -543,7 +543,7 @@ class TestCorrInput(task.SingleTask):
 
         # Create container to hold results
         corr_input_test = containers.CorrInputTest(freq=freqmap, test=self.test,
-                                              axes_from=timestream, attrs_from=timestream)
+                                                   axes_from=timestream, attrs_from=timestream)
 
         # Save flags to container, return container
         corr_input_test.input_mask[:] = input_mask
@@ -581,7 +581,6 @@ class AccumulateCorrInputMask(task.SingleTask):
         self._accumulated_input_mask = []
         self._csd = []
 
-
     def process(self, corr_input_mask):
         """ Append corr_input_mask to list.
 
@@ -596,7 +595,6 @@ class AccumulateCorrInputMask(task.SingleTask):
         self._accumulated_input_mask.append(corr_input_mask.input_mask[:])
         self._csd.append(corr_input_mask.attrs['csd'])
 
-
     def process_finish(self):
         """ Determine good days as those where the fraction
         of good inputs is above some user specified
@@ -608,8 +606,6 @@ class AccumulateCorrInputMask(task.SingleTask):
         --------
         corr_input_mask : container.CorrInputMask
         """
-
-        ninput = len(self.input)
         ncsd = len(self._csd)
 
         input_mask_all = np.asarray(self._accumulated_input_mask)
@@ -734,7 +730,7 @@ class ApplySiderealDayFlag(task.SingleTask):
             else:
                 msg = (("Warning: status of CSD %d not given in %s.  " +
                         "Will continue pipeline processing.") %
-                        (this_csd, self.file_name))
+                       (this_csd, self.file_name))
 
         else:
 
@@ -857,7 +853,6 @@ class RadiometerWeight(task.SingleTask):
             # Copy attributes
             memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
-
         elif isinstance(timestream, containers.SiderealStream):
 
             if mpiutil.rank0:
@@ -978,7 +973,7 @@ def daytime_flag(time):
     """
 
     flag = np.zeros(len(time), dtype=np.bool)
-    rise = ephemeris.solar_rising(time[0] - 24.0*3600.0, end_time=time[-1])
+    rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
         ss = ephemeris.solar_setting(rr)[0]
         flag |= ((time >= rr) & (time <= ss))
@@ -1020,7 +1015,7 @@ def solar_transit_flag(time, nsig=5.0):
     # as +/- nsig sigma, where sigma denotes the width of the
     # primary beam.  We use the lowest frequency and E polarisation,
     # since this is the most conservative (largest sigma).
-    window_sec = nsig*cal_utils.guess_fwhm(400.0, pol='X', dec=np.median(dec), sigma=True)*deg_to_sec
+    window_sec = nsig * cal_utils.guess_fwhm(400.0, pol='X', dec=np.median(dec), sigma=True) * deg_to_sec
 
     # Sun transit
     transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)
@@ -1031,7 +1026,7 @@ def solar_transit_flag(time, nsig=5.0):
         sun.compute(obs)
 
         peak_ra = ephemeris.peak_RA(sun, deg=True)
-        mid += (peak_ra - np.degrees(sun.ra))*deg_to_sec
+        mid += (peak_ra - np.degrees(sun.ra)) * deg_to_sec
 
         # Flag +/- window_sec around peak location
         begin = mid - window_sec
@@ -1049,17 +1044,17 @@ def taper_mask(mask, nwidth, outer=False):
     else:
         tapered_mask = mask.astype(np.float)
 
-    taper = np.hanning(2*nwidth - 1)
+    taper = np.hanning(2 * nwidth - 1)
 
     dmask = np.diff(tapered_mask)
     transition = np.where(dmask != 0)[0]
 
     for tt in transition:
         if dmask[tt] > 0:
-            ind = np.arange(tt, tt+nwidth)
+            ind = np.arange(tt, tt + nwidth)
             tapered_mask[ind % num] *= taper[:nwidth]
         else:
-            ind = np.arange(tt+2-nwidth, tt+2)
+            ind = np.arange(tt + 2 - nwidth, tt + 2)
             tapered_mask[ind % num] *= taper[-nwidth:]
 
     if outer:
@@ -1135,9 +1130,9 @@ class DayMask(task.SingleTask):
             if hasattr(csd, '__iter__'):
                 flag = np.zeros(len(ra), dtype=np.bool)
                 for cc in csd:
-                    flag |= flag_function(ephemeris.csd_to_unix(cc + ra/360.0))
+                    flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
             else:
-                flag = flag_function(ephemeris.csd_to_unix(csd + ra/360.0))
+                flag = flag_function(ephemeris.csd_to_unix(csd + ra / 360.0))
 
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(ra))))
 

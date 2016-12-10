@@ -35,8 +35,9 @@ import numpy as np
 from caput import pipeline, config
 from caput import mpiutil, mpiarray
 from ch_util import andata, ephemeris
+from draco.core import task
 
-from ..core import task, containers
+from ..core import containers
 from ..util import regrid
 
 
@@ -118,7 +119,6 @@ class LoadTimeStreamSidereal(task.SingleTask):
         else:
             self.freq_sel = None
 
-
     def process(self):
         """Load in each sidereal day.
 
@@ -155,7 +155,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         # Add a weight dataset if needed
         if 'vis_weight' not in ts.flags:
             weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                                       distributed=True, distributed_axis=0)
+                                         distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
 
             # Set weight to maximum value (255), unless the vis value is
@@ -347,7 +347,7 @@ class SiderealRegridder(task.SingleTask):
             vw_to_nsamples = max_nsamples / float(max_vw)
 
             # Convert to float32
-            imask = imask.astype(np.float32)*vw_to_nsamples
+            imask = imask.astype(np.float32) * vw_to_nsamples
 
         # Reshape data
         vr = vis_data.reshape(-1, vis_data.shape[-1])
@@ -416,7 +416,7 @@ class SiderealStacker(task.SingleTask):
 
             if mpiutil.rank0:
                 print("Starting stack with CSD: %s" %
-                        ', '.join(["%i" % csd for csd in input_csd]))
+                      ', '.join(["%i" % csd for csd in input_csd]))
 
             self.stack = containers.SiderealStream(axes_from=sdata)
             self.stack.redistribute('freq')
@@ -432,10 +432,9 @@ class SiderealStacker(task.SingleTask):
 
             return
 
-
         if mpiutil.rank0:
             print("Adding to stack CSD: %s" %
-                        ', '.join(["%i" % csd for csd in input_csd]))
+                  ', '.join(["%i" % csd for csd in input_csd]))
 
         # note: Eventually we should fix up gains
 
@@ -444,7 +443,6 @@ class SiderealStacker(task.SingleTask):
         self.stack.weight[:] += sdata.weight[:]
 
         self.csd_list += input_csd
-
 
     def process_finish(self):
         """Construct and emit sidereal stack.
@@ -462,7 +460,6 @@ class SiderealStacker(task.SingleTask):
         self.stack.attrs['csd'] = np.array(self.csd_list)
 
         self.stack.vis[:] *= tools.invert_no_zero(self.stack.weight[:])
-
 
         return self.stack
 
@@ -551,9 +548,9 @@ class MeanSubtract(task.SingleTask):
                 flag_quiet = np.ones(len(ra), dtype=np.bool)
                 for cc in csd_list:
                     if self.daytime:
-                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
                     else:
-                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
 
             else:
                 raise RuntimeError('Format of `sstream` argument is unknown.')
@@ -562,10 +559,10 @@ class MeanSubtract(task.SingleTask):
             for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
 
                 peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
-                src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
+                src_window = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
 
                 dra = (ra - peak_ra) % 360.0
-                dra -= (dra > 180.0)*360.0
+                dra -= (dra > 180.0) * 360.0
 
                 flag_quiet &= np.abs(dra) > src_window
 
@@ -589,7 +586,7 @@ class MeanSubtract(task.SingleTask):
 
                 else:
                     norm = tools.invert_no_zero(np.sum(weight))
-                    sstream.vis[fi, bi] -= norm * np.sum(weight*data)
+                    sstream.vis[fi, bi] -= norm * np.sum(weight * data)
 
         # Return mean subtracted map
         return sstream

@@ -27,10 +27,11 @@ import numpy as np
 
 from cora.util import hputil
 from caput import mpiutil, pipeline, config, mpiarray
+from draco.core import task
 
 from ch_util import ephemeris
 
-from ..core import containers, task
+from ..core import containers
 
 
 class SimulateSidereal(task.SingleTask):

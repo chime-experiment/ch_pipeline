@@ -21,7 +21,6 @@ Tasks
 """
 import numpy as np
 from scipy import interpolate
-from scipy.optimize import curve_fit
 
 from caput import config, pipeline
 from caput import mpiarray, mpiutil
@@ -29,11 +28,12 @@ from caput import mpiarray, mpiutil
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
-from ch_util import data_quality
 from ch_util import cal_utils
 from ch_util import fluxcat
 
-from ..core import containers, task
+from draco.core import task
+
+from ..core import containers
 from ..util import _fast_tools
 
 
@@ -156,7 +156,7 @@ def solve_gain(data, feeds=None, norm=None):
 
             # Construct gain solutions
             if evals[-1] > 0:
-                sign0 = (1.0 - 2.0*(evecs[0, -1].real < 0.0))
+                sign0 = (1.0 - 2.0 * (evecs[0, -1].real < 0.0))
                 gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
 
                 gain_error[fi, :, ti] = (inv_norm[fi, :, ti] *
@@ -166,7 +166,7 @@ def solve_gain(data, feeds=None, norm=None):
                 evalue[fi, :, ti] = evals
 
             # Solve for eigenvectors
-            #evals, evecs = tools.eigh_no_diagonal(cd, niter=5, eigvals=(nfeed - 2, nfeed - 1))
+            # evals, evecs = tools.eigh_no_diagonal(cd, niter=5, eigvals=(nfeed - 2, nfeed - 1))
 
             # Construct dynamic range and gain, but only if the two highest
             # eigenvalues are positive. If not, we just let the gain and dynamic
@@ -218,8 +218,8 @@ def _adiff(ts, dt):
     if dt is None:
         return ts
 
-    return ts - 0.5*(np.mean(ts[..., :dt], axis=-1) +
-                     np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
+    return ts - 0.5 * (np.mean(ts[..., :dt], axis=-1) +
+                       np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
 
 
 class NoiseSourceFold(task.SingleTask):
@@ -236,7 +236,6 @@ class NoiseSourceFold(task.SingleTask):
     period = config.Property(proptype=int, default=None)
     phase = config.Property(proptype=list, default=[])
     only_off = config.Property(proptype=bool, default=False)
-
 
     def process(self, ts):
         """Fold on the noise source and generate a gated dataset.
@@ -259,7 +258,7 @@ class NoiseSourceFold(task.SingleTask):
             ni_params = {'ni_period': self.period, 'ni_on_bins': self.phase}
 
         folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params,
-                                                     only_off=self.only_off)
+                                                 only_off=self.only_off)
 
         return folded_ts
 
@@ -429,7 +428,7 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Find gains with the eigenvalue method
         evalue, gain = solve_gain(gate_view, norm=norm_view)[0:2]
-        dr = evalue[:, -1, :]*tools.invert_no_zero(evalue[:, -2, :])
+        dr = evalue[:, -1, :] * tools.invert_no_zero(evalue[:, -2, :])
 
         # Normalise by the noise source channel
         gain *= tools.invert_no_zero(gain[:, np.newaxis, noise_channel, :])
@@ -467,7 +466,6 @@ def contiguous_flag(flag, centre=None):
                 continue
 
     return flag
-
 
 
 class SiderealCalibration(task.SingleTask):
@@ -542,7 +540,7 @@ class SiderealCalibration(task.SingleTask):
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
+        slice_width_deg = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -602,8 +600,8 @@ class SiderealCalibration(task.SingleTask):
 
         # Construct the dynamic range estimate as the ratio of the first to second
         # largest eigenvalue at the time of transit
-        dr_x = evalue_x[:, -1, :]*tools.invert_no_zero(evalue_x[:, -2, :])
-        dr_y = evalue_y[:, -1, :]*tools.invert_no_zero(evalue_y[:, -2, :])
+        dr_x = evalue_x[:, -1, :] * tools.invert_no_zero(evalue_x[:, -2, :])
+        dr_y = evalue_y[:, -1, :] * tools.invert_no_zero(evalue_y[:, -2, :])
 
         # If requested, fit a model to the point source transit
         if self.model_fit:
@@ -620,8 +618,8 @@ class SiderealCalibration(task.SingleTask):
             # Overwrite the initial gain estimates for frequencies/feeds
             # where the model fit was successful
             if self.use_peak:
-                gain = np.where(np.isnan(param[:,:,0]), gain,
-                                param[:,:,0]*np.exp(1.0j*np.deg2rad(param[:,:,-2])))
+                gain = np.where(np.isnan(param[:, :, 0]), gain,
+                                param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])))
             else:
                 for index in np.ndindex(nfreq, nfeed):
                     if np.all(np.isfinite(param[index])):

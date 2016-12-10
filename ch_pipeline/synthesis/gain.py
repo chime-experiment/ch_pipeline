@@ -22,8 +22,9 @@ Tasks
 import numpy as np
 
 from caput import config, mpiarray
+from draco.core import task
 
-from ..core import containers, task
+from ..core import containers
 
 
 class RandomGains(task.SingleTask):

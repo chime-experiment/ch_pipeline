@@ -20,11 +20,12 @@ Tasks
     MModeTransform
 """
 import numpy as np
+
 from caput import mpiarray, config
-
 from ch_util import tools, andata
+from draco.core import task
 
-from ..core import containers, task
+from ..core import containers
 
 
 class FrequencyRebin(task.SingleTask):
@@ -258,8 +259,6 @@ class SelectFreq(task.SingleTask):
             New container with trimmed frequencies.
         """
 
-        from caput import mpiutil
-
         # Set up frequency selection.
         freq_map = data.index_map['freq']
 
@@ -286,11 +285,9 @@ class SelectFreq(task.SingleTask):
 
         elif isinstance(data, andata.CorrData):
             newdata = containers.make_empty_corrdata(freq=freq_map, axes_from=data, attrs_from=data,
-                                                distributed=True, distributed_axis=2, comm=data.comm)
-
+                                                     distributed=True, distributed_axis=2, comm=data.comm)
         else:
             raise RuntimeError("I don't know how to deal with data type %s" % data.__class__.__name__)
-
 
         # Redistribute new container over ra or time.
         newdata.redistribute(['ra', 'time'])
@@ -316,7 +313,6 @@ class SelectFreq(task.SingleTask):
             newdata.vis[:] = data.vis[newindex, :, :]
             newdata.weight[:] = data.weight[newindex, :, :]
             newdata.gain[:] = data.gain[newindex, :, :]
-
 
         # Switch back to frequency distribution
         data.redistribute('freq')

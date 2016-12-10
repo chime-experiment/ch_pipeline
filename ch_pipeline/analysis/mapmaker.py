@@ -21,7 +21,9 @@ Tasks
 import numpy as np
 from caput import mpiarray, config
 
-from ..core import containers, task
+from draco.core import task
+
+from ..core import containers
 
 
 class BaseMapMaker(task.SingleTask):
