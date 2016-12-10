@@ -110,10 +110,8 @@ class ChannelFlagger(task.SingleTask):
         # Create a global channel weight (channels are bad by default)
         chan_mask = np.zeros(timestream.ninput, dtype=np.int)
 
-        # Mark any CHIME channels as good
-        for i in range(timestream.ninput):
-            if isinstance(inputmap[i], tools.CHIMEAntenna):
-                chan_mask[i] = 1
+        # Mark any powered CHIME channels as good
+        chan_mask[:] = tools.is_chime_on(inputmap)
 
         # Calculate start and end frequencies
         sf = timestream.vis.local_offset[0]
@@ -136,13 +134,15 @@ class ChannelFlagger(task.SingleTask):
                 if good_noise is None:
                     good_noise = np.ones_like(test_channels)
 
-                # Construct the overall channel mask for this frequency
+                # Construct the overall channel mask for this
+                # frequency (explicit cast to int or numpy complains,
+                # this should really be done upstream).
                 if not self.ignore_gains:
-                    chan_mask[test_channels] *= good_gains
+                    chan_mask[test_channels] *= good_gains.astype(np.int)
                 if not self.ignore_noise:
-                    chan_mask[test_channels] *= good_noise
+                    chan_mask[test_channels] *= good_noise.astype(np.int)
                 if not self.ignore_fit:
-                    chan_mask[test_channels] *= good_fit
+                    chan_mask[test_channels] *= good_fit.astype(np.int)
 
         # Gather the channel flags from all nodes, and combine into a
         # single flag (checking that all tests pass)
