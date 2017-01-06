@@ -32,9 +32,9 @@ from ch_util import cal_utils
 from ch_util import fluxcat
 
 from draco.core import task
+from draco.util import _fast_tools
 
 from ..core import containers
-from ..util import _fast_tools
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -666,116 +666,3 @@ class SiderealCalibration(task.SingleTask):
 
         # Return gain data
         return gain_data
-
-
-class ApplyGain(task.SingleTask):
-    """Apply a set of gains to a timestream or sidereal stack.
-
-    Attributes
-    ----------
-    inverse : bool, optional
-        Apply the gains directly, or their inverse.
-    smoothing_length : float, optional
-        Smooth the gain timestream across the given number of seconds.
-    """
-
-    inverse = config.Property(proptype=bool, default=True)
-    update_weight = config.Property(proptype=bool, default=False)
-    smoothing_length = config.Property(proptype=float, default=None)
-
-    def process(self, tstream, gain):
-
-        tstream.redistribute('freq')
-        gain.redistribute('freq')
-
-        if isinstance(gain, (containers.StaticGainData, containers.PointSourceTransit)):
-
-            # Extract gain array and add in a time axis
-            gain_arr = gain.gain[:][..., np.newaxis]
-
-            # Get the weight array if it's there
-            weight_arr = gain.weight[:][..., np.newaxis] if gain.weight is not None else None
-
-        elif isinstance(gain, containers.GainData):
-
-            # Extract gain array
-            gain_arr = gain.gain[:]
-
-            # Regularise any crazy entries
-            gain_arr = np.nan_to_num(gain_arr)
-
-            # Get the weight array if it's there
-            weight_arr = gain.weight[:] if gain.weight is not None else None
-
-            # Check that we are defined at the same time samples
-            if (gain.time != tstream.time).any():
-                raise RuntimeError('Gain data and timestream defined at different time samples.')
-
-            # Smooth the gain data if required
-            if self.smoothing_length is not None:
-                import scipy.signal as ss
-
-                # Turn smoothing length into a number of samples
-                tdiff = gain.time[1] - gain.time[0]
-                samp = int(np.ceil(self.smoothing_length / tdiff))
-
-                # Ensure smoothing length is odd
-                l = 2 * (samp / 2) + 1
-
-                # Turn into 2D array (required by smoothing routines)
-                gain_r = gain_arr.reshape(-1, gain_arr.shape[-1])
-
-                # Smooth amplitude and phase separately
-                smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
-                smooth_phase = ss.medfilt2d(np.angle(gain_r), kernel_size=[1, l])
-
-                # Recombine and reshape back to original shape
-                gain_arr = smooth_amp * np.exp(1.0J * smooth_phase)
-                gain_arr = gain_arr.reshape(gain.gain[:].shape)
-
-                # Smooth weight array if it exists
-                if weight_arr is not None:
-                    weight_arr = ss.medfilt2d(weight_arr, kernel_size=[1, l])
-
-        else:
-            raise RuntimeError('Format of `gain` argument is unknown.')
-
-        # Regularise any crazy entries
-        gain_arr = np.nan_to_num(gain_arr)
-
-        # If requested, invert the gains
-        inverse_gain_arr = tools.invert_no_zero(gain_arr)
-
-        if self.inverse:
-            gweight = gain_arr
-            gvis = inverse_gain_arr
-            if mpiutil.rank0:
-                print "Applying inverse gain."
-        else:
-            gweight = inverse_gain_arr
-            gvis = gain_arr
-            if mpiutil.rank0:
-                print "Applying gain."
-
-        # Apply gains to the weights
-        if self.update_weight:
-            tools.apply_gain(tstream.weight[:], np.abs(gweight)**2, out=tstream.weight[:])
-            if mpiutil.rank0:
-                print "Applying gain to weight."
-
-        # Apply gains to visibility matrix
-        tools.apply_gain(tstream.vis[:], gvis, out=tstream.vis[:])
-
-        # Update units
-        convert_units_to = gain.gain.attrs.get('convert_units_to')
-        if convert_units_to:
-            tstream.vis.attrs['units'] = convert_units_to
-
-        # Modify the weight array according to the gain weights
-        if weight_arr is not None:
-
-            # Convert dynamic range to a binary weight and apply to data
-            gain_weight = (weight_arr[:] > 2.0).astype(np.float64)
-            tstream.weight[:] *= gain_weight[:, np.newaxis, :]
-
-        return tstream

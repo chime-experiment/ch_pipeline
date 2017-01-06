@@ -1236,57 +1236,6 @@ class MaskRA(task.SingleTask):
         return sstream
 
 
-class MaskData(task.SingleTask):
-    """Mask out data ahead of map making.
-
-    Attributes
-    ----------
-    auto_correlations : bool
-        Exclude auto correlations if set (default=False).
-    m_zero : bool
-        Ignore the m=0 mode (default=False).
-    positive_m : bool
-        Include positive m-modes (default=True).
-    negative_m : bool
-        Include negative m-modes (default=True).
-    """
-
-    auto_correlations = config.Property(proptype=bool, default=False)
-    m_zero = config.Property(proptype=bool, default=False)
-    positive_m = config.Property(proptype=bool, default=True)
-    negative_m = config.Property(proptype=bool, default=True)
-
-    def process(self, mmodes):
-        """Mask out unwanted datain the m-modes.
-
-        Parameters
-        ----------
-        mmodes : containers.MModes
-
-        Returns
-        -------
-        mmodes : containers.MModes
-        """
-
-        # Exclude auto correlations if set
-        if not self.auto_correlations:
-            for pi, (fi, fj) in enumerate(mmodes.index_map['prod']):
-                if fi == fj:
-                    mmodes.weight[..., pi] = 0.0
-
-        # Apply m based masks
-        if not self.m_zero:
-            mmodes.weight[0] = 0.0
-
-        if not self.positive_m:
-            mmodes.weight[1:, 0] = 0.0
-
-        if not self.negative_m:
-            mmodes.weight[1:, 1] = 0.0
-
-        return mmodes
-
-
 class MaskCHIMEData(task.SingleTask):
     """Mask out data ahead of map making.
 
