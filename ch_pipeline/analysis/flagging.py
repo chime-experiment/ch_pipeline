@@ -717,7 +717,12 @@ class ApplySiderealDayFlag(task.SingleTask):
         """
 
         # Fetch the csd from the timestream attributes
-        this_csd = timestream.attrs.get('csd')
+        if 'lsd' in timestream.attrs:
+            this_csd = timestream.attrs['lsd']
+        elif 'csd' in timestream.attrs:
+            this_csd = timestream.attrs['lsd']
+        else:
+            this_csd = None
 
         # Is this csd specified in the file?
         if this_csd not in self.csd_dict:
@@ -725,7 +730,7 @@ class ApplySiderealDayFlag(task.SingleTask):
             output = timestream
 
             if this_csd is None:
-                msg = ("Warning: input timestream does not have 'csd' attribute.  " +
+                msg = ("Warning: input timestream does not have 'csd'/'lsd' attribute.  " +
                        "Will continue pipeline processing.")
             else:
                 msg = (("Warning: status of CSD %d not given in %s.  " +
@@ -1124,7 +1129,8 @@ class DayMask(task.SingleTask):
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(time))))
 
         else:
-            csd = sstream.attrs['csd']
+            # Fetch either the LSD or CSD attribute
+            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
             ra = sstream.index_map['ra'][:]
 
             if hasattr(csd, '__iter__'):

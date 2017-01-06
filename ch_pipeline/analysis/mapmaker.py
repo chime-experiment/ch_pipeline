@@ -153,7 +153,7 @@ class RingMapMaker(task.SingleTask):
             else:
                 vdr[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.vis[:, vis_ind]
 
-                wgh[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.weight[:,vis_ind]
+                wgh[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.weight[:, vis_ind]
 
                 smp[:, p_ind, :, x_ind % ncyl, y_ind] = w
 
@@ -173,7 +173,8 @@ class RingMapMaker(task.SingleTask):
         vis_pos_1d = np.fft.fftfreq(nvis_1d, d=(1.0 / (nvis_1d * sp)))
 
         # Create empty ring map
-        rm = containers.RingMap(beam=nbeam, el=el, pol=pol, axes_from=sstream)
+        rm = containers.RingMap(beam=nbeam, el=el, pol=pol,
+                                axes_from=sstream, attrs_from=sstream)
         rm.redistribute('freq')
 
         # Add datasets
@@ -208,35 +209,4 @@ class RingMapMaker(task.SingleTask):
             rm.map[fi] = bfm
             rm.dirty_beam[fi] = sb
 
-        # Copy units
-        units = sstream.vis.attrs.get('units')
-        if units is not None:
-            rm.map.attrs['units'] = units
-
-        # Transfer over attributes
-        tag = sstream.attrs.get('tag')
-        if tag is not None:
-            rm.attrs['tag'] = tag
-
-        csd = sstream.attrs.get('csd')
-        if csd is not None:
-            rm.attrs['csd'] = csd
-
         return rm
-
-
-def pinv_svd(M, acond=1e-4, rcond=1e-3):
-    # Generate the pseudo-inverse from an svd
-    # Not really clear why I'm not just using la.pinv2 instead,
-
-    import scipy.linalg as la
-
-    u, sig, vh = la.svd(M, full_matrices=False)
-
-    rank = np.sum(np.logical_and(sig > rcond * sig.max(), sig > acond))
-
-    psigma_diag = 1.0 / sig[: rank]
-
-    B = np.transpose(np.conjugate(np.dot(u[:, : rank] * psigma_diag, vh[: rank])))
-
-    return B

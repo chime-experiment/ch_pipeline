@@ -159,7 +159,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
         # Add attributes for the CSD and a tag for labelling saved files
         ts.attrs['tag'] = ('csd_%i' % csd)
-        ts.attrs['csd'] = csd
+        ts.attrs['lsd'] = csd
 
         # Add a weight dataset if needed
         if 'vis_weight' not in ts.flags:
@@ -258,6 +258,9 @@ class MeanSubtract(task.SingleTask):
         # Make sure we are distributed over frequency
         sstream.redistribute('freq')
 
+        # Fetch the CSD (preferring it to be labelled the LSD)
+        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+
         # Extract product map
         prod = sstream.index_map['prod']
 
@@ -287,11 +290,10 @@ class MeanSubtract(task.SingleTask):
                 else:
                     flag_quiet = ~daytime_flag(sstream.time)
 
-                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == sstream.attrs['csd'])
+                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == csd)
 
             elif isinstance(sstream, containers.SiderealStream):
                 # Extract csd and ra
-                csd = sstream.attrs['csd']
                 if hasattr(csd, '__iter__'):
                     csd_list = csd
                 else:

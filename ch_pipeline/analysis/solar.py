@@ -242,7 +242,8 @@ class SolarCalibration(task.SingleTask):
             ra = ephemeris.transit_RA(time)
         else:
             ra = sstream.index_map['ra'][:]
-            csd = sstream.attrs['csd'] + ra / 360.0
+            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            csd = csd + ra / 360.0
             time = ephemeris.csd_to_unix(csd)
 
         # Only examine data between sunrise and sunset
@@ -407,7 +408,8 @@ class SunClean(task.SingleTask):
 
         # Get array of CSDs for each sample
         ra = sstream.index_map['ra'][:]
-        csd = sstream.attrs['csd'] + ra / 360.0
+        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+        csd = csd + ra / 360.0
 
         nprod = len(sstream.index_map['prod'])
 
