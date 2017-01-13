@@ -720,7 +720,7 @@ class ApplySiderealDayFlag(task.SingleTask):
         if 'lsd' in timestream.attrs:
             this_csd = timestream.attrs['lsd']
         elif 'csd' in timestream.attrs:
-            this_csd = timestream.attrs['lsd']
+            this_csd = timestream.attrs['csd']
         else:
             this_csd = None
 

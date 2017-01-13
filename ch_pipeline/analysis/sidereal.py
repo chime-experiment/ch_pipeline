@@ -46,7 +46,7 @@ _chime_observer = time.Observer(
     lon=ephemeris.CHIMELONGITUDE,
     lat=ephemeris.CHIMELATITUDE,
     alt=ephemeris.CHIMEALTITUDE,
-    lsd_start=ephemeris.CSD_ZERO
+    lsd_start=ephemeris.CSD_ZERO - 60.0
 )
 
 
@@ -216,7 +216,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         # Set up the default Observer
         observer = _chime_observer if observer is None else observer
 
-        sidereal.SiderealGrouper.setup(self, observer)
+        sidereal.SiderealRegridder.setup(self, observer)
 
 
 class MeanSubtract(task.SingleTask):

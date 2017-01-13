@@ -219,7 +219,7 @@ class SiderealDayFlag(ContainerBase):
         return self.index_map['csd']
 
 
-class PointSourceTransit(ContainerBase):
+class PointSourceTransit(StaticGainData):
     """Parallel container for holding the results of a fit to a point source transit.
     """
 
