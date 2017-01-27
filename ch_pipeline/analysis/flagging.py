@@ -22,6 +22,8 @@ Tasks
     AccumulateCorrInputMask
     ApplyCorrInputMask
     ApplySiderealDayFlag
+    NanToNum
+    RadiometerWeight
     BadNodeFlagger
     DayMask
     MaskData

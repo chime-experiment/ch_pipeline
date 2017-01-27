@@ -17,8 +17,8 @@ Tasks
     NoiseSourceFold
     GatedNoiseCalibration
     SiderealCalibration
-    ApplyGain
 """
+
 import numpy as np
 from scipy import interpolate
 
@@ -488,7 +488,7 @@ class SiderealCalibration(task.SingleTask):
     threshold : float
         Relevant if model_fit is True.  The model is only fit to
         time samples with dynamic range greater than threshold.
-        Default is 5.
+        Default is 3.
 
     """
 

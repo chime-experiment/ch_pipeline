@@ -14,14 +14,9 @@ Tasks
 .. autosummary::
     :toctree: generated/
 
-    LoadFiles
-    LoadMaps
-    LoadFilesFromParams
+    LoadCorrDataFiles
     LoadSetupFile
     LoadFileFromTag
-    Save
-    Print
-    LoadBeamTransfer
 
 File Groups
 ===========
@@ -206,9 +201,6 @@ class LoadCorrDataFiles(task.SingleTask):
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
 
-        if mpiutil.rank0:
-            print "Done reading file."
-
         # Use a simple incrementing string as the tag
         if 'tag' not in ts.attrs:
             tag = 'file%03i' % self._file_ptr
@@ -266,8 +258,6 @@ class LoadSetupFile(pipeline.TaskBase):
         # Broadcast to other nodes
         cont = mpiutil.world.bcast(cont, root=0)
 
-        print "Load csd flag, rank %03d has data from %s" % (mpiutil.rank, self.filename)
-
         # Make sure all nodes have container before return
         mpiutil.world.Barrier()
 
@@ -284,29 +274,35 @@ class LoadFileFromTag(task.SingleTask):
     ----------
     prefix : str
         Filename is assumed to have the format:
-            prefix + incont.attrs['tag] + '.h5'
+            prefix + incont.attrs['tag'] + '.h5'
 
     only_prefix : bool
         If True, then the class will return the same
         container at each iteration.  The filename
         is assumed to have the format:
             prefix + '.h5'
+
+    distributed : bool
+        Whether or not the memh5 container should be
+        distributed.
     """
 
     prefix = config.Property(proptype=str)
 
     only_prefix = config.Property(proptype=bool, default=False)
 
+    distributed = config.Property(proptype=bool, default=False)
+
     def setup(self):
-        """Determine filename convention.  Load the file into
-        a container if only_prefix is True.
+        """Determine filename convention.  If only_prefix is True,
+        then load the file into a container.
         """
 
         from caput import memh5
 
-        if self.only_prefix:
+        self.outcont = None
 
-            self.outcont = None
+        if self.only_prefix:
 
             filename = self.prefix
 
@@ -320,15 +316,11 @@ class LoadFileFromTag(task.SingleTask):
 
             if mpiutil.rank0:
                 print "Loading file: %s" % filename
-                self.outcont = memh5.BasicCont.from_file(filename, distributed=False)
 
-            # Broadcast to other nodes
-            self.outcont = mpiutil.world.bcast(self.outcont, root=0)
-
-            # Make sure all nodes have container before return
-            mpiutil.world.Barrier()
+            self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
 
         else:
+
             self.prefix = os.path.splitext(self.prefix)[0]
 
         return
@@ -348,8 +340,6 @@ class LoadFileFromTag(task.SingleTask):
 
         if not self.only_prefix:
 
-            self.outcont = None
-
             filename = self.prefix + incont.attrs['tag'] + '.h5'
 
             # Check that the file exists
@@ -359,13 +349,7 @@ class LoadFileFromTag(task.SingleTask):
             if mpiutil.rank0:
                 print "Loading file: %s" % filename
 
-                # Load into container
-                self.outcont = memh5.BasicCont.from_file(self.filename, distributed=False)
-
-            # Broadcast to other nodes
-            self.outcont = mpiutil.world.bcast(self.outcont, root=0)
-
-            # Make sure all nodes have container before return
-            mpiutil.world.Barrier()
+            # Load into container
+            self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
 
         return self.outcont

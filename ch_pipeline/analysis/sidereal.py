@@ -17,7 +17,6 @@ Tasks
     LoadTimeStreamSidereal
     SiderealGrouper
     SiderealRegridder
-    SiderealStacker
     MeanSubtract
 
 Usage
@@ -371,13 +370,3 @@ def _days_in_csd(day, se_csd, extra=0.005):
     etest = se_csd[:, 0] < day + 1 - extra
 
     return np.where(np.logical_and(stest, etest))[0]
-
-
-def _ensure_list(x):
-
-    if hasattr(x, '__iter__'):
-        y = [xx for xx in x]
-    else:
-        y = [x]
-
-    return y
