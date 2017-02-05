@@ -366,6 +366,9 @@ class GatedNoiseCalibration(task.SingleTask):
     """Calibration using Noise Injection
     Attributes
     ----------
+    norm : ['gated', 'off', 'on', 'none']
+        Specify what to use to normalise the matrix.
+
     dist_channel : int
         Index (0-255) of the correlator input that tracks the fluctuations
         in the noise injection (ni) distribution system. When available,
@@ -381,6 +384,7 @@ class GatedNoiseCalibration(task.SingleTask):
         of the noise source.
     """
 
+    norm = config.Property(proptype=str, default='on')
     dist_channel = config.Property(proptype=int, default=None)
 
     def process(self, ts, inputmap, inputmask):
@@ -426,25 +430,27 @@ class GatedNoiseCalibration(task.SingleTask):
             else:
                 mask[self.dist_channel] = True
 
-        #good_input = np.arange(nfeed, dtype=np.int)[mask]
-
-        # THIS IS A HACK TO TEST NI PERFORMANCE WITH HIGHLY ILLUMNATED CHANNELS ONLY. PLEASE REMOVE
-        good_input = np.array([ 23,  24,  25,  26,  27,  28,  29,  30,  31,  34,  35,  36,  37,
-                                38,  39,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
-                                56,  87,  88,  89,  90,  92,  93,  94,  95,  97,  98,  99, 100,
-                                101, 103, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118,
-                                119, 151, 152, 153, 154, 155, 156, 157, 161, 162, 163, 165, 166,
-                                167, 168, 169, 170, 171, 172, 173, 176, 177, 178, 180, 181, 182,
-                                183, 184, 190, 215, 218, 219, 220, 221, 227, 229, 230, 231, 234,
-                                235, 236, 237, 238, 240, 242, 245, 246, 248])
-
+        good_input = np.arange(nfeed, dtype=np.int)[mask]
         N_good_input = len(good_input)
         bad_input = np.delete(np.arange(nfeed, dtype=np.int), good_input)
 
         # Get the norm matrix
-        norm_array = _extract_diagonal(vis_on.real)**0.5
-        norm_array = tools.invert_no_zero(norm_array)
-        norm_array[:, bad_input, :] = 0
+        if self.norm == 'gated':
+            norm_array = _extract_diagonal(vis_gate.real)**0.5
+            norm_array = tools.invert_no_zero(norm_array)
+            norm_array[:, bad_input, :] = 0
+        elif self.norm == 'off':
+            norm_array = _extract_diagonal(ts.vis[:].real)**0.5
+            norm_array = tools.invert_no_zero(norm_array)
+            norm_array[:, bad_input, :] = 0
+        elif self.norm == 'on':
+            norm_array = _extract_diagonal(vis_on.real)**0.5
+            norm_array = tools.invert_no_zero(norm_array)
+            norm_array[:, bad_input, :] = 0
+        elif self.norm == 'none':
+            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
+        else:
+            raise RuntimeError('Value of norm not recognised.')
 
         # Illumination = 1-Vii_off/Vii_on
         illumination = _extract_diagonal(vis_gate.real)*tools.invert_no_zero(_extract_diagonal(vis_on.real))
@@ -599,17 +605,7 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        #good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
-
-        # THIS IS A HACK TO TEST NI PERFORMANCE WITH HIGHLY ILLUMNATED CHANNELS ONLY. PLEASE REMOVE
-        good_input = np.array([ 23,  24,  25,  26,  27,  28,  29,  30,  31,  34,  35,  36,  37,
-                                38,  39,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
-                                56,  87,  88,  89,  90,  92,  93,  94,  95,  97,  98,  99, 100,
-                                101, 103, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118,
-                                119, 151, 152, 153, 154, 155, 156, 157, 161, 162, 163, 165, 166,
-                                167, 168, 169, 170, 171, 172, 173, 176, 177, 178, 180, 181, 182,
-                                183, 184, 190, 215, 218, 219, 220, 221, 227, 229, 230, 231, 234,
-                                235, 236, 237, 238, 240, 242, 245, 246, 248])
+        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
