@@ -97,8 +97,6 @@ def solve_gain(data, feeds=None, norm=None):
         of the visibility matrix.
     gain : np.ndarray[nfreq, nfeed, ntime]
         Gain solution for each feed, time, and frequency
-    gain_error : np.ndarray[nfreq, nfeed, ntime]
-        Error on the gain solution for each feed, time, and frequency
     """
 
     # Turn into numpy array to avoid any unfortunate indexing issues
@@ -113,7 +111,6 @@ def solve_gain(data, feeds=None, norm=None):
 
     # Create empty arrays to store the outputs
     gain = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.complex64)
-    gain_error = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.float32)
     evalue = np.zeros((data.shape[0], nfeed, data.shape[-1]), np.float32)
 
     # Set up normalisation matrix
@@ -158,11 +155,6 @@ def solve_gain(data, feeds=None, norm=None):
             if evals[-1] > 0:
                 sign0 = (1.0 - 2.0*(evecs[0, -1].real < 0.0))
                 gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
-
-                gain_error[fi, :, ti] = (inv_norm[fi, :, ti] *
-                                         1.4826 * np.median(np.abs(evals[:-1] - np.median(evals[:-1]))) /
-                                         evals[-1]**0.5)
-
                 evalue[fi, :, ti] = evals
 
             # Solve for eigenvectors
@@ -175,7 +167,7 @@ def solve_gain(data, feeds=None, norm=None):
             #     dr[fi, ti] = evals[-1] / evals[-2]
             #     gain[fi, :, ti] = inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
 
-    return evalue, gain, gain_error
+    return evalue, gain
 
 
 def interp_gains(trans_times, gain_mat, times, axis=-1):
@@ -372,30 +364,43 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
 class GatedNoiseCalibration(task.SingleTask):
     """Calibration using Noise Injection
-
     Attributes
     ----------
-    norm : ['gated', 'off', 'identity']
-        Specify what to use to normalise the matrix.
+    dist_channel : int
+        Index (0-255) of the correlator input that tracks the fluctuations
+        in the noise injection (ni) distribution system. When available,
+        this channel is used to remove the ni distribution gain fluctuations 
+        (only magnitude since phase is common to all feeds) from the calculated gains.
+        If the noise source power is sigma^2 (as measured by the 
+        noise source input) and d is the (voltage) gain of the ni distribution then it 
+        is assumed that the gain of the NoiseSource reference channel is sigma and that 
+        if the dist_channel input channel is d^2.sigma (d^2 because there is a loopback cable). 
+        This parameter is ignored if the NoiseSource reference channel is not available 
+        in the data. If dist_channel = None and the NoiseSource reference channel is available
+        then dist_channel is set to the NoiseSource id to remove the fluctuations
+        of the noise source.
     """
 
-    norm = config.Property(proptype=str, default='off')
+    dist_channel = config.Property(proptype=int, default=None)
 
-    def process(self, ts, inputmap):
-        """Find gains from noise injection data and apply them to visibilities.
+    def process(self, ts, inputmap, inputmask):
+        """Find complex gains from noise injection data.
 
         Parameters
         ----------
         ts : andata.CorrData
-            Parallel timestream class containing noise injection data.
-        inputmap : list of CorrInputs
-            List describing the inputs to the correlator.
+            Parallel timestream class containing noise injection data
+            (vis dataset has noise OFF data and gated_vis1 has ON-OFF data).
+        inputmap : list of :class:`CorrInput`s
+            A list of describing the inputs as they are in the file.
+        inputmask : containers.CorrInputMask
+            Mask indicating which correlator inputs to use in the
+            eigenvalue decomposition.
 
         Returns
         -------
-        ts : andata.CorrData
-            Timestream with calibrated (decimated) visibilities, gains and
-            respective timestamps.
+        gains : containers.GainData 
+            Complex gains from noise injection
         """
 
         # Ensure that we are distributed over frequency
@@ -404,44 +409,84 @@ class GatedNoiseCalibration(task.SingleTask):
         # Figure out which input channel is the noise source (used as gain reference)
         noise_channel = tools.get_noise_channel(inputmap)
 
-        # Get the norm matrix
-        if self.norm == 'gated':
-            norm_array = _extract_diagonal(ts.datasets['gated_vis0'][:])**0.5
-            norm_array = tools.invert_no_zero(norm_array)
-        elif self.norm == 'off':
-            norm_array = _extract_diagonal(ts.vis[:])**0.5
-            norm_array = tools.invert_no_zero(norm_array)
-
-            # Extract the points with zero weight (these will get zero norm)
-            w = (_extract_diagonal(ts.weight[:]) > 0)
-            w[:, noise_channel] = True  # Make sure we keep the noise channel though!
-
-            norm_array *= w
-
-        elif self.norm == 'none':
-            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
-        else:
-            raise RuntimeError('Value of norm not recognised.')
-
         # Take a view now to avoid some MPI issues
-        gate_view = ts.datasets['gated_vis0'][:].view(np.ndarray)
-        norm_view = norm_array[:].view(np.ndarray)
+        vis_gate = ts.datasets['gated_vis1'][:].view(np.ndarray)
+        vis_on = (ts.datasets['gated_vis1'][:] + ts.vis[:]).view(np.ndarray)
+        nfreq = vis_on.shape[0]
+        ntime = vis_on.shape[-1]
+
+        # Determine good inputs
+        nfeed = len(inputmap)
+        mask = inputmask.datasets['input_mask'][:]
+        # Make sure we keep the noise channel (and distribution channel, if exists)
+        if noise_channel is not None:
+            mask[noise_channel] = True
+            if self.dist_channel is None:
+                self.dist_channel = noise_channel
+            else:
+                mask[self.dist_channel] = True
+
+        #good_input = np.arange(nfeed, dtype=np.int)[mask]
+
+        # THIS IS A HACK TO TEST NI PERFORMANCE WITH HIGHLY ILLUMNATED CHANNELS ONLY. PLEASE REMOVE
+        good_input = np.array([ 23,  24,  25,  26,  27,  28,  29,  30,  31,  34,  35,  36,  37,
+                                38,  39,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
+                                56,  87,  88,  89,  90,  92,  93,  94,  95,  97,  98,  99, 100,
+                                101, 103, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118,
+                                119, 151, 152, 153, 154, 155, 156, 157, 161, 162, 163, 165, 166,
+                                167, 168, 169, 170, 171, 172, 173, 176, 177, 178, 180, 181, 182,
+                                183, 184, 190, 215, 218, 219, 220, 221, 227, 229, 230, 231, 234,
+                                235, 236, 237, 238, 240, 242, 245, 246, 248])
+
+        N_good_input = len(good_input)
+        bad_input = np.delete(np.arange(nfeed, dtype=np.int), good_input)
+
+        # Get the norm matrix
+        norm_array = _extract_diagonal(vis_on.real)**0.5
+        norm_array = tools.invert_no_zero(norm_array)
+        norm_array[:, bad_input, :] = 0
+
+        # Illumination = 1-Vii_off/Vii_on
+        illumination = _extract_diagonal(vis_gate.real)*tools.invert_no_zero(_extract_diagonal(vis_on.real))
+        illumination[:, bad_input, :] = 0
+
+        # Create arrays to hold point source response
+        gain = np.zeros([nfreq, nfeed, ntime], np.complex128)
+        gain_error = np.zeros([nfreq, nfeed, ntime], np.float64)
 
         # Find gains with the eigenvalue method
-        evalue, gain = solve_gain(gate_view, norm=norm_view)[0:2]
-        dr = evalue[:, -1, :]*tools.invert_no_zero(evalue[:, -2, :])
+        if mpiutil.rank0: print 'Calculating gains'
+        evalue, gain[:, good_input, :] = solve_gain(vis_gate, feeds=good_input, norm=norm_array[:, good_input])
+        
+        #Calculate dynamic range and gain errors
+        sigma_ev = np.std(evalue[:, :-1], axis=1)/np.sqrt(N_good_input-1)
+        r_ev = evalue[:, -1]*tools.invert_no_zero(sigma_ev) #dynamic range
+        gain_error[:, good_input, :] = np.sqrt((sigma_ev*tools.invert_no_zero(r_ev))[:, np.newaxis, :] * 
+                              tools.invert_no_zero(illumination[:, good_input, :]))
 
-        # Normalise by the noise source channel
-        gain *= tools.invert_no_zero(gain[:, np.newaxis, noise_channel, :])
-        gain = np.nan_to_num(gain)
+        # The pipeline constructs the dynamic range as the ratio of the first to second
+        # largest eigenvalue. This is proportional to r_ev above, but still calculate
+        # it since it is what is used in other modules like sidereal calibration for
+        # the weight dataset. The evalue ratio is time averaged
+        evalue_ratio = np.median(evalue[:, -1, :]*tools.invert_no_zero(evalue[:, -2, :]), axis=-1)
 
-        # Create container from gains
-        gain_data = containers.GainData(axes_from=ts)
-        gain_data.add_dataset('weight')
+        # Remove noise injection distribution system fluctuations and/or
+        # noise source fluctuations if available
+        if noise_channel is not None:
+            gain_dist = np.sqrt(abs(gain[:, np.newaxis, noise_channel, :]*
+                                    gain[:, np.newaxis, self.dist_channel, :]))
+            gain *= tools.invert_no_zero(gain_dist)
+            gain = np.nan_to_num(gain)
 
-        # Copy data into container
+        # Create container to hold gain results
+        gain_data = containers.GainData(good_input=good_input, axes_from=ts)
+
         gain_data.gain[:] = gain
-        gain_data.weight[:] = dr
+        gain_data.evalue[:] = evalue
+        gain_data.illumination_med[:] = np.median(illumination, axis=-1)
+        gain_data.gain_error_med[:] = np.median(gain_error, axis=-1)
+        gain_data.add_dataset('weight')
+        gain_data.weight[:] = evalue_ratio
 
         return gain_data
 
@@ -554,7 +599,17 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+        #good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+
+        # THIS IS A HACK TO TEST NI PERFORMANCE WITH HIGHLY ILLUMNATED CHANNELS ONLY. PLEASE REMOVE
+        good_input = np.array([ 23,  24,  25,  26,  27,  28,  29,  30,  31,  34,  35,  36,  37,
+                                38,  39,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
+                                56,  87,  88,  89,  90,  92,  93,  94,  95,  97,  98,  99, 100,
+                                101, 103, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118,
+                                119, 151, 152, 153, 154, 155, 156, 157, 161, 162, 163, 165, 166,
+                                167, 168, 169, 170, 171, 172, 173, 176, 177, 178, 180, 181, 182,
+                                183, 184, 190, 215, 218, 219, 220, 221, 227, 229, 230, 231, 234,
+                                235, 236, 237, 238, 240, 242, 245, 246, 248])
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
@@ -571,18 +626,34 @@ class SiderealCalibration(task.SingleTask):
 
         # Subtract the average visibility at the start and end of the slice (off source)
         diff = int(slice_width / 3)
-        vis_slice = _adiff(vis_slice, diff)
+        vis_slice_diff = _adiff(vis_slice, diff)
+
+        # Illumination = 1-Vii_off/Vii_on
+        illumination = _extract_diagonal(vis_slice_diff.real)*tools.invert_no_zero(_extract_diagonal(vis_slice.real))
 
         # Fringestop the data
-        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, inputmap, source)
+        vis_slice_diff = tools.fringestop_pathfinder(vis_slice_diff, ra_slice, freq, inputmap, source)
 
         # Create arrays to hold point source response
         resp = np.zeros([nfreq, nfeed, nra], np.complex128)
         resp_err = np.zeros([nfreq, nfeed, nra], np.float64)
 
         # Solve for the point source response of each set of polarisations
-        evalue_x, resp[:, xfeeds, :], resp_err[:, xfeeds, :] = solve_gain(vis_slice, feeds=xfeeds, norm=norm[:, xfeeds])
-        evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
+        evalue_x, resp[:, xfeeds, :] = solve_gain(vis_slice_diff, feeds=xfeeds, norm=norm[:, xfeeds])
+        evalue_y, resp[:, yfeeds, :] = solve_gain(vis_slice_diff, feeds=yfeeds, norm=norm[:, yfeeds])
+
+        #Calculate dynamic range and gain errors
+        sigma_ev_x = np.median(abs(evalue_x[:, :-1]-np.median(evalue_x[:, :-1], axis=1)[:, np.newaxis, :]),
+                             axis=1)*1.4826/np.sqrt(len(xfeeds)-1)
+        r_ev_x = evalue_x[:, -1]*tools.invert_no_zero(sigma_ev_x) #dynamic range
+        resp_err[:, xfeeds, :] = np.sqrt((sigma_ev_x*tools.invert_no_zero(r_ev_x))[:, np.newaxis, :] * 
+                              tools.invert_no_zero(illumination[:, xfeeds, :]))
+
+        sigma_ev_y = np.median(abs(evalue_y[:, :-1]-np.median(evalue_y[:, :-1], axis=1)[:, np.newaxis, :]),
+                             axis=1)*1.4826/np.sqrt(len(yfeeds)-1)
+        r_ev_y = evalue_y[:, -1]*tools.invert_no_zero(sigma_ev_y) #dynamic range
+        resp_err[:, yfeeds, :] = np.sqrt((sigma_ev_y*tools.invert_no_zero(r_ev_y))[:, np.newaxis, :] * 
+                              tools.invert_no_zero(illumination[:, yfeeds, :]))
 
         # Extract flux density of the source
         rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict_flux(freq))
@@ -707,10 +778,10 @@ class ApplyGain(task.SingleTask):
             gain_arr = np.nan_to_num(gain_arr)
 
             # Get the weight array if it's there
-            weight_arr = gain.weight[:] if gain.weight is not None else None
+            weight_arr = gain.weight[:][..., np.newaxis] if gain.weight is not None else None
 
             # Check that we are defined at the same time samples
-            if (gain.time != tstream.time).any():
+            if (gain.index_map['time']['ctime'] != tstream.index_map['time']['ctime']).any():
                 raise RuntimeError('Gain data and timestream defined at different time samples.')
 
             # Smooth the gain data if required
@@ -777,7 +848,7 @@ class ApplyGain(task.SingleTask):
         if weight_arr is not None:
 
             # Convert dynamic range to a binary weight and apply to data
-            gain_weight = (weight_arr[:] > 2.0).astype(np.float64)
+            gain_weight = (weight_arr[:] > 2.0).astype(np.uint8)
             tstream.weight[:] *= gain_weight[:, np.newaxis, :]
 
         return tstream

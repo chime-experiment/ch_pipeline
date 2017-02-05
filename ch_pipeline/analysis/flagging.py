@@ -732,9 +732,9 @@ class ApplySiderealDayFlag(task.SingleTask):
                 msg = ("Warning: input timestream does not have 'csd' attribute.  " +
                        "Will continue pipeline processing.")
             else:
-                msg = (("Warning: status of CSD %d not given in %s.  " +
+                msg = (("Warning: status of CSD %d not given.  " +
                         "Will continue pipeline processing.") %
-                        (this_csd, self.file_name))
+                        (this_csd))
 
         else:
 

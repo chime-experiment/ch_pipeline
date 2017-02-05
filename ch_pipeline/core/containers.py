@@ -390,7 +390,7 @@ class GainData(ContainerBase):
     """Parallel container for holding gain data.
     """
 
-    _axes = ('freq', 'input', 'time')
+    _axes = ('freq', 'input', 'time', 'good_input')
 
     _dataset_spec = {
         'gain': {
@@ -401,12 +401,33 @@ class GainData(ContainerBase):
             'distributed_axis': 'freq'
         },
         'weight': {
-            'axes': ['freq', 'time'],
+            'axes': ['freq'],
             'dtype': np.float64,
             'initialise': False,
             'distributed': True,
             'distributed_axis': 'freq'
-        }
+            },
+        'evalue': {
+            'axes': ['freq', 'good_input', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },     
+        'illumination_med': {
+            'axes': ['freq', 'input'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },        
+        'gain_error_med': {
+            'axes': ['freq', 'input'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }      
     }
 
     @property
@@ -414,11 +435,20 @@ class GainData(ContainerBase):
         return self.datasets['gain']
 
     @property
+    def evalue(self):
+        return self.datasets['evalue']
+
+    @property
+    def illumination_med(self):
+        return self.datasets['illumination_med']
+
+    @property
+    def gain_error_med(self):
+        return self.datasets['gain_error_med']
+
+    @property
     def weight(self):
-        try:
-            return self.datasets['weight']
-        except KeyError:
-            return None
+        return self.datasets['weight']
 
     @property
     def time(self):
@@ -436,6 +466,10 @@ class GainData(ContainerBase):
     @property
     def input(self):
         return self.index_map['input']
+
+    @property
+    def good_input(self):
+        return self.index_map['good_input']
 
 
 class CorrInputMask(ContainerBase):

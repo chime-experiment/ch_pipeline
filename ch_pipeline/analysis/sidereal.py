@@ -484,7 +484,7 @@ class MeanSubtract(task.SingleTask):
 
     all_data = config.Property(proptype=bool, default=False)
     daytime = config.Property(proptype=bool, default=False)
-    median = config.Property(proptype=bool, default=True)
+    median = config.Property(proptype=bool, default=False)
 
     def process(self, sstream):
         """
@@ -501,7 +501,7 @@ class MeanSubtract(task.SingleTask):
 
         from flagging import daytime_flag
         from ch_util import cal_utils, tools
-        import weighted as wq
+        #import weighted as wq
 
         # Make sure we are distributed over frequency
         sstream.redistribute('freq')
