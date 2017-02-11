@@ -23,11 +23,19 @@ Containers
     SunTransit
     RingMap
     Photometry
+
+Tasks
+=====
+
+.. autosummary::
+    :toctree: generated/
+
+    MonkeyPatchContainers
 """
 
 import numpy as np
 
-from caput import memh5
+from caput import memh5, pipeline
 
 from draco.core.containers import *
 
@@ -717,3 +725,54 @@ def make_empty_corrdata(freq=None, input=None, time=None,
     dset[:] = 0.0
 
     return data
+
+
+class MonkeyPatchContainers(pipeline.TaskBase):
+    """Patch draco to use CHIME timestream containers.
+
+    This task does nothing but perform a monkey patch on `draco.core.containers`
+    """
+
+    def __init__(self):
+
+        import ch_pipeline.core.containers as ccontainers
+        import draco.core.containers as dcontainers
+
+        # Replace the routine for making an empty timestream. This needs to be replaced
+        # in both draco and ch_pipeline because of the ways the imports work
+        dcontainers.empty_timestream = ccontainers.make_empty_corrdata
+        ccontainers.empty_timestream = ccontainers.make_empty_corrdata
+
+        # Save a reference to the original routine
+        _make_empty_like = dcontainers.empty_like
+
+        # A new routine which wraps the old empty_like, but can additionally handle
+        # andata.CorrData types
+        def empty_like_patch(obj, kwargs):
+            """Create an empty container like `obj`.
+
+            Parameters
+            ----------
+            obj : ContainerBase or CorrData
+                Container to base this one off.
+            kwargs : optional
+                Optional definitions of specific axes we want to override. Works in the
+                same way as the `ContainerBase` constructor, though `axes_from=obj` and
+                `attrs_from=obj` are implied.
+
+            Returns
+            -------
+            newobj : container.ContainerBase or CorrData
+                New data container.
+            """
+
+            from ch_util import andata
+
+            if isinstance(obj, andata.CorrData):
+                return dcontainers.empty_timestream(axes_from=obj,
+                                                    attrs_from=obj, **kwargs)
+            else:
+                return _make_empty_like(obj, kwargs)
+
+        # Replace the empty_like routine
+        dcontainers.empty_like = empty_like_patch
