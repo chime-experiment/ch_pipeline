@@ -541,13 +541,6 @@ class SunClean(task.SingleTask):
             u = vis_pos[:, 0] / wv[fi]
             v = vis_pos[:, 1] / wv[fi]
 
-            # Estimate mean value
-            # mu_vis = np.zeros(nprod, dtype=np.complex64)
-            # for bi in range(nprod):
-            #     mw = sstream.weight[fi, bi, :] * (el > 0.0)
-            #     norm = tools.invert_no_zero(np.sum(mw))
-            #     mu_vis[bi] = norm * np.sum(mw * sstream.vis[fi, bi, :])
-
             # Loop over ra to reduce memory usage
             for ri in range(len(ra)):
 
@@ -559,9 +552,6 @@ class SunClean(task.SingleTask):
 
                 # Check if sun has set
                 if el[ri] > 0.0:
-
-                    # Subtract mean value
-                    # visn = vis - mu_vis
 
                     # Calculate the phase that the sun would have using the fringestop routine
                     sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
