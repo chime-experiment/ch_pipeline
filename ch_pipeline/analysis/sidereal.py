@@ -17,7 +17,8 @@ Tasks
     LoadTimeStreamSidereal
     SiderealGrouper
     SiderealRegridder
-    MeanSubtract
+    SiderealMean
+    ChangeSiderealMean
 
 Usage
 =====
@@ -209,9 +210,9 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         sidereal.SiderealRegridder.setup(self, observer)
 
 
-class MeanSubtract(task.SingleTask):
-    """Subtract the weighted mean (over time) of every element of the
-    visibility matrix excluding the auto-correlations.
+class SiderealMean(task.SingleTask):
+    """Calculate the weighted mean (over time) of every element of the
+    visibility matrix.
 
     Parameters
     ----------
@@ -220,13 +221,18 @@ class MeanSubtract(task.SingleTask):
         calculate the weighted mean.  If False, then use only
         night-time data away from the transit of bright
         point sources.  Default is False.
+    daytime : bool
+        Use only day-time data away from transit of bright point
+        sources to caclulate the weighted mean.  Overriden by all_data.
+        Default is False.
     median : bool
-        Subtracted weighted median instead of weighted mean.
+        Calculate weighted median instead of weighted mean.
+        Default is False.
     """
 
     all_data = config.Property(proptype=bool, default=False)
     daytime = config.Property(proptype=bool, default=False)
-    median = config.Property(proptype=bool, default=True)
+    median = config.Property(proptype=bool, default=False)
 
     def process(self, sstream):
         """
@@ -237,8 +243,8 @@ class MeanSubtract(task.SingleTask):
 
         Returns
         -------
-        sstream : same as input
-            Timestream or sidereal stream with mean subtracted.
+        mustream : same as input
+            Sidereal stream containing only the mean value.
         """
 
         from flagging import daytime_flag
@@ -248,21 +254,25 @@ class MeanSubtract(task.SingleTask):
         # Make sure we are distributed over frequency
         sstream.redistribute('freq')
 
-        # Fetch the CSD (preferring it to be labelled the LSD)
-        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-
         # Extract product map
         prod = sstream.index_map['prod']
+
+        # Extract lsd
+        lsd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
 
         # Check if we are using all of the data to calculate the mean,
         # or only "quiet" periods.
         if self.all_data:
 
             if isinstance(sstream, andata.CorrData):
-                flag_quiet = np.ones(len(sstream.time), dtype=np.bool)
+                flag_quiet = np.fix(ephemeris.csd(sstream.time)) == lsd
+
+                ra = ephemeris.transit_RA(sstream.time)
 
             elif isinstance(sstream, containers.SiderealStream):
                 flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
+
+                ra = sstream.index_map['ra']
 
             else:
                 raise RuntimeError('Format of `sstream` argument is unknown.')
@@ -280,24 +290,24 @@ class MeanSubtract(task.SingleTask):
                 else:
                     flag_quiet = ~daytime_flag(sstream.time)
 
-                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == csd)
+                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == lsd)
 
             elif isinstance(sstream, containers.SiderealStream):
                 # Extract csd and ra
-                if hasattr(csd, '__iter__'):
-                    csd_list = csd
+                if hasattr(lsd, '__iter__'):
+                    lsd_list = lsd
                 else:
-                    csd_list = [csd]
+                    lsd_list = [lsd]
 
                 ra = sstream.index_map['ra']
 
                 # Find night time data
                 flag_quiet = np.ones(len(ra), dtype=np.bool)
-                for cc in csd_list:
+                for cc in lsd_list:
                     if self.daytime:
-                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
+                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
                     else:
-                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
+                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
 
             else:
                 raise RuntimeError('Format of `sstream` argument is unknown.')
@@ -306,37 +316,109 @@ class MeanSubtract(task.SingleTask):
             for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
 
                 peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
-                src_window = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
+                src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
 
                 dra = (ra - peak_ra) % 360.0
-                dra -= (dra > 180.0) * 360.0
+                dra -= (dra > 180.0)*360.0
 
                 flag_quiet &= np.abs(dra) > src_window
+
+
+        # Create output
+        newra = np.array([ 0.5*(np.min(ra[flag_quiet]) + np.max(ra[flag_quiet])) ])
+
+        mustream = containers.SiderealStream(ra=newra, axes_from=sstream,
+                                             distributed=True, comm=sstream.comm)
+
+        mustream.attrs['lsd'] = lsd
+        mustream.attrs['tag'] = sstream.attrs['tag']
+
+        mustream.redistribute('freq')
 
         # Loop over frequencies and baselines to reduce memory usage
         for lfi, fi in sstream.vis[:].enumerate(0):
             for lbi, bi in sstream.vis[:].enumerate(1):
 
-                # Do not subtract mean of autocorrelation
-                if prod[bi][0] == prod[bi][1]:
-                    continue
+                mu, norm = 0.0, 0.0
 
                 # Extract visibility and weight
                 data = sstream.vis[fi, bi]
                 weight = sstream.weight[fi, bi] * flag_quiet
 
-                # Subtract weighted median or weighted mean value
+                norm = tools.invert_no_zero(np.sum(weight))
+
+                # Calculate either weighted median or weighted mean value
                 if self.median:
                     if np.any(weight > 0.0):
-                        med = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
-                        sstream.vis[fi, bi] -= med
+                        mu = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
 
                 else:
-                    norm = tools.invert_no_zero(np.sum(weight))
-                    sstream.vis[fi, bi] -= norm * np.sum(weight * data)
+                    mu = norm * np.sum(weight*data)
 
-        # Return mean subtracted map
+                mustream.vis[fi, bi, 0] = mu
+                mustream.weight[fi, bi, 0] = norm
+
+
+        # Return sidereal stream containing the mean value
+        return mustream
+
+
+class ChangeSiderealMean(task.SingleTask):
+    """ Subtract or add an overall offset (over time) to every element
+    of the visibility matrix.
+
+    Parameters
+    ----------
+    add : bool
+        Add the value instead of subtracting.
+        Default is False.
+    """
+
+    add = config.Property(proptype=bool, default=False)
+
+    def process(self, sstream, mustream):
+        """
+        Parameters
+        ----------
+        sstream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream.
+
+        mustream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream with 1 element in the time axis
+            that contains the value to add or subtract.
+
+        Returns
+        -------
+        sstream : same as input
+            Timestream or sidereal stream with value added or subtracted.
+        """
+
+        # Check that input visibilities have consistent shapes
+
+        sshp, mshp = sstream.vis.shape, mustream.vis.shape
+
+        if np.any(sshp[0:2] != mshp[0:2]):
+            ValueError("Frequency or product axis differ between inputs.")
+
+        if (len(mshp) != 3) or (mshp[-1] != 1):
+            ValueError("Mean value has incorrect shape, must be (nfreq, nprod, 1).")
+
+        # Ensure both inputs are distributed over frequency
+        sstream.redistribute('freq')
+        mustream.redistribute('freq')
+
+        # Determine autocorrelations
+        not_auto = np.array([pi != pj for pi, pj in mustream.index_map['prod'][:]])[np.newaxis, :, np.newaxis]
+
+        # Add or subtract value to the cross-correlations
+        if self.add:
+            sstream.vis[:] += mustream.vis[:].view(np.ndarray) * not_auto
+        else:
+            sstream.vis[:] -= mustream.vis[:].view(np.ndarray) * not_auto
+
+        # Return sidereal stream with modified offset
         return sstream
+
 
 
 def get_times(acq_files):
