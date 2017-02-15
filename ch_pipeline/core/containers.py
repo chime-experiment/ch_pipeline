@@ -401,7 +401,7 @@ class GainData(ContainerBase):
             'distributed_axis': 'freq'
         },
         'weight': {
-            'axes': ['freq'],
+            'axes': ['freq', 'input'],
             'dtype': np.float64,
             'initialise': False,
             'distributed': True,

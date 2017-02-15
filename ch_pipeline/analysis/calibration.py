@@ -369,6 +369,10 @@ class GatedNoiseCalibration(task.SingleTask):
     norm : ['gated', 'off', 'on', 'none']
         Specify what to use to normalise the matrix.
 
+    from_NoiseSource : bool
+        If True, the gains are calculated from the crosscorrelations
+        with the NoiseSource reference channel only (no eigenvalue decomposition)
+
     dist_channel : int
         Index (0-255) of the correlator input that tracks the fluctuations
         in the noise injection (ni) distribution system. When available,
@@ -385,6 +389,7 @@ class GatedNoiseCalibration(task.SingleTask):
     """
 
     norm = config.Property(proptype=str, default='on')
+    from_NoiseSource = config.Property(proptype=bool, default=False)
     dist_channel = config.Property(proptype=int, default=None)
 
     def process(self, ts, inputmap, inputmask):
@@ -434,65 +439,104 @@ class GatedNoiseCalibration(task.SingleTask):
         N_good_input = len(good_input)
         bad_input = np.delete(np.arange(nfeed, dtype=np.int), good_input)
 
-        # Get the norm matrix
-        if self.norm == 'gated':
-            norm_array = _extract_diagonal(vis_gate.real)**0.5
-            norm_array = tools.invert_no_zero(norm_array)
-            norm_array[:, bad_input, :] = 0
-        elif self.norm == 'off':
-            norm_array = _extract_diagonal(ts.vis[:].real)**0.5
-            norm_array = tools.invert_no_zero(norm_array)
-            norm_array[:, bad_input, :] = 0
-        elif self.norm == 'on':
-            norm_array = _extract_diagonal(vis_on.real)**0.5
-            norm_array = tools.invert_no_zero(norm_array)
-            norm_array[:, bad_input, :] = 0
-        elif self.norm == 'none':
-            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
-        else:
-            raise RuntimeError('Value of norm not recognised.')
-
         # Illumination = 1-Vii_off/Vii_on
         illumination = _extract_diagonal(vis_gate.real)*tools.invert_no_zero(_extract_diagonal(vis_on.real))
         illumination[:, bad_input, :] = 0
+        illumination = np.where(illumination<0., 0., illumination) # Negative illumination not allowed
 
-        # Create arrays to hold point source response
+        # Create arrays to hold noise source response
         gain = np.zeros([nfreq, nfeed, ntime], np.complex128)
         gain_error = np.zeros([nfreq, nfeed, ntime], np.float64)
 
-        # Find gains with the eigenvalue method
-        if mpiutil.rank0: print 'Calculating gains'
-        evalue, gain[:, good_input, :] = solve_gain(vis_gate, feeds=good_input, norm=norm_array[:, good_input])
-        
-        #Calculate dynamic range and gain errors
-        sigma_ev = np.std(evalue[:, :-1], axis=1)/np.sqrt(N_good_input-1)
-        r_ev = evalue[:, -1]*tools.invert_no_zero(sigma_ev) #dynamic range
-        gain_error[:, good_input, :] = np.sqrt((sigma_ev*tools.invert_no_zero(r_ev))[:, np.newaxis, :] * 
-                              tools.invert_no_zero(illumination[:, good_input, :]))
+        if self.from_NoiseSource: # Get gains from correlations with NoiseSource only (on gate)
+            if noise_channel is not None:
+                if mpiutil.rank0:
+                    print "Calculating noise inj gains from crosscorrelations with NoiseSource channel."
+                # Find corr. indices corresponding to correlations with ref channel
+                idx = [tools.cmap(i, noise_channel, nfeed) for i in good_input]
+                
+                # Correlations with ref channel
+                gain[:, good_input, :] = vis_on[:, idx, :]
+                
+                # Divide by sqrt(abs(Vrr)) to have gains in same format as with evalue decomp (g_i*\sigma)
+                gain *= np.sqrt(tools.invert_no_zero(abs(gain[:, np.newaxis, noise_channel, :])))
+                
+                # Since the gains are obtained from the upper triangle of the
+                # correlation matrix, need to conjugate all gains for which
+                # idx > noise_channel
+                gain[:, noise_channel:, :] = gain[:, noise_channel:, :].conj()
+                
+                # Refer all phases to the phase of the first good channel
+                gain *= np.exp(-1j*np.angle(gain[:, np.newaxis, good_input[0], :]))
+                
+                # Remove noise source fluctuations (and noise injection distribution system 
+                # fluctuations if available)
+                gain_dist = np.sqrt(abs(gain[:, np.newaxis, noise_channel, :]*
+                                        gain[:, np.newaxis, self.dist_channel, :]))
+                gain *= tools.invert_no_zero(gain_dist)
+                gain = np.nan_to_num(gain)
 
-        # The pipeline constructs the dynamic range as the ratio of the first to second
-        # largest eigenvalue. This is proportional to r_ev above, but still calculate
-        # it since it is what is used in other modules like sidereal calibration for
-        # the weight dataset. The evalue ratio is time averaged
-        evalue_ratio = np.median(evalue[:, -1, :]*tools.invert_no_zero(evalue[:, -2, :]), axis=-1)
+                # There are no evalues so create a zero array (hack)
+                evalue = np.zeros([nfreq, N_good_input, ntime], np.float64)
+            else:
+                raise RuntimeError('NoiseSource cannot be None if from_NoiseSource is enabled.')
+        else: # Get gains using all data from eigenvalue decomposition
+            if mpiutil.rank0:
+                    print "Calculating noise inj gains from full correlation matrix."
+            # Get the norm matrix
+            if self.norm == 'gated':
+                norm_array = _extract_diagonal(vis_gate.real)**0.5
+                norm_array = tools.invert_no_zero(norm_array)
+                norm_array[:, bad_input, :] = 0
+            elif self.norm == 'off':
+                norm_array = _extract_diagonal(ts.vis[:].real)**0.5
+                norm_array = tools.invert_no_zero(norm_array)
+                norm_array[:, bad_input, :] = 0
+            elif self.norm == 'on':
+                norm_array = _extract_diagonal(vis_on.real)**0.5
+                norm_array = tools.invert_no_zero(norm_array)
+                norm_array[:, bad_input, :] = 0
+            elif self.norm == 'none':
+                norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
+            else:
+                raise RuntimeError('Value of norm not recognised.')
 
-        # Remove noise injection distribution system fluctuations and/or
-        # noise source fluctuations if available
-        if noise_channel is not None:
-            gain_dist = np.sqrt(abs(gain[:, np.newaxis, noise_channel, :]*
-                                    gain[:, np.newaxis, self.dist_channel, :]))
-            gain *= tools.invert_no_zero(gain_dist)
-            gain = np.nan_to_num(gain)
+            # Find gains with the eigenvalue method
+            if mpiutil.rank0: print 'Calculating gains'
+            evalue, gain[:, good_input, :] = solve_gain(vis_gate, feeds=good_input, norm=norm_array[:, good_input])
+            
+            #Calculate dynamic range and gain errors
+            sigma_ev = np.std(evalue[:, :-1], axis=1)/np.sqrt(N_good_input-1)
+            r_ev = evalue[:, -1]*tools.invert_no_zero(sigma_ev) #dynamic range
+            gain_error[:, good_input, :] = np.sqrt((sigma_ev*tools.invert_no_zero(r_ev))[:, np.newaxis, :] * 
+                                  tools.invert_no_zero(illumination[:, good_input, :]))
+
+            # Remove noise injection distribution system fluctuations and/or
+            # noise source fluctuations if available
+            if noise_channel is not None:
+                gain_dist = np.sqrt(abs(gain[:, np.newaxis, noise_channel, :]*
+                                        gain[:, np.newaxis, self.dist_channel, :]))
+                gain *= tools.invert_no_zero(gain_dist)
+                gain = np.nan_to_num(gain)
 
         # Create container to hold gain results
         gain_data = containers.GainData(good_input=good_input, axes_from=ts)
 
         gain_data.gain[:] = gain
         gain_data.evalue[:] = evalue
-        gain_data.illumination_med[:] = np.median(illumination, axis=-1)
         gain_data.gain_error_med[:] = np.median(gain_error, axis=-1)
+
+        illumination_med = np.median(illumination, axis=-1)
+        gain_data.illumination_med[:] = illumination_med
+
+        # For now there is one weight per channel per file
+        # The weight is just the inverse of the relative variance
+        # (sigma_{g_i}/g_i)^2
+        Nsamples = ts.attrs['gpu.gpu_intergration_period'][0]
+        # alpha is the extra factor you get in the variance of gains when using full matrix
+        alpha = np.sum(illumination_med, axis=1)[:, np.newaxis] if self.from_NoiseSource else 1.
         gain_data.add_dataset('weight')
-        gain_data.weight[:] = evalue_ratio
+        gain_data.weight[:] = Nsamples*illumination_med*alpha
 
         return gain_data
 
@@ -746,10 +790,24 @@ class ApplyGain(task.SingleTask):
         Apply the gains directly, or their inverse.
     smoothing_length : float, optional
         Smooth the gain timestream across the given number of seconds.
+    update_weight: bool, optional
+        Update timestream weights. For sidereal calibration, the weights
+        are rescaled by applying the inverse of the gains applied to 
+        visibilities. For noise injection calibration, the weights
+        are either rescaled by applying the inverse of the gains applied to 
+        visibilities or the weights are updated with the inverse variance
+        resulting from propagating the gain errors.
+    scale_weight_only: bool, optional
+        If True, the data weights are rescaled by applying the inverse of 
+        the gains applied to visibilities. If False, the weights are updated 
+        with the inverse variance resulting from propagating the gain errors
+        (assumes the current weight of the tstream is just the inverse variance 
+        from the rad eqn).
     """
 
     inverse = config.Property(proptype=bool, default=True)
     update_weight = config.Property(proptype=bool, default=False)
+    scale_weight_only = config.Property(proptype=bool, default=False)
     smoothing_length = config.Property(proptype=float, default=None)
 
     def process(self, tstream, gain):
@@ -765,16 +823,50 @@ class ApplyGain(task.SingleTask):
             # Get the weight array if it's there
             weight_arr = gain.weight[:][..., np.newaxis] if gain.weight is not None else None
 
-        elif isinstance(gain, containers.GainData):
-
-            # Extract gain array
-            gain_arr = gain.gain[:]
-
             # Regularise any crazy entries
             gain_arr = np.nan_to_num(gain_arr)
 
+            # If requested, invert the gains
+            inverse_gain_arr = tools.invert_no_zero(gain_arr)
+
+            if self.inverse:
+                gweight = gain_arr
+                gvis = inverse_gain_arr
+                if mpiutil.rank0:
+                    print "Applying inverse gain."
+            else:
+                gweight = inverse_gain_arr
+                gvis = gain_arr
+                if mpiutil.rank0:
+                    print "Applying gain."
+
+            # Apply gains to the weights
+            if self.update_weight:
+                tools.apply_gain(tstream.weight[:], np.abs(gweight)**2, out=tstream.weight[:])
+                if mpiutil.rank0:
+                    print "Applying gain to weight."
+
+            # Apply gains to visibility matrix
+            tools.apply_gain(tstream.vis[:], gvis, out=tstream.vis[:])
+
+            # Update units
+            convert_units_to = gain.gain.attrs.get('convert_units_to')
+            if convert_units_to:
+                tstream.vis.attrs['units'] = convert_units_to
+
+            # Modify the weight array according to the gain weights
+            if weight_arr is not None:
+                # Convert dynamic range to a binary weight and apply to data
+                gain_weight = (weight_arr[:] > 2.0).astype(tstream.weight.dtype)
+                tstream.weight[:] *= gain_weight[:, np.newaxis, :]
+
+        elif isinstance(gain, containers.GainData): #Noise injection gains
+
+            # Extract gain array
+            gain_arr = gain.gain[:].view(np.ndarray) # If not viewed as ndarray get error when smoothing
+
             # Get the weight array if it's there
-            weight_arr = gain.weight[:][..., np.newaxis] if gain.weight is not None else None
+            weight_arr = gain.weight[:].view(np.ndarray) if gain.weight is not None else None
 
             # Check that we are defined at the same time samples
             if (gain.index_map['time']['ctime'] != tstream.index_map['time']['ctime']).any():
@@ -783,6 +875,9 @@ class ApplyGain(task.SingleTask):
             # Smooth the gain data if required
             if self.smoothing_length is not None:
                 import scipy.signal as ss
+
+                if mpiutil.rank0:
+                    print "Smoothing noise injection gains."
 
                 # Turn smoothing length into a number of samples
                 tdiff = gain.time[1] - gain.time[0]
@@ -804,47 +899,57 @@ class ApplyGain(task.SingleTask):
 
                 # Smooth weight array if it exists
                 if weight_arr is not None:
-                    weight_arr = ss.medfilt2d(weight_arr, kernel_size=[1, l])
+                    weight_arr_shape = weight_arr.shape
+                    if weight_arr_shape[-1] == gain_arr.shape[-1]: # If not assume gain.weight is 2D so don't smooth
+                        weight_arr = weight_arr.reshape(-1, weight_arr_shape[-1])
+                        weight_arr = ss.medfilt2d(np.abs(weight_arr), kernel_size=[1, l])
+                        weight_arr = weight_arr.reshape(weight_arr_shape)
+
+            # Regularise any crazy entries
+            gain_arr = np.nan_to_num(gain_arr)
+
+            if mpiutil.rank0:
+                print "Applying inverse gain to visibilities."
+
+            # Apply gains to visibility matrix
+            vis_raw = tstream.vis[:].copy()
+            tools.apply_gain(tstream.vis[:], tools.invert_no_zero(gain_arr), out=tstream.vis[:])
+
+            # Modify the weight array according to the gain weights
+            if self.update_weight and (weight_arr is not None):
+                if self.scale_weight_only:
+                    # Do nt propagate error from applying noise inj gains.
+                    # Only rescale inverse rad eqn variance by applied gains
+                    # i.e assume perfect knowledge of gains
+                    if mpiutil.rank0:
+                        print "Applying gain to weights (rescale only)."
+
+                    tools.apply_gain(tstream.weight[:], np.abs(gain_arr)**2, out=tstream.weight[:])
+                else:
+                    # Propagate error on visibilities from applying noise inj gains.
+                    # Assumes the current weight of the tstream is just the inverse variance from the 
+                    # rad eqn.
+
+                    if mpiutil.rank0:
+                        print "Applying gain to weights (propagate gain errors)."
+                    # Variance contribution due to raw visibility
+                    var_radeqn = tools.invert_no_zero(tstream.weight[:]*np.abs(vis_raw)**2)
+                    # Variance contribution due to inverse gain
+                    nfreq = gain_arr.shape[0]
+                    nchannels = gain_arr.shape[1]
+                    var_gi = np.concatenate([tools.invert_no_zero(weight_arr[:, i:i+1]) * 
+                                             np.ones((nfreq, nchannels-i)) 
+                                             for i in range(nchannels)], axis=1)
+                    var_gj = np.concatenate([tools.invert_no_zero(weight_arr[:, i:])
+                                             for i in range(nchannels)], axis=1)
+
+                    tstream.weight[:] = tools.invert_no_zero(np.abs(tstream.vis[:])**2 * 
+                                        (var_radeqn + var_gi[..., np.newaxis] + var_gj[..., np.newaxis]))
+            else: 
+                if mpiutil.rank0:
+                    print "Data weights not updated."
 
         else:
             raise RuntimeError('Format of `gain` argument is unknown.')
-
-        # Regularise any crazy entries
-        gain_arr = np.nan_to_num(gain_arr)
-
-        # If requested, invert the gains
-        inverse_gain_arr = tools.invert_no_zero(gain_arr)
-
-        if self.inverse:
-            gweight = gain_arr
-            gvis = inverse_gain_arr
-            if mpiutil.rank0:
-                print "Applying inverse gain."
-        else:
-            gweight = inverse_gain_arr
-            gvis = gain_arr
-            if mpiutil.rank0:
-                print "Applying gain."
-
-        # Apply gains to the weights
-        if self.update_weight:
-            tools.apply_gain(tstream.weight[:], np.abs(gweight)**2, out=tstream.weight[:])
-            if mpiutil.rank0:
-                print "Applying gain to weight."
-
-        # Apply gains to visibility matrix
-        tools.apply_gain(tstream.vis[:], gvis, out=tstream.vis[:])
-
-        # Update units
-        convert_units_to = gain.gain.attrs.get('convert_units_to')
-        if convert_units_to:
-            tstream.vis.attrs['units'] = convert_units_to
-
-        # Modify the weight array according to the gain weights
-        if weight_arr is not None:
-
-            # Convert dynamic range to a binary weight and apply to data
-            gain_weight = (weight_arr[:] > 2.0).astype(np.uint8)
-            tstream.weight[:] *= gain_weight[:, np.newaxis, :]
 
         return tstream
