@@ -708,13 +708,19 @@ def make_empty_corrdata(freq=None, input=None, time=None,
         prodmap = np.array([[fi, fj] for fi in range(nfeed) for fj in range(fi, nfeed)])
     data.create_index_map('prod', prodmap)
 
+    # Determine datatype for weights
+    if (axes_from is not None) and hasattr(axes_from, 'flags') and ('vis_weight' in axes_from.flags):
+        weight_dtype = axes_from.flags['vis_weight'].dtype
+    else:
+        weight_dtype = np.float32
+
     # Create empty datasets, and add axis attributes to them
     dset = data.create_dataset('vis', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.complex64,
                                distributed=distributed, distributed_axis=distributed_axis)
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0
 
-    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.float32,
+    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=weight_dtype,
                             distributed=distributed, distributed_axis=distributed_axis)
     dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
     dset[:] = 0.0
@@ -748,7 +754,7 @@ class MonkeyPatchContainers(pipeline.TaskBase):
 
         # A new routine which wraps the old empty_like, but can additionally handle
         # andata.CorrData types
-        def empty_like_patch(obj, kwargs):
+        def empty_like_patch(obj, **kwargs):
             """Create an empty container like `obj`.
 
             Parameters
@@ -772,7 +778,7 @@ class MonkeyPatchContainers(pipeline.TaskBase):
                 return dcontainers.empty_timestream(axes_from=obj,
                                                     attrs_from=obj, **kwargs)
             else:
-                return _make_empty_like(obj, kwargs)
+                return _make_empty_like(obj, **kwargs)
 
         # Replace the empty_like routine
         dcontainers.empty_like = empty_like_patch

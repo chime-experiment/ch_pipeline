@@ -345,7 +345,7 @@ class SiderealMean(task.SingleTask):
                 data = sstream.vis[fi, bi]
                 weight = sstream.weight[fi, bi] * flag_quiet
 
-                norm = tools.invert_no_zero(np.sum(weight))
+                norm = np.sum(weight)
 
                 # Calculate either weighted median or weighted mean value
                 if self.median:
@@ -353,7 +353,7 @@ class SiderealMean(task.SingleTask):
                         mu = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
 
                 else:
-                    mu = norm * np.sum(weight*data)
+                    mu = tools.invert_no_zero(norm) * np.sum(weight*data)
 
                 mustream.vis[fi, bi, 0] = mu
                 mustream.weight[fi, bi, 0] = norm
