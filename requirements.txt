@@ -2,4 +2,4 @@
 -e git+ssh://git@bitbucket.org/chime/ch_util.git@caput-time-merge#egg=ch_util
 -e git+https://github.com/radiocosmology/cora#egg=cora
 -e git+https://github.com/radiocosmology/driftscan#egg=driftscan
--e git+ssh://git@github.com/radiocosmology/draco@ch_pipeline_port#egg=draco
+-e git+https://github.com/radiocosmology/draco#egg=draco
