@@ -17,6 +17,7 @@ Tasks
     LoadTimeStreamSidereal
     SiderealGrouper
     SiderealRegridder
+    SiderealFileFilter
     SiderealMean
     ChangeSiderealMean
 
@@ -31,6 +32,7 @@ Generally you would want to use these tasks together. Starting with a
 
 import gc
 import numpy as np
+import os.path
 
 from caput import pipeline, config
 from caput import mpiutil
@@ -210,6 +212,112 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         sidereal.SiderealRegridder.setup(self, observer)
 
 
+class SiderealFileFilter(pipeline.TaskBase):
+    """ Filter a list of data files based on the
+    sidereal days that they contain.
+
+    Attributes
+    ----------
+    csd_start : int
+        Only include sidereal days on or after.
+    csd_end : int
+        Only include sidereal days on or before.
+    csd_list : list
+        Only include these sidereal days.
+    ignore_from : str
+        Ignore sidereal days in the csd/lsd
+        attribute of this hdf5 file.
+    keep_from : str
+        Only include sidereal days present in the csd/lsd
+        attribute of this hdf5 file.
+    padding : float
+        Extra amount of a sidereal day to pad each timestream by. Useful for
+        getting rid of interpolation artifacts.
+    """
+
+    csd_start = config.Property(proptype=int, default=None)
+    csd_end = config.Property(proptype=int, default=None)
+    csd_list = config.Property(proptype=list, default=[])
+    ignore_from = config.Property(proptype=str, default=None)
+    keep_from = config.Property(proptype=str, default=None)
+    padding = config.Property(proptype=float, default=0.005)
+
+    def setup(self, files_in):
+        """ Filter data files.
+
+        Parameters
+        ----------
+        files_in : list
+            List of data files.
+
+        Returns
+        -------
+        files_out : list
+            List of data files containing only the
+            requested sidereal days.
+        """
+        
+        import h5py
+
+        files_out = None
+        if mpiutil.rank0:
+
+            # Create list of sidereal days to ignore and keep
+            # based on the lsd/csd attributes of the files specified
+            # in the ignore_from and keep_from config properties.
+            ignore_csd = []
+            if (self.ignore_from is not None) and os.path.isfile(self.ignore_from):
+                with h5py.File(self.ignore_from) as hf:
+                    for key in ['lsd', 'csd']:
+                        if key in hf.attrs:
+                            ignore_csd += sidereal._ensure_list(hf.attrs[key])
+
+            keep_csd = []
+            if (self.keep_from is not None) and os.path.isfile(self.keep_from):
+                with h5py.File(self.keep_from) as hf:
+                    for key in ['lsd', 'csd']:
+                        if key in hf.attrs:
+                            keep_csd += sidereal._ensure_list(hf.attrs[key])
+
+            # Determine the sidereal days covered by each input file
+            se_times = get_times(files_in)
+            se_csd = ephemeris.csd(se_times)
+
+            # Determine the unique sidereal days in the set of all input files
+            days = np.unique(np.floor(se_csd).astype(np.int))
+
+            # Create list of relevant files for each unique sidereal day
+            filemap = {day:list(_days_in_csd(day, se_csd, extra=self.padding)) for day in days}
+
+            # Loop over sidereal days and apply filter
+            index_out = []
+            for csd in sorted(filemap.keys()):
+
+                if (self.csd_start is not None) and (csd < self.csd_start):
+                    continue
+
+                if (self.csd_end is not None) and (csd > self.csd_end):
+                    continue
+
+                if self.csd_list and (csd not in self.csd_list):
+                    continue
+
+                if keep_csd and (csd not in keep_csd):
+                    continue
+
+                if csd in ignore_csd:
+                    continue
+
+                index_out += filemap[csd]
+
+            files_out = [files_in[ind] for ind in np.unique(index_out)]
+
+        # Broadcast filtered list of files to other nodes and return
+        files_out = mpiutil.world.bcast(files_out, root=0)
+
+        return files_out
+
+
 class SiderealMean(task.SingleTask):
     """Calculate the weighted mean (over time) of every element of the
     visibility matrix.
@@ -325,7 +433,10 @@ class SiderealMean(task.SingleTask):
 
 
         # Create output
-        newra = np.array([ 0.5*(np.min(ra[flag_quiet]) + np.max(ra[flag_quiet])) ])
+        if np.any(flag_quiet):
+            newra = np.array([ 0.5*(np.min(ra[flag_quiet]) + np.max(ra[flag_quiet])) ])
+        else:
+            newra = np.array([ 0.5*(np.min(ra) + np.max(ra)) ])
 
         mustream = containers.SiderealStream(ra=newra, axes_from=sstream,
                                              distributed=True, comm=sstream.comm)
