@@ -23,7 +23,10 @@ Tasks
     ApplyCorrInputMask
     ApplySiderealDayFlag
     NanToNum
+    IntegrationTimeWeight
     RadiometerWeight
+    RadiometerWeightExternal
+    EdgeFlagger
     BadNodeFlagger
     DayMask
     MaskData
@@ -801,15 +804,100 @@ class NanToNum(task.SingleTask):
         return timestream
 
 
-class RadiometerWeight(task.SingleTask):
-    """ Update vis_weight according to the radiometer equation:
+class IntegrationTimeWeight(task.SingleTask):
+    """ Update weights so that they scale with integration time.  Specifically set
 
-            vis_weight_ij = Nsamples / V_ii V_jj
+            vis_weight = Effective Number of Samples = Integration Time / Bandwidth
+
     """
 
     def process(self, timestream):
-        """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
-        multiplies by the total number of samples, and divides by the autocorrelations of the
+        """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32
+        and convert to effective number of samples.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData
+
+        Returns
+        --------
+        timestream : andata.CorrData
+        """
+
+        # Redistribute over the frequency direction
+        timestream.redistribute('freq')
+
+        # Convert weights to effective number of samples.
+        if mpiutil.rank0:
+            print "Converting weights to effective number of samples."
+
+        # Extract number of samples per integration period
+        max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
+
+        # Check if vis_weight is float or int
+        datatype = timestream.flags['vis_weight'].dtype
+        if np.issubdtype(datatype, np.integer):
+
+            # Extract the maximum possible value of vis_weight
+            max_vis_weight = np.iinfo(datatype).max
+
+            # Calculate the scaling factor that converts from vis_weight value
+            # to number of samples
+            vw_to_nsamp = max_nsamples / float(max_vis_weight)
+
+            # Scale vis_weight by the effective number of samples
+            vis_weight = timestream.flags['vis_weight'][:].view(np.ndarray).astype(np.float32) * vw_to_nsamp
+
+            # Recast vis_weight flag as float32
+            # Wrap to produce MPIArray
+            vis_weight = mpiarray.MPIArray.wrap(vis_weight, axis=0, comm=timestream.comm)
+
+            # Extract attributes
+            vis_weight_attrs = memh5.attrs2dict(timestream.flags['vis_weight'].attrs)
+
+            # Delete current uint8 dataset
+            timestream['flags'].__delitem__('vis_weight')
+
+            # Create new float32 dataset
+            vis_weight_dataset = timestream.create_flag('vis_weight', data=vis_weight, distributed=True)
+
+            # Copy attributes
+            memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
+
+        else:
+
+            max_vis_weight = 255
+
+            # Calculate the scaling factor that converts from vis_weight value
+            # to number of samples
+            vw_to_nsamp = max_nsamples / float(max_vis_weight)
+
+            # Scale vis_weight by the effective number of samples
+            timestream.flags['vis_weight'][:] *= vw_to_nsamp
+
+        # Return timestream with updated weights
+        return timestream
+
+
+class RadiometerWeight(task.SingleTask):
+    """ Update vis_weight according to the radiometer equation:
+
+            vis_weight_ij /= V_ii V_jj
+
+    Attributes
+    ----------
+    median : bool
+        Use the median over the time axis.
+    niqr : int
+        Check for outliers before applying weights.
+    """
+
+    median = config.Property(proptype=bool, default=True)
+    niqr = config.Property(proptype=int, default=3.0)
+
+
+    def process(self, timestream, inputmap, inputmask):
+        """ Divides the input weight by the autocorrelations of the
         two feeds that form each baseline.
 
         Parameters
@@ -826,59 +914,212 @@ class RadiometerWeight(task.SingleTask):
         # Redistribute over the frequency direction
         timestream.redistribute('freq')
 
-        if isinstance(timestream, andata.CorrData):
+        # Scale by the outer product of the inverse autocorrelations.
+        if mpiutil.rank0:
+            print "Scaling weights by outer product of inverse receiver temperature."
 
-            if mpiutil.rank0:
-                print "Converting weights to effective number of samples."
+        # Extract the autocorrelation
+        Trec = diag(timestream.vis[:].view(np.ndarray).real)
 
-            # Extract number of samples per integration period
-            max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
+        # Calculate the median value over time axis
+        med_Trec = np.median(Trec, axis=-1)
 
-            # Extract the maximum possible value of vis_weight
-            max_vis_weight = np.iinfo(timestream.flags['vis_weight'].dtype).max
+        # If requested use the median value
+        if self.median:
+            Trec = med_Trec[..., np.newaxis]
 
-            # Calculate the scaling factor that converts from vis_weight value
-            # to number of samples
-            vw_to_nsamp = max_nsamples / float(max_vis_weight)
+        # Flag outliers
+        if self.niqr > 0:
 
-            # Scale vis_weight by the effective number of samples
-            vis_weight = timestream.flags['vis_weight'][:].astype(np.float32) * vw_to_nsamp
+            # Determine good inputs
+            good_input = np.flatnonzero(inputmask.datasets['input_mask'][:])
 
-            # Recast vis_weight as float32
-            # Wrap to produce MPIArray
-            vis_weight = mpiarray.MPIArray.wrap(vis_weight, axis=0, comm=timestream.comm)
+            # Use input map to figure out which are the X and Y feeds
+            xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
+            yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_y(inp)])
 
-            # Extract attributes
-            vis_weight_attrs = memh5.attrs2dict(timestream.flags['vis_weight'].attrs)
+            # Loop over polarizations and flag outliers
+            for ifeeds in [xfeeds, yfeeds]:
 
-            # Delete current uint8 dataset
-            timestream['flags'].__delitem__('vis_weight')
+                percentile = np.percentile(med_Trec[:, ifeeds], [25, 75], axis=-1)
 
-            # Create new float32 dataset
-            vis_weight_dataset = timestream.create_flag('vis_weight', data=vis_weight, distributed=True)
+                lower_bound = percentile[0, :] - self.niqr * (percentile[1, :] - percentile[0, :])
+                upper_bound = percentile[1, :] + self.niqr * (percentile[1, :] - percentile[0, :])
 
-            # Copy attributes
-            memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
+                Trec[:, ifeeds, :] *= ((med_Trec[:, ifeeds] >= lower_bound[:, np.newaxis]) &
+                                       (med_Trec[:, ifeeds] <= upper_bound[:, np.newaxis]))[:, :, np.newaxis]
 
-        elif isinstance(timestream, containers.SiderealStream):
+        # Invert the autocorrelation
+        inv_Trec = tools.invert_no_zero(Trec)
 
-            if mpiutil.rank0:
-                print "Scaling weights by outer product of inverse receiver temperature."
-
-            # Extract the autocorrelation
-            Trec = diag(timestream.vis).real
-
-            # Invert the autocorrelation
-            inv_Trec = tools.invert_no_zero(Trec)
-
-            # Scale the weights by the outerproduct of the inverse autocorrelations
-            tools.apply_gain(timestream.weight[:], inv_Trec, out=timestream.weight[:])
-
-        else:
-            raise RuntimeError('Format of `timestream` argument is unknown.')
+        # Scale the weights by the outerproduct of the inverse autocorrelations
+        tools.apply_gain(timestream.weight[:].view(np.ndarray), inv_Trec, out=timestream.weight[:])
 
         # Return timestream with updated weights
         return timestream
+
+
+class RadiometerWeightExternal(task.SingleTask):
+    """ Update vis_weight according to the radiometer equation:
+
+            vis_weight_ij /= V_ii V_jj
+
+    Attributes
+    ----------
+    niqr : int
+        Check for outliers before applying weights.
+    """
+
+    niqr = config.Property(proptype=int, default=3.0)
+
+    def process(self, timestream, mustream, inputmap, inputmask):
+        """ Divides the input weight by the autocorrelations of the
+        two feeds that form each baseline.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData
+
+        Returns
+        --------
+        timestream : andata.CorrData
+        """
+
+        from calibration import _extract_diagonal as diag
+
+        # Redistribute over the frequency direction
+        timestream.redistribute('freq')
+        mustream.redistribute('freq')
+
+        # Scale by the outer product of the inverse autocorrelations.
+        if mpiutil.rank0:
+            print "Scaling weights by outer product of inverse receiver temperature."
+
+        # Extract the autocorrelation
+        Trec = np.median(diag(mustream.vis[:].view(np.ndarray)).real, axis=-1)
+
+        # Flag outliers
+        if self.niqr > 0:
+
+            # Determine good inputs
+            good_input = np.flatnonzero(inputmask.datasets['input_mask'][:])
+
+            # Use input map to figure out which are the X and Y feeds
+            xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
+            yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_y(inp)])
+
+            # Loop over polarizations and flag outliers
+            for ifeeds in [xfeeds, yfeeds]:
+
+                percentile = np.percentile(Trec[:, ifeeds], [25, 75], axis=-1)
+
+                lower_bound = percentile[0, :] - self.niqr * (percentile[1, :] - percentile[0, :])
+                upper_bound = percentile[1, :] + self.niqr * (percentile[1, :] - percentile[0, :])
+
+                Trec[:, ifeeds] *= ((Trec[:, ifeeds] >= lower_bound[:, np.newaxis]) &
+                                    (Trec[:, ifeeds] <= upper_bound[:, np.newaxis]))
+
+        # Invert the autocorrelation
+        inv_Trec = tools.invert_no_zero(Trec)
+
+        # Scale the weights by the outerproduct of the inverse autocorrelations
+        tools.apply_gain(timestream.weight[:].view(np.ndarray), inv_Trec[:, :, np.newaxis],
+                         out=timestream.weight[:])
+
+        # Return timestream with updated weights
+        return timestream
+
+
+def find_missing_data(time, grid, width):
+
+    # Look for large jumps in time
+    dt = np.median(np.diff(grid))
+    njump = np.diff(time) / dt
+    big_jumps = np.flatnonzero(njump > (2*width))
+
+    # Create a flag for the grid points
+    flag = np.ones(grid.size, dtype=np.bool)
+
+    # Flag the boundaries near jumps in the acquisition
+    for jj in big_jumps:
+
+        tstart = time[jj] - width*dt
+        tend = time[jj+1] + width*dt
+
+        flag *= (grid < tstart) | (grid > tend)
+
+    # Flag missing data at start or end of acquisition
+    tstart = time[0] + width*dt
+    tend = time[-1] - width*dt
+
+    flag *= (grid > tstart) & (grid < tend)
+
+    return flag
+
+
+class EdgeFlagger(task.SingleTask):
+    """Flag regions of the sidereal stream where the
+    acquisition or gpu node turned on/off.
+
+    Parameters
+    ----------
+    width:  int
+        Number of samples in the regridded timestream that should
+        be flagged as bad at an edge.
+    keep:   bool
+        Keep the timestream.  Default is to delete.
+    """
+
+    width = config.Property(proptype=int, default=5)
+    keep = config.Property(proptype=bool, default=False)
+
+    def process(self, timestream, sstream):
+        """Run after sidereal regridder to flag edge regions.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData
+        sstream : containers.SiderealStream
+
+        Returns
+        -------
+        sstream : containers.SiderealStream
+        """
+
+        import gc
+
+        # Redistribute over the frequency direction
+        timestream.redistribute('freq')
+        sstream.redistribute('freq')
+
+        # Extract times
+        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+        grid = ephemeris.csd_to_unix(csd + sstream.ra[:] / 360.0)
+
+        time = timestream.time[:]
+
+        # Flag edges caused by bad GPU node
+        freq_flag = np.any(timestream.weight[:].view(np.ndarray) > 0, axis=1)
+
+        # Loop through frequencies
+        for lfi, fi in timestream.weight[:].enumerate(0):
+
+            tflag = freq_flag[lfi, :]
+
+            if np.sum(tflag) > 2:
+                sflag = find_missing_data(time[tflag], grid, self.width)
+
+            else:
+                sflag = np.zeros(grid.size, dtype=np.bool)
+
+            sstream.weight[fi, :, :] *= sflag[np.newaxis, :]
+
+        # Delete the original timestream and collect garbage.
+        if not self.keep:
+            del timestream
+            gc.collect()
+
+        return sstream
 
 
 class BadNodeFlagger(task.SingleTask):
@@ -924,7 +1165,7 @@ class BadNodeFlagger(task.SingleTask):
 
         # Create bad node flag by checking for frequencies/time samples where
         # the autocorrelations are all zero
-        good_freq_flag = np.any(timestream.vis[:, auto_pi, :].real > 0.0, axis=1)
+        good_freq_flag = np.any(timestream.vis[:, auto_pi, :].view(np.ndarray).real > 0, axis=1)
 
         # Apply bad node flag
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
