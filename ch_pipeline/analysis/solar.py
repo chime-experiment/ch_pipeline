@@ -207,7 +207,7 @@ class SolarCalibration(task.SingleTask):
         peak location.
     """
 
-    fringestop = config.Property(proptype=bool, default=False)
+    fringestop = config.Property(proptype=bool, default=True)
     model_fit = config.Property(proptype=bool, default=False)
     nsig = config.Property(proptype=float, default=2.0)
 
@@ -292,7 +292,7 @@ class SolarCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+        good_input = np.flatnonzero(inputmask.datasets['input_mask'][:])
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp) and (idx in good_input)])
@@ -303,12 +303,13 @@ class SolarCalibration(task.SingleTask):
                   (len(good_input), nfeed, len(xfeeds), len(yfeeds)))
 
         # Construct baseline vector for each visibility
-        feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
-        vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
+        if self.fringestop:
+            feed_pos = tools.get_feed_positions(inputmap)
+            vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
+            vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
 
-        u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
-        v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
+            u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
+            v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
 
         # Create container to hold results of fit
         suntrans = containers.SunTransit(time=time, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream)
@@ -324,15 +325,16 @@ class SolarCalibration(task.SingleTask):
             # Extract visibility slice
             vis_slice = sstream.vis[..., slc_in].copy()
 
-            ha = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
-            dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
-
             # Extract the diagonal (to be used for weighting)
             norm = (_extract_diagonal(vis_slice, axis=1).real)**0.5
             norm = tools.invert_no_zero(norm)
 
             # Fringestop
             if self.fringestop:
+
+                ha = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
+                dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
+
                 vis_slice *= tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v)
 
             # Solve for the point source response of each set of polarisations
@@ -360,9 +362,9 @@ class SolarCalibration(task.SingleTask):
             obs.date = ephemeris.unix_to_ephem_time(time[i_transit])
             body.compute(obs)
 
-            peak_ra = ephemeris.peak_RA(body)
+            peak_ra = ephemeris.peak_RA(body, deg=True)
             dra = ra - peak_ra
-            dra = np.abs(dra - (dra > np.pi) * 2.0 * np.pi)[np.newaxis, np.newaxis, :]
+            dra = np.abs(dra - (dra > 180.0) * 360.0 + (dra < -180.0) * 360.0)[np.newaxis, np.newaxis, :]
 
             # Estimate FWHM
             sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
@@ -404,6 +406,9 @@ class SolarClean(task.SingleTask):
     eigenvector corresponding to the largest eigenvalue.
     """
 
+    accuracy = config.Property(proptype=float, default=10.0)
+    precision = config.Property(proptype=float, default=15.0)
+
     def process(self, sstream, suntrans, inputmap):
         """Clean the sun.
 
@@ -422,8 +427,17 @@ class SolarClean(task.SingleTask):
             Sidereal stream with sun removed
         """
 
+        # Redistribute over frequency
         sstream.redistribute('freq')
         suntrans.redistribute('freq')
+
+        # Find the local frequencies
+        nfreq = sstream.vis.local_shape[0]
+        sfreq = sstream.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        freq = sstream.freq['centre'][sfreq:efreq]
+        wv = 3e2 / freq
 
         # Determine time mapping
         if hasattr(sstream, 'time'):
@@ -436,42 +450,100 @@ class SolarClean(task.SingleTask):
         # Extract gain array
         gtime = suntrans.time[:]
         gain = suntrans.response[:].view(np.ndarray)
-
-        ninput = gain.shape[1]
-
-        # Determine product map
-        prod_map = sstream.index_map['prod'][:]
-        nprod = prod_map.size
-
-        if nprod != (ninput * (ninput + 1) / 2):
-            raise Exception("Number of inputs does not match the number of products.")
-
-        feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prod_map]
-
-        # Determine polarisation for each visibility
-        same_pol = np.zeros(nprod, dtype=np.bool)
-        for pp, (ii, jj) in enumerate(feed_list):
-            if tools.is_chime(ii) and tools.is_chime(jj):
-                same_pol[pp] = tools.is_chime_y(ii) == tools.is_chime_y(jj)
+        error = suntrans.response_error[:].view(np.ndarray) * tools.invert_no_zero(np.abs(gain))
 
         # Match ra
         match = np.array([ np.argmin(np.abs(gt - stime)) for gt in gtime ])
 
-        # Loop over frequencies and products
+        ntime = gtime.size
+
+        # Determine product map
+        prod_map = sstream.index_map['prod'][:]
+        nprod = prod_map.size
+        ninput = gain.shape[1]
+
+        if nprod != (ninput * (ninput + 1) / 2):
+            raise Exception("Number of inputs does not match the number of products.")
+
+        feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prod_map ]
+
+        # Determine polarisation for each visibility
+        pol_ind = np.full(len(feed_list), -1, dtype=np.int)
+        for bb, (fi, fj) in enumerate(feed_list):
+            if tools.is_chime(fi) and tools.is_chime(fj):
+                pol_ind[bb] = 2 * tools.is_chime_y(fi) + tools.is_chime_y(fj)
+
+        pol_sub = np.array([0, 3])
+        npol = pol_sub.size
+
+        # Determine average phase and uncertainty
+        avg_sunphase = np.zeros((nfreq, ntime, npol), dtype=np.complex128)
+        err_sunphase = np.zeros((nfreq, ntime, npol), dtype=np.float64)
+
+        # Loop over frequencies and product
         for lfi, fi in sstream.vis[:].enumerate(0):
 
-            for pp in range(nprod):
+            for pp, psub in enumerate(pol_sub):
 
-                if same_pol[pp]:
+                this_pol = np.flatnonzero(pol_ind == psub)
 
-                    ii, jj = prod_map[pp]
+                for ii, jj in prod_map[this_pol]:
 
-                    # Fetch the gains
-                    gi = gain[lfi, ii, :]
-                    gj = gain[lfi, jj, :].conj()
+                    val = gain[lfi, ii, :] * gain[lfi, jj, :].conj()
 
-                    # Subtract the gains
-                    sstream.vis[fi, pp, match] -= gi * gj
+                    weight = np.abs(val)**2 * (error[lfi, ii, :]**2 + error[lfi, jj, :]**2)
+
+                    weight = tools.invert_no_zero(weight)
+
+                    avg_sunphase[lfi, :, pp] += weight * val
+                    err_sunphase[lfi, :, pp] += weight
+
+        err_sunphase = tools.invert_no_zero(err_sunphase)
+
+        avg_sunphase *= err_sunphase
+
+        err_sunphase = np.sqrt(err_sunphase) * tools.invert_no_zero(np.abs(avg_sunphase))
+
+        subtract_sun = ((np.abs(np.angle(avg_sunphase, deg=True)) < self.precision) &
+                        (np.degrees(err_sunphase) < self.accuracy))
+
+        print "Subtracting sun for %0.2f percent of samples." % (100.0*np.sum(subtract_sun) / float(subtract_sun.size))
+
+        # Construct baseline vector for each visibility
+        feed_pos = tools.get_feed_positions(inputmap)
+        vis_pos = np.array([ feed_pos[ii] - feed_pos[jj] for ii, jj in prod_map])
+        vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
+
+        u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
+        v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
+
+        # Calculate expected phase of sun
+        ha = (suntrans.coord[:, 0])[np.newaxis, np.newaxis, :]
+        dec = (suntrans.coord[:, 1])[np.newaxis, np.newaxis, :]
+
+        sunphase = tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v).conj()
+
+        # Loop over frequencies and products,
+        # perform subtraction.
+        for lfi, fi in sstream.vis[:].enumerate(0):
+
+            for pp, psub in enumerate(pol_sub):
+
+                this_pol = np.flatnonzero(pol_ind == psub)
+
+                for bb in this_pol:
+
+                    ii, jj = prod_map[bb]
+
+                    # Do not subtract from autocorrelations
+                    if ii != jj:
+
+                        # Fetch the gains
+                        gi = gain[lfi, ii, :]
+                        gj = gain[lfi, jj, :].conj()
+
+                        # Subtract the outer product of the gains times the sun phase
+                        sstream.vis[fi, bb, match] -=  subtract_sun[lfi, :, pp] * gi * gj * sunphase[lfi, bb, :]
 
         # Return the clean sidereal stream
         return sstream
