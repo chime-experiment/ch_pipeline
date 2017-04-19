@@ -21,14 +21,18 @@ Classes
 import numpy as np
 import h5py
 import healpy
+import warnings
 
 from caput import config, mpiutil
 
 from drift.core import telescope
 from drift.telescope import cylbeam
 
+from cora.util import coord, hputil
+
 from ch_util import ephemeris, tools
 
+from scipy.interpolate import griddata
 
 class CHIMEPathfinder(telescope.PolarisedTelescope):
     """Model telescope for the CHIME Pathfinder.
@@ -92,6 +96,9 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     cylinder_length = 40.0
 
     rotation_angle = tools._PF_ROT
+
+    zenith = np.array([np.pi/2 - np.deg2rad(ephemeris.CHIMELATITUDE), 
+                       0.0])
 
     auto_correlations = True
 
@@ -406,11 +413,30 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         return beam_map, beam_mask
 
-
 class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
     """Model telescope for the CHIME Pathfinder.
 
-    This class uses an external beam model that is read in from a file.
+        This class uses an external beam model that is read in from a file.
+
+        Attributes
+        ----------
+        primary_beamx_filename : str
+            The file name for the EW polarisation.
+
+        primary_beamy_filename : str
+            The file name for the NS polarisation.
+        
+        cylinder_id : bool
+            Are the beams different for the different cylinders?
+            Default False.
+
+        vector_file : bool
+            Is the beam vector in the file (or only its amplitude)?
+            Default True.
+
+        normalize : bool
+            Normalize the beam amplitude to the largest pixel?
+            Default False.
     """
 
     primary_beamx_filename = config.Property(
@@ -423,57 +449,250 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
         default='/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5'
     )
 
-    def beam(self, feed, freq_id):
-        # Fetch beam parameters out of config database.
+    vector_file = config.Property(proptype=bool, default=True)
+    normalize = config.Property(proptype=bool, default=False)
+    rotate = config.Property(proptype=bool, default=False)
+    cylinder_id = config.Property(proptype=bool, default=False)
 
+    def __init__(self, *args, **kwargs):
+        """ Instantiates a CHIMEPathfinderExternalBeam object.
+        """
+        
+        self._beam_initialized = False
+
+    def beam(self, feed, freq_id):
+        """
+        Overloads the beam of the Pathfinder class.
+
+        """
+
+        if not self._beam_initialized:
+            self._init_beam()
+            self._beam_initialized = True
+
+        ## Fetch beam parameters out of config database.
         feed_obj = self.feeds[feed]
         tel_freq = self.frequencies
-        nside = self._nside
-        npix = healpy.nside2npix(nside)
 
         if feed_obj is None:
-            raise ValueError("The requested feed doesn't seem to exist.")
+            raise Exception("Craziness. The requested feed doesn't seem to exist.")
+        
+        #Parse polarisation id
+        if tools.is_chime_y(feed_obj):
+            polstr = "NS"
+        elif tools.is_chime_x(feed_obj):
+            polstr = "EW"
+        else:
+            raise ValueError("Polarisation %s not supported by this feed" % str(feed_obj.pol),
+                             feed_obj)
+        self._polstr = polstr
 
-        if tools.is_chime_x(feed_obj):
-            fname = self.primary_beamx_filename
+        #Parse cylinder id
+        cylnum = feed_obj.cyl
+        if cylnum == 0:
+            cylstr = "W"
+        elif cylnum == 1:
+            cylstr = "E"
+        else:
+            raise ValueError("Cylinder %s not supported." % str(cylnum))
+        self._cylstr = cylstr
+        
+        #Get the beam
+        map_out = self._get_beam(freq_id, cylstr, polstr)
+    
+        return map_out
 
-        elif tools.is_chime_y(feed_obj):
-            fname = self.primary_beamy_filename
+    def _get_beam(self, freq_id, cylstr, polstr):
+        """
+        Get the beam from file if it is not in memory.
+
+        """
+        
+        #Get pol cyl info
+        pci = self._pol_cyl_map()
+
+        if freq_id in self._loaded_freq[pci]:
+            freq_idl = self._loaded_freq[pci].index(freq_id)
+            map_out = self._beam_arr[pci][freq_idl]
 
         else:
-            raise ValueError("Polarisation not supported by this feed",
-                             feed_obj)
+            #Get from file
+            map_out = self._beam_io(freq_id, cylstr, polstr)
+
+            if len(self._beam_arr[pci]) == 0:
+                #First time we are loading a map of this pol cyl type
+                self._loaded_freq[pci].append(freq_id)
+                self._beam_arr[pci] = map_out[np.newaxis, ...]
+
+            else:
+                #Find array index
+                largerfreq = np.where(np.array(self._loaded_freq[pci]) > freq_id)[0]
+                if len(largerfreq) == 0:
+                    fi = len(self._loaded_freq[pci])
+                else:
+                    fi = largerfreq[0]
+                #Add to the array and list
+                self._beam_arr[pci] = np.insert(self._beam_arr[pci], fi, map_out, axis=0)
+                self._loaded_freq[pci].insert(fi, freq_id)
+            
+        if not np.all(map_out == 0.0):
+            if self.normalize:
+                maxpix = np.max(np.absolute(map_out), axis=0)
+                map_out = map_out/maxpix[np.newaxis, :]
+        else:
+            warning.warn("Returning a zero beam map.", RuntimeWarning)
+
+        #Up- or down-grade the map if required
+        map_out = healpy.pixelfunc.ud_grade(map_out.swapaxes(0, 1), self._nside)
+        map_out = np.array(map_out).swapaxes(0, 1)
+
+        return map_out
+
+    def _beam_io(self, freq_id, cylstr, polstr):
+        """
+        Modify this routine for a specific instance of beam file type.
+        """
+
+        if polstr == 'NS':
+            infile = self.primary_beamy_filename
+        elif polstr == 'EW':
+            infile = self.primary_beamx_filename
+
+        if cylstr == "W":
+            cylnum = 0
+        elif cylstr == 'E':
+            cylnum = 1
+
+        #Get telescope frequencies
+        tel_freq = self.frequencies
+
         try:
-            print "Attempting to read beam file from disk..."
-            with h5py.File(fname, 'r') as f:
-                map_freq = f['freq'][:]
-                freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
-                beam_map = f['beam'][freq_sel, :]
+            print "Attempting to read beam "+cylstr+"-"+polstr+" from disk..."
+
+            with h5py.File(infile, 'r') as f:
+
+                if self.cylinder_id:
+                    map_freq = f['freq'][:]
+                    good_freq = f['good_freq'][:]
+                    gmap_freq = map_freq[good_freq]
+                    gfreq_sel = np.arange(len(map_freq))[good_freq]
+                    freq_sel = _nearest_freq(tel_freq, gmap_freq, freq_id)
+                    freq_sel = gfreq_sel[freq_sel]
+
+                    beam_map = f['abeam'][freq_sel, cylnum, :]
+
+                    npix = f['abeam'][0, 0].shape[0]
+
+                else:
+                    map_freq = f['freq'][:]
+                    freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
+                    beam_map = f['beam'][freq_sel, :]
+                    beam_map = np.concatenate((beam_map['Et'][..., np.newaxis], 
+                                               beam_map['Ep'][..., np.newaxis]),
+                                              axis=-1)
+                    
+                    npix = f['beam']['Et'][0].shape[0]
 
         except IOError:
-            raise IOError("Could not load beams from disk [path: %s]."
-                          % fname)
+            raise IOError("Could not load beams from disk [path: %s]." % infile)
 
-        if len(freq_sel) == 1:
-            return beam_map
+        #Get map nside
+        nside = healpy.npix2nside(npix)
 
+        if self.rotate:                
+            #Get telescope coords
+            thetai, phii = healpy.pix2ang(nside, np.arange(npix))
+            phii = np.where(np.logical_and(phii > np.pi, phii <= 2*np.pi), -(2*np.pi - phii), phii)
+            #Rotate from telescope coords to ra, dec.
+            rot = [0.0, ephemeris.CHIMELATITUDE, self.rotation_angle]
+            if len(beam_map.shape) == 2:
+                beam_map[0] = _rotate(beam_map[0], thetai, phii, rot=rot)
+                beam_map[1] = _rotate(beam_map[1], thetai, phii, rot=rot)
+            else:
+                beam_map = _rotate(beam_map, thetai, phii, rot=rot)
+
+        if not self.vector_file:
+            #Get the polarisation vector
+            pvec = self.pol_vector(polstr, nside)
+            beam_map, pvec = np.broadcast_arrays(beam_map[..., np.newaxis], pvec)
+            beam_map = beam_map*pvec
+
+        if len(freq_sel) == 2:
+            allzero = np.all(np.all(beam_map == 0.0, axis=-1), axis=-1)
+            nonzero = np.logical_not(allzero)
+            if np.all(allzero):
+                beam_map = beam_map[0]
+
+            elif np.all(nonzero):                
+                #Interpolate
+                freq_high = map_freq[freq_sel[1]]
+                freq_low = map_freq[freq_sel[0]]
+                freq_int = tel_freq[freq_id]
+
+                alpha = (freq_high - freq_int) / (freq_high - freq_low)
+                beta = (freq_int - freq_low) / (freq_high - freq_low)
+
+                map_t = beam_map[0, :, 0] * alpha + beam_map[1, :, 0] * beta
+                map_p = beam_map[0, :, 1] * alpha + beam_map[1, :, 1] * beta
+                
+                beam_map = np.column_stack((map_t, map_p))
+
+            else:
+                #Just use the non zero one
+                beam_map = beam_map[nonzero]
+
+        return beam_map
+
+
+    def pol_vector(self, polstr, nside):
+        """
+        Get the polarisation vector assuming no leakage.
+        """
+
+        zenith = self.zenith
+
+        that, phat = coord.thetaphi_plane_cart(zenith)
+        rot = np.deg2rad([-self.rotation_angle, 0.0, 0.0])
+        xhat, yhat, zhat = cylbeam.rotate_ypr(rot, phat, -that, coord.sph_to_cart(zenith))
+
+        angpos = hputil.ang_positions(nside)
+
+        if polstr == "EW":
+            pvec = cylbeam.polpattern(angpos, xhat)
+        elif polstr == "NS":
+            pvec = cylbeam.polpattern(angpos, yhat)
+
+        return pvec
+
+    def _pol_cyl_map(self):
+
+        if self._polstr == 'NS':
+            if self.cylinder_id:
+                if self._cylstr == 'W':
+                    return 0
+                elif self._cylstr == 'E':
+                    return 2
+            else:
+                return 0
+        elif self._polstr == 'EW':
+            if self.cylinder_id:
+                if self._cylstr == 'W':
+                    return 1
+                elif self._cylstr == 'E':
+                    return 3
+            else:
+                return 1
+
+    def _init_beam(self):
+
+        if self.cylinder_id:
+            self._npolcyl = 4
+            self._loaded_freq = [[], [], [], []]
+            self._beam_arr = [[], [], [], []]
         else:
-            freq_high = map_freq[freq_sel[1]]
-            freq_low = map_freq[freq_sel[0]]
-            freq_int = tel_freq[freq_id]
-
-            alpha = (freq_high - freq_int) / (freq_high - freq_low)
-            beta = (freq_int - freq_low) / (freq_high - freq_low)
-
-            map_t = beam_map['Et'][0] * alpha + beam_map['Et'][1] * beta
-            map_p = beam_map['Ep'][0] * alpha + beam_map['Ep'][1] * beta
-
-            map_out = np.empty((npix, 2), dtype=np.complex128)
-            map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
-            map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
-
-            return map_out
-
+            self._npolcyl = 2
+            self._loaded_freq = [[], []]
+            self._beam_arr = [[], []]
 
 def _nearest_freq(tel_freq, map_freq, freq_id):
 
@@ -501,3 +720,85 @@ def _nearest_freq(tel_freq, map_freq, freq_id):
     freq_ind = np.nonzero(match_mask)[0]
 
     return freq_ind
+
+def _rotate(bmap, theta, phi, rot=[0.0, 49.32, 1.9]):
+    
+    yaw = np.deg2rad(rot[0])
+    pitch = np.deg2rad(rot[1])
+    roll = np.deg2rad(rot[2])
+    
+    #Convert to cartesian                           
+    x = np.cos(phi)*np.sin(theta)
+    y = np.sin(phi)*np.sin(theta)
+    z = np.cos(theta)
+
+    cart = np.array([x, y, z])
+
+    #Apply yaw rotation
+    rot = [[np.cos(yaw), np.sin(yaw),  0],
+           [-np.sin(yaw), np.cos(yaw), 0],
+           [0.0,         0.0,        1.0]]
+    
+    cartp = np.dot(rot, cart)
+    
+    #Apply pitch rotation
+    rot = [[np.cos(pitch),    0, np.sin(pitch)],
+           [0,            1.0,           0],
+           [-np.sin(pitch), 0.0, np.cos(pitch)]]
+
+    cartp = np.dot(rot, cartp)
+
+    #Apply 1.9 degree rotation              
+    rot = [[1.0,            0.0,         0.0],
+            [0, np.cos(roll),  np.sin(roll)],
+            [0, -np.sin(roll), np.cos(roll)]]
+
+    cartp = np.dot(rot, cartp)
+
+    #Get the new angular coordinates                                                                   
+    phip = np.arctan2(cartp[1], cartp[0])
+    thetap = np.arccos(cartp[2])
+    
+    #Interpolate on to rotated grid
+    amap = griddata((theta, phi), bmap, (thetap, phip), method='linear', fill_value=0.0)
+    
+    return amap
+
+"""
+def _nearest_freq(tel_freq, map_freq, freq_id):
+	
+    """ """Find nearest neighbor frequencies.
+	
+    Parameters
+    ----------
+    tel_freq : float
+        Frequencies from telescope object
+    map_freq : float
+        Frequencies for which beams exist.
+    freq_id : int
+        Frequency selection.
+	
+    Returns
+    -------
+    freq_ind : int
+        List of closest frequencies matched to tel_freq.
+
+    """ """
+	
+    diff_freq = abs(map_freq - tel_freq)
+
+    freq_width = 400.0/1024/2
+	
+    match_mask = diff_freq < freq_width
+
+    if np.any(match_mask):
+        freq_ind = [np.argmin(diff_freq)]
+    else:
+        freq_ext = np.argmin(diff_freq)
+        if map_freq[freq_ext] < tel_freq:
+            freq_ind = np.append(freq_ext-1, freq_ext).tolist()
+        else:
+            freq_ind = np.append(freq_ext, freq_ext+1).tolist()
+        
+    return freq_ind
+"""
