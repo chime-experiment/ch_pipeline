@@ -423,6 +423,10 @@ class GatedNoiseCalibration(task.SingleTask):
     norm : ['gated', 'off', 'on', 'none']
         Specify what to use to normalise the matrix.
 
+    use_NoiseSource : bool
+        If True, and a NoiseSource reference channel is available, then include this
+        channel in the eigenvalue decomposition (has no effect if from_NoiseSource iis True)
+
     from_NoiseSource : bool
         If True, the gains are calculated from the crosscorrelations
         with the NoiseSource reference channel only (no eigenvalue decomposition)
@@ -440,11 +444,18 @@ class GatedNoiseCalibration(task.SingleTask):
         in the data. If dist_channel = None and the NoiseSource reference channel is available
         then dist_channel is set to the NoiseSource id to remove the fluctuations
         of the noise source.
+
+    med_gain_norm : bool
+        If True and there is no ref channel available or use_NoiseSource=False, 
+        the gain amplitudes are referred to the median gain amplitude along all
+        feeds within a cylinder (so a median amplitude per cylinder)    
     """
 
     norm = config.Property(proptype=str, default='on')
     from_NoiseSource = config.Property(proptype=bool, default=False)
     dist_channel = config.Property(proptype=int, default=None)
+    use_NoiseSource = config.Property(proptype=bool, default=True)
+    med_gain_norm = config.Property(proptype=bool, default=False)
 
     def process(self, ts, inputmap, inputmask):
         """Find complex gains from noise injection data.
@@ -470,7 +481,9 @@ class GatedNoiseCalibration(task.SingleTask):
         ts.redistribute('freq')
 
         # Figure out which input channel is the noise source (used as gain reference)
-        noise_channel = tools.get_noise_channel(inputmap)
+        noise_channel = None
+        if self.use_NoiseSource:
+            noise_channel = tools.get_noise_channel(inputmap)
 
         # Take a view now to avoid some MPI issues
         vis_gate = ts.datasets['gated_vis1'][:].view(np.ndarray)
@@ -572,6 +585,15 @@ class GatedNoiseCalibration(task.SingleTask):
                                         gain[:, np.newaxis, self.dist_channel, :]))
                 gain *= tools.invert_no_zero(gain_dist)
                 gain = np.nan_to_num(gain)
+            else: # Refer gains to median gain per cylinder
+                if self.med_gain_norm:
+                    N_good_input_cyl1 = np.searchsorted(good_input, 128)
+                    med_gain_W = np.median(np.abs(
+                        gain[:, good_input[:N_good_input_cyl1]]), axis=1)[:, np.newaxis, :]
+                    med_gain_E = np.median(np.abs(
+                        gain[:, good_input[N_good_input_cyl1:]]), axis=1)[:, np.newaxis, :]
+                    gain[:128] *= tools.invert_no_zero(med_gain_W)
+                    gain[128:] *= tools.invert_no_zero(med_gain_E)
 
         # Create container to hold gain results
         gain_data = containers.GainData(good_input=good_input, axes_from=ts)
