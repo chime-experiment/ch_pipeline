@@ -17,6 +17,7 @@ Tasks
     NoiseSourceFold
     GatedNoiseCalibration
     SiderealCalibration
+    LoadCalibration
 """
 
 import numpy as np
@@ -35,6 +36,7 @@ from draco.core import task
 from draco.util import _fast_tools
 
 from ..core import containers
+from ..core.io import _list_or_glob
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -160,8 +162,8 @@ def solve_gain(data, feeds=None, norm=None):
                 gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
 
                 gain_error[fi, :, ti] = (inv_norm[fi, :, ti] *
-                                         1.4826 * np.median(np.abs(evals[:-1] - np.median(evals[:-1]))) /
-                                         evals[-1]**0.5)
+                                         np.median(np.abs(evals[:-1] - np.median(evals[:-1]))) /
+                                         (nfeed * evals[-1])**0.5)
 
                 evalue[fi, :, ti] = evals
 
@@ -547,13 +549,15 @@ class SiderealCalibration(task.SingleTask):
         # Cut out a snippet of the timestream
         slice_width_deg = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
-        slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
 
-        vis_slice = sstream.vis[..., st:et].copy()
-        ra_slice = sstream.ra[st:et]
+        islice = np.arange(st, et, dtype=np.int)
+        vis_slice = sstream.vis[:].view(np.ndarray).take(islice, mode='wrap', axis=-1)
+        ra_slice = sstream.ra[:].take(islice, mode='wrap')
 
         nra = vis_slice.shape[-1]
+
+        slice_centre = np.argmin(np.abs(ra_slice - peak_ra))
 
         # Determine good inputs
         nfeed = len(inputmap)
@@ -649,6 +653,11 @@ class SiderealCalibration(task.SingleTask):
             # If requested, fit a model to the point source transit
             if self.model_fit:
 
+                # Obtain initial estimate of beam FWHM
+                initial_fwhm = np.full([nfreq, nfeed], 2.0, dtype=np.float64)
+                initial_fwhm[:, xfeeds] = cal_utils.guess_fwhm(freq, pol='X', dec=source._dec, sigma=False)[:, np.newaxis]
+                initial_fwhm[:, yfeeds] = cal_utils.guess_fwhm(freq, pol='Y', dec=source._dec, sigma=False)[:, np.newaxis]
+
                 # Only fit ra values above the specified dynamic range threshold
                 # that are contiguous about the expected peak position.
                 fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
@@ -656,7 +665,8 @@ class SiderealCalibration(task.SingleTask):
                 fit_flag[:, yfeeds, :] = contiguous_flag(dr_y > self.threshold, centre=slice_centre)[:, np.newaxis, :]
 
                 # Fit model for the complex response of each feed to the point source
-                param, param_cov = cal_utils.fit_point_source_transit(ra_slice, resp, resp_err, flag=fit_flag)
+                param, param_cov = cal_utils.fit_point_source_transit(ra_slice, resp, resp_err,
+                                                                      flag=fit_flag, fwhm=initial_fwhm)
 
                 # Overwrite the initial gain estimates for frequencies/feeds
                 # where the model fit was successful
@@ -664,7 +674,7 @@ class SiderealCalibration(task.SingleTask):
                     for index in np.ndindex(nfreq, nfeed):
                         if np.all(np.isfinite(param[index])):
                             out_index = (good_freq_local[index[0]], index[1])
-                            self.gain[out_index] = param[index][0] * np.exp(1.0j * np.deg2rad(param[index][-2]))
+                            self.gain[out_index] = param[index][0] * np.exp(1.0j * np.deg2rad(param[index][3]))
 
                 else:
                     for index in np.ndindex(nfreq, nfeed):
@@ -702,3 +712,113 @@ class SiderealCalibration(task.SingleTask):
 
         # Return gain data
         return gain_data
+
+
+class LoadCalibration(task.SingleTask):
+    """Load sidereal calibrations previously saved to disk
+    and extract the appropriate gain for an input stream.
+
+    Attributes
+    ----------
+    files : list or glob
+        Files containing the sidereal calibration.
+    interpolate : bool
+        If True, interpolate the gains found in files.  If False,
+        use the gain found in the file closest in time.
+    """
+
+    files = config.Property(proptype=_list_or_glob)
+    interpolate = config.Property(proptype=bool, default=False)
+
+    def setup(self, observer=None):
+        """Load the sidereal calibration found in files.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set observer attribute
+        self.observer = ephemeris.chime_observer() if observer is None else observer
+
+        # Set gain attribute to None, will be initialized after loading first file.
+        self.gain = None
+
+        # Loop over files
+        nfiles = len(self.files)
+        for ff, filename in enumerate(self.files):
+
+            # Load the static gains from the file.
+            cont = containers.GainData.from_file(filename, distributed=True)
+            cont.redistribute('freq')
+
+            # If the gain variable does not exist yet, then create with proper size.
+            if self.gain is None:
+
+                nfreq = cont.gain.local_shape[0]
+                nfeed = cont.gain.local_shape[1]
+
+                self.gain = np.zeros((nfreq, nfeed, nfiles), dtype=cont.gain.dtype)
+                self.time = np.zeros(nfiles, dtype=np.float64)
+
+            # Save the static gains to the attribute.
+            self.gain[:, :, ff] = cont.gain[:].view(np.ndarray)
+
+            # Extract the time of transit
+            lsd = cont.attrs['lsd'] if 'lsd' in cont.attrs else cont.attrs['csd']
+
+            source = ephemeris.source_dictionary[cont.attrs['source']]
+            peak_ra = ephemeris.peak_RA(source, deg=True)
+
+            self.time[ff] = self.observer.lsd_to_unix(lsd + peak_ra / 360.0)
+
+
+    def process(self, sstream):
+        """ Return appropriate gain for input stream.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream or andata.CorrData
+
+        Returns
+        -------
+        outcont : containers.GainData or containers.StaticGainData
+            If interpolate attribute is set to True, then a GainData
+            container is returned.  If set to False, then a
+            StaticGainData container is returned.
+        """
+
+        # Extract the time of the stream.
+        if hasattr(sstream, 'time'):
+            time = sstream.time[:]
+        else:
+            ra = sstream.index_map['ra'][:]
+            lsd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            time = self.observer.lsd_to_unix(lsd + ra / 360.0)
+
+        # Determine appropriate gain to apply based on time of stream.
+        if self.interpolate:
+
+            # Interpolate the gains from sidereal calibration.
+            gain_data = containers.GainData(time=time, axes_from=sstream, attrs_from=sstream)
+            gain_data.redistribute('freq')
+
+            gain_data.gain[:] = interp_gains(self.time, self.gain, time, axis=-1)
+
+        else:
+
+            # Use the nearest sidereal calibration.
+            gain_data = containers.StaticGainData(axes_from=sstream, attrs_from=sstream)
+            gain_data.redistribute('freq')
+
+            index_time = np.argmin(np.abs(np.median(time) - self.time))
+
+            if mpiutil.rank0:
+                print "Using calibration from lsd %d" % int(self.observer.unix_to_lsd(self.time[index_time]))
+
+            gain_data.gain[:] = self.gain[:, :, index_time]
+
+        # Return gains
+        return gain_data
+
