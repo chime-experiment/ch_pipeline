@@ -33,6 +33,7 @@ Tasks
     MaskCHIMEData
 """
 import numpy as np
+import ephem
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
@@ -1229,59 +1230,81 @@ def daytime_flag(time):
     return flag
 
 
-def solar_transit_flag(time, nsig=5.0):
+def transit_flag(body, time, nsig=5.0):
     """ Return a flag that indicates if the input times
-    occur near sun transit.
+    occur near transit of a celestial body.
 
     Parameters
     ----------
+    body : ephem.Body
+        PyEphem representation of a celestial body.
     time : float (UNIX time)
+        Determine whether these times occur near transit.
+    nsig : float
+        Number of sigma to flag on either side of transit.
 
     Returns
     -------
     flag : np.ndarray, dtype=np.bool
+        Flag indicating whether the input times are near transit.
     """
 
-    import ephem
-
+    obs = ephemeris._get_chime()
     deg_to_sec = 3600.0 * ephemeris.SIDEREAL_S / 15.0
 
     # Create boolean flag
     flag = np.zeros(len(time), dtype=np.bool)
 
-    # Get position of sun at every time sample
-    ra, dec = [], []
-    obs, sun = ephemeris._get_chime(), ephem.Sun()
-    for tt in time:
-        obs.date = ephemeris.unix_to_ephem_time(tt)
-        sun.compute(obs)
+    # Find transit times
+    transit_times = ephemeris.transit_times(body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0)
 
-        ra.append(sun.ra)
-        dec.append(sun.dec)
-
-    # Estimate the amount of time the sun is in the primary beam
-    # as +/- nsig sigma, where sigma denotes the width of the
-    # primary beam.  We use the lowest frequency and E polarisation,
-    # since this is the most conservative (largest sigma).
-    window_sec = nsig * cal_utils.guess_fwhm(400.0, pol='X', dec=np.median(dec), sigma=True) * deg_to_sec
-
-    # Sun transit
-    transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)
+    # Loop over transit times
     for mid in transit_times:
 
-        # Update peak location based on rotation of cylinder
+        # Set body to time of transit
         obs.date = ephemeris.unix_to_ephem_time(mid)
-        sun.compute(obs)
+        body.compute(obs)
 
-        peak_ra = ephemeris.peak_RA(sun, deg=True)
-        mid += (peak_ra - np.degrees(sun.ra)) * deg_to_sec
+        # Make sure body is above horizon
+        if body.alt > 0.0:
 
-        # Flag +/- window_sec around peak location
-        begin = mid - window_sec
-        end = mid + window_sec
-        flag |= ((time >= begin) & (time <= end))
+            # Estimate the amount of time the body is in the primary beam
+            # as +/- nsig sigma, where sigma denotes the width of the
+            # primary beam.  We use the lowest frequency and E polarisation,
+            # since this is the most conservative (largest sigma).
+            window_sec = nsig * cal_utils.guess_fwhm(400.0, pol='X', dec=body.dec, sigma=True) * deg_to_sec
 
+            # Update peak location based on rotation of cylinder
+            peak_ra = ephemeris.peak_RA(body, deg=True)
+            peak_time = mid + (peak_ra - np.degrees(body.ra)) * deg_to_sec
+
+            # Flag +/- window_sec around peak location
+            begin = peak_time - window_sec
+            end = peak_time + window_sec
+            flag |= ((time >= begin) & (time <= end))
+
+    # Return boolean flag indicating times near transit
     return flag
+
+
+def solar_transit_flag(time, nsig=5.0):
+    """ Return a flag that indicates if the input times
+    occur near transit of the sun.
+    """
+
+    body = ephem.Sun()
+
+    return transit_flag(body, time, nsig=nsig)
+
+
+def lunar_transit_flag(time, nsig=2.0):
+    """ Return a flag that indicates if the input times
+    occur near transit of the moon.
+    """
+
+    body = ephem.Moon()
+
+    return transit_flag(body, time, nsig=nsig)
 
 
 def taper_mask(mask, nwidth, outer=False):
@@ -1319,12 +1342,11 @@ class DayMask(task.SingleTask):
     zero_data : bool, optional
         Zero the data in addition to modifying the noise weights
         (default is False).
-    remove_average : bool, optional
-        Estimate and remove the mean level from each visibilty. This estimate
-        does not use data from the masked region. (default is False)
     only_sun : bool, optional
         If only_sun is True, then a window of time around sun transit is flagged as bad.
         If only_sun is False, then all day time data is flagged as bad.  (default is False)
+    mask_moon : bool, optional
+        Mask data around lunar transit.  (default is False)
     taper_width : float, optional
         Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from
         masked to unmasked regions using a cosine function.  Default is 0.0 (no taper).
@@ -1336,8 +1358,8 @@ class DayMask(task.SingleTask):
     """
 
     zero_data = config.Property(proptype=bool, default=False)
-    remove_average = config.Property(proptype=bool, default=False)
     only_sun = config.Property(proptype=bool, default=False)
+    mask_moon = config.Property(proptype=bool, default=False)
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
 
@@ -1369,27 +1391,27 @@ class DayMask(task.SingleTask):
             time = sstream.time
             flag = flag_function(time)
 
+            if self.mask_moon:
+                flag |= lunar_transit_flag(time)
+
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(time))))
 
         else:
             # Fetch either the LSD or CSD attribute
             csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            if not hasattr(csd, '__iter__'):
+                csd = [csd]
+
             ra = sstream.index_map['ra'][:]
 
-            if hasattr(csd, '__iter__'):
-                flag = np.zeros(len(ra), dtype=np.bool)
-                for cc in csd:
-                    flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
-            else:
-                flag = flag_function(ephemeris.csd_to_unix(csd + ra / 360.0))
+            flag = np.zeros(len(ra), dtype=np.bool)
+            for cc in csd:
+                flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
+
+                if self.mask_moon:
+                    flag |= lunar_transit_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
 
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(ra))))
-
-        # If requested, estimate and subtract the mean level
-        if self.remove_average and not np.all(flag):
-            if mpiutil.rank0:
-                print("Subtracting mean visibility.")
-            sstream.vis[:] -= np.mean(sstream.vis[..., ~flag], axis=-1)[..., np.newaxis]
 
         # Apply the mask
         if np.any(flag):

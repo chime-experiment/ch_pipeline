@@ -37,26 +37,6 @@ from draco.core import task
 from ..core import containers
 
 
-def unix_to_localtime(unix_time):
-    """Converts unix time to a :class:`datetime.datetime` object.
-
-    Parameters
-    ----------
-    unix_time : float
-        Unix/POSIX time.
-
-    Returns
-    --------
-    dt : :class:`datetime.datetime`
-
-    """
-    import pytz
-
-    utc_time = pytz.utc.localize(datetime.utcfromtimestamp(unix_time))
-
-    return utc_time.astimezone(pytz.timezone('Canada/Pacific'))
-
-
 def ra_dec_of(body, time):
     """ Calculate the coordinates of a celestial
     body at a particular time.
@@ -115,8 +95,8 @@ class SolarGrouper(task.SingleTask):
         """
 
         # Get the start and end day of the file as an int with format YYYYMMDD
-        day_start = int(unix_to_localtime(tstream.time[0]).strftime('%Y%m%d'))
-        day_end = int(unix_to_localtime(tstream.time[-1]).strftime('%Y%m%d'))
+        day_start = int(ephemeris.unix_to_chime_local_datetime(tstream.time[0]).strftime('%Y%m%d'))
+        day_end = int(ephemeris.unix_to_chime_local_datetime(tstream.time[-1]).strftime('%Y%m%d'))
 
         # If current_day is None then this is the first time we've run
         if self._current_day is None:
@@ -187,7 +167,7 @@ class SolarGrouper(task.SingleTask):
 
         # Add attributes for the date and a tag for labelling saved files
         ts.attrs['tag'] = day
-        ts.attrs['date'] = day
+        ts.attrs['date'] = self._current_day
 
         return ts
 
@@ -243,7 +223,7 @@ class SolarCalibration(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Get the local frequency axis
-        freq = sstream.freq['centre'][sfreq:efreq]
+        freq = sstream.index_map['freq']['centre'][sfreq:efreq]
         wv = 3e2 / freq
 
         # Get times
@@ -271,7 +251,7 @@ class SolarCalibration(task.SingleTask):
             return None
 
         # Convert boolean flag to slices
-        time_index = np.where(time_flag)[0]
+        time_index = np.flatnonzero(time_flag)
 
         time_slice = []
         ntime = 0
@@ -312,7 +292,9 @@ class SolarCalibration(task.SingleTask):
             v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
 
         # Create container to hold results of fit
-        suntrans = containers.SunTransit(time=time, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream)
+        suntrans = containers.SunTransit(time=time, pol_x=xfeeds, pol_y=yfeeds,
+                                            axes_from=sstream, attrs_from=sstream)
+        suntrans.redistribute('freq')
         for key in suntrans.datasets.keys():
             suntrans.datasets[key][:] = 0.0
 
@@ -371,13 +353,13 @@ class SolarCalibration(task.SingleTask):
             sig_y = cal_utils.guess_fwhm(freq, pol='Y', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
 
             # Only fit ra values above the specified dynamic range threshold
-            fit_flag = np.zeros([nfreq, nfeed, ntime], dtype=np.bool)
+            fit_flag = np.zeros((nfreq, nfeed, ntime), dtype=np.bool)
             fit_flag[:, xfeeds, :] = dra < (self.nsig * sig_x)
             fit_flag[:, yfeeds, :] = dra < (self.nsig * sig_y)
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra, suntrans.response[:],
-                                                                  suntrans.response_error[:],
+            param, param_cov = cal_utils.fit_point_source_transit(ra, suntrans.response[:].view(np.ndarray),
+                                                                  suntrans.response_error[:].view(np.ndarray),
                                                                   flag=fit_flag)
 
             # Save to container

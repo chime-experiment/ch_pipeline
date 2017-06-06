@@ -102,6 +102,8 @@ class QueryRun(pipeline.TaskBase):
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
 
+            layout.connect_database()
+
             cat_run = layout.global_flag_category.select().where(layout.global_flag_category.name == 'run').get()
 
             # Find run in database
