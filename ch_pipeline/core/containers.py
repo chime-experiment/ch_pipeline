@@ -21,6 +21,7 @@ Containers
     SiderealDayFlag
     PointSourceTransit
     SunTransit
+    Crosstalk
     RingMap
     Photometry
 
@@ -231,8 +232,7 @@ class PointSourceTransit(StaticGainData):
     """Parallel container for holding the results of a fit to a point source transit.
     """
 
-    _axes = ('freq', 'input', 'ra', 'pol_x', 'pol_y',
-             'param', 'param_cov1', 'param_cov2')
+    _axes = ('freq', 'input', 'ra', 'pol_x', 'pol_y', 'param')
 
     _dataset_spec = {
         'gain': {
@@ -292,7 +292,7 @@ class PointSourceTransit(StaticGainData):
             'distributed_axis': 'freq'
         },
         'parameter_cov': {
-            'axes': ['freq', 'input', 'param_cov1', 'param_cov2'],
+            'axes': ['freq', 'input', 'param', 'param'],
             'dtype': np.float64,
             'initialise': True,
             'distributed': True,
@@ -302,9 +302,10 @@ class PointSourceTransit(StaticGainData):
 
     def __init__(self, *args, **kwargs):
 
-        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
-        kwargs['param_cov1'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
-        kwargs['param_cov2'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm',
+                                    'phase_intercept', 'phase_slope',
+                                    'phase_quad', 'phase_cube',
+                                    'phase_quart', 'phase_quint'])
 
         super(PointSourceTransit, self).__init__(*args, **kwargs)
 
@@ -355,14 +356,6 @@ class PointSourceTransit(StaticGainData):
     @property
     def param(self):
         return self.index_map['param']
-
-    @property
-    def param_cov1(self):
-        return self.index_map['param_cov1']
-
-    @property
-    def param_cov2(self):
-        return self.index_map['param_cov2']
 
 
 class SunTransit(ContainerBase):
@@ -431,7 +424,10 @@ class SunTransit(ContainerBase):
 
     def __init__(self, *args, **kwargs):
 
-        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope'])
+        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm',
+                                    'phase_intercept', 'phase_slope',
+                                    'phase_quad', 'phase_cube',
+                                    'phase_quart', 'phase_quint'])
         kwargs['coord'] = np.array(['ha', 'dec', 'alt', 'az'])
 
         super(SunTransit, self).__init__(*args, **kwargs)
@@ -503,6 +499,87 @@ class SunTransit(ContainerBase):
     def az(self):
         ind = list(self.index_map['coord']).index('az')
         return self.datasets['coord'][:, ind]
+
+
+class Crosstalk(ContainerBase):
+    """Parallel container for holding crosstalk model fit.
+    """
+
+    _axes = ('prod', 'input', 'path', 'fdegree', 'tdegree', 'freq', 'ra')
+
+    _dataset_spec = {
+        'coeff': {
+            'axes': ['prod', 'path', 'fdegree', 'tdegree'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'prod'
+        },
+        'flag': {
+            'axes': ['prod', 'path', 'fdegree', 'tdegree'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'prod'
+        },
+        'delay': {
+            'axes': ['prod', 'path'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'prod'
+        },
+        'weight': {
+            'axes': ['prod', 'freq', 'ra'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'prod'
+        }
+    }
+
+    def __init__(self, *args, **kwargs):
+
+        # Resolve product map
+        prod = None
+        if 'prod' in kwargs:
+            prod = kwargs['prod']
+        elif ('axes_from' in kwargs) and ('prod' in kwargs['axes_from'].index_map):
+            prod = kwargs['axes_from'].index_map['prod']
+
+        # Resolve input map
+        inputs = None
+        if 'input' in kwargs:
+            inputs = kwargs['input']
+        elif ('axes_from' in kwargs) and ('input' in kwargs['axes_from'].index_map):
+            inputs = kwargs['axes_from'].index_map['input']
+
+        # Automatically construct product map from inputs if not given
+        if prod is None and inputs is not None:
+            nfeed = inputs if isinstance(inputs, int) else len(inputs)
+            kwargs['prod'] = np.array([[fi, fj] for fi in range(nfeed) for fj in range(fi, nfeed)])
+
+        super(Crosstalk, self).__init__(*args, **kwargs)
+
+    @property
+    def coeff(self):
+        return self.datasets['coeff']
+
+    @property
+    def flag(self):
+        return self.datasets['flag']
+
+    @property
+    def delay(self):
+        return self.datasets['delay']
+
+    @property
+    def weight(self):
+        return self.datasets['weight']
+
+    @property
+    def prod(self):
+        return self.index_map['prod']
 
 
 class RingMap(ContainerBase):

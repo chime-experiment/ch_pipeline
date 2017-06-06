@@ -18,8 +18,7 @@ Tasks
     SiderealGrouper
     SiderealRegridder
     SiderealFileFilter
-    SiderealMean
-    ChangeSiderealMean
+    SiderealFileFilterFromParams
 
 Usage
 =====
@@ -218,6 +217,70 @@ class SiderealFileFilter(pipeline.TaskBase):
 
     Attributes
     ----------
+    padding : float
+        Extra amount of a sidereal day to pad each timestream by. Useful for
+        getting rid of interpolation artifacts.
+    """
+
+    padding = config.Property(proptype=float, default=0.005)
+
+    def setup(self, files_in, csd_flag):
+        """ Filter data files.
+
+        Parameters
+        ----------
+        files_in : list
+            List of data files.
+
+        Returns
+        -------
+        files_out : list
+            List of data files containing only the
+            requested sidereal days.
+        """
+
+        # Use input csd_flag to create dictionary indicating good csd
+        csd_dict = {}
+        for cc, csd in enumerate(csd_flag.csd[:]):
+            csd_dict[csd] = csd_flag.csd_flag[cc]
+
+        # Have rank0 look up csd contained in each input file and apply flag
+        files_out = None
+        if mpiutil.rank0:
+
+            # Determine the sidereal days covered by each input file
+            se_times = get_times(files_in)
+            se_csd = ephemeris.csd(se_times)
+
+            # Determine the unique sidereal days in the set of all input files
+            days = np.unique(np.floor(se_csd).astype(np.int))
+
+            # Create list of relevant files for each unique sidereal day
+            filemap = {day:list(_days_in_csd(day, se_csd, extra=self.padding)) for day in days}
+
+            # Loop over sidereal days and apply filter
+            index_out = []
+            for csd in sorted(filemap.keys()):
+
+                if (csd in csd_dict) and not (csd_dict[csd]):
+                    continue
+
+                index_out += filemap[csd]
+
+            files_out = [files_in[ind] for ind in np.unique(index_out)]
+
+        # Broadcast filtered list of files to other nodes and return
+        files_out = mpiutil.world.bcast(files_out, root=0)
+
+        return files_out
+
+
+class SiderealFileFilterFromParams(pipeline.TaskBase):
+    """ Filter a list of data files based on the
+    sidereal days that they contain.
+
+    Attributes
+    ----------
     csd_start : int
         Only include sidereal days on or after.
     csd_end : int
@@ -256,7 +319,7 @@ class SiderealFileFilter(pipeline.TaskBase):
             List of data files containing only the
             requested sidereal days.
         """
-        
+
         import h5py
 
         files_out = None
@@ -316,220 +379,6 @@ class SiderealFileFilter(pipeline.TaskBase):
         files_out = mpiutil.world.bcast(files_out, root=0)
 
         return files_out
-
-
-class SiderealMean(task.SingleTask):
-    """Calculate the weighted mean (over time) of every element of the
-    visibility matrix.
-
-    Parameters
-    ----------
-    all_data : bool
-        If this is True, then use all of the input data to
-        calculate the weighted mean.  If False, then use only
-        night-time data away from the transit of bright
-        point sources.  Default is False.
-    daytime : bool
-        Use only day-time data away from transit of bright point
-        sources to caclulate the weighted mean.  Overriden by all_data.
-        Default is False.
-    median : bool
-        Calculate weighted median instead of weighted mean.
-        Default is False.
-    """
-
-    all_data = config.Property(proptype=bool, default=False)
-    daytime = config.Property(proptype=bool, default=False)
-    median = config.Property(proptype=bool, default=False)
-
-    def process(self, sstream):
-        """
-        Parameters
-        ----------
-        sstream : andata.CorrData or containers.SiderealStream
-            Timestream or sidereal stream.
-
-        Returns
-        -------
-        mustream : same as input
-            Sidereal stream containing only the mean value.
-        """
-
-        from flagging import daytime_flag
-        from ch_util import cal_utils, tools
-        import weighted as wq
-
-        # Make sure we are distributed over frequency
-        sstream.redistribute('freq')
-
-        # Extract product map
-        prod = sstream.index_map['prod']
-
-        # Extract lsd
-        lsd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-
-        # Check if we are using all of the data to calculate the mean,
-        # or only "quiet" periods.
-        if self.all_data:
-
-            if isinstance(sstream, andata.CorrData):
-                flag_quiet = np.fix(ephemeris.csd(sstream.time)) == lsd
-
-                ra = ephemeris.transit_RA(sstream.time)
-
-            elif isinstance(sstream, containers.SiderealStream):
-                flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
-
-                ra = sstream.index_map['ra']
-
-            else:
-                raise RuntimeError('Format of `sstream` argument is unknown.')
-
-        else:
-
-            # Check if we are dealing with CorrData or SiderealStream
-            if isinstance(sstream, andata.CorrData):
-                # Extract ra
-                ra = ephemeris.transit_RA(sstream.time)
-
-                # Find night time data
-                if self.daytime:
-                    flag_quiet = daytime_flag(sstream.time)
-                else:
-                    flag_quiet = ~daytime_flag(sstream.time)
-
-                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == lsd)
-
-            elif isinstance(sstream, containers.SiderealStream):
-                # Extract csd and ra
-                if hasattr(lsd, '__iter__'):
-                    lsd_list = lsd
-                else:
-                    lsd_list = [lsd]
-
-                ra = sstream.index_map['ra']
-
-                # Find night time data
-                flag_quiet = np.ones(len(ra), dtype=np.bool)
-                for cc in lsd_list:
-                    if self.daytime:
-                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
-                    else:
-                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
-
-            else:
-                raise RuntimeError('Format of `sstream` argument is unknown.')
-
-            # Find data free of bright point sources
-            for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
-
-                peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
-                src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
-
-                dra = (ra - peak_ra) % 360.0
-                dra -= (dra > 180.0)*360.0
-
-                flag_quiet &= np.abs(dra) > src_window
-
-
-        # Create output
-        if np.any(flag_quiet):
-            newra = np.array([ 0.5*(np.min(ra[flag_quiet]) + np.max(ra[flag_quiet])) ])
-        else:
-            newra = np.array([ 0.5*(np.min(ra) + np.max(ra)) ])
-
-        mustream = containers.SiderealStream(ra=newra, axes_from=sstream,
-                                             distributed=True, comm=sstream.comm)
-
-        mustream.attrs['lsd'] = lsd
-        mustream.attrs['tag'] = sstream.attrs['tag']
-
-        mustream.redistribute('freq')
-
-        # Loop over frequencies and baselines to reduce memory usage
-        for lfi, fi in sstream.vis[:].enumerate(0):
-            for lbi, bi in sstream.vis[:].enumerate(1):
-
-                mu, norm = 0.0, 0.0
-
-                # Extract visibility and weight
-                data = sstream.vis[fi, bi]
-                weight = sstream.weight[fi, bi] * flag_quiet
-
-                norm = np.sum(weight)
-
-                # Calculate either weighted median or weighted mean value
-                if self.median:
-                    if np.any(weight > 0.0):
-                        mu = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
-
-                else:
-                    mu = tools.invert_no_zero(norm) * np.sum(weight*data)
-
-                mustream.vis[fi, bi, 0] = mu
-                mustream.weight[fi, bi, 0] = norm
-
-
-        # Return sidereal stream containing the mean value
-        return mustream
-
-
-class ChangeSiderealMean(task.SingleTask):
-    """ Subtract or add an overall offset (over time) to every element
-    of the visibility matrix.
-
-    Parameters
-    ----------
-    add : bool
-        Add the value instead of subtracting.
-        Default is False.
-    """
-
-    add = config.Property(proptype=bool, default=False)
-
-    def process(self, sstream, mustream):
-        """
-        Parameters
-        ----------
-        sstream : andata.CorrData or containers.SiderealStream
-            Timestream or sidereal stream.
-
-        mustream : andata.CorrData or containers.SiderealStream
-            Timestream or sidereal stream with 1 element in the time axis
-            that contains the value to add or subtract.
-
-        Returns
-        -------
-        sstream : same as input
-            Timestream or sidereal stream with value added or subtracted.
-        """
-
-        # Check that input visibilities have consistent shapes
-
-        sshp, mshp = sstream.vis.shape, mustream.vis.shape
-
-        if np.any(sshp[0:2] != mshp[0:2]):
-            ValueError("Frequency or product axis differ between inputs.")
-
-        if (len(mshp) != 3) or (mshp[-1] != 1):
-            ValueError("Mean value has incorrect shape, must be (nfreq, nprod, 1).")
-
-        # Ensure both inputs are distributed over frequency
-        sstream.redistribute('freq')
-        mustream.redistribute('freq')
-
-        # Determine autocorrelations
-        not_auto = np.array([pi != pj for pi, pj in mustream.index_map['prod'][:]])[np.newaxis, :, np.newaxis]
-
-        # Add or subtract value to the cross-correlations
-        if self.add:
-            sstream.vis[:] += mustream.vis[:].view(np.ndarray) * not_auto
-        else:
-            sstream.vis[:] -= mustream.vis[:].view(np.ndarray) * not_auto
-
-        # Return sidereal stream with modified offset
-        return sstream
-
 
 
 def get_times(acq_files):
