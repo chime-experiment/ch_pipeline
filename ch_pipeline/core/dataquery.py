@@ -67,7 +67,7 @@ from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
 _DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
-#_DEFAULT_NODE_SPOOF = {'scinet_processing': '/scratch/k/krs/jrs65/chime/archive/processing/'}
+
 
 class QueryRun(pipeline.TaskBase):
     """Find the files belonging to a specific `run`.
@@ -102,6 +102,8 @@ class QueryRun(pipeline.TaskBase):
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
 
+            layout.connect_database()
+
             cat_run = layout.global_flag_category.select().where(layout.global_flag_category.name == 'run').get()
 
             # Find run in database
@@ -109,7 +111,7 @@ class QueryRun(pipeline.TaskBase):
                                                           layout.global_flag.name == self.run_name)
 
             # Make sure we only have flags with active events
-            run_query = run_query.join(layout.graph_obj).join(layout.event).where(layout.event.active == True)
+            run_query = run_query.join(layout.graph_obj).join(layout.event).where(layout.event.active)
 
             if run_query.count() == 0:
                 raise RuntimeError('Run %s not found in database' % self.run_name)

@@ -17,11 +17,10 @@ Tasks
     NoiseSourceFold
     GatedNoiseCalibration
     SiderealCalibration
-    ApplyGain
 """
+
 import numpy as np
 from scipy import interpolate
-from scipy.optimize import curve_fit
 
 from caput import config, pipeline
 from caput import mpiarray, mpiutil
@@ -29,12 +28,13 @@ from caput import mpiarray, mpiutil
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
-from ch_util import data_quality
 from ch_util import cal_utils
 from ch_util import fluxcat
 
-from ..core import containers, task
-from ..util import _fast_tools
+from draco.core import task
+from draco.util import _fast_tools
+
+from ..core import containers
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -207,12 +207,12 @@ def solve_gain(data, feeds=None, norm=None):
 
             # Construct gain solutions
             if evals[-1] > 0:
-                sign0 = (1.0 - 2.0*(evecs[0, -1].real < 0.0))
+                sign0 = (1.0 - 2.0 * (evecs[0, -1].real < 0.0))
                 gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
                 evalue[fi, :, ti] = evals
 
             # Solve for eigenvectors
-            #evals, evecs = tools.eigh_no_diagonal(cd, niter=5, eigvals=(nfeed - 2, nfeed - 1))
+            # evals, evecs = tools.eigh_no_diagonal(cd, niter=5, eigvals=(nfeed - 2, nfeed - 1))
 
             # Construct dynamic range and gain, but only if the two highest
             # eigenvalues are positive. If not, we just let the gain and dynamic
@@ -264,8 +264,8 @@ def _adiff(ts, dt):
     if dt is None:
         return ts
 
-    return ts - 0.5*(np.mean(ts[..., :dt], axis=-1) +
-                     np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
+    return ts - 0.5 * (np.mean(ts[..., :dt], axis=-1) +
+                       np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
 
 
 class NoiseSourceFold(task.SingleTask):
@@ -282,7 +282,6 @@ class NoiseSourceFold(task.SingleTask):
     period = config.Property(proptype=int, default=None)
     phase = config.Property(proptype=list, default=[])
     only_off = config.Property(proptype=bool, default=False)
-
 
     def process(self, ts):
         """Fold on the noise source and generate a gated dataset.
@@ -305,7 +304,7 @@ class NoiseSourceFold(task.SingleTask):
             ni_params = {'ni_period': self.period, 'ni_on_bins': self.phase}
 
         folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params,
-                                                     only_off=self.only_off)
+                                                 only_off=self.only_off)
 
         return folded_ts
 
@@ -418,6 +417,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
 class GatedNoiseCalibration(task.SingleTask):
     """Calibration using Noise Injection
+
     Attributes
     ----------
     norm : ['gated', 'off', 'on', 'none']
@@ -640,7 +640,6 @@ def contiguous_flag(flag, centre=None):
     return flag
 
 
-
 class SiderealCalibration(task.SingleTask):
     """Use point source as a calibrator for a sidereal stack.
 
@@ -661,7 +660,7 @@ class SiderealCalibration(task.SingleTask):
     threshold : float
         Relevant if model_fit is True.  The model is only fit to
         time samples with dynamic range greater than threshold.
-        Default is 5.
+        Default is 3.
 
     """
 
@@ -713,7 +712,7 @@ class SiderealCalibration(task.SingleTask):
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
+        slice_width_deg = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -789,8 +788,8 @@ class SiderealCalibration(task.SingleTask):
 
         # Construct the dynamic range estimate as the ratio of the first to second
         # largest eigenvalue at the time of transit
-        dr_x = evalue_x[:, -1, :]*tools.invert_no_zero(evalue_x[:, -2, :])
-        dr_y = evalue_y[:, -1, :]*tools.invert_no_zero(evalue_y[:, -2, :])
+        dr_x = evalue_x[:, -1, :] * tools.invert_no_zero(evalue_x[:, -2, :])
+        dr_y = evalue_y[:, -1, :] * tools.invert_no_zero(evalue_y[:, -2, :])
 
         # If requested, fit a model to the point source transit
         if self.model_fit:
@@ -807,8 +806,8 @@ class SiderealCalibration(task.SingleTask):
             # Overwrite the initial gain estimates for frequencies/feeds
             # where the model fit was successful
             if self.use_peak:
-                gain = np.where(np.isnan(param[:,:,0]), gain,
-                                param[:,:,0]*np.exp(1.0j*np.deg2rad(param[:,:,-2])))
+                gain = np.where(np.isnan(param[:, :, 0]), gain,
+                                param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])))
             else:
                 for index in np.ndindex(nfreq, nfeed):
                     if np.all(np.isfinite(param[index])):
@@ -855,184 +854,3 @@ class SiderealCalibration(task.SingleTask):
 
         # Return gain data
         return gain_data
-
-
-class ApplyGain(task.SingleTask):
-    """Apply a set of gains to a timestream or sidereal stack.
-
-    Attributes
-    ----------
-    inverse : bool, optional
-        Apply the gains directly, or their inverse.
-    smoothing_length : float, optional
-        Smooth the gain timestream across the given number of seconds.
-    update_weight: bool, optional
-        Update timestream weights. For sidereal calibration, the weights
-        are rescaled by applying the inverse of the gains applied to 
-        visibilities. For noise injection calibration, the weights
-        are either rescaled by applying the inverse of the gains applied to 
-        visibilities or the weights are updated with the inverse variance
-        resulting from propagating the gain errors.
-    scale_weight_only: bool, optional
-        If True, the data weights are rescaled by applying the inverse of 
-        the gains applied to visibilities. If False, the weights are updated 
-        with the inverse variance resulting from propagating the gain errors
-        (assumes the current weight of the tstream is just the inverse variance 
-        from the rad eqn).
-    normalize_gains: bool, optional
-        If True, the noise injection gains are normalized the median of the
-        gain magnitude along the time axis
-    """
-
-    inverse = config.Property(proptype=bool, default=True)
-    update_weight = config.Property(proptype=bool, default=False)
-    scale_weight_only = config.Property(proptype=bool, default=False)
-    normalize_gains = config.Property(proptype=float, default=False)
-    smoothing_length = config.Property(proptype=float, default=None)
-
-    def process(self, tstream, gain):
-
-        tstream.redistribute('freq')
-        gain.redistribute('freq')
-
-        if isinstance(gain, (containers.StaticGainData, containers.PointSourceTransit)):
-
-            # Extract gain array and add in a time axis
-            gain_arr = gain.gain[:][..., np.newaxis]
-
-            # Get the weight array if it's there
-            weight_arr = gain.weight[:][..., np.newaxis] if gain.weight is not None else None
-
-            # Regularise any crazy entries
-            gain_arr = np.nan_to_num(gain_arr)
-
-            # If requested, invert the gains
-            inverse_gain_arr = tools.invert_no_zero(gain_arr)
-
-            if self.inverse:
-                gweight = gain_arr
-                gvis = inverse_gain_arr
-                if mpiutil.rank0:
-                    print "Applying inverse gain."
-            else:
-                gweight = inverse_gain_arr
-                gvis = gain_arr
-                if mpiutil.rank0:
-                    print "Applying gain."
-
-            # Apply gains to the weights
-            if self.update_weight:
-                tools.apply_gain(tstream.weight[:], np.abs(gweight)**2, out=tstream.weight[:])
-                if mpiutil.rank0:
-                    print "Applying gain to weight."
-
-            # Apply gains to visibility matrix
-            tools.apply_gain(tstream.vis[:], gvis, out=tstream.vis[:])
-
-            # Update units
-            convert_units_to = gain.gain.attrs.get('convert_units_to')
-            if convert_units_to:
-                tstream.vis.attrs['units'] = convert_units_to
-
-            # Modify the weight array according to the gain weights
-            if weight_arr is not None:
-                # Convert dynamic range to a binary weight and apply to data
-                gain_weight = (weight_arr[:] > 2.0).astype(tstream.weight.dtype)
-                tstream.weight[:] *= gain_weight[:, np.newaxis, :]
-
-        elif isinstance(gain, containers.GainData): #Noise injection gains
-
-            # Extract gain array
-            gain_arr = gain.gain[:].view(np.ndarray) # If not viewed as ndarray get error when smoothing
-            if self.normalize_gains:
-                g_mag_med, g_mag_std = get_med_std(np.abs(gain_arr), 100)
-                gain_arr *= tools.invert_no_zero(g_mag_med[..., np.newaxis]) 
-
-            # Get the weight array if it's there
-            weight_arr = gain.weight[:].view(np.ndarray) if gain.weight is not None else None
-
-            # Check that we are defined at the same time samples
-            if (gain.index_map['time']['ctime'] != tstream.index_map['time']['ctime']).any():
-                raise RuntimeError('Gain data and timestream defined at different time samples.')
-
-            # Smooth the gain data if required
-            if self.smoothing_length is not None:
-                import scipy.signal as ss
-
-                if mpiutil.rank0:
-                    print "Smoothing noise injection gains."
-
-                # Turn smoothing length into a number of samples
-                tdiff = gain.time[1] - gain.time[0]
-                samp = int(np.ceil(self.smoothing_length / tdiff))
-
-                # Ensure smoothing length is odd
-                l = 2 * (samp / 2) + 1
-
-                # Turn into 2D array (required by smoothing routines)
-                gain_r = gain_arr.reshape(-1, gain_arr.shape[-1])
-
-                # Smooth amplitude and phase separately
-                smooth_amp = ss.medfilt2d(np.abs(gain_r), kernel_size=[1, l])
-                smooth_phase = ss.medfilt2d(np.angle(gain_r), kernel_size=[1, l])
-
-                # Recombine and reshape back to original shape
-                gain_arr = smooth_amp * np.exp(1.0J * smooth_phase)
-                gain_arr = gain_arr.reshape(gain.gain[:].shape)
-
-                # Smooth weight array if it exists
-                if weight_arr is not None:
-                    weight_arr_shape = weight_arr.shape
-                    if weight_arr_shape[-1] == gain_arr.shape[-1]: # If not assume gain.weight is 2D so don't smooth
-                        weight_arr = weight_arr.reshape(-1, weight_arr_shape[-1])
-                        weight_arr = ss.medfilt2d(np.abs(weight_arr), kernel_size=[1, l])
-                        weight_arr = weight_arr.reshape(weight_arr_shape)
-
-            # Regularise any crazy entries
-            gain_arr = np.nan_to_num(gain_arr)
-
-            if mpiutil.rank0:
-                print "Applying inverse gain to visibilities."
-
-            # Apply gains to visibility matrix
-            vis_raw = tstream.vis[:].copy()
-            tools.apply_gain(tstream.vis[:], tools.invert_no_zero(gain_arr), out=tstream.vis[:])
-
-            # Modify the weight array according to the gain weights
-            if self.update_weight and (weight_arr is not None):
-                if self.scale_weight_only:
-                    # Do nt propagate error from applying noise inj gains.
-                    # Only rescale inverse rad eqn variance by applied gains
-                    # i.e assume perfect knowledge of gains
-                    if mpiutil.rank0:
-                        print "Applying gain to weights (rescale only)."
-
-                    tools.apply_gain(tstream.weight[:], np.abs(gain_arr)**2, out=tstream.weight[:])
-                else:
-                    # Propagate error on visibilities from applying noise inj gains.
-                    # Assumes the current weight of the tstream is just the inverse variance from the 
-                    # rad eqn.
-
-                    if mpiutil.rank0:
-                        print "Applying gain to weights (propagate gain errors)."
-                    # Variance contribution due to raw visibility
-                    var_radeqn = tools.invert_no_zero(tstream.weight[:]*np.abs(vis_raw)**2)
-                    # Variance contribution due to inverse gain
-                    nfreq = gain_arr.shape[0]
-                    nchannels = gain_arr.shape[1]
-                    var_gi = np.concatenate([tools.invert_no_zero(weight_arr[:, i:i+1]) * 
-                                             np.ones((nfreq, nchannels-i)) 
-                                             for i in range(nchannels)], axis=1)
-                    var_gj = np.concatenate([tools.invert_no_zero(weight_arr[:, i:])
-                                             for i in range(nchannels)], axis=1)
-
-                    tstream.weight[:] = tools.invert_no_zero(np.abs(tstream.vis[:])**2 * 
-                                        (var_radeqn + var_gi[..., np.newaxis] + var_gj[..., np.newaxis]))
-            else: 
-                if mpiutil.rank0:
-                    print "Data weights not updated."
-
-        else:
-            raise RuntimeError('Format of `gain` argument is unknown.')
-
-        return tstream
