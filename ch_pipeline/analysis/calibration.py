@@ -75,61 +75,6 @@ def _extract_diagonal(utmat, axis=1):
 
     return diag_array
 
-def std_from_mad(a):
-    '''
-    Calculate standard deviation from Median absolute deviation of time (last) 
-    axis for array a. a is assumed to be REAL
-
-    Parameters
-    ----------
-    a : np.ndarray[freq, prod/input, time]
-        3d real array.
-
-    Returns
-    -------
-    a_std : np.ndarray[freq, prod/input]
-        Standard deviation along time (last) axis of a
-    '''
-
-    return np.median( abs(a - np.median(a, axis=-1)[..., np.newaxis]), axis=-1 )*1.4826
-
-def get_med_std(vis_array, frames_per_test=None):
-    '''Get median and standard deviation from MAD along time (last in general) axis.
-    vis_array has the nominal shape [freq, prod/input, time]. 
-    Finds the median and std for chunks of frames_per_test frames, and then takes 
-    median. frames_per_test must be even
-    
-    Parameters
-    ----------
-    vis_array : np.ndarray[freq, prod/input, time]
-        3d array.
-    frames_per_test: uint8
-        Number of samples per test. Must be even
-
-    Returns
-    -------
-    vis_array_med : np.ndarray[freq, prod/input]
-        Median along time (last) axis of a
-    vis_array_std : Standard deviation (from MAD) along time (last) axis of a
-    '''
-    
-    Nframes = vis_array.shape[-1]
-    if frames_per_test is None:
-        frames_per_test = Nframes
-        
-    Ntests = Nframes/frames_per_test #Number of tests per freq
-        
-    med = []
-    std = []
-    for i in range(Ntests):
-        v = vis_array[..., i*frames_per_test:(i+1)*frames_per_test]
-        v_diff = (v[..., ::2]-v[..., 1::2])/np.sqrt(2) # remove long time scale fluctuations
-        std.append(std_from_mad(v_diff)[..., np.newaxis])
-        med.append(np.median(v, axis=-1)[..., np.newaxis])
-        del v, v_diff
-                    
-    return np.median(np.concatenate(med, axis=-1), axis=-1), np.median(np.concatenate(std, axis=-1), axis=-1)
-
 def solve_gain(data, feeds=None, norm=None):
     """
     Steps through each time/freq pixel, generates a Hermitian matrix and
