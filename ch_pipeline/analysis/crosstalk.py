@@ -19,11 +19,13 @@ Tasks
     ChangeMeanVisibility
 """
 import numpy as np
-from caput import config, mpiutil
+from caput import config, mpiutil, mpiarray
 
 from draco.core import task
 
 from ch_util import tools
+from ch_util import andata
+from ch_util import ephemeris
 
 from ..core import containers
 
@@ -43,7 +45,9 @@ class ComputeCrosstalk(task.SingleTask):
         coefficients.
     """
 
+    cheb = config.Property(proptype=bool, default=False)
     norm = config.Property(proptype=bool, default=False)
+    auto = config.Property(proptype=bool, default=False)
     poly_time_degree = config.Property(proptype=int, default=4)
 
     max_iter = config.Property(proptype=int, default=2)
@@ -62,14 +66,23 @@ class ComputeCrosstalk(task.SingleTask):
         self.beamtransfer = bt
 
         # Specify center and span to normalize variable of polynomial
-        self.freq_norm = np.array([600.0, 75.0])
-        self.time_norm = np.array([180.0, 60.0])
+        if self.cheb:
+            # self.freq_norm = np.array([600.0, 205.0])
+            # self.time_norm = np.array([180.0, 185.0])
+            self.freq_norm = np.array([600.0, 300.0])
+            self.time_norm = np.array([180.0, 270.0])
+        else:
+            self.freq_norm = np.array([600.0, 75.0])
+            self.time_norm = np.array([180.0, 60.0])
 
         # Specify degree of polynomial (currently hardcoded)
         # Key has format (is_intra, is_xx)
 
+        # inter_deg = np.array([6, 10, 10])
+        # intra_deg = np.array([6, 10, 10, 10, 10])
+
         inter_deg = np.array([6, 10, 10])
-        intra_deg = np.array([6, 10, 10, 10, 10])
+        intra_deg = np.array([6, 16, 10])
 
         self.poly_freq_deg_lookup = {}
         self.poly_freq_deg_lookup[(0, 0)] = inter_deg
@@ -121,24 +134,57 @@ class ComputeCrosstalk(task.SingleTask):
         crosstalk : containers.Crosstalk
         """
 
-        # Distribute over products
-        sstream.redistribute('prod')
-
-        # Make list of the products relevant for crosstalk removal
         tel = self.beamtransfer.telescope
 
-        # Extract frequency and ra
+        # Extract dimensions of the sidereal stream
         freq = sstream.index_map['freq']['centre']
-        ra = sstream.index_map['ra']
+        prod = sstream.index_map['prod']
+        ra   = sstream.index_map['ra']
+
+        nfreq, nra = freq.size, ra.size
 
         # Check that we have enough data points to fit the polynomial
-        if len(freq) < (self.max_poly_deg[0] + 1):
+        if nfreq < (self.max_poly_deg[0] + 1):
             ValueError("Number of frequency samples (%d) is less than number of coefficients for polynomial (%d)." %
-                        (len(freq), (self.max_poly_deg[0] + 1)))
+                        (nfreq, (self.max_poly_deg[0] + 1)))
 
-        if len(ra) < (self.max_poly_deg[1] + 1):
+        if nra < (self.max_poly_deg[1] + 1):
             ValueError("Number of time samples (%d) is less than number of coefficients for polynomial (%d)." %
-                        (len(ra), (self.max_poly_deg[1] + 1)))
+                        (nra, (self.max_poly_deg[1] + 1)))
+
+        # If requested, extract autocorrelations
+        if self.auto:
+
+            # Distribute over frequency
+            sstream.redistribute('freq')
+
+            # Get auto index
+            iauto = np.array([idx for idx, (fi, fj) in enumerate(prod) if fi == fj])
+
+            # Extract autocorrelations for local frequencies
+            local_start = sstream.vis.local_offset
+            local_auto_corr = sstream.vis[:, iauto, :].view(np.ndarray).real
+
+            shp = local_auto_corr.shape
+            shp = (nfreq, shp[1], shp[2])
+            auto_corr = np.zeros(shp, dtype=local_auto_corr.dtype)
+
+            nproc = 1 if sstream.comm is None else sstream.comm.size
+            # Gather local distributed auto correlations to a global array for all procs
+            for rank in range(nproc):
+                mpiutil.gather_local(auto_corr, local_auto_corr, local_start, root=rank, comm=sstream.comm)
+
+            # Deal with the scenario where we have already compressed over redundant baselines
+            if iauto.size == 2:
+                polstr = [tel.feeds[prod[idx][0]].pol for idx in iauto]
+
+                iauto = np.array([polstr.index(feed.pol) if hasattr(feed, 'pol') else -1
+                                  for feed in tel.feeds])
+            else:
+                iauto = range(iauto.size)
+
+        # Distribute over products
+        sstream.redistribute('prod')
 
         # Create two-dimensional grid in frequency and time
         gfreq, gra = np.meshgrid(freq, ra, indexing='ij')
@@ -146,21 +192,26 @@ class ComputeCrosstalk(task.SingleTask):
 
         # Normalize frequency and time
         gnu = (gfreq - self.freq_norm[0]) / self.freq_norm[1]
-
         gra = (gra - self.time_norm[0]) / self.time_norm[1]
 
         ndata = gnu.size
 
-        # Set up index for flagging outliers
-        even, odd = np.arange(0, freq.size, 2), np.arange(1, freq.size, 2)
+        # Define polynomial basis
+        if self.cheb:
+            poly_vander = np.polynomial.chebyshev.chebvander2d
+            poly_weight = np.polynomial.chebyshev.chebweight
+        else:
+            poly_vander = np.polynomial.hermite.hermvander2d
+            poly_weight = np.polynomial.hermite.hermweight
 
-        # Compute Hermite polynomials
+        # Compute polynomials
         shp = (ndata,) + tuple(self.max_poly_deg + 1)
-        Hmax = np.polynomial.hermite.hermvander2d(gnu, gra, self.max_poly_deg).reshape(*shp)
+
+        Hmax = poly_vander(gnu, gra, self.max_poly_deg).reshape(*shp)
 
         if self.norm:
-            Hmax *= np.polynomial.hermite.hermweight(gnu)[:, np.newaxis]
-            Hmax *= np.polynomial.hermite.hermweight(gra)[:, np.newaxis]
+            Hmax *= poly_weight(gnu)[:, np.newaxis, np.newaxis]
+            Hmax *= poly_weight(gra)[:, np.newaxis, np.newaxis]
 
         # Create container to hold results
         crosstalk = containers.Crosstalk(fdegree=shp[1], tdegree=shp[2], path=self.max_ndelay,
@@ -173,15 +224,16 @@ class ComputeCrosstalk(task.SingleTask):
         for key in crosstalk.datasets.keys():
             crosstalk.datasets[key][:] = 0.0
 
-        # Set attributes specifying model normalization
+        # Set attributes specifying model
+        crosstalk.attrs['cheb'] = self.cheb
         crosstalk.attrs['norm'] = self.norm
+        crosstalk.attrs['auto'] = self.auto
         crosstalk.attrs['fcenter'] = self.freq_norm[0]
         crosstalk.attrs['fspan'] = self.freq_norm[1]
         crosstalk.attrs['tcenter'] = self.time_norm[0]
         crosstalk.attrs['tspan'] = self.time_norm[1]
-
-        # Extract products
-        prod = sstream.index_map['prod']
+        if self.auto:
+            crosstalk.attrs['iauto'] = iauto
 
         # Loop over products
         for lpp, pp in sstream.vis[:].enumerate(1):
@@ -201,10 +253,10 @@ class ComputeCrosstalk(task.SingleTask):
                 continue
 
             # Extract weights from container
-            weight = sstream.weight[:, pp, :].view(np.ndarray) > 0.0
+            weight = sstream.weight[:, pp, :].view(np.ndarray)
 
             # Do not apply crosstalk removal to products containing bad feeds
-            if not np.any(weight):
+            if not np.any(weight > 0.0):
                 continue
 
             # Extract visibilities from container
@@ -215,6 +267,11 @@ class ComputeCrosstalk(task.SingleTask):
             # Flatten over frequency and time
             weight = weight.flatten()
             vis = vis.flatten()
+
+            # Extract autocorrelations
+            if self.auto:
+                auto_neg = auto_corr[:, iauto[fi], :].flatten()
+                auto_pos = auto_corr[:, iauto[fj], :].flatten()
 
             # Determine the crosstalk model that will be used for this product
             is_xx = (tel.feeds[fi].pol == 'E') and (tel.feeds[fj].pol == 'E')
@@ -229,13 +286,13 @@ class ComputeCrosstalk(task.SingleTask):
             ddist = tel.feedpositions[fi, :] - tel.feedpositions[fj, :]
             baseline = np.sqrt(np.sum(ddist**2))
 
-            delays = get_delays(baseline, ndelay=ndelay, is_intra=is_intra)
+            delays = get_delays(baseline, ndelay=ndelay, is_intra=is_intra)[0]
 
             delays = delays[0:ndelay]
             delays = np.concatenate((delays, -delays))
             ndelay = delays.size
 
-            # Generate Hermite polynomials
+            # Generate polynomials
             ncoeff = poly_freq_ncoeff * poly_time_ncoeff
             nparam = np.sum(ncoeff)
 
@@ -249,6 +306,12 @@ class ComputeCrosstalk(task.SingleTask):
                 H[:, aa:bb] = Hmax[:, 0:poly_freq_ncoeff[dd], 0:poly_time_ncoeff[dd]].reshape(ndata, ncoeff[dd])
 
                 dindex[aa:bb] = dd
+
+                if self.auto:
+                    if delays[dd] < 0.0:
+                        H[:, aa:bb] *= auto_neg[:, np.newaxis]
+                    else:
+                        H[:, aa:bb] *= auto_pos[:, np.newaxis]
 
             # Construct delay matrix
             S = np.exp(2.0J * np.pi * gfreq[:, np.newaxis] * 1e6 * delays[np.newaxis, dindex])
@@ -270,7 +333,7 @@ class ComputeCrosstalk(task.SingleTask):
                 resid = np.abs(vis - np.dot(A, coeff))
 
                 # Determine outliers
-                sig = 1.4826 * np.median(resid[weight > 0])
+                sig = 1.4826 * np.median(resid[weight > 0.0])
 
                 not_outlier = resid < (self.nsig * sig)
 
@@ -293,17 +356,10 @@ class ComputeCrosstalk(task.SingleTask):
 
 class RemoveCrosstalk(task.SingleTask):
     """ Remove crosstalk between feeds.
-
-    Attributes
-    ----------
-    norm : bool
-        Normalize the Hermite polynomials used to model
-        the frequency and time dependence of the
-        crosstalk coupling coefficients.
     """
 
     def process(self, sstream, crosstalk):
-        """Computes the best fit model for crosstalk.
+        """Remove model for crosstalk between feeds.
 
         Parameters
         ----------
@@ -317,13 +373,25 @@ class RemoveCrosstalk(task.SingleTask):
             Sidereal stream with crosstalk removed.
         """
 
-        # Distribute over products
-        sstream.redistribute('prod')
-        crosstalk.redistribute('prod')
+        # Extract parameters specifying model
+        cheb = crosstalk.attrs.get('cheb', False)
+        norm = crosstalk.attrs.get('norm', False)
+        auto = crosstalk.attrs.get('auto', False)
 
-        # Extract frequency and ra
+        # Define polynomial basis
+        if cheb:
+            poly_eval = np.polynomial.chebyshev.chebval2d
+            poly_weight = np.polynomial.chebyshev.chebweight
+        else:
+            poly_eval = np.polynomial.hermite.hermval2d
+            poly_weight = np.polynomial.hermite.hermweight
+
+        # Extract dimensions of the sidereal stream
         freq = sstream.index_map['freq']['centre']
+        prod = sstream.index_map['prod']
         ra = sstream.index_map['ra']
+
+        nfreq, nra = freq.size, ra.size
 
         # Create two-dimensional grid in frequency and time
         gfreq, gra = np.meshgrid(freq, ra, indexing='ij')
@@ -332,10 +400,175 @@ class RemoveCrosstalk(task.SingleTask):
         gnu = (gfreq - crosstalk.attrs['fcenter']) / crosstalk.attrs['fspan']
         gra = (gra - crosstalk.attrs['tcenter']) / crosstalk.attrs['tspan']
 
-        ndata = gnu.size
+        # Extract autocorrelations
+        if auto:
+            # Distribute over frequency
+            sstream.redistribute('freq')
+
+            # Get auto index
+            iauto = np.array([idx for idx, (fi, fj) in enumerate(prod) if fi == fj])
+
+            # Extract autocorrelations for local frequencies
+            local_start = sstream.vis.local_offset
+            local_auto_corr = sstream.vis[:, iauto, :].view(np.ndarray).real
+
+            shp = local_auto_corr.shape
+            shp = (nfreq, shp[1], shp[2])
+            auto_corr = np.zeros(shp, dtype=local_auto_corr.dtype)
+
+            nproc = 1 if sstream.comm is None else sstream.comm.size
+            # Gather local distributed auto correlations to a global array for all procs
+            for rank in range(nproc):
+                mpiutil.gather_local(auto_corr, local_auto_corr, local_start, root=rank, comm=sstream.comm)
+
+            iauto = crosstalk.attrs['iauto']
+
+        # Distribute over products
+        sstream.redistribute('prod')
+        crosstalk.redistribute('prod')
 
         # Loop over products
         for lpp, pp in sstream.vis[:].enumerate(1):
+
+            coeff = crosstalk.coeff[pp].view(np.ndarray)
+            flag = crosstalk.flag[pp].view(np.ndarray)
+            delay = crosstalk.delay[pp].view(np.ndarray)
+
+            if not np.any(flag):
+                continue
+
+            # Extract autocorrelations
+            if auto:
+                fi, fj = prod[pp]
+                auto_neg = auto_corr[:, iauto[fi], :]
+                auto_pos = auto_corr[:, iauto[fj], :]
+
+            # Loop over path
+            for ii, dd in enumerate(delay):
+
+                # Check if coefficients exists for this path
+                if np.any(flag[ii]):
+
+                    # Determine degree of polynomials
+                    fdeg = np.flatnonzero(np.any(flag[ii], axis=1)).size
+                    tdeg = np.flatnonzero(np.any(flag[ii], axis=0)).size
+
+                    # Evaluate model
+                    cmodel = (poly_eval(gnu, gra, coeff[ii, 0:fdeg, 0:tdeg]) *
+                              np.exp(2.0J * np.pi * gfreq * 1e6 * dd))
+
+                    if norm:
+                        cmodel *= poly_weight(gnu)
+                        cmodel *= poly_weight(gra)
+
+                    if auto:
+                        if dd < 0.0:
+                            cmodel *= auto_neg
+                        else:
+                            cmodel *= auto_pos
+
+                    # Subtract model for this path from visibilities
+                    sstream.vis[:, pp, :] -= cmodel
+
+
+        # Return sidereal stream with crosstalk removed
+        return sstream
+
+
+class CrosstalkCalibration(task.SingleTask):
+    """ Determine receiver gain based on response to crosstalk signal.
+
+    Attributes
+    ----------
+    solve_gain: bool, default True
+        If True, assume that the individual receiver gains
+        are fluctuating with time.  If False, assume that the
+        individual receiver temperatures are fluctuating with time.
+
+    ymin: float, default 1.2
+        Do not include baselines with N-S separation
+        less than ymin in the fit.
+    """
+
+    solve_gain = config.Property(proptype=bool, default=True)
+    only_intra = config.Property(proptype=bool, default=True)
+    ymin = config.Property(proptype=float, default=1.2)
+
+    def setup(self, bt):
+        """Set the beamtransfer matrices.
+
+        Parameters
+        ----------
+        bt : beamtransfer.BeamTransfer
+            Beam transfer manager object. This does not need to have
+            pre-generated matrices as they are not needed.
+        """
+
+        self.beamtransfer = bt
+
+    def process(self, sstream, crosstalk):
+        """Compute gains based on sidereal stream and crosstalk model.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream
+            The input sidereal stream.
+        crosstalk : containers.Crosstalk
+
+        Returns
+        -------
+        sstream : containers.SiderealStream
+            Sidereal stream with crosstalk removed.
+        """
+
+        # First calculate crosstalk model
+        # ------------------------------------------------
+
+        crosstalk.redistribute('prod')
+
+        # Extract telescope information
+        tel = self.beamtransfer.telescope
+
+        # Determine polynomial
+        cheb = crosstalk.attrs.get('cheb', False)
+
+        # Extract products
+        prodmap = sstream.index_map['prod']
+        cprod = crosstalk.index_map['prod']
+
+        # Extract frequency and ra
+        freq = sstream.index_map['freq']['centre']
+        ra = sstream.index_map['ra']
+
+        # Define dimensions
+        nprod = prodmap.shape[0]
+        ncprod = cprod.shape[0]
+
+        nfreq = freq.size
+        nra = ra.size
+
+        # Create two-dimensional grid in frequency and time
+        gfreq, gra = np.meshgrid(freq, ra, indexing='ij')
+
+        # Normalize frequency and time
+        gnu = (gfreq - crosstalk.attrs['fcenter']) / crosstalk.attrs['fspan']
+        gra = (gra - crosstalk.attrs['tcenter']) / crosstalk.attrs['tspan']
+
+        # Create array to hold crosstalk model
+        mdtype = sstream.vis[:].dtype
+
+        model_pos = mpiarray.MPIArray((ncprod, nfreq, nra), axis=0, dtype=mdtype)
+        model_pos[:] = 0.0
+
+        model_neg = mpiarray.MPIArray((ncprod, nfreq, nra), axis=0, dtype=mdtype)
+        model_neg[:] = 0.0
+
+        print "before model_pos.shape:  ", model_pos.global_shape, model_pos.local_shape, np.any(model_pos[:].view(np.ndarray))
+        print "before model_neg.shape:  ", model_neg.global_shape, model_neg.local_shape, np.any(model_neg[:].view(np.ndarray))
+        print "crosstalk.coeff.shape:   ", crosstalk.coeff.global_shape, crosstalk.coeff.local_shape
+
+        # Calculate crosstalk model.  Loop over products.
+        for lpp, pp in crosstalk.coeff[:].enumerate(0):
 
             coeff = crosstalk.coeff[pp].view(np.ndarray)
             flag = crosstalk.flag[pp].view(np.ndarray)
@@ -355,19 +588,178 @@ class RemoveCrosstalk(task.SingleTask):
                     tdeg = np.flatnonzero(np.any(flag[ii], axis=0)).size
 
                     # Evaluate model
-                    cmodel = (np.polynomial.hermite.hermval2d(gnu, gra, coeff[ii, 0:fdeg, 0:tdeg]) *
-                              np.exp(2.0J * np.pi * gfreq * 1e6 * dd))
+                    if cheb:
+                        cmodel = (np.polynomial.chebyshev.chebval2d(gnu, gra, coeff[ii, 0:fdeg, 0:tdeg]) *
+                                  np.exp(2.0J * np.pi * gfreq * 1e6 * dd))
+                    else:
+                        cmodel = (np.polynomial.hermite.hermval2d(gnu, gra, coeff[ii, 0:fdeg, 0:tdeg]) *
+                                  np.exp(2.0J * np.pi * gfreq * 1e6 * dd))
 
                     if crosstalk.attrs['norm']:
-                        cmodel *= np.polynomial.hermite.hermweight(gnu)
-                        cmodel *= np.polynomial.hermite.hermweight(gra)
+                        if cheb:
+                            cmodel *= np.polynomial.chebyshev.chebweight(gnu)
+                            cmodel *= np.polynomial.chebyshev.chebweight(gra)
+                        else:
+                            cmodel *= np.polynomial.hermite.hermweight(gnu)
+                            cmodel *= np.polynomial.hermite.hermweight(gra)
 
-                    # Subtract model for this path from visibilities
-                    sstream.vis[:, pp, :] -= cmodel
+                    # Update model
+                    if dd >= 0.0:
+                        model_pos[lpp, :, :] += cmodel
+                    else:
+                        model_neg[lpp, :, :] += cmodel
 
 
-        # Return sidereal stream with crosstalk removed
-        return sstream
+        # Next determine antenna deviations from this model
+        # -------------------------------------------------
+
+        sstream.redistribute('freq')
+        model_pos = model_pos.redistribute(axis=1)
+        model_neg = model_neg.redistribute(axis=1)
+
+        print "after model_pos.shape:  ", model_pos.global_shape, model_pos.local_shape, np.any(model_pos[:].view(np.ndarray))
+        print "after model_neg.shape:  ", model_neg.global_shape, model_neg.local_shape, np.any(model_neg[:].view(np.ndarray))
+        print "sstream.vis.shape:      ", sstream.vis.global_shape, sstream.vis.local_shape
+
+
+        # Determine good X and Y feeds
+        if self.only_intra:
+
+            xfeeds_west = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_x(inp) and (inp.cyl == 0)])
+            xfeeds_east = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_x(inp) and (inp.cyl == 1)])
+            yfeeds_west = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_y(inp) and (inp.cyl == 0)])
+            yfeeds_east = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_y(inp) and (inp.cyl == 1)])
+
+            feed_groups = [xfeeds_west, xfeeds_east, yfeeds_west, yfeeds_east]
+
+        else:
+
+            xfeeds = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_x(inp)])
+            yfeeds = np.array([idx for idx, inp in enumerate(tel.feeds) if tools.is_chime_y(inp)])
+
+            feed_groups = [xfeeds, yfeeds]
+
+        # Determine products for each subset of feeds
+        polmap = []
+        for feeds in feed_groups:
+            prods = np.array([idx for idx, (fi, fj) in enumerate(prodmap) if ((fi in feeds) and (fj in feeds))])
+            polmap.append((feeds, prods))
+
+        poldim = [(2 * xx[1].size, (1 + 2*self.solve_gain) * xx[0].size, xx[0].size) for xx in polmap]
+
+        # Determine feed positions
+        feed_pos = tel.feedpositions
+        vis_pos = np.array([ feed_pos[ii] - feed_pos[jj] for ii, jj in prodmap ])
+        vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
+
+        # Determine mapping between full visibility matrix and stack over redundant baselines
+        vismap = tools.pack_product_array(tel.feedmap, axis=0)
+
+        # Create container to hold results
+        gcont = containers.CrosstalkGain(axes_from=sstream, attrs_from=sstream)#,
+                                         #pol_x=poldim[0][1], pol_y=poldim[1][1])
+
+        if self.solve_gain:
+            gcont.add_dataset('gain')
+
+        gcont.redistribute('freq')
+
+        # Initialize datasets to zero
+        for key in gcont.datasets.keys():
+            gcont.datasets[key][:] = 0.0
+
+        # Loop over polarizations
+        for ipol, (ifeed, iprod) in enumerate(polmap):
+
+            compmap = vismap[iprod]
+
+            good_baseline = ~((np.abs(vis_pos[iprod, 1]) <= self.ymin) &
+                              (np.abs(vis_pos[iprod, 0]) < 10.0)) & (compmap >= 0)
+            good_baseline = good_baseline.astype(np.float64)
+
+
+            lfeed = list(ifeed)
+            polprod = [(lfeed.index(pp[0]), lfeed.index(pp[1])) for pp in prodmap[iprod]]
+
+            # Create indices for real and imaginary components
+            dims = poldim[ipol][0:2]
+            nbase = poldim[ipol][0]
+            nfeed = poldim[ipol][2]
+
+            ire = np.arange(0, nbase, 2, dtype=np.int)
+            iim = np.arange(1, nbase, 2, dtype=np.int)
+
+            # Loop over frequencies
+            for lff, ff in sstream.vis[:].enumerate(0):
+
+                # Loop over right ascension
+                for rr in range(nra):
+
+                    # Extract data
+                    vtemp = (sstream.vis[ff, iprod, rr].view(np.ndarray) -
+                                   model_pos[compmap, lff, rr] -
+                                   model_neg[compmap, lff, rr])
+
+                    vis = np.zeros(nbase, dtype=np.float64)
+                    vis[ire] = vtemp.real
+                    vis[iim] = vtemp.imag
+
+                    weight = np.zeros_like(vis)
+                    weight[ire] = sstream.weight[ff, iprod, rr].view(np.ndarray) * good_baseline
+                    weight[iim] = weight[ire]
+
+                    # Create array for crosstalk model
+                    A = np.zeros(dims, dtype=np.float64)
+
+                    # Set up crosstalk model assuming receiver gain varies
+                    for cnt, (aa, bb) in enumerate(polprod):
+                        A[ire[cnt], aa] = model_neg[compmap[cnt], lff, rr].real
+                        A[ire[cnt], bb] = model_pos[compmap[cnt], lff, rr].real
+
+                        A[iim[cnt], aa] = model_neg[compmap[cnt], lff, rr].imag
+                        A[iim[cnt], bb] = model_pos[compmap[cnt], lff, rr].imag
+
+                    if self.solve_gain:
+                        for cnt, (aa, bb) in enumerate(polprod):
+                            model = model_pos[compmap[cnt], lff, rr] + model_neg[compmap[cnt], lff, rr]
+
+                            A[ire[cnt], nfeed + aa] = model.real
+                            A[ire[cnt], nfeed + bb] = model.real
+                            A[ire[cnt], 2*nfeed + aa] = -model.imag
+                            A[ire[cnt], 2*nfeed + bb] =  model.imag
+
+                            A[iim[cnt], nfeed + aa] = model.imag
+                            A[iim[cnt], nfeed + bb] = model.imag
+                            A[iim[cnt], 2*nfeed + aa] =  model.real
+                            A[iim[cnt], 2*nfeed + bb] = -model.real
+
+
+                    # Calculate covariance of model coefficients
+                    C = np.dot(A.T, weight[:, np.newaxis] * A)
+
+                    # Solve for antenna gains
+                    param = np.linalg.lstsq(C, np.dot(A.T, weight * vis))[0]
+
+                    # Calculate chisq before and after subtracting
+                    # receiver dependent model for crosstalk
+                    gcont.chisq_before[ff, rr] += np.sum(weight * np.abs(vis)**2)
+                    gcont.chisq_after[ff, rr]  += np.sum(weight * np.abs(vis - np.dot(A, param))**2)
+
+                    # Save covariance to output container
+                    # if ipol == 0:
+                    #     gcont.datasets['cov_x'][ff, :, :, rr] = C
+                    # else:
+                    #     gcont.datasets['cov_y'][ff, :, :, rr] = C
+
+                    # Save receiver temp to output container
+                    gcont.receiver_temp[ff, ifeed, rr] = param[0:nfeed]
+
+                    # Save gain to output container
+                    if self.solve_gain:
+                        gcont.gain[ff, ifeed, rr] = param[nfeed:2*nfeed] + 1.0J * param[2*nfeed:3*nfeed]
+
+            # Return gain container
+            return gcont
 
 
 class MeanVisibility(task.SingleTask):
@@ -376,15 +768,16 @@ class MeanVisibility(task.SingleTask):
 
     Parameters
     ----------
+    keep_sources : bool
+        Include data near the transit of bright point sources when
+        calculating the weighted mean.  Defaule is False.
     all_data : bool
         If this is True, then use all of the input data to
         calculate the weighted mean.  If False, then use only
-        night-time data away from the transit of bright
-        point sources.  Default is False.
+        night-time data.  Default is False.
     daytime : bool
-        Use only day-time data away from transit of bright point
-        sources to caclulate the weighted mean.  Overriden by all_data.
-        Default is False.
+        Use only day-time data to caclulate the weighted mean.
+        Overriden by all_data.  Default is False.
     median : bool
         Calculate weighted median instead of weighted mean.
         Default is False.
@@ -393,6 +786,7 @@ class MeanVisibility(task.SingleTask):
         calculated for each block.  Default is 1 block.
     """
 
+    keep_sources = config.Property(proptype=bool, default=False)
     all_data = config.Property(proptype=bool, default=False)
     daytime = config.Property(proptype=bool, default=False)
     median = config.Property(proptype=bool, default=False)
@@ -419,9 +813,6 @@ class MeanVisibility(task.SingleTask):
         # Make sure we are distributed over frequency
         sstream.redistribute('freq')
 
-        # Extract product map
-        prod = sstream.index_map['prod']
-
         # Extract date or lsd
         if 'date' in sstream.attrs:
             lsd = sstream.attrs['date']
@@ -440,70 +831,66 @@ class MeanVisibility(task.SingleTask):
 
             time_func = lambda x: np.fix(ephemeris.unix_to_csd(x))
 
-        # Check if we are using all of the data to calculate the mean,
-        # or only "quiet" periods.
-        if self.all_data:
+        # Pick out this particular sidereal (solar) day and determine RA.
+        if isinstance(sstream, andata.CorrData):
+            flag_quiet = time_func(sstream.time) == lsd
 
-            if isinstance(sstream, andata.CorrData):
-                flag_quiet = time_func(sstream.time) == lsd
+            ra = ephemeris.transit_RA(sstream.time)
 
-                ra = ephemeris.transit_RA(sstream.time)
+            is_corr = True
 
-            elif isinstance(sstream, containers.SiderealStream):
-                flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
+        elif isinstance(sstream, containers.SiderealStream):
+            flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
 
-                ra = sstream.index_map['ra']
+            ra = sstream.index_map['ra']
 
-            else:
-                raise RuntimeError('Format of `sstream` argument is unknown.')
+            is_corr = False
 
         else:
+            raise RuntimeError('Format of `sstream` argument is unknown.')
+
+
+        # Flag daytime or nightime data
+        if not self.all_data:
 
             # Check if we are dealing with CorrData or SiderealStream
-            if isinstance(sstream, andata.CorrData):
-                # Extract ra
-                ra = ephemeris.transit_RA(sstream.time)
+            if is_corr:
 
                 # Find night time data
                 if self.daytime:
-                    flag_quiet = daytime_flag(sstream.time)
+                    flag_quiet &= daytime_flag(sstream.time)
                 else:
-                    flag_quiet = ~daytime_flag(sstream.time)
+                    flag_quiet &= ~daytime_flag(sstream.time)
 
-                flag_quiet &= (time_func(sstream.time) == lsd)
-
-            elif isinstance(sstream, containers.SiderealStream):
-                # Extract csd and ra
-                if hasattr(lsd, '__iter__'):
-                    lsd_list = lsd
-                else:
-                    lsd_list = [lsd]
-
-                ra = sstream.index_map['ra']
+            else:
+                # Format lsd into list
+                lsd_list = lsd if hasattr(lsd, '__iter__') else [lsd]
 
                 # Find night time data
-                flag_quiet = np.ones(len(ra), dtype=np.bool)
                 for cc in lsd_list:
                     if self.daytime:
                         flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
                     else:
                         flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
 
-            else:
-                raise RuntimeError('Format of `sstream` argument is unknown.')
 
-            # Find data free of bright point sources
+        # Flag data near transit of bright point sources
+        if not self.keep_sources:
+
+            # Loop over sources in ephemeris
             for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
 
+                # Make sure they are FixedBody
                 if isinstance(src_ephem, ephem.FixedBody):
 
                     peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
                     src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
 
-                    dra = (ra - peak_ra) % 360.0
-                    dra -= (dra > 180.0)*360.0
+                    dra = ra - peak_ra
+                    dra = dra - (dra > 180.0)*360.0 + (dra < -180.0)*360.0
 
                     flag_quiet &= np.abs(dra) > src_window
+
 
         # Determine the size of the blocks in time
         nra = ra.size
@@ -518,13 +905,19 @@ class MeanVisibility(task.SingleTask):
 
         mustream.redistribute('freq')
 
+        # Extract list of baselines
+        prod = sstream.index_map['prod']
+
         # Loop over frequencies and baselines to reduce memory usage
         for lfi, fi in sstream.vis[:].enumerate(0):
             for lbi, bi in sstream.vis[:].enumerate(1):
 
                 # Extract visibility and weight
-                data = sstream.vis[fi, bi, :].view(np.ndarray)
-                weight = flag_quiet * sstream.weight[fi, bi, :].view(np.ndarray)
+                data = sstream.vis[fi, bi, :].view(np.ndarray).copy()
+                weight = sstream.weight[fi, bi, :].view(np.ndarray).copy()
+
+                if prod[bi][0] != prod[bi][1]:
+                    weight *= flag_quiet
 
                 # Loop over blocks in time
                 for tt in range(self.nblock):
@@ -641,4 +1034,3 @@ def get_delays(baseline, ndelay=10, is_intra=True):
 
 
     return delay
-
