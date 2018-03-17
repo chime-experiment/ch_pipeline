@@ -45,7 +45,7 @@ class Difference(task.SingleTask):
         ----------
         sstream1 : containers.SiderealStream
             Input sidereal stream.
-        
+
         sstream2 : containers.SiderealStream
             Input sidereal stream.
 
@@ -66,7 +66,7 @@ class Difference(task.SingleTask):
         for ax in sstream1.vis.attrs['axis']:
             if np.any(sstream1.index_map[ax] != sstream2.index_map[ax]):
                 InputError("Cannot difference visibilities, incompatible axis.")
-        
+
         # Either subtract sstream2 from sstream1, or create a new container
         # that contains sstream1 - sstream2.
         if self.in_place:
@@ -86,18 +86,36 @@ class Difference(task.SingleTask):
             dstream.attrs['tag'] = tag2 + '_diff'
         else:
             dstream.attrs['tag'] = 'diff'
-        
+
+        # Redefine the lsd
+        lsd = []
+        lsd1 = sstream1.attrs.get('lsd', None)
+        if lsd1 is not None:
+            if hasattr(lsd1, '__iter__'):
+                lsd += [xx for xx in lsd1]
+            else:
+                lsd.append(lsd1)
+
+        lsd2 = sstream2.attrs.get('lsd', None)
+        if lsd2 is not None:
+            if hasattr(lsd2, '__iter__'):
+                lsd += [xx for xx in lsd2]
+            else:
+                lsd.append(lsd2)
+
+        dstream.attrs['lsd'] = np.array(lsd)
+
         # Loop over frequencies and baselines to reduce memory usage
         for lfi, fi in sstream1.vis[:].enumerate(0):
             for lbi, bi in sstream1.vis[:].enumerate(1):
 
-                dstream.vis[fi, bi, :] = (sstream1.vis[fi, bi, :].view(np.ndarray) - 
+                dstream.vis[fi, bi, :] = (sstream1.vis[fi, bi, :].view(np.ndarray) -
                                           sstream2.vis[fi, bi, :].view(np.ndarray))
 
                 var1 = tools.invert_no_zero(sstream1.weight[fi, bi, :].view(np.ndarray))
                 var2 = tools.invert_no_zero(sstream2.weight[fi, bi, :].view(np.ndarray))
                 flag = (var1 > 0.0) & (var2 > 0.0)
-        
+
                 dstream.weight[fi, bi, :] = tools.invert_no_zero(var1 + var2) * flag
 
         # Return the difference
