@@ -56,23 +56,46 @@ class RFIFilter(task.SingleTask):
     """
 
     threshold_mad = config.Property(proptype=float, default=5.0)
-
+    threshold_coin = config.Property(proptype=float, default=0.20)
     flag1d = config.Property(proptype=bool, default=False)
+    keep_ndev = config.Property(proptype=bool, default=False)
 
     def process(self, data):
 
         if mpiutil.rank0:
-            print "RFI filtering %s, flag1d = %s" % (data.attrs['tag'], self.flag1d)
+            print("RFI filtering %s, flag1d = %s, keep_ndev = %s, threshold_mad = %0.1f" %
+                    (data.attrs['tag'], self.flag1d, self.keep_ndev, self.threshold_mad))
+
+        # Create container to hold output
+        out = containers.RFIMask(axes_from=data, attrs_from=data)
+        if self.keep_ndev:
+            out.add_dataset('ndev')
+
+        # Redistribute across time
+        data.redistribute('time')
+        out.redistribute('time')
 
         # Construct RFI mask
-        mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad, flag1d=self.flag1d)
+        ndev = rfi.number_deviations(data, flag1d=self.flag1d)
 
-        data.weight[:] *= (1 - mask).astype(data.weight.dtype)  # Switch from mask to inverse noise weight
+        mask_ind = ndev > self.threshold_mad
+        mask_all = (np.sum(mask_ind, axis=1) / float(mask_ind.shape[1])) > self.threshold_coin
+        mask = np.logical_or(mask_ind, mask_all[:, np.newaxis, :])
+
+        mask = np.logical_not(np.logical_or(mask, rfi.frequency_mask(data.freq)[:, None, None]))
+
+        # Save to output container
+        out.mask[:] = mask
+
+        if self.keep_ndev:
+            out.ndev[:] = ndev
 
         # Redistribute across frequency
         data.redistribute('freq')
+        out.redistribute('freq')
 
-        return data
+        # Return output container
+        return out
 
 
 class ChannelFlagger(task.SingleTask):
@@ -662,32 +685,41 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 
 class ApplyCorrInputMask(task.SingleTask):
-    """ Flag out bad correlator inputs from a timestream or sidereal stack.
+    """ Apply a mask to a timestream.
     """
 
-    def process(self, timestream, inputmask):
-        """Flag out bad correlator inputs by giving them zero weight.
+    def process(self, timestream, cmask):
+        """Flag out events by giving them zero weight.
 
         Parameters
         ----------
         timestream : andata.CorrData or containers.SiderealStream
 
-        inputmask : containers.CorrInputMask
+        mask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
         timestream : andata.CorrData or containers.SiderealStream
         """
 
-        # Make sure that timestream is distributed over frequency
+        # Make sure containers are distributed across frequency
         timestream.redistribute('freq')
+        cmask.redistribute('freq')
 
-        # Extract mask
-        mask = inputmask.datasets['input_mask'][:]
+        # Create a slice that will expand the mask to
+        # the same dimensions as the vis_weight array
+        waxis = timestream.weight.attrs['axis']
+        slc = [slice(None)] * len(waxis)
+        for ww, name in enumerate(waxis):
+            if (name != 'prod') and (name not in cmask.mask.attrs['axis']):
+                slc[ww] = None
+
+        # Extract vis_weight array and rfi mask
+        weight = timestream.weight[:]
+        mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
 
         # Apply mask to the vis_weight array
-        weight = timestream.weight[:]
-        tools.apply_gain(weight, mask[np.newaxis, :, np.newaxis], out=weight)
+        tools.apply_gain(weight, mask[slc], out=weight, prod_map=timestream.prod)
 
         # Return timestream
         return timestream
@@ -1347,6 +1379,8 @@ class DayMask(task.SingleTask):
         If only_sun is False, then all day time data is flagged as bad.  (default is False)
     mask_moon : bool, optional
         Mask data around lunar transit.  (default is False)
+    nsig : float, optional
+        Number of sigma around solar transit to flag.  Default is 2.0.
     taper_width : float, optional
         Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from
         masked to unmasked regions using a cosine function.  Default is 0.0 (no taper).
@@ -1360,6 +1394,7 @@ class DayMask(task.SingleTask):
     zero_data = config.Property(proptype=bool, default=False)
     only_sun = config.Property(proptype=bool, default=False)
     mask_moon = config.Property(proptype=bool, default=False)
+    nsig = config.Property(proptype=float, default=2.0)
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
 
@@ -1380,8 +1415,10 @@ class DayMask(task.SingleTask):
         # Determine the flagging function to use
         if self.only_sun:
             flag_function = solar_transit_flag
+            kwargs = {'nsig':self.nsig}
         else:
             flag_function = daytime_flag
+            kwargs = {}
 
         # Redistribute over frequency
         sstream.redistribute('freq')
@@ -1389,7 +1426,7 @@ class DayMask(task.SingleTask):
         # Get flag that indicates day times (RAs)
         if hasattr(sstream, 'time'):
             time = sstream.time
-            flag = flag_function(time)
+            flag = flag_function(time, **kwargs)
 
             if self.mask_moon:
                 flag |= lunar_transit_flag(time)
@@ -1406,7 +1443,7 @@ class DayMask(task.SingleTask):
 
             flag = np.zeros(len(ra), dtype=np.bool)
             for cc in csd:
-                flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
+                flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0), **kwargs)
 
                 if self.mask_moon:
                     flag |= lunar_transit_flag(ephemeris.csd_to_unix(cc + ra / 360.0))
