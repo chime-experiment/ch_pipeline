@@ -15,6 +15,8 @@ Containers
 .. autosummary::
     :toctree: generated/
 
+    RFIMask
+    GainJumps
     CorrInputMask
     CorrInputTest
     CorrInputMonitor
@@ -22,8 +24,11 @@ Containers
     PointSourceTransit
     SunTransit
     Crosstalk
+    CrosstalkGain
     RingMap
+    Fringestop
     Photometry
+    MapNoise
 
 Tasks
 =====
@@ -39,6 +44,107 @@ import numpy as np
 from caput import memh5, pipeline
 
 from draco.core.containers import *
+
+class RFIMask(ContainerBase):
+    """Container for holding mask that indicates RFI events.
+    """
+
+    _axes = ('freq', 'input', 'time')
+
+    _dataset_spec = {
+        'mask': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'ndev': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.float32,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    @property
+    def mask(self):
+        return self.datasets['mask']
+
+    @property
+    def ndev(self):
+        return self.datasets['ndev']
+
+
+class GainJumps(ContainerBase):
+    """Container for holding gain jump candidates.
+    """
+
+    _axes = ('candidate', 'window')
+
+    _dataset_spec = {
+        'freq': {
+            'axes': ['candidate'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': False,
+        },
+        'input': {
+            'axes': ['candidate'],
+            'dtype': np.int,
+            'initialise': True,
+            'distributed': False,
+        },
+        'time': {
+            'axes': ['candidate'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': False,
+        },
+        'flag': {
+            'axes': ['candidate', 'window'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': False,
+        },
+        'atime': {
+            'axes': ['candidate', 'window'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': False,
+        },
+        'auto': {
+            'axes': ['candidate', 'window'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': False,
+        }
+    }
+
+    @property
+    def freq(self):
+        return self.datasets['freq']
+
+    @property
+    def input(self):
+        return self.datasets['input']
+
+    @property
+    def time(self):
+        return self.datasets['time']
+
+    @property
+    def flag(self):
+        return self.datasets['flag']
+
+    @property
+    def atime(self):
+        return self.datasets['atime']
+
+    @property
+    def auto(self):
+        return self.datasets['auto']
 
 
 class CorrInputMask(ContainerBase):
@@ -58,6 +164,10 @@ class CorrInputMask(ContainerBase):
 
     @property
     def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def mask(self):
         return self.datasets['input_mask']
 
     @property
@@ -95,6 +205,10 @@ class CorrInputTest(ContainerBase):
 
     @property
     def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def mask(self):
         return self.datasets['input_mask']
 
     @property
@@ -168,6 +282,10 @@ class CorrInputMonitor(ContainerBase):
 
     @property
     def input_mask(self):
+        return self.datasets['input_mask']
+
+    @property
+    def mask(self):
         return self.datasets['input_mask']
 
     @property
@@ -359,10 +477,11 @@ class PointSourceTransit(StaticGainData):
 
 
 class SunTransit(ContainerBase):
-    """Parallel container for holding the results of a fit to a point source transit.
+    """Parallel container for holding the results of a fit to a solar transit.
     """
 
-    _axes = ('freq', 'input', 'time', 'pol_x', 'pol_y', 'coord', 'param')
+    _axes = ('freq', 'input', 'time', 'pol', 'eigen', 'good_input1', 'good_input2',
+             'udegree', 'vdegree', 'coord', 'param')
 
     _dataset_spec = {
         'coord': {
@@ -371,29 +490,43 @@ class SunTransit(ContainerBase):
             'initialise': True,
             'distributed': False,
         },
-        'evalue_x': {
-            'axes': ['freq', 'pol_x', 'time'],
+        'evalue1': {
+            'axes': ['freq', 'good_input1', 'time'],
             'dtype': np.float64,
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
         },
-        'evalue_y': {
-            'axes': ['freq', 'pol_y', 'time'],
+        'evalue2': {
+            'axes': ['freq', 'good_input2', 'time'],
             'dtype': np.float64,
-            'initialise': True,
+            'initialise': False,
             'distributed': True,
             'distributed_axis': 'freq'
         },
         'response': {
-            'axes': ['freq', 'input', 'time'],
+            'axes': ['freq', 'input', 'time', 'eigen'],
             'dtype': np.complex128,
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
         },
         'response_error': {
-            'axes': ['freq', 'input', 'time'],
+            'axes': ['freq', 'input', 'time', 'eigen'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'coeff': {
+            'axes': ['freq', 'pol', 'time', 'udegree', 'vdegree'],
+            'dtype': np.complex128,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'is_sun': {
+            'axes': ['freq', 'pol', 'time'],
             'dtype': np.float64,
             'initialise': True,
             'distributed': True,
@@ -437,12 +570,20 @@ class SunTransit(ContainerBase):
         return self.datasets['coord']
 
     @property
+    def evalue1(self):
+        return self.datasets['evalue1']
+
+    @property
+    def evalue2(self):
+        return self.datasets['evalue2']
+
+    @property
     def evalue_x(self):
-        return self.datasets['evalue_x']
+        return self.datasets['evalue1']
 
     @property
     def evalue_y(self):
-        return self.datasets['evalue_y']
+        return self.datasets['evalue2']
 
     @property
     def response(self):
@@ -451,6 +592,14 @@ class SunTransit(ContainerBase):
     @property
     def response_error(self):
         return self.datasets['response_error']
+
+    @property
+    def coeff(self):
+        return self.datasets['coeff']
+
+    @property
+    def is_sun(self):
+        return self.datasets['is_sun']
 
     @property
     def flag(self):
@@ -582,19 +731,78 @@ class Crosstalk(ContainerBase):
         return self.index_map['prod']
 
 
+class CrosstalkGain(ContainerBase):
+    """Parallel container for holding gain data
+    derived from cross talk.
+    """
+
+    _axes = ('freq', 'input', 'ra')#, 'pol_x', 'pol_y')
+
+    _dataset_spec = {
+        'receiver_temp': {
+            'axes': ['freq', 'input', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'gain': {
+            'axes': ['freq', 'input', 'ra'],
+            'dtype': np.complex128,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'chisq_before': {
+            'axes': ['freq', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            },
+        'chisq_after': {
+            'axes': ['freq', 'ra'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+            }
+    }
+
+    @property
+    def receiver_temp(self):
+        return self.datasets['receiver_temp']
+
+    @property
+    def gain(self):
+        return self.datasets['gain']
+
+    @property
+    def chisq_before(self):
+        return self.datasets['chisq_before']
+
+    @property
+    def chisq_after(self):
+        return self.datasets['chisq_after']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def ra(self):
+        return self.index_map['ra']
+
+
 class RingMap(ContainerBase):
     """Container for holding multifrequency ring maps.
 
     The maps are packed in format `[freq, pol, ra, EW beam, el]` where
-    the polarisations are Stokes I, Q, U and V.
-
-    Parameters
-    ----------
-    nside : int
-        The nside of the Healpix maps.
-    polarisation : bool, optional
-        If `True` all Stokes parameters are stored, if `False` only Stokes I is
-        stored.
+    the polarisations are XX, YY, XY, YX.
     """
 
     _axes = ('freq', 'pol', 'ra', 'beam', 'el')
@@ -656,6 +864,81 @@ class RingMap(ContainerBase):
         return self.datasets['dirty_beam']
 
 
+class Fringestop(ContainerBase):
+    """Parallel container for holding photometry extracted from a map.
+    """
+
+    _axes = ('freq', 'pol', 'param', 'source', 'index')
+
+    _dataset_spec = {
+        'ra': {
+            'axes': ['index', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': False
+        },
+        'vis': {
+            'axes': ['freq', 'pol', 'index', 'source'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'weight': {
+            'axes': ['freq', 'pol', 'index', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'parameter': {
+            'axes': ['freq', 'pol', 'param', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'parameter_cov': {
+            'axes': ['freq', 'pol', 'param', 'param', 'source'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+    @property
+    def ra(self):
+        return self.datasets['ra']
+
+    @property
+    def vis(self):
+        return self.datasets['vis']
+
+    @property
+    def weight(self):
+        return self.datasets['weight']
+
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def param(self):
+        return self.index_map['param']
+
+    @property
+    def source(self):
+        return self.index_map['source']
+
+
 class Photometry(ContainerBase):
     """Parallel container for holding photometry extracted from a map.
     """
@@ -709,6 +992,58 @@ class Photometry(ContainerBase):
     @property
     def source(self):
         return self.index_map['source']
+
+
+class MapNoise(ContainerBase):
+    """Parallel container for holding statistics extracted from a map.
+    """
+
+    _axes = ('freq', 'pol', 'region')
+
+    _dataset_spec = {
+        'mu': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'sigma': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'chisq_per_dof': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'pte': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'shapiro': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'anderson': {
+            'axes': ['freq', 'pol', 'region'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
 
 
 def make_empty_corrdata(freq=None, input=None, time=None,
