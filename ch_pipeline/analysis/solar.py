@@ -63,6 +63,32 @@ def ra_dec_of(body, time):
     return body.ra, body.dec, body.alt, body.az
 
 
+def wrap_phase(x, deg=True):
+
+    if deg:
+        y = x - 360.0 * (x > 180.0) + 360.0 * (x < -180.0)
+    else:
+        y = x - 2.0 * np.pi * (x > np.pi) + 2.0 * np.pi * (x < -np.pi)
+
+    return y
+
+
+def upper_triangle_gain_vector(gain):
+
+    nfeed = gain.shape[0]
+    nprod = nfeed * (nfeed + 1) / 2
+
+    G = np.zeros(nprod, dtype=gain.dtype)
+
+    count = 0
+    for fi in range(nfeed):
+        for fj in range(fi, nfeed):
+            G[count] = np.sum(gain[fi, :] * gain[fj, :].conj())
+            count += 1
+
+    return G
+
+
 class SolarGrouper(task.SingleTask):
     """Group individual timestreams together into whole solar days.
 
@@ -177,8 +203,22 @@ class SolarCalibration(task.SingleTask):
 
     Attributes
     ----------
-    fringestop:  bool, default False
-        Fringestop prior to solving for the sun response.
+    dualpol: bool, default True
+        Model all polarization products together.
+        Otherwise model XX and YY independently.
+    extended:  bool, default True
+        Model the extended nature of the sun.
+    hermweight:  bool, default True
+        Normalize the hermite polynomials used to model the extended
+        nature of the sun.  Only relevant if extended is True.
+    neigen: int, default 2
+        Number of eigenvalues to use to model response to sun.
+    ymin: float, default 1.2
+        Do not include baselines with N-S separation
+        less than ymin in the fit.  Only relevant if
+        extended is True.
+    max_iter: int, default 4
+        Maximum number of iterations.
     model_fit: bool, default False
         Fit a model to the primary beam.
     nsig: float, default 2.0
@@ -187,12 +227,18 @@ class SolarCalibration(task.SingleTask):
         peak location.
     """
 
-    fringestop = config.Property(proptype=bool, default=True)
+    dualpol = config.Property(proptype=bool, default=True)
+    extended = config.Property(proptype=bool, default=True)
+    hermweight = config.Property(proptype=bool, default=True)
+    neigen = config.Property(proptype=int, default=2)
+    ymin = config.Property(proptype=float, default=1.2)
+    max_iter = config.Property(proptype=int, default=4)
+
     model_fit = config.Property(proptype=bool, default=False)
     nsig = config.Property(proptype=float, default=2.0)
 
     def process(self, sstream, inputmap, inputmask):
-        """Determine calibration from a timestream.
+        """Determine solar response from input timestream.
 
         Parameters
         ----------
@@ -213,6 +259,12 @@ class SolarCalibration(task.SingleTask):
         from operator import itemgetter
         from itertools import groupby
         from calibration import _extract_diagonal, solve_gain
+
+        # Hardcoded parameters related to size of sun
+        poly_deg = np.array([3, 3])
+        scale = np.array([np.radians(0.5), np.radians(0.5)])
+
+        poly_ncoeff = poly_deg + 1
 
         # Ensure that we are distributed over frequency
         sstream.redistribute('freq')
@@ -258,7 +310,7 @@ class SolarCalibration(task.SingleTask):
         for key, group in groupby(enumerate(time_index), lambda (index, item): index - item):
             group = map(itemgetter(1), group)
             ngroup = len(group)
-            time_slice.append((slice(group[0], group[-1] + 1), slice(ntime, ntime + ngroup)))
+            time_slice.append((range(group[0], group[-1] + 1), range(ntime, ntime + ngroup)))
             ntime += ngroup
 
         time = np.concatenate([time[slc[0]] for slc in time_slice])
@@ -268,11 +320,13 @@ class SolarCalibration(task.SingleTask):
         sun_pos = np.array([ra_dec_of(ephem.Sun(), t) for t in time])
 
         # Convert from ra to hour angle
-        sun_pos[:, 0] = np.radians(ra) - sun_pos[:, 0]
+        sun_pos[:, 0] = wrap_phase(np.radians(ra) - sun_pos[:, 0], deg=False)
 
         # Determine good inputs
         nfeed = len(inputmap)
         good_input = np.flatnonzero(inputmask.datasets['input_mask'][:])
+
+        prodmap = sstream.index_map['prod'][:]
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp) and (idx in good_input)])
@@ -283,17 +337,46 @@ class SolarCalibration(task.SingleTask):
                   (len(good_input), nfeed, len(xfeeds), len(yfeeds)))
 
         # Construct baseline vector for each visibility
-        if self.fringestop:
-            feed_pos = tools.get_feed_positions(inputmap)
-            vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
-            vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
+        feed_pos = tools.get_feed_positions(inputmap)
+        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in prodmap])
+        vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
 
-            u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
-            v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
+        # Deal with different options for fitting dual polarisation data
+        if self.dualpol:
 
-        # Create container to hold results of fit
-        suntrans = containers.SunTransit(time=time, pol_x=xfeeds, pol_y=yfeeds,
-                                            axes_from=sstream, attrs_from=sstream)
+            feeds = np.sort(np.concatenate((xfeeds, yfeeds)))
+
+            prods = np.array([idx for idx, (fi, fj) in enumerate(prodmap) if ((fi in feeds) and (fj in feeds))])
+
+            polmap = [(feeds, prods)]
+
+            # Create container to hold results of fit
+            suntrans = containers.SunTransit(time=time, eigen=self.neigen,
+                                                        pol=np.array(['DUAL']),
+                                                        good_input1=feeds, good_input2=feeds,
+                                                        udegree=poly_ncoeff[0], vdegree=poly_ncoeff[1],
+                                                        axes_from=sstream, attrs_from=sstream)
+
+        else:
+
+            xprods = np.array([idx for idx, (fi, fj) in enumerate(prodmap) if ((fi in xfeeds) and (fj in xfeeds))])
+            yprods = np.array([idx for idx, (fi, fj) in enumerate(prodmap) if ((fi in yfeeds) and (fj in yfeeds))])
+
+            polmap = [(xfeeds, xprods), (yfeeds, yprods)]
+
+            # Create container to hold results of fit
+            suntrans = containers.SunTransit(time=time, eigen=self.neigen,
+                                                        pol=np.array(['XX', 'YY']),
+                                                        good_input1=xfeeds, good_input2=yfeeds,
+                                                        udegree=poly_ncoeff[0], vdegree=poly_ncoeff[1],
+                                                        axes_from=sstream, attrs_from=sstream)
+
+            suntrans.add_dataset('evalue2')
+
+        # Initialize datasets
+        if self.extended:
+            suntrans.add_dataset('coeff')
+
         suntrans.redistribute('freq')
         for key in suntrans.datasets.keys():
             suntrans.datasets[key][:] = 0.0
@@ -301,37 +384,158 @@ class SolarCalibration(task.SingleTask):
         # Set coordinates
         suntrans.coord[:] = sun_pos
 
-        # Loop over time slices
-        for slc_in, slc_out in time_slice:
+        # Create slice for expanding dimensions for solve_gain
+        edim = (None, slice(None), None)
 
-            # Extract visibility slice
-            vis_slice = sstream.vis[..., slc_in].copy()
+        # Loop over polarizations
+        for ipol, (ifeed, iprod) in enumerate(polmap):
 
-            # Extract the diagonal (to be used for weighting)
-            norm = (_extract_diagonal(vis_slice, axis=1).real)**0.5
-            norm = tools.invert_no_zero(norm)
+            p_nfeed, p_nprod = ifeed.size, iprod.size
+            iauto = np.array([idx for idx, (fi, fj) in enumerate(prodmap[iprod]) if (fi == fj)])
+            iadj = np.flatnonzero((np.abs(vis_pos[iprod, 1]) <= self.ymin) & (np.abs(vis_pos[iprod, 0]) < 10.0))
+            intercyl = np.flatnonzero(np.abs(vis_pos[iprod, 0]) > 10.0)
 
-            # Fringestop
-            if self.fringestop:
+            polid = np.array([2 * int(fi in yfeeds) + int(fj in yfeeds) for (fi, fj) in prodmap[iprod]])
+            uniq_polid = np.unique(polid)
 
-                ha = (sun_pos[slc_out, 0])[np.newaxis, np.newaxis, :]
-                dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
+            icross = np.ones(iprod.size, dtype=np.bool)
+            #icross[iadj] = False
+            icross[iauto] = False
+            icross = np.flatnonzero(icross)
 
-                vis_slice *= tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v)
+            # Loop over frequency
+            for ff_local, ff_global in enumerate(range(sfreq, efreq)):
 
-            # Solve for the point source response of each set of polarisations
-            ev_x, resp_x, err_resp_x = solve_gain(vis_slice, feeds=xfeeds, norm=norm[:, xfeeds])
-            ev_y, resp_y, err_resp_y = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
+                # Create baseline vectors
+                u = vis_pos[iprod, 0] / wv[ff_local]
+                v = vis_pos[iprod, 1] / wv[ff_local]
 
-            # Save to container
-            suntrans.evalue_x[..., slc_out] = ev_x
-            suntrans.evalue_y[..., slc_out] = ev_y
+                # Create hermite polynomials to model extended emission
+                if self.extended:
+                    H = np.polynomial.hermite.hermvander2d(u * scale[0], v * scale[1], poly_deg).astype(np.complex64)
+                    if self.hermweight:
+                        H *= np.polynomial.hermite.hermweight(u * scale[0])[:, np.newaxis]
+                        H *= np.polynomial.hermite.hermweight(v * scale[1])[:, np.newaxis]
 
-            suntrans.response[:, xfeeds, slc_out] = resp_x
-            suntrans.response[:, yfeeds, slc_out] = resp_y
+                # Define windows around bright point source transits
+                source_window = []
+                for ss, src in ephemeris.source_dictionary.iteritems():
+                    if isinstance(src, ephem.FixedBody):
+                        peak_ra = ephemeris.peak_RA(src, deg=True)
+                        window_ra = 3.0*cal_utils.guess_fwhm(freq[ff_local], pol=['X', 'Y'][ipol],
+                                                             dec=src._dec, sigma=True)
+                        source_window.append((src, peak_ra, window_ra))
 
-            suntrans.response_error[:, xfeeds, slc_out] = err_resp_x
-            suntrans.response_error[:, yfeeds, slc_out] = err_resp_y
+                # Loop over time slices
+                for slc_in, slc_out in time_slice:
+
+                    # Loop over times within a slice
+                    for tt_in, tt_out in zip(slc_in, slc_out):
+
+                        # Extract visibility and weight at this frequency and time
+                        vis = sstream.vis[ff_global, iprod, tt_in].view(np.ndarray).copy()
+                        weight = sstream.weight[ff_global, iprod, tt_in].view(np.ndarray).copy()
+
+                        # Set weight for autocorrelation and adjacent feeds equal to zero
+                        weight[iauto] = 0.0
+                        weight[iadj] = 0.0
+
+                        # Extract the diagonal (to be used for weighting)
+                        norm = (_extract_diagonal(vis, axis=0).real)**0.5
+                        norm = tools.invert_no_zero(norm)
+
+                        # Project out bright point sources so that they do not confuse the sun calibration
+                        for src, center, span in source_window:
+
+                            sha = wrap_phase(ra[tt_out] - center, deg=True)
+
+                            if np.abs(sha) < span:
+
+                                src_phase = tools.fringestop_phase(np.radians(sha), np.radians(ephemeris.CHIMELATITUDE),
+                                                                   src._dec, u, v)
+
+                                for upid in uniq_polid:
+
+                                    pp = np.flatnonzero(polid == upid)
+
+                                    asrc = np.sum(weight[pp] * vis[pp] * src_phase[pp]) * tools.invert_no_zero(np.sum(weight[pp]))
+
+                                    vis[pp] -= asrc * src_phase[pp].conj()
+
+                        # Fringestop
+                        vis *= tools.fringestop_phase(sun_pos[tt_out, 0], np.radians(ephemeris.CHIMELATITUDE),
+                                                      sun_pos[tt_out, 1], u, v)
+
+                        # Solve for the solar response
+                        ev, resp, err_resp = [np.squeeze(var) for var in solve_gain(vis[edim], norm=norm[edim], neigen=self.neigen)]
+
+                        if len(resp.shape) == 1:
+                            resp = resp[:, np.newaxis]
+                            err_resp = err_resp[:, np.newaxis]
+
+                        G = upper_triangle_gain_vector(resp)
+
+                        # Analysis of extended source
+                        if self.extended:
+
+                            A = G[:, np.newaxis] * H
+
+                            iters = 0
+                            while iters < self.max_iter:
+
+                                vism = vis.copy()
+
+                                # Calculate covariance of model coefficients
+                                C = np.dot(A.T.conj(), weight[:, np.newaxis] * A)
+
+                                # Solve for model coefficients
+                                coeff = np.linalg.lstsq(C, np.dot(A.T.conj(), weight * vis))[0]
+
+                                # Compute model for extended source structure
+                                model = np.dot(H, coeff)
+
+                                # Correct for the extended source structure
+                                vism[icross] *= tools.invert_no_zero(model[icross])
+
+                                # Re-solve for the solar response
+                                ev, resp, err_resp = [np.squeeze(var) for var in solve_gain(vism[edim], norm=norm[edim], neigen=self.neigen)]
+
+                                if len(resp.shape) == 1:
+                                    resp = resp[:, np.newaxis]
+                                    err_resp = err_resp[:, np.newaxis]
+
+                                G = upper_triangle_gain_vector(resp)
+
+                                A = G[:, np.newaxis] * H
+
+                                # Increase iteration counter
+                                iters += 1
+
+                            # Save model coefficients to output container
+                            suntrans.coeff[ff_global, ipol, tt_out, :, :] = coeff.reshape(*poly_ncoeff)
+
+                            # Calculate residual
+                            residual = vis - np.dot(A, coeff)
+
+                        else:
+                            # Not modeling extended source, just calculate residual
+                            residual = vis - G
+
+
+                        # Check reduction in intercylinder power to determine if we should perform subtraction
+                        chisq_before = np.sum(weight[intercyl] * np.abs(vis[intercyl])**2)
+                        chisq_after = np.sum(weight[intercyl] * np.abs(residual[intercyl])**2)
+
+                        suntrans.is_sun[ff_global, ipol, tt_out] = chisq_before * tools.invert_no_zero(chisq_after) - 1.0
+
+                        # Save results to container
+                        suntrans.response[ff_global, ifeed, tt_out, :] = resp
+                        suntrans.response_error[ff_global, ifeed, tt_out, :] = err_resp
+
+                        if ipol == 0:
+                            suntrans.evalue1[ff_global, :, tt_out] = ev
+                        else:
+                            suntrans.evalue2[ff_global, :, tt_out] = ev
 
         # If requested, fit a model to the primary beam of the sun transit
         if self.model_fit:
@@ -346,7 +550,7 @@ class SolarCalibration(task.SingleTask):
 
             peak_ra = ephemeris.peak_RA(body, deg=True)
             dra = ra - peak_ra
-            dra = np.abs(dra - (dra > 180.0) * 360.0 + (dra < -180.0) * 360.0)[np.newaxis, np.newaxis, :]
+            dra = np.abs(wrap_phase(dra, deg=True))
 
             # Estimate FWHM
             sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
@@ -358,8 +562,8 @@ class SolarCalibration(task.SingleTask):
             fit_flag[:, yfeeds, :] = dra < (self.nsig * sig_y)
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra, suntrans.response[:].view(np.ndarray),
-                                                                  suntrans.response_error[:].view(np.ndarray),
+            param, param_cov = cal_utils.fit_point_source_transit(ra, suntrans.response[..., 0].view(np.ndarray),
+                                                                  suntrans.response_error[..., 0].view(np.ndarray),
                                                                   flag=fit_flag)
 
             # Save to container
@@ -379,17 +583,27 @@ class SolarCalibration(task.SingleTask):
 
         suntrans.attrs['source'] = 'Sun'
 
+        suntrans.attrs['uscale'] = scale[0]
+        suntrans.attrs['vscale'] = scale[1]
+        suntrans.attrs['hermweight'] = self.hermweight
+        suntrans.attrs['ymin'] = self.ymin
+
         # Return sun transit
         return suntrans
 
 
 class SolarClean(task.SingleTask):
-    """Clean the sun from daytime data by removing the outer product of the
-    eigenvector corresponding to the largest eigenvalue.
+    """Clean sun from daytime data by subtracting a model for the
+       sun visibility determined by the SolarCalibration module.
+
+    Attributes
+    ----------
+    threshold: float, default 2.5
+        Do not subtract sun if the is_sun metric defined in
+        SolarCalibration module is less than threshold.
     """
 
-    accuracy = config.Property(proptype=float, default=10.0)
-    precision = config.Property(proptype=float, default=15.0)
+    threshold = config.Property(proptype=float, default=2.5)
 
     def process(self, sstream, suntrans, inputmap):
         """Clean the sun.
@@ -408,6 +622,8 @@ class SolarClean(task.SingleTask):
         mstream : containers.SiderealStream
             Sidereal stream with sun removed
         """
+
+        from scipy.stats import skew
 
         # Redistribute over frequency
         sstream.redistribute('freq')
@@ -432,22 +648,20 @@ class SolarClean(task.SingleTask):
         # Extract gain array
         gtime = suntrans.time[:]
         gain = suntrans.response[:].view(np.ndarray)
-        error = suntrans.response_error[:].view(np.ndarray) * tools.invert_no_zero(np.abs(gain))
 
         # Match ra
         match = np.array([ np.argmin(np.abs(gt - stime)) for gt in gtime ])
-
         ntime = gtime.size
 
         # Determine product map
-        prod_map = sstream.index_map['prod'][:]
-        nprod = prod_map.size
+        prodmap = sstream.index_map['prod'][:]
+        nprod = prodmap.size
         ninput = gain.shape[1]
 
         if nprod != (ninput * (ninput + 1) / 2):
             raise Exception("Number of inputs does not match the number of products.")
 
-        feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prod_map ]
+        feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prodmap ]
 
         # Determine polarisation for each visibility
         pol_ind = np.full(len(feed_list), -1, dtype=np.int)
@@ -455,77 +669,75 @@ class SolarClean(task.SingleTask):
             if tools.is_chime(fi) and tools.is_chime(fj):
                 pol_ind[bb] = 2 * tools.is_chime_y(fi) + tools.is_chime_y(fj)
 
-        pol_sub = np.array([0, 3])
-        npol = pol_sub.size
-
-        # Determine average phase and uncertainty
-        avg_sunphase = np.zeros((nfreq, ntime, npol), dtype=np.complex128)
-        err_sunphase = np.zeros((nfreq, ntime, npol), dtype=np.float64)
-
-        # Loop over frequencies and product
-        for lfi, fi in sstream.vis[:].enumerate(0):
-
-            for pp, psub in enumerate(pol_sub):
-
-                this_pol = np.flatnonzero(pol_ind == psub)
-
-                for ii, jj in prod_map[this_pol]:
-
-                    val = gain[lfi, ii, :] * gain[lfi, jj, :].conj()
-
-                    weight = np.abs(val)**2 * (error[lfi, ii, :]**2 + error[lfi, jj, :]**2)
-
-                    weight = tools.invert_no_zero(weight)
-
-                    avg_sunphase[lfi, :, pp] += weight * val
-                    err_sunphase[lfi, :, pp] += weight
-
-        err_sunphase = tools.invert_no_zero(err_sunphase)
-
-        avg_sunphase *= err_sunphase
-
-        err_sunphase = np.sqrt(err_sunphase) * tools.invert_no_zero(np.abs(avg_sunphase))
-
-        subtract_sun = ((np.abs(np.angle(avg_sunphase, deg=True)) < self.precision) &
-                        (np.degrees(err_sunphase) < self.accuracy))
-
-        print "Subtracting sun for %0.2f percent of samples." % (100.0*np.sum(subtract_sun) / float(subtract_sun.size))
+        npol = suntrans.index_map['pol'].size
+        if npol == 1:
+            pol_ind = (pol_ind < 0).astype(np.int)
+            pol_sub = np.array([0])
+        elif npol == 2:
+            pol_sub = np.array([0, 3])
+        else:
+            ValueError("npol = %d, must be either 1 or 2." % npol)
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[jj] for ii, jj in prod_map])
+        vis_pos = np.array([ feed_pos[ii] - feed_pos[jj] for ii, jj in prodmap])
         vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
 
-        u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
-        v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
+        # Extract coordinates
+        ha  = suntrans.coord[:, 0]
+        dec = suntrans.coord[:, 1]
 
-        # Calculate expected phase of sun
-        ha = (suntrans.coord[:, 0])[np.newaxis, np.newaxis, :]
-        dec = (suntrans.coord[:, 1])[np.newaxis, np.newaxis, :]
+        # Set up for removal
+        scale = np.array([suntrans.attrs['uscale'], suntrans.attrs['vscale']])
+        hermweight = suntrans.attrs['hermweight']
+        extended = 'coeff' in suntrans.datasets
 
-        sunphase = tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v).conj()
+        # Loop over frequencies
+        for ff_local, ff_global in enumerate(range(sfreq, efreq)):
 
-        # Loop over frequencies and products,
-        # perform subtraction.
-        for lfi, fi in sstream.vis[:].enumerate(0):
-
+            # Loop over polarisations
             for pp, psub in enumerate(pol_sub):
 
+                # Apply threshold to the is_sun metric defined in SolarCalibration
+                # to determine what time samples to subtract.
+                subtract_sun = (suntrans.is_sun[ff_global, pp, :] > self.threshold).astype(np.float64)
+
+                # Determine baselines for this polarisation
                 this_pol = np.flatnonzero(pol_ind == psub)
 
+                # Loop over baselines
                 for bb in this_pol:
 
-                    ii, jj = prod_map[bb]
+                    ii, jj = prodmap[bb]
 
                     # Do not subtract from autocorrelations
                     if ii != jj:
 
+                        # Create baseline vectors
+                        u = vis_pos[bb, 0] / wv[ff_local]
+                        v = vis_pos[bb, 1] / wv[ff_local]
+
+                        # Determine phase of sun
+                        sunphase = tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v).conj()
+
+                        # Determine model for sun's extended emission
+                        if extended:
+                            coeff = np.rollaxis(suntrans.coeff[ff_global, pp, :, :, :], 0, 3)
+                            model = np.polynomial.hermite.hermval2d(u * scale[0], v * scale[1], coeff)
+                            if hermweight:
+                                model *= (np.polynomial.hermite.hermweight(u * scale[0]) *
+                                          np.polynomial.hermite.hermweight(v * scale[1]))
+                        else:
+                            model = np.ones(ntime, dtype=np.float64)
+
                         # Fetch the gains
-                        gi = gain[lfi, ii, :]
-                        gj = gain[lfi, jj, :].conj()
+                        gi = gain[ff_local, ii, :, :]
+                        gj = gain[ff_local, jj, :, :].conj()
+
+                        gout = np.sum(gi * gj, axis=-1)
 
                         # Subtract the outer product of the gains times the sun phase
-                        sstream.vis[fi, bb, match] -=  subtract_sun[lfi, :, pp] * gi * gj * sunphase[lfi, bb, :]
+                        sstream.vis[ff_global, bb, match] -=  subtract_sun * model * gout * sunphase
 
         # Return the clean sidereal stream
         return sstream
