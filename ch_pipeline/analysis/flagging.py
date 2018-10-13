@@ -34,7 +34,7 @@ import numpy as np
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
 
-from draco.core import task
+from draco.core import task, io
 
 from ..core import containers
 
@@ -789,14 +789,17 @@ class NanToNum(task.SingleTask):
             # Set non-finite values of the visibility equal to zero
             flag = ~np.isfinite(timestream.vis[fi])
             if np.any(flag):
-                print "Rank %d: %d visibilities are non-finite." % (mpiutil.rank, np.sum(flag))
                 timestream.vis[fi][flag] = 0.0
+                timestream.weight[fi][flag] = 0.0  # Also set weights to zero so we don't trust values
+                self.log.info("%d visibilities are non finite for frequency=%i (%.2f %%)" %
+                              (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size))
 
             # Set non-finite values of the weight equal to zero
             flag = ~np.isfinite(timestream.weight[fi])
             if np.any(flag):
-                print "Rank %d: %d visibilities are non-finite." % (mpiutil.rank, np.sum(flag))
                 timestream.weight[fi][flag] = 0
+                self.log.info("%d weights are non finite for frequency=%i (%.2f %%)" %
+                              (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size))
 
         return timestream
 
@@ -1273,7 +1276,7 @@ class MaskCHIMEData(task.SingleTask):
         tel : :class:`ch_pipeline.core.pathfinder.CHIMEPathfinder`
             CHIME telescope class to use to get feed information.
         """
-        self.telescope = tel
+        self.telescope = io.get_telescope(tel)
 
     def process(self, mmodes):
         """Mask out unwanted datain the m-modes.
@@ -1298,8 +1301,8 @@ class MaskCHIMEData(task.SingleTask):
                 mmodes.weight[..., pi] = 0.0
 
             # Check all the polarisation states
-            is_xx = tools.is_chime_x(oi) and tools.is_chime_x(oj)
-            is_yy = tools.is_chime_y(oi) and tools.is_chime_y(oj)
+            is_xx = tools.is_array_x(oi) and tools.is_array_x(oj)
+            is_yy = tools.is_array_y(oi) and tools.is_array_y(oj)
 
             if not self.xx_pol and is_xx:
                 mmodes.weight[..., pi] = 0.0
@@ -1311,3 +1314,46 @@ class MaskCHIMEData(task.SingleTask):
                 mmodes.weight[..., pi] = 0.0
 
         return mmodes
+
+
+class MaskCHIMEMisc(task.SingleTask):
+    """Some miscellaneous data masking routines.
+    """
+
+    mask_clock = config.Property(proptype=bool, default=True)
+
+    mask_nodes = config.Property(proptype=list, default=None)
+
+    mask_freq = config.Property(proptype=list, default=None)
+
+    def process(self, ss):
+
+        ss.redistribute('prod')
+
+        # Mask out the 10 MHz lines
+        if self.mask_clock:
+
+            # Identify the frequency bins that contain the 10 MHz clock line
+            m10 = np.abs(((ss.freq['centre'] + 5) % 10.0) - 5.0) > 0.5 * ss.freq['width']
+
+            ss.weight[:] *= m10[:, np.newaxis, np.newaxis]
+
+        if self.mask_nodes is not None:
+
+            node_index = ((800.0 - ss.freq['centre']) / 400.0 * 1024) % 16
+
+            for ni in self.mask_nodes:
+
+                node_mask = (node_index != ni)
+                ss.weight[:] *= node_mask[:, np.newaxis, np.newaxis]
+
+        if self.mask_freq is not None:
+
+            fmask = np.ones_like(ss.freq['centre'])
+            fmask[self.mask_freq] = 0.0
+
+            ss.weight[:] *= fmask[:, np.newaxis, np.newaxis]
+
+        return ss
+
+

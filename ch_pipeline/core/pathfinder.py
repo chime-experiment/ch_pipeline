@@ -266,7 +266,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         """
 
         # Fetch cylinder relative positions
-        pos = tools.get_feed_positions(self.feeds, rotation=self.rotation_angle)
+        pos = tools.get_feed_positions(self.feeds)
 
         # The above routine returns NaNs for non CHIME feeds. This is a bit
         # messy, so turn them into zeros.
@@ -287,9 +287,9 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         # Make beam class just channel number.
 
         def _feedclass(f):
-            if tools.is_chime_x(f):
+            if tools.is_array_x(f):
                 return 0
-            if tools.is_chime_y(f):
+            if tools.is_array_y(f):
                 return 1
             return -1
 
@@ -297,7 +297,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
             return np.array([_feedclass(f) for f in self.feeds])
         else:
             beamclass = [
-                fi if tools.is_chime(feed) else -1
+                fi if tools.is_array(feed) else -1
                 for fi, feed in enumerate(self.feeds)
             ]
             return np.array(beamclass)
@@ -322,7 +322,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         if feed_obj is None:
             raise ValueError("Craziness. The requested feed doesn't seem to exist.")
 
-        if not tools.is_chime(feed_obj):
+        if not tools.is_array(feed_obj):
             raise ValueError('Requested feed is not a CHIME antenna.')
 
         # Get the beam rotation parameters.
@@ -334,11 +334,11 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         # We can only support feeds angled parallel or perp to the cylinder
         # axis. Check for these and throw exception for anything else.
-        if tools.is_chime_y(feed_obj):
+        if tools.is_array_y(feed_obj):
             return cylbeam.beam_y(self._angpos, self.zenith,
                                   self.cylinder_width / self.wavelengths[freq],
                                   self.fwhm_e, self.fwhm_h, rot=rot)
-        elif tools.is_chime_x(feed_obj):
+        elif tools.is_array_x(feed_obj):
             return cylbeam.beam_x(self._angpos, self.zenith,
                                   self.cylinder_width / self.wavelengths[freq],
                                   self.fwhm_e, self.fwhm_h, rot=rot)
@@ -434,10 +434,10 @@ class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
         if feed_obj is None:
             raise ValueError("The requested feed doesn't seem to exist.")
 
-        if tools.is_chime_x(feed_obj):
+        if tools.is_array_x(feed_obj):
             fname = self.primary_beamx_filename
 
-        elif tools.is_chime_y(feed_obj):
+        elif tools.is_array_y(feed_obj):
             fname = self.primary_beamy_filename
 
         else:

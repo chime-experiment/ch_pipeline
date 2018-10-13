@@ -72,7 +72,8 @@ class RingMapMaker(task.SingleTask):
             pre-generated matrices as they are not needed.
         """
 
-        self.beamtransfer = bt
+        from draco.core import io
+        self.beamtransfer = io.get_beamtransfer(bt)
 
     def process(self, sstream):
         """Computes the ringmap.
@@ -109,8 +110,9 @@ class RingMapMaker(task.SingleTask):
 
         # Construct mapping from vis array to unpacked 2D grid
         feed_list = [ (tel.feeds[fi], tel.feeds[fj]) for fi, fj in sstream.index_map['prod'][:]]
+
         feed_ind = [ ( 2 * int(fi.pol == 'S') + int(fj.pol == 'S'),
-                       fi.cyl - fj.cyl, int(np.round((fi.pos - fj.pos) / sp))) for fi, fj in feed_list]
+            fi.cyl - fj.cyl, int(np.round((np.array(fi.pos) - np.array(fj.pos))[1] / sp))) for fi, fj in feed_list]
 
         # Define polarisation axis
         pol = np.array([x + y for x in ['X', 'Y'] for y in ['X', 'Y']])
