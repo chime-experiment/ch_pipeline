@@ -89,7 +89,6 @@ class CHIME(telescope.PolarisedTelescope):
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
 
-    rotation_angle = tools._PF_ROT
 
     auto_correlations = True
 
@@ -193,6 +192,14 @@ class CHIME(telescope.PolarisedTelescope):
     @property
     def v_width(self):
         return 1.0
+    
+    # Set non-zero rotation angle for pathfinder
+    @property
+    def rotation_angle(self):
+        if self.correlator=='pathfinder':
+            return tools._PF_ROT
+        else:
+            return 0.0
 
     def calculate_frequencies(self):
         """Override default version to give support for specifying by frequency
@@ -324,11 +331,7 @@ class CHIME(telescope.PolarisedTelescope):
             raise ValueError('Requested feed is not a CHIME antenna.')
 
         # Get the beam rotation parameters.
-        yaw = 0.0
-
-	if self.correlator == 'pathfinder':
-            yaw = -self.rotation_angle
-
+        yaw = -self.rotation_angle
         pitch = 0.0
         roll = 0.0
 
