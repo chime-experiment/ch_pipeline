@@ -1,11 +1,11 @@
 """
 ===============================================================
-Pathfinder Telescope Model (:mod:`ch_pipeline.core.pathfinder`)
+Pathfinder/CHIME Telescope Model (:mod:`ch_pipeline.core.pathfinder`)
 ===============================================================
 
 .. currentmodule:: ch_pipeline.core.pathfinder
 
-A model for the CHIME Pathfinder telescope. This attempts to query the
+A model for both CHIME and Pathfinder telescopes. This attempts to query the
 configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
 
@@ -15,7 +15,7 @@ Classes
 .. autosummary::
     :toctree: generated/
 
-    CHIMEPathfinder
+    CHIME
 """
 
 import numpy as np
@@ -30,8 +30,8 @@ from drift.telescope import cylbeam
 from ch_util import ephemeris, tools
 
 
-class CHIMEPathfinder(telescope.PolarisedTelescope):
-    """Model telescope for the CHIME Pathfinder.
+class CHIME(telescope.PolarisedTelescope):
+    """Model telescope for the CHIME/Pathfinder.
 
     This class currently uses a simple Gaussian model for the primary beams.
 
@@ -86,10 +86,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     input_sel = config.Property(proptype=list, default=None)
 
     # Fix base properties
-    num_cylinders = 2
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
-    cylinder_length = 40.0
 
     rotation_angle = tools._PF_ROT
 
@@ -111,12 +109,12 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         self.longitude = ephemeris.CHIMELONGITUDE
         self.altitude = ephemeris.CHIMEALTITUDE
 
-        # Set the LSD start epoch (i.e. CHIME Pathfinder first light)
+        # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
 
     @classmethod
     def from_layout(cls, layout, correlator=None, skip=False):
-        """Create a Pathfinder telescope description for the specified layout.
+        """Create a CHIME/Pathfinder telescope description for the specified layout.
 
         Parameters
         ----------
@@ -131,23 +129,23 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
         Returns
         -------
-        tel : CHIMEPathfinder
+        tel : CHIME
         """
 
-        pf = cls()
+        tel = cls()
 
-        pf.layout = layout
-        pf.correlator = correlator
-        pf.skip_non_chime = skip
-        pf._load_layout()
+        tel.layout = layout
+        tel.correlator = correlator
+        tel.skip_non_chime = skip
+        tel._load_layout()
 
-        return pf
+        return tel
 
     def _load_layout(self):
-        """Load the Pathfinder layout from the database.
+        """Load the CHIME/Pathfinder layout from the database.
 
         Generally this routine shouldn't be called directly. Use
-        :method:`CHIMEPathfinder.from_layout` or configure from a YAML file.
+        :method:`CHIME.from_layout` or configure from a YAML file.
         """
         if self.layout is None:
             raise Exception("Layout attributes not set.")
@@ -276,7 +274,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
 
     @property
     def beamclass(self):
-        """Beam class definition for the Pathfinder.
+        """Beam class definition for the CHIME/Pathfinder.
 
         When `self.redundant` is set, the X-polarisation feeds get
         `beamclass = 0`, and the Y-polarisation gets `beamclass = 1`.
@@ -307,12 +305,12 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
     #
 
     def beam(self, feed, freq):
-        """Primary beam implementation for the CHIME Pathfinder.
+        """Primary beam implementation for the CHIME/Pathfinder.
 
         This only supports normal CHIME cylinder antennas. Asking for the beams
         for other types of inputs will cause an exception to be thrown. The
         beams from this routine are rotated by `self.rotation_angle` to account
-        for the Pathfinder rotation.
+        for the Pathfinder rotation, and are not rotated for CHIME.
         """
         # # Fetch beam parameters out of config database.
 
@@ -326,7 +324,11 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
             raise ValueError('Requested feed is not a CHIME antenna.')
 
         # Get the beam rotation parameters.
-        yaw = -self.rotation_angle
+        yaw = 0.0
+
+	if self.correlator == 'pathfinder':
+            yaw = -self.rotation_angle
+
         pitch = 0.0
         roll = 0.0
 
@@ -388,7 +390,7 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         # # Reimplemented to make sure entries we always pick the upper
         # # triangle (and do not reorder to make EW baselines)
         if self.redundant:
-            super(CHIMEPathfinder, self)._make_ew()
+            super(CHIME, self)._make_ew()
 
     def _unique_beams(self):
         # Override to mask out any feed where the beamclass is less than zero.
@@ -407,8 +409,8 @@ class CHIMEPathfinder(telescope.PolarisedTelescope):
         return beam_map, beam_mask
 
 
-class CHIMEPathfinderExternalBeam(CHIMEPathfinder):
-    """Model telescope for the CHIME Pathfinder.
+class CHIMEExternalBeam(CHIME):
+    """Model telescope for the CHIME.
 
     This class uses an external beam model that is read in from a file.
     """

@@ -1273,7 +1273,7 @@ class MaskCHIMEData(task.SingleTask):
 
         Parameters
         ----------
-        tel : :class:`ch_pipeline.core.pathfinder.CHIMEPathfinder`
+        tel : :class:`ch_pipeline.core.pathfinder.CHIME`
             CHIME telescope class to use to get feed information.
         """
         self.telescope = io.get_telescope(tel)
