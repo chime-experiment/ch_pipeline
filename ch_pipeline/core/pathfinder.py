@@ -43,8 +43,12 @@ class CHIME(telescope.PolarisedTelescope):
         Restrict to a specific correlator.
     skip_non_chime : boolean
         Ignore non CHIME feeds in the BeamTransfers.
-    redundant : boolean
-        Use only redundant baselines (default is False).
+    stack_type : string, optional
+        Stacking type.
+        `redundant`: feeds of same polarization have same beam class (default).
+        `redundant_cyl`: feeds of same polarization and cylinder have same beam
+        class.
+        `unique`: Each feed has a unique beam class.
     use_pathfinder_freq: boolean
         Use the pathfinder channelization of 1024 frequencies between 400 and
         800 MHz.  Setting this to True also enables the specification of a
@@ -73,7 +77,8 @@ class CHIME(telescope.PolarisedTelescope):
     skip_non_chime = config.Property(proptype=bool, default=False)
 
     # Redundancy settings
-    redundant = config.Property(proptype=bool, default=False)
+    stack_type = config.enum(['redundant', 'redundant_cyl', 'unique'],
+                                 default='redundant')
 
     # Configure frequency properties
     use_pathfinder_freq = config.Property(proptype=bool, default=True)
@@ -283,23 +288,37 @@ class CHIME(telescope.PolarisedTelescope):
     def beamclass(self):
         """Beam class definition for the CHIME/Pathfinder.
 
-        When `self.redundant` is set, the X-polarisation feeds get
+        When `self.stack_type` is `redundant`, the X-polarisation feeds get
         `beamclass = 0`, and the Y-polarisation gets `beamclass = 1`.
-        If `self.redundant` is `False`, then the feeds are just give an
-        increasing unique class. In both cases, any other type of feed gets set
-        to `-1` and should be ignored.
+        When `self.stack_type` is `redundant_cyl`, feeds of same polarisation
+        and cylinder have same beam class. The beam class is given by
+        `beamclass = 2*cyl + pol` where `cyl` is the cylinder number according to
+        `ch_util.tools` convention and `pol` is the polarisation (0 for X and 1
+        for Y polarisation)
+        When `self.stack_type` is `unique`, then the feeds are just given an
+        increasing unique class.
+        In all cases, any other type of feed gets set to `-1` and should be
+        ignored.
         """
         # Make beam class just channel number.
 
-        def _feedclass(f):
-            if tools.is_array_x(f):
-                return 0
-            if tools.is_array_y(f):
-                return 1
+        def _feedclass(f, redundant_cyl=False):
+            if tools.is_array(f):
+                if tools.is_array_x(f): # feed is X polarisation
+                    pol = 0
+                else: # feed is Y polarisation
+                    pol = 1
+
+                if redundant_cyl:
+                    return 2*f.cyl + pol
+                else:
+                    return pol
             return -1
 
-        if self.redundant:
+        if self.stack_type == 'redundant':
             return np.array([_feedclass(f) for f in self.feeds])
+        elif self.stack_type == 'redundant_cyl':
+            return np.array([_feedclass(f, redundant_cyl=True) for f in self.feeds])
         else:
             beamclass = [
                 fi if tools.is_array(feed) else -1
