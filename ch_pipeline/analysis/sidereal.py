@@ -17,7 +17,8 @@ Tasks
     LoadTimeStreamSidereal
     SiderealGrouper
     SiderealRegridder
-    SiderealStacker
+    SiderealMean
+    ChangeSiderealMean
 
 Usage
 =====
@@ -28,15 +29,16 @@ Generally you would want to use these tasks together. Starting with a
 :class:`SiderealStacker` if you want to combine the different days.
 """
 
-
+import gc
 import numpy as np
 
 from caput import pipeline, config
-from caput import mpiutil, mpiarray
+from caput import mpiutil
 from ch_util import andata, ephemeris
+from draco.core import task
+from draco.analysis import sidereal
 
-from ..core import task, containers
-from . import regrid
+from ..core import containers
 
 
 class LoadTimeStreamSidereal(task.SingleTask):
@@ -54,12 +56,27 @@ class LoadTimeStreamSidereal(task.SingleTask):
     padding : float
         Extra amount of a sidereal day to pad each timestream by. Useful for
         getting rid of interpolation artifacts.
+    freq_physical : list
+        List of physical frequencies in MHz.
+        Given first priority.
+    channel_range : list
+        Range of frequency channel indices, either
+        [start, stop, step], [start, stop], or [stop]
+        is acceptable.  Given second priority.
+    channel_index : list
+        List of frequency channel indices.
+        Given third priority.
+    only_autos : bool
+        Only load the autocorrelations.
     """
 
     padding = config.Property(proptype=float, default=0.005)
 
-    freq_start = config.Property(proptype=int, default=None)
-    freq_end = config.Property(proptype=int, default=None)
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
+
+    only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
         """Divide the list of files up into sidereal days.
@@ -88,9 +105,17 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
         self.filemap = mpiutil.world.bcast(filemap, root=0)
 
-        # Set up frequency selection
-        if self.freq_start is not None:
-            self.freq_sel = np.arange(self.freq_start, self.freq_end)
+        # Set up frequency selection.
+        if self.freq_physical:
+            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+            self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ]))
+
+        elif self.channel_range and (len(self.channel_range) <= 3):
+            self.freq_sel = range(*self.channel_range)
+
+        elif self.channel_index:
+            self.freq_sel = self.channel_index
+
         else:
             self.freq_sel = None
 
@@ -106,281 +131,294 @@ class LoadTimeStreamSidereal(task.SingleTask):
         if len(self.filemap) == 0:
             raise pipeline.PipelineStopIteration
 
+        # Extract filelist for this CSD
         csd, fmap = self.filemap.pop(0)
-        dfiles = [ self.files[fi] for fi in fmap ]
+        dfiles = sorted([ self.files[fi] for fi in fmap ])
 
         if mpiutil.rank0:
             print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
 
-        ts = andata.CorrData.from_acq_h5(sorted(dfiles), distributed=True, freq_sel=self.freq_sel)
+        # Set up product selection
+        prod_sel = None
+        if self.only_autos:
+            rd = andata.CorrReader(dfiles)
+            prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
+
+        # Load files
+        ts = andata.CorrData.from_acq_h5(dfiles, distributed=True,
+                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         # Add attributes for the CSD and a tag for labelling saved files
         ts.attrs['tag'] = ('csd_%i' % csd)
-        ts.attrs['csd'] = csd
+        ts.attrs['lsd'] = csd
 
         # Add a weight dataset if needed
-        if 'vis_weight' not in ts.datasets:
-            weight_dset = ts.create_dataset('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                            distributed=True, distributed_axis=0)
+        if 'vis_weight' not in ts.flags:
+            weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
+                                         distributed=True, distributed_axis=0)
             weight_dset.attrs['axis'] = ts.vis.attrs['axis']
-            weight_dset[:] = 128
+
+            # Set weight to maximum value (255), unless the vis value is
+            # zero which presumably came from missing data. NOTE: this may have
+            # a small bias
+            weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
+
+        gc.collect()
 
         return ts
 
 
-class SiderealGrouper(task.SingleTask):
-    """Group individual timestreams together into whole Sidereal days.
+class SiderealGrouper(sidereal.SiderealGrouper):
+    """SiderealGrouper that automatically uses the location of CHIME.
 
-    Attributes
-    ----------
-    padding : float
-        Extra amount of a sidereal day to pad each timestream by. Useful for
-        getting rid of interpolation artifacts.
+    See `draco.analysis.sidereal.SiderealGrouper` for extended documentation.
     """
 
-    padding = config.Property(proptype=float, default=0.005)
-
-    def __init__(self):
-        self._timestream_list = []
-        self._current_csd = None
-
-    def process(self, tstream):
-        """Load in each sidereal day.
+    def setup(self, observer=None):
+        """Setup the SiderealGrouper task.
 
         Parameters
         ----------
-        tstream : andata.CorrData
-            Timestream to group together.
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        observer = ephemeris.chime_observer() if observer is None else observer
+
+        sidereal.SiderealGrouper.setup(self, observer)
+
+
+class SiderealRegridder(sidereal.SiderealRegridder):
+    """SiderealRegridder that automatically uses the location of CHIME.
+
+    See `draco.analysis.sidereal.SiderealRegridder` for extended documentation.
+    """
+
+    def setup(self, observer=None):
+        """Setup the SiderealRegridder task.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        observer = ephemeris.chime_observer() if observer is None else observer
+
+        sidereal.SiderealRegridder.setup(self, observer)
+
+
+class SiderealMean(task.SingleTask):
+    """Calculate the weighted mean (over time) of every element of the
+    visibility matrix.
+
+    Parameters
+    ----------
+    all_data : bool
+        If this is True, then use all of the input data to
+        calculate the weighted mean.  If False, then use only
+        night-time data away from the transit of bright
+        point sources.  Default is False.
+    daytime : bool
+        Use only day-time data away from transit of bright point
+        sources to caclulate the weighted mean.  Overriden by all_data.
+        Default is False.
+    median : bool
+        Calculate weighted median instead of weighted mean.
+        Default is False.
+    """
+
+    all_data = config.Property(proptype=bool, default=False)
+    daytime = config.Property(proptype=bool, default=False)
+    median = config.Property(proptype=bool, default=False)
+
+    def process(self, sstream):
+        """
+        Parameters
+        ----------
+        sstream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream.
 
         Returns
         -------
-        ts : andata.CorrData or None
-            Returns the timestream of each sidereal day when we have received
-            the last file, otherwise returns :obj:`None`.
+        mustream : same as input
+            Sidereal stream containing only the mean value.
         """
 
-        # Get the start and end CSDs of the file
-        csd_start = int(ephemeris.csd(tstream.time[0]))
-        csd_end = int(ephemeris.csd(tstream.time[-1]))
+        from flagging import daytime_flag
+        from ch_util import cal_utils, tools
+        import weighted as wq
 
-        # If current_csd is None then this is the first time we've run
-        if self._current_csd is None:
-            self._current_csd = csd_start
+        # Make sure we are distributed over frequency
+        sstream.redistribute('freq')
 
-        # If this file started during the current CSD add it onto the list
-        if self._current_csd == csd_start:
-            self._timestream_list.append(tstream)
+        # Extract product map
+        prod = sstream.index_map['prod']
 
-        if tstream.vis.comm.rank == 0:
-            print "Adding file into group for CSD:%i" % csd_start
+        # Extract lsd
+        lsd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
 
-        # If this file ends during a later CSD then we need to process the
-        # current list and restart the system
-        if self._current_csd < csd_end:
+        # Check if we are using all of the data to calculate the mean,
+        # or only "quiet" periods.
+        if self.all_data:
 
-            if tstream.vis.comm.rank == 0:
-                print "Concatenating files for CSD:%i" % csd_start
+            if isinstance(sstream, andata.CorrData):
+                flag_quiet = np.fix(ephemeris.csd(sstream.time)) == lsd
 
-            # Combine timestreams into a single container for the whole day this
-            # could get returned as None if there wasn't enough data
-            tstream_all = self._process_current_csd()
+                ra = ephemeris.transit_RA(sstream.time)
 
-            # Reset list and current CSD for the new file
-            self._timestream_list = [tstream]
-            self._current_csd = csd_end
+            elif isinstance(sstream, containers.SiderealStream):
+                flag_quiet = np.ones(len(sstream.index_map['ra'][:]), dtype=np.bool)
 
-            return tstream_all
+                ra = sstream.index_map['ra']
+
+            else:
+                raise RuntimeError('Format of `sstream` argument is unknown.')
+
         else:
-            return None
 
-    def process_finish(self):
-        """Return the final sidereal day.
+            # Check if we are dealing with CorrData or SiderealStream
+            if isinstance(sstream, andata.CorrData):
+                # Extract ra
+                ra = ephemeris.transit_RA(sstream.time)
 
-        Returns
-        -------
-        ts : andata.CorrData or None
-            Returns the timestream of the final sidereal day if it's long
-            enough, otherwise returns :obj:`None`.
-        """
+                # Find night time data
+                if self.daytime:
+                    flag_quiet = daytime_flag(sstream.time)
+                else:
+                    flag_quiet = ~daytime_flag(sstream.time)
 
-        # If we are here there is no more data coming, we just need to process any remaining data
-        tstream_all = self._process_current_csd()
+                flag_quiet &= (np.fix(ephemeris.csd(sstream.time)) == lsd)
 
-        return tstream_all
+            elif isinstance(sstream, containers.SiderealStream):
+                # Extract csd and ra
+                if hasattr(lsd, '__iter__'):
+                    lsd_list = lsd
+                else:
+                    lsd_list = [lsd]
 
-    def _process_current_csd(self):
-        # Combine the current set of files into a timestream
+                ra = sstream.index_map['ra']
 
-        csd = self._current_csd
+                # Find night time data
+                flag_quiet = np.ones(len(ra), dtype=np.bool)
+                for cc in lsd_list:
+                    if self.daytime:
+                        flag_quiet &= daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
+                    else:
+                        flag_quiet &= ~daytime_flag(ephemeris.csd_to_unix(cc + ra/360.0))
 
-        # Calculate the length of data in this current CSD
-        start = ephemeris.csd(self._timestream_list[0].time[0])
-        end = ephemeris.csd(self._timestream_list[-1].time[-1])
-        day_length = min(end, csd + 1) - max(start, csd)
+            else:
+                raise RuntimeError('Format of `sstream` argument is unknown.')
 
-        # If the amount of data for this day is too small, then just skip
-        if day_length < 0.1:
-            return None
+            # Find data free of bright point sources
+            for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
 
-        if self._timestream_list[0].vis.comm.rank == 0:
-            print "Constructing CSD:%i [%i files]" % (csd, len(self._timestream_list))
+                peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
+                src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)
 
-        # Construct the combined timestream
-        ts = andata.concatenate(self._timestream_list)
+                dra = (ra - peak_ra) % 360.0
+                dra -= (dra > 180.0)*360.0
 
-        # Add attributes for the CSD and a tag for labelling saved files
-        ts.attrs['tag'] = ('csd_%i' % csd)
-        ts.attrs['csd'] = csd
-
-        return ts
+                flag_quiet &= np.abs(dra) > src_window
 
 
-class SiderealRegridder(task.SingleTask):
-    """Take a sidereal days worth of data, and put onto a regular grid.
+        # Create output
+        newra = np.array([ 0.5*(np.min(ra[flag_quiet]) + np.max(ra[flag_quiet])) ])
 
-    Uses a maximum-likelihood inverse of a Lanczos interpolation to do the
-    regridding. This gives a reasonably local regridding, that is pretty well
-    behaved in m-space.
+        mustream = containers.SiderealStream(ra=newra, axes_from=sstream,
+                                             distributed=True, comm=sstream.comm)
 
-    Attributes
+        mustream.attrs['lsd'] = lsd
+        mustream.attrs['tag'] = sstream.attrs['tag']
+
+        mustream.redistribute('freq')
+
+        # Loop over frequencies and baselines to reduce memory usage
+        for lfi, fi in sstream.vis[:].enumerate(0):
+            for lbi, bi in sstream.vis[:].enumerate(1):
+
+                mu, norm = 0.0, 0.0
+
+                # Extract visibility and weight
+                data = sstream.vis[fi, bi]
+                weight = sstream.weight[fi, bi] * flag_quiet
+
+                norm = np.sum(weight)
+
+                # Calculate either weighted median or weighted mean value
+                if self.median:
+                    if np.any(weight > 0.0):
+                        mu = wq.median(data.real, weight) + 1.0J * wq.median(data.imag, weight)
+
+                else:
+                    mu = tools.invert_no_zero(norm) * np.sum(weight*data)
+
+                mustream.vis[fi, bi, 0] = mu
+                mustream.weight[fi, bi, 0] = norm
+
+
+        # Return sidereal stream containing the mean value
+        return mustream
+
+
+class ChangeSiderealMean(task.SingleTask):
+    """ Subtract or add an overall offset (over time) to every element
+    of the visibility matrix.
+
+    Parameters
     ----------
-    samples : int
-        Number of samples across the sidereal day.
-    lanczos_width : int
-        Width of the Lanczos interpolation kernel.
+    add : bool
+        Add the value instead of subtracting.
+        Default is False.
     """
 
-    samples = config.Property(proptype=int, default=1024)
-    lanczos_width = config.Property(proptype=int, default=5)
+    add = config.Property(proptype=bool, default=False)
 
-    def process(self, data):
-        """Regrid the sidereal day.
-
+    def process(self, sstream, mustream):
+        """
         Parameters
         ----------
-        data : andata.CorrData
-            Timestream data for the day (must have a `csd` attribute).
+        sstream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream.
+
+        mustream : andata.CorrData or containers.SiderealStream
+            Timestream or sidereal stream with 1 element in the time axis
+            that contains the value to add or subtract.
 
         Returns
         -------
-        sdata : containers.SiderealStream
-            The regularly gridded sidereal timestream.
+        sstream : same as input
+            Timestream or sidereal stream with value added or subtracted.
         """
 
-        if mpiutil.rank0:
-            print "Regridding CSD:%i" % data.attrs['csd']
+        # Check that input visibilities have consistent shapes
 
-        # Redistribute if needed too
-        data.redistribute('freq')
+        sshp, mshp = sstream.vis.shape, mustream.vis.shape
 
-        # Convert data timestamps into CSDs
-        timestamp_csd = ephemeris.csd(data.time)
+        if np.any(sshp[0:2] != mshp[0:2]):
+            ValueError("Frequency or product axis differ between inputs.")
 
-        # Fetch which CSD this is
-        csd = data.attrs['csd']
+        if (len(mshp) != 3) or (mshp[-1] != 1):
+            ValueError("Mean value has incorrect shape, must be (nfreq, nprod, 1).")
 
-        # Create a regular grid in CSD, padded at either end to supress interpolation issues
-        pad = 5 * self.lanczos_width
-        csd_grid = csd + np.arange(-pad, self.samples + pad, dtype=np.float64) / self.samples
+        # Ensure both inputs are distributed over frequency
+        sstream.redistribute('freq')
+        mustream.redistribute('freq')
 
-        # Construct regridding matrix
-        lzf = regrid.lanczos_forward_matrix(csd_grid, timestamp_csd, self.lanczos_width).T.copy()
+        # Determine autocorrelations
+        not_auto = np.array([pi != pj for pi, pj in mustream.index_map['prod'][:]])[np.newaxis, :, np.newaxis]
 
-        # Mask data
-        imask = data.weight[:].view(np.ndarray)
-        vis_data = data.vis[:].view(np.ndarray)
+        # Add or subtract value to the cross-correlations
+        if self.add:
+            sstream.vis[:] += mustream.vis[:].view(np.ndarray) * not_auto
+        else:
+            sstream.vis[:] -= mustream.vis[:].view(np.ndarray) * not_auto
 
-        # Reshape data
-        vr = vis_data.reshape(-1, vis_data.shape[-1])
-        nr = imask.reshape(-1, vis_data.shape[-1])
+        # Return sidereal stream with modified offset
+        return sstream
 
-        # Construct a signal 'covariance'
-        Si = np.ones_like(csd_grid) * 1e-8
-
-        # Calculate the interpolated data and a noise weight at the points in the padded grid
-        sts, ni = regrid.band_wiener(lzf, nr, Si, vr, 2 * self.lanczos_width - 1)
-
-        # Throw away the padded ends
-        sts = sts[:, pad:-pad].copy()
-        ni = ni[:, pad:-pad].copy()
-
-        # Reshape to the correct shape
-        sts = sts.reshape(vis_data.shape[:-1] + (self.samples,))
-        ni = ni.reshape(vis_data.shape[:-1] + (self.samples,))
-
-        # Wrap to produce MPIArray
-        sts = mpiarray.MPIArray.wrap(sts, axis=data.vis.distributed_axis)
-        ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
-
-        # FYI this whole process creates an extra copy of the sidereal stack.
-        # This could probably be optimised out with a little work.
-        sdata = containers.SiderealStream(axes_from=data, ra=self.samples)
-        sdata.redistribute('freq')
-        sdata.vis[:] = sts
-        sdata.weight[:] = ni
-        sdata.attrs['csd'] = csd
-        sdata.attrs['tag'] = 'csd_%i' % csd
-
-        return sdata
-
-
-class SiderealStacker(task.SingleTask):
-    """Take in a set of sidereal days, and stack them up.
-
-    This will apply relative calibration.
-    """
-
-    stack = None
-
-    def process(self, sdata):
-        """Stack up sidereal days.
-
-        Parameters
-        ----------
-        sdata : containers.SiderealStream
-            Individual sidereal day to stack up.
-        """
-
-        sdata.redistribute('freq')
-
-        if self.stack is None:
-
-            self.stack = containers.SiderealStream(axes_from=sdata)
-            self.stack.redistribute('freq')
-
-            self.stack.vis[:] = (sdata.vis[:] * sdata.weight[:])
-            self.stack.weight[:] = sdata.weight[:]
-
-            if mpiutil.rank0:
-                print "Starting stack with CSD:%i" % sdata.attrs['csd']
-
-            return
-
-        if mpiutil.rank0:
-            print "Adding CSD:%i to stack" % sdata.attrs['csd']
-
-        # note: Eventually we should fix up gains
-
-        # Combine stacks with inverse `noise' weighting
-        self.stack.vis[:] += (sdata.vis[:] * sdata.weight[:])
-        self.stack.weight[:] += sdata.weight[:]
-
-    def process_finish(self):
-        """Construct and emit sidereal stack.
-
-        Returns
-        -------
-        stack : containers.SiderealStream
-            Stack of sidereal days.
-        """
-
-        self.stack.attrs['tag'] = 'stack'
-
-        self.stack.vis[:] = np.where(self.stack.weight[:] == 0,
-                                     0.0,
-                                     self.stack.vis[:] / self.stack.weight[:])
-
-        return self.stack
 
 
 def get_times(acq_files):

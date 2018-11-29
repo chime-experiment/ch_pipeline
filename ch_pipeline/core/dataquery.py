@@ -66,7 +66,7 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {'scinet_scratch': '/scratch/k/krs/jrs65/chime_archive/'}
+_DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
 
 
 class QueryRun(pipeline.TaskBase):
@@ -102,14 +102,21 @@ class QueryRun(pipeline.TaskBase):
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
 
+            layout.connect_database()
+
             cat_run = layout.global_flag_category.select().where(layout.global_flag_category.name == 'run').get()
 
             # Find run in database
             run_query = layout.global_flag.select().where(layout.global_flag.category == cat_run,
                                                           layout.global_flag.name == self.run_name)
 
+            # Make sure we only have flags with active events
+            run_query = run_query.join(layout.graph_obj).join(layout.event).where(layout.event.active)
+
             if run_query.count() == 0:
                 raise RuntimeError('Run %s not found in database' % self.run_name)
+            elif run_query.count() > 1:
+                raise RuntimeError('Multiple global flags found in database for run %s' % self.run_name)
 
             run = run_query.get()
 
@@ -142,6 +149,9 @@ class QueryRun(pipeline.TaskBase):
             files.sort()
 
         files = mpiutil.world.bcast(files, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
 
         return files
 
@@ -286,6 +296,9 @@ class QueryInputs(pipeline.TaskBase):
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
 
         return inputs
 
