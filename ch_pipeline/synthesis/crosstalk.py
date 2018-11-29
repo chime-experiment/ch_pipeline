@@ -21,13 +21,14 @@ import numpy as np
 from caput import pipeline
 from caput import config
 from caput import mpidataset, mpiutil
+from draco.core import task, io
 
 from ch_util import tools
 import scipy.constants as c
 import datetime
 
 
-class CrossTalkSameCylinder(pipeline.TaskBase):
+class CrossTalkSameCylinder(task.SingleTask):
     """Simulating Cross Talk models
 
     Attributes
@@ -44,34 +45,32 @@ class CrossTalkSameCylinder(pipeline.TaskBase):
     t_sky = config.Property(proptype=bool, default=True)
     bounce = config.Property(proptype=int, default=0)
 
-    def setup(self, telescope, inputmap):
+    def setup(self, manager):
         """ Setup the simulation for crosstalk.
- 
-        Parameters
-        ----------
-        telescope : TransitTelescope
-        	Telescope object.
-        inputmap : Feedmap
-        	List of correlator inputs.
-        """
-        self.telescope = telescope
-        pol = tools.get_feed_polarisations(inputmap)
-        self._pol_pairs = get_pol_pairs(pol)
 
-    def next(self, sstream):    
-	""" Simulate a SiderealStream (or Timestream) with Cross talk.
-	
-	Returns
-	-------
-	sstream_xtalk : SiderealStream (or Timestream) with Cross talk.
-	"""
+            Parameters
+            ----------
+            manager : ProductManager
+
+        """
+        self.telescope = io.get_telescope(manager)
+
+    def process(self, sstream):
+        """ Simulate a SiderealStream (or Timestream) with Cross talk.
+
+            Returns
+            -------
+            sstream_xtalk : SiderealStream (or Timestream) with Cross talk.
+        """
         tel = self.telescope
+        pol = tools.get_feed_polarisations(tel.feeds)
+        self._pol_pairs = get_pol_pairs(pol)
         self._tsys = tel.tsys()
         self._nfreq = tel.nfreq
         self._nfeeds = tel.nfeed
-       	self._baselines = np.sqrt(tel.baselines[:,0]**2 + tel.baselines[:,1]**2) 
-	self._vis = sstream.vis
-        self._freq = sstream.freq['centre'] * 1e6
+        self._baselines = np.sqrt(tel.baselines[:, 0]**2 + tel.baselines[:, 1]**2)
+        self._vis = sstream.vis
+        self._freq = tel.frequencies * 1e6
 
         xtalk = self.get_xtalk()
 
@@ -80,117 +79,111 @@ class CrossTalkSameCylinder(pipeline.TaskBase):
         return sstream
 
     def get_coeffs(self, alpha_list):
-        """Figure out which visibilities are nearest neighbor, 2 feeds
-        apart and setting coupling coefficient for each baseline seperation.
-	(crosstalk for cross polarization not yet implemented.)
-	
-	Parameters
-	----------
-	alpha_list : List of coupling coefficients.
-		[Same feed, nearest neighbor, 2 feeds apart, ...]
-	Returns
-	-------
-	alpha_arr : numpy.array of dtype ('index', 'alpha')
-		index: tuple of integers, 
-			prod_map indices of coupling factor between feeds i, j
-		alpha: float / or complex, coupling factor. 
-			(currently hard coded in methode get_xtalk.) 
-	"""
+        """ Figure out which visibilities are nearest neighbor, 2 feeds
+            apart and setting coupling coefficient for each baseline seperation.
+
+            Parameters
+            ----------
+            alpha_list : List of coupling coefficients.
+                [Same feed, nearest neighbor, 2 feeds apart, ...]
+            Returns
+            -------
+            alpha_arr : numpy.array of dtype ('index', 'alpha')
+            index: tuple of integers,
+                prod_map indices of coupling factor between feeds i, j
+            alpha: float / or complex, coupling factor.
+                (currently hard coded in methode get_xtalk.)
+        """
 
         alpha_struct = []
 
-	nprod = self._nfeeds * (self._nfeeds + 1) / 2
-     	self._prod = np.empty(nprod, dtype=[('input_a', np.uint16),
-                                     ('input_b', np.uint16)])
-     	for i in range(nprod):
-            self._prod[i]['input_a'] = tools.icmap(i, self._nfeeds)[0]         
-	    self._prod[i]['input_b'] = tools.icmap(i, self._nfeeds)[1]
+        nprod = self._nfeeds * (self._nfeeds + 1) / 2
+        self._prod = np.empty(nprod, dtype=[('input_a', np.uint16),
+                              ('input_b', np.uint16)])
+        for i in range(nprod):
+            self._prod[i]['input_a'] = tools.icmap(i, self._nfeeds)[0]
+        self._prod[i]['input_b'] = tools.icmap(i, self._nfeeds)[1]
 
-        for i in range (len(alpha_list)):
+        for i in range(len(alpha_list)):
             if alpha_list[i] == 0.0:
                 continue
             else:
                 for j in range(len(self._baselines)):
-                    if np.round(abs(self._baselines[j] / 0.3048)).astype(int) == i and self._pol_pairs[j,0] == self._pol_pairs[j,1]:
+                    if np.round(abs(self._baselines[j] / 0.3048)).astype(int) == i and self._pol_pairs[j, 0] == self._pol_pairs[j, 1]:
                         alpha_struct.append({'index': j, 'alpha': alpha_list[i]})
 
-        alpha_arr = np.zeros(len(alpha_struct), np.dtype([('index', np.int16,
-            (2,)), ('alpha', np.complex64)]))
-        
+        alpha_arr = np.zeros(len(alpha_struct),
+                             np.dtype([('index', np.int16, (2,)), ('alpha', np.complex64)]))
+
         for i in range(alpha_arr.shape[0]):
             idx = alpha_struct[i]['index']
             chan_i, chan_j = self._prod[idx][0], self._prod[idx][1]
             alpha_arr[i]['index'][0], alpha_arr[i]['index'][1] = chan_i, chan_j
             alpha_arr[i]['alpha'] = alpha_struct[i]['alpha']
-        
-        return alpha_arr
 
+        return alpha_arr
 
     def get_xtalk(self):
         """ Get the receiver and/or sky Cross talk given an input model.
-	Parameters
-	----------
-	nbounce : integer, number of bounces to consider.
-		(options 0, 1, 2; default:0)
-	t_sky : bool, if sky cross talk is considered. (default: True).
-	t_receiver : bool, if t_receiver cross talk is considered. (default: True).
-	set_50K : bool, if 50K are added to autocorrelations. (default: True).
-	
-	Returns
-	-------
-	xtalk : numpy.array in shape of visibilties. 
-		contains all crosstalk terms due to input model.
-	"""
+            Parameters
+            ----------
+            nbounce : integer, number of bounces to consider.
+                (options 0, 1, 2; default:0)
+            t_sky : bool, if sky cross talk is considered. (default: True).
+            t_receiver : bool, if t_receiver cross talk is considered. (default: True).
+            set_50K : bool, if 50K are added to autocorrelations. (default: True).
+
+            Returns
+            -------
+            xtalk : numpy.array in shape of visibilties.
+                contains all crosstalk terms due to input model.
+        """
         nbounce = self.bounce
-	t_sky = self.t_sky
-	t_receiver = self.t_receiver
-	set_50K = self.set_50K
+        t_sky = self.t_sky
+        t_receiver = self.t_receiver
+        set_50K = self.set_50K
 
         if nbounce == 0:
-            
             alpha_list = [0, 0.15]
             alpha = self.get_coeffs(alpha_list)
             path = self._baselines
             phase_factor = _get_phase(self._freq, path)
             alpha_dot_phase = _get_alpha_dot_phase(alpha, phase_factor,
-                    self._nfeeds)
+                                                   self._nfeeds)
             print "path is no bounce"
 
         elif nbounce == 1:
-            
             # feed to focal line assuming 5m
             alpha_list = [0.15 for i in range(self._nfeeds)]
             alpha = self.get_coeffs(alpha_list)
-            path = 2 * np.sqrt((self._baselines/2)**2 + 5**2) 
+            path = 2 * np.sqrt((self._baselines/2)**2 + 5**2)
             phase_factor = _get_phase(self._freq, path)
             alpha_dot_phase = _get_alpha_dot_phase(alpha, phase_factor,
-                    self._nfeeds)
+                                                   self._nfeeds)
             print "path is one bounce"
 
         elif nbounce == 2:
-            
             alpha_list = [0.08 for i in range(self._nfeeds)]
             alpha = self.get_coeffs(alpha_list)
             path = 4 * np.sqrt((self._baselines/2)**2 + 5**2)
             phase_factor = _get_phase(self._freq, path)
             alpha_dot_phase = _get_alpha_dot_phase(alpha, phase_factor,
-                    self._nfeeds)
-            print "path is two bounces" 
-       
+                                                   self._nfeeds)
+            print "path is two bounces"
 
         if (t_sky and t_receiver and set_50K) is True:
             trec = _set_treceiver(self._vis, self._tsys, self._nfeeds)
             vis_and_tsys = self._vis + trec
             xtalk = _sparse_mult(alpha_dot_phase, vis_and_tsys, self._nfeeds)
-       	    xtalk = xtalk + trec
-	    print "Special case: added Tsys to Vis and then calculated overall crosstalk"
+            xtalk = xtalk + trec
+            print "Special case: added Tsys to Vis and then calculated overall crosstalk"
 
         elif (t_sky and t_receiver) is True and set_50K is False:
             xtalk_sky = _sparse_mult(alpha_dot_phase, self._vis, self._nfeeds)
-            xtalk_trec =  _sparse_mult_tsys(alpha_dot_phase, self._tsys,
-                    self._vis, self._nfeeds)
+            xtalk_trec = _sparse_mult_tsys(alpha_dot_phase, self._tsys,
+                                           self._vis, self._nfeeds)
             xtalk = xtalk_sky + xtalk_trec
-        
+
         elif (t_sky and set_50K) is True and t_receiver is False:
             trec = _set_treceiver(self._vis, self._tsys, self._nfeeds)
             xtalk_sky = _sparse_mult(alpha_dot_phase, self._vis, self._nfeeds)
@@ -198,30 +191,29 @@ class CrossTalkSameCylinder(pipeline.TaskBase):
 
         elif (t_receiver and set_50K) is True and t_sky is False:
             trec = _set_treceiver(self._vis, self._tsys, self._nfeeds)
-            xtalk_trec =  _sparse_mult_tsys(alpha_dot_phase, self._tsys,
-                    self._vis, self._nfeeds)
+            xtalk_trec = _sparse_mult_tsys(alpha_dot_phase, self._tsys,
+                                           self._vis, self._nfeeds)
             xtalk = trec + xtalk_trec
 
         elif t_receiver is True and (t_sky and set_50K) is False:
             xtalk = _sparse_mult_tsys(alpha_dot_phase, self._tsys, self._vis,
-                    self._nfeeds)
+                                      self._nfeeds)
 
         elif t_sky is True and (t_receiver and set_50K) is False:
             xtalk = _sparse_mult(alpha_dot_phase, self._vis, self._nfeeds)
-        
-        
-        print "DONE!"
 
+        print "DONE!"
 
         return xtalk
 
+
 def _sparse_mult(alpha_dot_phase, vis, nfeeds):
     """ Sparse multiplication of alpha_dot_phase with visibilties"""
- 
-    sky_xtalk = np.zeros_like(vis) 
+
+    sky_xtalk = np.zeros_like(vis)
     print "Calculating sky xtalk"
     n_alpha = alpha_dot_phase.shape[1]
-    
+
     for i in range(nfeeds):
         for j in range(i, nfeeds):
             visidx = tools.cmap(i, j, nfeeds)
@@ -283,7 +275,7 @@ def _sparse_mult_tsys(alpha_dot_phase, tsys, vis, nfeeds):
     Parameters
     ----------
     alpha_dot_phase: 2D np.array of dtype ('index', 'alpha_dot_phase') and 
-	shape (freq,prod). Is sparse.
+    shape (freq,prod). Is sparse.
     tsys: 2D array of shape (freq,prod). Is sparse.
 
     Returns
@@ -294,7 +286,7 @@ def _sparse_mult_tsys(alpha_dot_phase, tsys, vis, nfeeds):
     xtalk = np.zeros_like(vis)
     for a in range(alpha_dot_phase.shape[1]):
         chan_i, chan_j = alpha_dot_phase['index'][0,a][0], alpha_dot_phase['index'][0,a][1]
-	idx = tools.cmap(chan_i, chan_j, nfeeds)
+    idx = tools.cmap(chan_i, chan_j, nfeeds)
         xtalk[:, idx, :] = (alpha_dot_phase['alpha_dot_phase'][:, a, np.newaxis] * 
                 tsys[:, np.newaxis] + 
                 np.conjugate(alpha_dot_phase['alpha_dot_phase'][:, a, np.newaxis]) *
@@ -336,16 +328,16 @@ def _get_alpha_dot_phase(alpha, phase, nfeeds):
     Parameter
     ---------
     alpha : np.array of dtype ('index', 'alpha') 
-	'index': tuple of integers, 
-    		prod_map indices of coupling factor between feeds i, j        
-	'alpha' : complex, coupling factor. Is sparse.
+    'index': tuple of integers, 
+            prod_map indices of coupling factor between feeds i, j        
+    'alpha' : complex, coupling factor. Is sparse.
     phase_factor: 2D np.array of (freq, prod). Full matrix. 
     
     Returns
     ------
     alpha_dot_phase: np.array of dtype ('index', 'alpha')
-	'index' : tuple of integers,
-		prod_map indices of coupling factor between feeds i, j
+    'index' : tuple of integers,
+        prod_map indices of coupling factor between feeds i, j
         'alpha_dot_phase' : complex, coupling factor including phase
                 factor. Is sparse.
     """
