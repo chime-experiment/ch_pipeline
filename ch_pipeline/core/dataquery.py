@@ -68,6 +68,108 @@ from ch_util import tools, ephemeris
 
 _DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
 
+class QueryDatabase(pipeline.TaskBase):
+    """Find files from specified database queries.
+    
+    This routine will query the database as specified in the runtime
+    configuration file.
+    
+    Attributes
+    ----------
+    node_spoof : dictionary (default: { 'gong': '/mnt/gong/archive'} )
+        host and directory in which to find data.
+    starttime, endtime : string (default: None)
+        start and end times to restrict the database search to, eg '20190116T150323'
+    instrument : string (default: 'chimestack')
+        
+    source26m : string (default: None)
+        holography source to include. If None, do not include holography data.
+    
+    """
+    
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    
+    instrument = config.Property(proptype=str, default='chimestack')
+    source26m = config.Property(proptype=str, default=False)
+    
+    starttime = config.Property(proptype=str, default=None)
+    endtime = config.Property(proptype=str, default=None)
+    
+    exclude_daytime = config.Property(proptype=bool, default=False)
+    
+    exclude_sun = config.Property(proptype=bool, default=False)
+    exclude_sun_time_delta = config.Property(proptype=float, default=None)
+    exclude_sun_time_delta_rise_set = config.Property(proptype=float, default=None)
+    
+    exclude_transits = config.Property(default=None)
+    
+    start_RA = config.Property(proptype=float, default=None)
+    end_RA = config.Property(proptype=float, default=None)
+    
+    run_name = config.Property(proptype=str, default=None)
+    
+    accept_all_global_flags = config.Property(proptype=bool, default=False)
+    
+    def setup(self):
+        """Query the database and fetch the files
+        
+        Returns
+        -------
+        files : list
+            List of files to load
+        """
+        from ch_util import layout
+        from ch_util import data_index as di
+        
+        files = None
+        
+        # Query the database on rank=0 only, and broadcast to everywhere else
+        if mpiutil.rank0:
+            if run_name:
+                return self.QueryRun()
+
+            layout.connect_database()
+            
+            f = di.Finder(node_spoof = node_spoof)
+
+            # should be redundant if an instrument has been specified
+            f.only_corr()
+            
+            if accept_all_global_flags:
+                f.accept_all_global_flags()
+            
+            # Note: include_time_interval includes the specified time interval
+            # Using this instead of set_time_range, which only narrows the interval
+            f.include_time_interval(starttime, endtime)
+            
+            f.include_RA_interval(start_RA, end_RA)
+            
+            f.filter_acqs(di.ArchiveInst.name == instrument)
+            
+            if exclude_daytime:
+                f.exclude_daytime()
+            
+            if exclude_sun:
+                f.exclude_sun(time_delta=exclude_sun_time_delta,
+                            time_delta_rise_set=exclude_sun_time_delta_rise_set)
+            if exclude_transits:
+                f.exclude_transits(exclude_transits)
+           
+            if source26m:
+                f.include_26m_obs(source26m)
+                
+            
+            results = fi.get_results()
+            files = [ fname for result in results for fname in result[0] ]
+            files.sort()
+
+        files = mpiutil.world.bcast(files, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
+
+        return files
+
 
 class QueryRun(pipeline.TaskBase):
     """Find the files belonging to a specific `run`.
