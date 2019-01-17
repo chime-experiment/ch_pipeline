@@ -14,22 +14,31 @@ class FringeStop(task.SingleTask):
     """apply the fringestop of the holography data
     """
 
-    #source = config.Property(proptype=string, default='CasA')
-    #update_weight = config.Property(proptype=bool, default=False)
-    #smoothing_length = config.Property(proptype=float, default=None)
+    source = config.Property(proptype=string, default='CasA')
 
-    def process(self, tstream, source):
+    def process(self, tstream):
+        """Apply the fringestop to holography data
+
+        Parameters
+        ----------
+        tstream: andata.CorrData
+            timestream data to be fringestoped
+        Returns
+        ----------
+        tstream: andata.CorrData
+            returns the same timestream object but fringestopped
+        """
 
         tstream.redistribute('freq')
-
-        utime=tstream.index_map['time']['ctime']
-        freq=tstream.index_map['freq']['centre']
-        dtime=ephemeris.unix_to_datetime(utime[0])
+        
+        freq = tstream.freq['centre']
+        prod_map = tstream.index_map['prod']
+        src = ephemeris.get_source_dictionary()[source] 
+        dtime = ephemeris.unix_to_datetime(utime[0])
         corr_inputs = tools.get_correlator_inputs(dtime), correlator='chime')
-        feeds=[corr_inputs[data.index_map['input'][i][0]] for i in range(len(data.index_map['input']))]
-        prod_map=tstream.index_map['prod']
+        feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
 
-        tstream.vis=tools.fringestop_time(tstream.vis,times=utime, freq=freq,feeds=feeds,src=source,prod_map=prod_map)
+        tstream.vis=tools.fringestop_time(tstream.vis,times=tstream.time, freq=freq,feeds=feeds,src=source,prod_map=prod_map)
 
         return tstream
 
