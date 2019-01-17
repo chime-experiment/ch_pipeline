@@ -634,6 +634,145 @@ class Photometry(ContainerBase):
         return self.index_map['source']
 
 
+class HolographyProfileBeam(ContainerBase):
+    """ Container for holography beam measurements.
+        Holds a one-dimensional track at constant declination.
+    """
+
+    _axes = ('freq', 'pol', 'ha')
+
+    _dataset_spec = {
+        'beam': {
+            'axes': ['freq', 'pol', 'ha'],
+            'dtype': np.complex64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'weight': {
+            'axes': ['freq', 'pol', 'ha'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    def __init__(self, dec, *args, **kwargs):
+        self._dec = dec
+        super(HolographyProfileBeam, self).__init__(*args, **kwargs)
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def pol(self):
+        return self.index_map['pol']
+
+    @property
+    def ha(self):
+        return self.index_map['ha']
+
+    @property
+    def dec(self):
+        return self._dec
+
+
+class GridBeam(ContainerBase):
+
+    _axes = ('freq', 'pol', 'theta', 'phi')
+
+    _dataset_spec = {
+        'beam': {
+            'axes': ['freq', 'pol', 'theta', 'phi'],
+            'dtype': np.complex64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'weight': {
+            'axes': ['freq', 'pol', 'theta', 'phi'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    def __init__(self, coords='celestial', *args, **kwargs):
+
+        self._coords = coords
+        super(GridBeam, self).__init__(*args, **kwargs)
+
+    @property
+    def coords(self):
+        return self._coords
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def pol(self):
+        return self.index_map['pol']
+
+    @property
+    def theta(self):
+        return self.index_map['theta']
+
+    @property
+    def phi(self):
+        return self.index_map['phi']
+
+
+class TrackBeam(ContainerBase):
+
+    _axes = ('freq', 'pol', 'pix')
+
+    _dataset_spec = {
+        'beam': {
+            'axes': ['freq', 'pol', 'pix'],
+            'dtype': np.complex64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'weight': {
+            'axes': ['freq', 'pol', 'pix'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    def __init__(self, theta=None, phi=None, *args, **kwargs):
+
+        if (theta is None) != (phi is None):
+            raise RuntimeError("Both theta and phi coordinates must be specified.")
+        elif len(theta) != len(phi):
+            raise RuntimeError("theta and phi axes must have same length: "
+                               "({:d} != {:d})".format(len(theta), len(phi)))
+        else:
+            pix = np.zeros(len(theta), dtype=[('theta', np.float32), ('phi', np.float32)])
+            pix['theta'] = theta
+            pix['phi'] = phi
+            super(TrackBeam, self).__init__(*args, pix=pix, **kwargs)
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def pol(self):
+        return self.index_map['pol']
+
+    @property
+    def pix(self):
+        return self.index_map['pix']
+
+
 def make_empty_corrdata(freq=None, input=None, time=None,
                         axes_from=None, attrs_from=None,
                         distributed=True, distributed_axis=0, comm=None):
