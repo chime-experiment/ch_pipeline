@@ -66,7 +66,7 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {'gong': '/mnt/gong/archive/'}
+_DEFAULT_NODE_SPOOF = {'cedar': '/project/rpp-krs/chime/chime_online/'}
 
 class QueryDatabase(pipeline.TaskBase):
     """Find files from specified database queries.
@@ -76,13 +76,14 @@ class QueryDatabase(pipeline.TaskBase):
     
     Attributes
     ----------
-    node_spoof : dictionary (default: { 'gong': '/mnt/gong/archive'} )
+    node_spoof : dictionary
+        (default: {'cedar': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
-    starttime, endtime : string (default: None)
+    start_time, end_time : string (default: None)
         start and end times to restrict the database search to, eg '20190116T150323'
     instrument : string (default: 'chimestack')
         data set to use
-    source26m : string (default: None)
+    source_26m : string (default: None)
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
         exclude daytime data
@@ -108,10 +109,10 @@ class QueryDatabase(pipeline.TaskBase):
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
     
     instrument = config.Property(proptype=str, default='chimestack')
-    source26m = config.Property(proptype=str, default=False)
+    source_26m = config.Property(proptype=str, default=False)
     
-    starttime = config.Property(proptype=str, default=None)
-    endtime = config.Property(proptype=str, default=None)
+    start_time = config.Property(proptype=str, default=None)
+    end_time = config.Property(proptype=str, default=None)
     
     exclude_daytime = config.Property(proptype=bool, default=False)
     
@@ -159,8 +160,8 @@ class QueryDatabase(pipeline.TaskBase):
             
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
-            # f.include_time_interval(self.starttime, self.endtime)
-            f.set_time_range(self.starttime, self.endtime)
+            # f.include_time_interval(self.start_time, self.end_time)
+            f.set_time_range(self.start_time, self.end_time)
             
             if self.start_RA and self.end_RA:
                 f.include_RA_interval(self.start_RA, self.end_RA)
@@ -178,8 +179,8 @@ class QueryDatabase(pipeline.TaskBase):
             if self.exclude_transits:
                 f.exclude_transits(self.exclude_transits)
            
-            if self.source26m:
-                f.include_26m_obs(self.source26m)
+            if self.source_26m:
+                f.include_26m_obs(self.source_26m)
                 
             
             results = f.get_results()
