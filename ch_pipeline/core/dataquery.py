@@ -80,7 +80,9 @@ class QueryDatabase(pipeline.TaskBase):
         (default: {'cedar': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
     start_time, end_time : string (default: None)
-        start and end times to restrict the database search to, eg '20190116T150323'
+        start and end times to restrict the database search to
+        can be in any format ensure_unix will support, including eg
+            20190116T150323 and 2019-1-16 08:03:23 -7
     instrument : string (default: 'chimestack')
         data set to use
     source_26m : string (default: None)
@@ -99,7 +101,7 @@ class QueryDatabase(pipeline.TaskBase):
         starting and ending RA to include. Both values must be included or
         no effect
     run_name : string (default: None)
-        run name to include
+        run name to include. If used, all other parameters will be ignored.
     accept_all_global_flags : bool (default: False)
         Accept all global flags. Due to a bug as of 2019-1-16, this may need to
         be set to True
@@ -109,11 +111,11 @@ class QueryDatabase(pipeline.TaskBase):
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
     
     instrument = config.Property(proptype=str, default='chimestack')
-    source_26m = config.Property(proptype=str, default=False)
+    source_26m = config.Property(proptype=str, default=None)
     
-    start_time = config.Property(proptype=str, default=None)
-    end_time = config.Property(proptype=str, default=None)
-    
+    start_time = config.Property(default=None)
+    end_time = config.Property(default=None)
+
     exclude_daytime = config.Property(proptype=bool, default=False)
     
     exclude_sun = config.Property(proptype=bool, default=False)
@@ -145,6 +147,7 @@ class QueryDatabase(pipeline.TaskBase):
         
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
+
             if self.run_name:
                 return self.QueryRun()
 
