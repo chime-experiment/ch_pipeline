@@ -106,6 +106,7 @@ class QueryDatabase(pipeline.TaskBase):
     start_RA = config.Property(proptype=float, default=None)
     end_RA = config.Property(proptype=float, default=None)
     
+
     run_name = config.Property(proptype=str, default=None)
     
     accept_all_global_flags = config.Property(proptype=bool, default=False)
@@ -125,41 +126,45 @@ class QueryDatabase(pipeline.TaskBase):
         
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-            if run_name:
+            if self.run_name:
                 return self.QueryRun()
 
             layout.connect_database()
             
-            f = di.Finder(node_spoof = node_spoof)
+            f = di.Finder(node_spoof = self.node_spoof)
 
             # should be redundant if an instrument has been specified
             f.only_corr()
             
-            if accept_all_global_flags:
+            if self.accept_all_global_flags:
                 f.accept_all_global_flags()
             
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
-            f.include_time_interval(starttime, endtime)
+            #f.include_time_interval(self.starttime, self.endtime)
+            f.set_time_range(self.starttime, self.endtime)
             
-            f.include_RA_interval(start_RA, end_RA)
+            if self.start_RA and self.end_RA:
+                f.include_RA_interval(self.start_RA, self.end_RA)
+            elif (self.start_RA or self.start_RA):
+                    print('WARNING: one but not both of start_RA and end_RA are set. Ignoring both.')
             
-            f.filter_acqs(di.ArchiveInst.name == instrument)
+            f.filter_acqs(di.ArchiveInst.name == self.instrument)
             
-            if exclude_daytime:
+            if self.exclude_daytime:
                 f.exclude_daytime()
             
-            if exclude_sun:
-                f.exclude_sun(time_delta=exclude_sun_time_delta,
-                            time_delta_rise_set=exclude_sun_time_delta_rise_set)
-            if exclude_transits:
-                f.exclude_transits(exclude_transits)
+            if self.exclude_sun:
+                f.exclude_sun(time_delta=self.exclude_sun_time_delta,
+                            time_delta_rise_set=self.exclude_sun_time_delta_rise_set)
+            if self.exclude_transits:
+                f.exclude_transits(self.exclude_transits)
            
-            if source26m:
-                f.include_26m_obs(source26m)
+            if self.source26m:
+                f.include_26m_obs(self.source26m)
                 
             
-            results = fi.get_results()
+            results = f.get_results()
             files = [ fname for result in results for fname in result[0] ]
             files.sort()
 
