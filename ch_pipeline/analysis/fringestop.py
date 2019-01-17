@@ -1,33 +1,17 @@
-"""Miscellaneous pipeline tasks with no where better to go.
+"""to do the fringestop of the holography data
+"""
 
-Tasks should be proactively moved out of """
-
-import numpy as np
-
-from caput import config, mpiutil
 from ch_util import andata
 from ch_util import data_index
 from ch_util import ephemeris
-from ch_util import ni_utils
-from ch_util import layout
 from ch_util import tools
 
 from datetime import datetime
-from datetime import timedelta
 
 
 
 class FringeStop(task.SingleTask):
-    """Apply a set of gains to a timestream or sidereal stack.
-
-    Attributes
-    ----------
-    inverse : bool, optional
-        Apply the gains directly, or their inverse.
-    update_weight : bool, optional
-        Scale the weight array with the updated gains.
-    smoothing_length : float, optional
-        Smooth the gain timestream across the given number of seconds.
+    """apply the fringestop of the holography data
     """
 
     #source = config.Property(proptype=string, default='CasA')
