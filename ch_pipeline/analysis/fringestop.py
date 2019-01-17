@@ -30,8 +30,10 @@ class FringeStop(task.SingleTask):
         """
 
         tstream.redistribute('freq')
-        
-        freq = tstream.freq['centre']
+
+        start_freq = tstream.vis.local_offset[0]
+        nfreq = tstream.vis.local_shape[0]
+        freq = tstream.freq['centre'][start_freq:start_freq + nfreq]
         prod_map = tstream.index_map['prod']
         src = ephemeris.get_source_dictionary()[source] 
         dtime = ephemeris.unix_to_datetime(utime[0])
