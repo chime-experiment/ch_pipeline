@@ -40,7 +40,7 @@ class FringeStop(task.SingleTask):
         corr_inputs = tools.get_correlator_inputs(dtime), correlator='chime')
         feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
 
-        tstream.vis=tools.fringestop_time(tstream.vis,times=tstream.time, freq=freq,feeds=feeds,src=source,prod_map=prod_map)
+        tstream.vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
 
         return tstream
 
