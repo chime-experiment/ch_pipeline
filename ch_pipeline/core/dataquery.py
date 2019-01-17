@@ -66,7 +66,7 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {'scinet_online': '/scratch/k/krs/jrs65/chime/archive/online/'}
+_DEFAULT_NODE_SPOOF = {'gong': '/mnt/gong/archive/'}
 
 class QueryDatabase(pipeline.TaskBase):
     """Find files from specified database queries.
@@ -81,9 +81,27 @@ class QueryDatabase(pipeline.TaskBase):
     starttime, endtime : string (default: None)
         start and end times to restrict the database search to, eg '20190116T150323'
     instrument : string (default: 'chimestack')
-        
+        data set to use
     source26m : string (default: None)
         holography source to include. If None, do not include holography data.
+    exclude_daytime : bool (default: False)
+        exclude daytime data
+    exclude_sun : bool (default: False)
+        exclude data around Sun
+    exclude_sun_time_delta : float (default: None)
+        time_delta parameter passed to exclude_sun()
+    exclude_sun_time_delta_rise_set : float (default: None)
+        time_delta_rise_set parameter passed to exclude_sun()
+    exclude_transits : string or float (default: None)
+        if set, call exclude_transits(). Pass name of source or RA to exclude
+    start_RA, end_RA : float (default: None)
+        starting and ending RA to include. Both values must be included or
+        no effect
+    run_name : string (default: None)
+        run name to include
+    accept_all_global_flags : bool (default: False)
+        Accept all global flags. Due to a bug as of 2019-1-16, this may need to
+        be set to True
     
     """
     
@@ -141,7 +159,7 @@ class QueryDatabase(pipeline.TaskBase):
             
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
-            #f.include_time_interval(self.starttime, self.endtime)
+            # f.include_time_interval(self.starttime, self.endtime)
             f.set_time_range(self.starttime, self.endtime)
             
             if self.start_RA and self.end_RA:
