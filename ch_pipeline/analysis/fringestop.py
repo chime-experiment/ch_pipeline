@@ -36,7 +36,7 @@ class FringeStop(task.SingleTask):
         freq = tstream.freq['centre'][start_freq:start_freq + nfreq]
         prod_map = tstream.index_map['prod']
         src = ephemeris.get_source_dictionary()[source] 
-        dtime = ephemeris.unix_to_datetime(utime[0])
+        dtime = ephemeris.unix_to_datetime(tstream.time[0])
         corr_inputs = tools.get_correlator_inputs(dtime), correlator='chime')
         feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
 
