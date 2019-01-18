@@ -1,12 +1,9 @@
 """to do the fringestop of the holography data
 """
 
-from ch_util import andata
-from ch_util import data_index
 from ch_util import ephemeris
 from ch_util import tools
 from draco.core import containers
-from datetime import datetime
 
 
 
@@ -47,10 +44,11 @@ class FringeStop(task.SingleTask):
         dtime = ephemeris.unix_to_datetime(tstream.time[0])
         corr_inputs = tools.get_correlator_inputs(dtime), correlator='chime')
         feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
+        # todo: change the feeds calling from the tools.reorder_correlator_inputs after Python3 fix 
 
         fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
 
-        if overwrite:
+        if self.overwrite:
             tstream.vis=fs_vis
             return tstream
         else:
