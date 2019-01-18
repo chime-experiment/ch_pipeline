@@ -634,9 +634,9 @@ class Photometry(ContainerBase):
         return self.index_map['source']
 
 
-class HolographyProfileBeam(ContainerBase):
+class HolographyTransitBeam(ContainerBase):
     """ Container for holography beam measurements.
-        Holds a one-dimensional track at constant declination.
+        Holds a one-dimensional hour-angle track at constant declination.
     """
 
     _axes = ('freq', 'pol', 'ha')
@@ -660,7 +660,7 @@ class HolographyProfileBeam(ContainerBase):
 
     def __init__(self, dec, *args, **kwargs):
         self._dec = dec
-        super(HolographyProfileBeam, self).__init__(*args, **kwargs)
+        super(HolographyTransitBeam, self).__init__(*args, **kwargs)
 
     @property
     def freq(self):
@@ -680,6 +680,9 @@ class HolographyProfileBeam(ContainerBase):
 
 
 class GridBeam(ContainerBase):
+    """ Generic container for representing the 2-d beam in spherical
+        coordinates on a rectangular grid.
+    """
 
     _axes = ('freq', 'pol', 'theta', 'phi')
 
@@ -727,6 +730,10 @@ class GridBeam(ContainerBase):
 
 
 class TrackBeam(ContainerBase):
+    """ Container for a sequence of beam samples at arbitrary locations
+        on the sphere. The axis of the beam samples is 'pix', defined by
+        the numpy.dtype [('theta', np.float32), ('phi', np.float32)].
+    """
 
     _axes = ('freq', 'pol', 'pix')
 
