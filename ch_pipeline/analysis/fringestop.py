@@ -5,27 +5,35 @@ from ch_util import andata
 from ch_util import data_index
 from ch_util import ephemeris
 from ch_util import tools
-
+from draco.core import containers
 from datetime import datetime
 
 
 
 class FringeStop(task.SingleTask):
     """apply the fringestop of the holography data
+
+    Parameters
+    ----------
+    source : string
+        the source of the holography measurement
+    overwrite : bool
+        whether overwrite the original timestream data with the fringestopped timestream data
     """
 
-    source = config.Property(proptype=string, default='CasA')
+    source = config.Property(proptype=string, default='CAS_A')
+    overwrite = config.Property(proptype=bool, default=False)
 
     def process(self, tstream):
         """Apply the fringestop to holography data
 
         Parameters
         ----------
-        tstream: andata.CorrData
+        tstream : andata.CorrData
             timestream data to be fringestoped
         Returns
         ----------
-        tstream: andata.CorrData
+        tstream : andata.CorrData
             returns the same timestream object but fringestopped
         """
 
@@ -35,14 +43,20 @@ class FringeStop(task.SingleTask):
         nfreq = tstream.vis.local_shape[0]
         freq = tstream.freq['centre'][start_freq:start_freq + nfreq]
         prod_map = tstream.index_map['prod']
-        src = ephemeris.get_source_dictionary()[source] 
+        src = ephemeris.get_source_dictionary()[self.source] 
         dtime = ephemeris.unix_to_datetime(tstream.time[0])
         corr_inputs = tools.get_correlator_inputs(dtime), correlator='chime')
         feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
 
-        tstream.vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
+        fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
 
-        return tstream
+        if overwrite:
+            tstream.vis=fs_vis
+            return tstream
+        else:
+            tstream_fs=containers.empty_like(tstream)
+            tstream_fs.vis=fs_vis
+            return tstream_fs
 
 
 
