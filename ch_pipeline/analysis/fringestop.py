@@ -3,7 +3,8 @@
 
 from ch_util import ephemeris
 from ch_util import tools
-from draco.core import containers
+from draco.core import containers,task
+from caput import config
 
 
 
@@ -20,8 +21,8 @@ class FringeStop(task.SingleTask):
         whether overwrite the original timestream data with the fringestopped timestream data
     """
 
-    source = config.Property(proptype=string, default='CAS_A')
-    source_file = config.Property(proptype=string, default='primary_calibrators_perley2016.json')
+    source = config.Property(proptype=str, default='CAS_A')
+    source_file = config.Property(proptype=str, default='primary_calibrators_perley2016.json')
     overwrite = config.Property(proptype=bool, default=False)
 
     def process(self, tstream):
