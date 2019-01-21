@@ -4,7 +4,8 @@
 from ch_util import ephemeris
 from ch_util import tools
 from draco.core import containers,task
-from caput import config
+from caput import config,mpiutil
+from datetime import datetime
 
 
 
@@ -43,22 +44,29 @@ class FringeStop(task.SingleTask):
         start_freq = tstream.vis.local_offset[0]
         nfreq = tstream.vis.local_shape[0]
         end_freq = start_freq + nfreq
-        freq = tstream.freq['centre'][start_freq:end_freq]
+        print end_freq
+        print start_freq
+        print nfreq
+        freq = tstream.freq[start_freq:end_freq]
         prod_map = tstream.index_map['prod']
         src = ephemeris.get_source_dictionary(self.source_file)[self.source] 
         dtime = ephemeris.unix_to_datetime(tstream.time[0])
-        corr_inputs = tools.get_correlator_inputs(dtime, correlator='chime')
-        feeds = [corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
+        if mpiutil.rank==0:
+            corr_inputs = tools.get_correlator_inputs(dtime, correlator='chime')
+        else:
+            corr_inputs = None 
+        self.corr_inputs = mpiutil.world.bcast(corr_inputs,root=0)
+        feeds = [self.corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
         # todo: change the feeds calling from the tools.reorder_correlator_inputs after Python3 fix 
 
         fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
 
         if self.overwrite:
-            tstream.vis = fs_vis
+            tstream.vis[:] = fs_vis
             return tstream
         else:
             tstream_fs = containers.empty_like(tstream)
-            tstream_fs.vis = fs_vis
+            tstream_fs.vis[:] = fs_vis
             return tstream_fs
 
 
