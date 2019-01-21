@@ -33,6 +33,9 @@ class FringeStop(task.SingleTask):
         ----------
         tstream : andata.CorrData
             timestream data to be fringestoped
+        inputmap : list of :class:`CorrInput`s
+            A list of describing the inputs as they are in the file, output from the tools.get_correlator_inputs()
+
         Returns
         ----------
         tstream/tstream_fs : andata.CorrData
