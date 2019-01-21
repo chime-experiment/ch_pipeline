@@ -26,7 +26,7 @@ class FringeStop(task.SingleTask):
     source_file = config.Property(proptype=str, default='primary_calibrators_perley2016.json')
     overwrite = config.Property(proptype=bool, default=False)
 
-    def process(self, tstream):
+    def process(self, tstream, inputmap):
         """Apply the fringestop to holography data
 
         Parameters
@@ -43,20 +43,18 @@ class FringeStop(task.SingleTask):
 
         start_freq = tstream.vis.local_offset[0]
         nfreq = tstream.vis.local_shape[0]
-        end_freq = start_freq + nfreq
-        print end_freq
-        print start_freq
-        print nfreq
-        freq = tstream.freq[start_freq:end_freq]
+        #end_freq = start_freq + nfreq
+        freq = tstream.freq[start_freq:start_freq+nfreq]
         prod_map = tstream.index_map['prod']
         src = ephemeris.get_source_dictionary(self.source_file)[self.source] 
         dtime = ephemeris.unix_to_datetime(tstream.time[0])
+        """
         if mpiutil.rank==0:
             corr_inputs = tools.get_correlator_inputs(dtime, correlator='chime')
         else:
             corr_inputs = None 
-        self.corr_inputs = mpiutil.world.bcast(corr_inputs,root=0)
-        feeds = [self.corr_inputs[tstream.input[i][0]] for i in range(len(tstream.input))]
+        self.corr_inputs = mpiutil.world.bcast(corr_inputs,root=0)"""
+        feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
         # todo: change the feeds calling from the tools.reorder_correlator_inputs after Python3 fix 
 
         fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
