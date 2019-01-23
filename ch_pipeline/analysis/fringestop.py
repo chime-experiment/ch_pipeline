@@ -1,33 +1,28 @@
-"""to do the fringestop of the holography data
+"""fringe stop CHIME data to a given source
 """
 
-from ch_util import ephemeris
-from ch_util import tools
-from draco.core import containers,task
-from caput import config,mpiutil
 from datetime import datetime
-
+from caput import config,mpiutil
+from ch_util import tools, ephemeris
+from draco.core import containers,task
 
 
 class FringeStop(task.SingleTask):
-    """apply the fringestop of the holography data
+    """Fringe stop CHIME data to a given source
 
     Parameters
     ----------
     source : string
-        the source of the holography measurement
-    source_file : string
-        the file under ch_util/catalogs which contain the list of sources
+        the source to fringe stop
     overwrite : bool
         whether overwrite the original timestream data with the fringestopped timestream data
     """
 
-    source = config.Property(proptype=str, default='CAS_A')
-    source_file = config.Property(proptype=str, default='primary_calibrators_perley2016.json')
+    source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
-        """Apply the fringestop to holography data
+        """Apply the fringe stop of CHIME data to a given source
 
         Parameters
         ----------
@@ -38,7 +33,7 @@ class FringeStop(task.SingleTask):
 
         Returns
         ----------
-        tstream/tstream_fs : andata.CorrData
+        tstream : andata.CorrData
             returns the same timestream object but fringestopped
         """
 
@@ -49,7 +44,7 @@ class FringeStop(task.SingleTask):
         end_freq = start_freq + nfreq
         freq = tstream.freq[start_freq:end_freq]
         prod_map = tstream.index_map['prod']
-        src = ephemeris.get_source_dictionary(self.source_file)[self.source] 
+        src = ephemeris.source_dictionary[self.source] 
         feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
 
         fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
