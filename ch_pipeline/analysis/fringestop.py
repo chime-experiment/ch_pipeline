@@ -2,9 +2,9 @@
 """
 
 from datetime import datetime
-from caput import config,mpiutil
+from caput import config, mpiutil
 from ch_util import tools, ephemeris
-from draco.core import containers,task
+from draco.core import containers, task
 
 
 class FringeStop(task.SingleTask):
@@ -44,10 +44,17 @@ class FringeStop(task.SingleTask):
         end_freq = start_freq + nfreq
         freq = tstream.freq[start_freq:end_freq]
         prod_map = tstream.index_map['prod']
-        src = ephemeris.source_dictionary[self.source] 
-        feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
+        src = ephemeris.source_dictionary[self.source]
+        feeds = [inputmap[tstream.input[i][0]]
+                 for i in range(len(tstream.input))]
 
-        fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
+        fs_vis = tools.fringestop_time(
+            tstream.vis,
+            times=tstream.time,
+            freq=freq,
+            feeds=feeds,
+            src=src,
+            prod_map=prod_map)
 
         if self.overwrite:
             tstream.vis[:] = fs_vis
@@ -56,6 +63,3 @@ class FringeStop(task.SingleTask):
             tstream_fs = containers.empty_like(tstream)
             tstream_fs.vis[:] = fs_vis
             return tstream_fs
-
-
-
