@@ -51,7 +51,6 @@ class FringeStop(task.SingleTask):
         prod_map = tstream.index_map['prod']
         src = ephemeris.get_source_dictionary(self.source_file)[self.source] 
         feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
-        # todo: change the feeds calling from the tools.reorder_correlator_inputs after Python3 fix
 
         fs_vis=tools.fringestop_time(tstream.vis, times=tstream.time, freq=freq, feeds=feeds, src=src, prod_map=prod_map)
 
