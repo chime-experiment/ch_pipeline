@@ -498,6 +498,57 @@ class CHIMEExternalBeam(CHIME):
 
             return map_out
 
+class CHIMEExternalBeamAmplitude(CHIME):
+    """Model telescope for the CHIME.
+
+    This class uses an external beam model. It reads in maps in the form np.ndarray[npoints], 
+    representing beam amplitudes for each (x,y) polarization. Assumes single frequency.
+    """
+
+    primary_beamx_filename = config.Property(
+        proptype=str,
+        default='/home/pboubel/702_gaussbeam_x_amp.npy'
+    )
+
+    primary_beamy_filename = config.Property(
+        proptype=str,
+        default='/home/pboubel/702_gaussbeam_y_amp.npy'
+    )
+
+    def beam(self, feed, freq):
+        # Fetch beam parameters out of config database.
+        
+        beam_nside = healpy.npix2nside(np.load(self.primary_beamy_filename).shape[0])
+        telescope.TransitTelescope._init_trans(self, beam_nside)
+        print self._nside
+        
+        feed_obj = self.feeds[feed]
+
+        # Check that feed exists and is a CHIME cylinder antenna
+        if feed_obj is None:
+            raise ValueError("Craziness. The requested feed doesn't seem to exist.")
+
+        if not tools.is_array(feed_obj):
+            raise ValueError('Requested feed is not a CHIME antenna.')
+
+        # Get the beam rotation parameters.
+        yaw = -self.rotation_angle
+        pitch = 0.0
+        roll = 0.0
+
+        rot = np.radians([yaw, pitch, roll])
+
+        # We can only support feeds angled parallel or perp to the cylinder
+        # axis. Check for these and throw exception for anything else.
+        if tools.is_array_y(feed_obj):
+            fname = self.primary_beamy_filename
+            return cylbeam.beam_y_ext(fname, self._angpos, self.zenith, rot=rot)
+        elif tools.is_array_x(feed_obj):
+            fname = self.primary_beamx_filename
+            return cylbeam.beam_x_ext(fname, self._angpos, self.zenith, rot=rot)
+        else:
+            raise RuntimeError("Given polarisation (feed.pol=%s) not supported." % feed_obj.pol)
+
 
 def _nearest_freq(tel_freq, map_freq, freq_id):
 
