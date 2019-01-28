@@ -1,4 +1,22 @@
-"""fringe stop CHIME data to a given source
+"""
+=====================================================
+Tasks for fringestopping CHIME data to a given source
+=====================================================
+
+.. currentmodule:: ch_pipeline.analysis.fringestop
+
+Tasks for taking the timestream data and fringestop it to a given source
+
+Tasks
+=====
+    Fringestop
+
+Usage
+=====
+Use this task together with
+:ch_pipeline.core.dataquery.QueryDatabase to query the database to generate a file list
+:ch_pipeline.core.io.LoadCorrDataFiles to load the timestream data from the files in the previous file list
+:ch_pipeline.core.dataquery.QueryInputs to query the inputmap of the timestream data
 """
 
 from datetime import datetime
@@ -13,9 +31,9 @@ class FringeStop(task.SingleTask):
     Parameters
     ----------
     source : string
-        the source to fringe stop
+        The source to fringe stop data to, for example, 'CAS_A', 'CYG_A'
     overwrite : bool
-        whether overwrite the original timestream data with the fringestopped timestream data
+        Whether overwrite the original timestream data with the fringestopped timestream data, default is False
     """
 
     source = config.Property(proptype=str)
