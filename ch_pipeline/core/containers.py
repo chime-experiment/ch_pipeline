@@ -684,18 +684,18 @@ class GridBeam(ContainerBase):
         coordinates on a rectangular grid.
     """
 
-    _axes = ('freq', 'pol', 'theta', 'phi')
+    _axes = ('freq', 'pol', 'input', 'theta', 'phi')
 
     _dataset_spec = {
         'beam': {
-            'axes': ['freq', 'pol', 'theta', 'phi'],
+            'axes': ['freq', 'pol', 'input', 'theta', 'phi'],
             'dtype': np.complex64,
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
         },
         'weight': {
-            'axes': ['freq', 'pol', 'theta', 'phi'],
+            'axes': ['freq', 'pol', 'input', 'theta', 'phi'],
             'dtype': np.float32,
             'initialise': True,
             'distributed': True,
@@ -705,12 +705,12 @@ class GridBeam(ContainerBase):
 
     def __init__(self, coords='celestial', *args, **kwargs):
 
-        self._coords = coords
+        self.attrs['coords'] = coords
         super(GridBeam, self).__init__(*args, **kwargs)
 
     @property
     def coords(self):
-        return self._coords
+        return self.attrs['coords']
 
     @property
     def freq(self):
@@ -719,6 +719,10 @@ class GridBeam(ContainerBase):
     @property
     def pol(self):
         return self.index_map['pol']
+
+    @property
+    def input(self):
+        return self.index_map['input']
 
     @property
     def theta(self):
@@ -735,18 +739,18 @@ class TrackBeam(ContainerBase):
         the numpy.dtype [('theta', np.float32), ('phi', np.float32)].
     """
 
-    _axes = ('freq', 'pol', 'pix')
+    _axes = ('freq', 'pol', 'input', 'pix')
 
     _dataset_spec = {
         'beam': {
-            'axes': ['freq', 'pol', 'pix'],
+            'axes': ['freq', 'pol', 'input', 'pix'],
             'dtype': np.complex64,
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
         },
         'weight': {
-            'axes': ['freq', 'pol', 'pix'],
+            'axes': ['freq', 'pol', 'input', 'pix'],
             'dtype': np.float32,
             'initialise': True,
             'distributed': True,
@@ -754,7 +758,8 @@ class TrackBeam(ContainerBase):
         }
     }
 
-    def __init__(self, theta=None, phi=None, *args, **kwargs):
+    def __init__(self, theta=None, phi=None, coords='celestial',
+                 track_type='drift', *args, **kwargs):
 
         if (theta is None) != (phi is None):
             raise RuntimeError("Both theta and phi coordinates must be specified.")
@@ -767,6 +772,18 @@ class TrackBeam(ContainerBase):
             pix['phi'] = phi
             super(TrackBeam, self).__init__(*args, pix=pix, **kwargs)
 
+        self.attrs['coords'] = coords
+        self.attrs['track_type'] = track_type
+        super(GridBeam, self).__init__(*args, **kwargs)
+
+    @property
+    def coords(self):
+        return self.attrs['coords']
+
+    @property
+    def track_type(self):
+        return self.attrs['track_type']
+
     @property
     def freq(self):
         return self.index_map['freq']
@@ -774,6 +791,10 @@ class TrackBeam(ContainerBase):
     @property
     def pol(self):
         return self.index_map['pol']
+
+    @property
+    def input(self):
+        return self.index_map['input']
 
     @property
     def pix(self):
