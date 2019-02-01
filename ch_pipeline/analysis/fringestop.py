@@ -1,7 +1,7 @@
 """
-=====================================================
-Tasks for fringestopping CHIME data to a given source
-=====================================================
+===================================
+Tasks for fringestopping CHIME data
+===================================
 
 .. currentmodule:: ch_pipeline.analysis.fringestop
 
@@ -9,14 +9,23 @@ Tasks for taking the timestream data and fringestop it to a given source
 
 Tasks
 =====
-    Fringestop
+
+.. autosummary::
+    :toctree: generated/
+    
+    FringeStop
 
 Usage
 =====
-Use this task together with
-:ch_pipeline.core.dataquery.QueryDatabase to query the database to generate a file list
-:ch_pipeline.core.io.LoadCorrDataFiles to load the timestream data from the files in the previous file list
-:ch_pipeline.core.dataquery.QueryInputs to query the inputmap of the timestream data
+
+Use this task together with:
+
+* :class:`~ch_pipeline.core.dataquery.QueryDatabase` to query the database
+  and generate a file list.
+* :class:`~ch_pipeline.core.io.LoadCorrDataFiles` to load the timestream
+  from the files in the previous file list
+* :class:`~ch_pipeline.core.dataquery.QueryInputs` to query the inputmap
+  of the timestream data
 """
 
 from datetime import datetime
@@ -33,7 +42,8 @@ class FringeStop(task.SingleTask):
     source : string
         The source to fringe stop data to, for example, 'CAS_A', 'CYG_A'
     overwrite : bool
-        Whether overwrite the original timestream data with the fringestopped timestream data, default is False
+        Whether overwrite the original timestream data with the fringestopped
+        timestream data, default is False
     """
 
     source = config.Property(proptype=str)
@@ -46,13 +56,14 @@ class FringeStop(task.SingleTask):
         ----------
         tstream : andata.CorrData
             timestream data to be fringestoped
-        inputmap : list of :class:`CorrInput`s
-            A list of describing the inputs as they are in the file, output from the tools.get_correlator_inputs()
+        inputmap : list of :class:`CorrInput`
+            A list of describing the inputs as they are in the file, output from
+            `tools.get_correlator_inputs()`
 
         Returns
-        ----------
+        -------
         tstream : andata.CorrData
-            returns the same timestream object but fringestopped
+            Returns the same timestream object but fringestopped
         """
 
         tstream.redistribute('freq')
