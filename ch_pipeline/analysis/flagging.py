@@ -51,24 +51,65 @@ class RFIFilter(task.SingleTask):
         Threshold above which we mask the data.
     """
 
-    threshold_mad = config.Property(proptype=float, default=5.0)
-
+    stack = config.Property(proptype=bool, default=False)
     flag1d = config.Property(proptype=bool, default=False)
+    rolling = config.Property(proptype=bool, default=False)
+    keep_ndev = config.Property(proptype=bool, default=False)
+    freq_width = config.Property(proptype=float, default=10.0)
+    time_width = config.Property(proptype=float, default=420.0)
+    threshold_mad = config.Property(proptype=float, default=6.0)
 
     def process(self, data):
 
-        if mpiutil.rank0:
-            print "RFI filtering %s, flag1d = %s" % (data.attrs['tag'], self.flag1d)
-
-        # Construct RFI mask
-        mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad, flag1d=self.flag1d)
-
-        data.weight[:] *= (1 - mask).astype(data.weight.dtype)  # Switch from mask to inverse noise weight
+        self.log.info("RFI filtering %s, stack = %s, flag1d = %s, rolling = %s, keep_ndev = %s, threshold_mad = %0.1f" %
+                     (data.attrs['tag'], self.stack, self.flag1d, self.rolling, self.keep_ndev, self.threshold_mad))
 
         # Redistribute across frequency
         data.redistribute('freq')
 
-        return data
+        # Construct RFI mask
+        auto_index, ndev = rfi.number_deviations(data, freq_width=self.freq_width,
+                                                       time_width=self.time_width,
+                                                       flag1d=self.flag1d,
+                                                       rolling=self.rolling,
+                                                       stack=self.stack)
+
+        # Reorder output based on input chan_id
+        minput = data.index_map['input'][auto_index]
+        isort = np.argsort(minput['chan_id'])
+
+        minput = minput[isort]
+        ndev = ndev[:, isort, :]
+
+        # Place cut on the number of deviations
+        mask = ndev > self.threshold_mad
+
+        # Lookup known RFI bands
+        nfreq = data.vis.local_shape[0]
+        sfreq = data.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        static_mask = rfi.frequency_mask(data.freq[sfreq:efreq])
+        static_mask = static_mask[:, np.newaxis, np.newaxis]
+
+        # Mask known RFI bands and change flag convention
+        mask = np.logical_not(np.logical_or(mask, static_mask))
+
+        # Create container to hold output
+        out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+        if self.keep_ndev:
+            out.add_dataset('ndev')
+
+        out.redistribute('freq')
+
+        # Save mask to output container
+        out.mask[:] = mask
+
+        if self.keep_ndev:
+            out.ndev[:] = ndev
+
+        # Return output container
+        return out
 
 
 class ChannelFlagger(task.SingleTask):
@@ -658,32 +699,71 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 
 class ApplyCorrInputMask(task.SingleTask):
-    """ Flag out bad correlator inputs from a timestream or sidereal stack.
+    """ Apply an input mask to a timestream.
     """
 
-    def process(self, timestream, inputmask):
-        """Flag out bad correlator inputs by giving them zero weight.
+    def process(self, timestream, cmask):
+        """Flag out events by giving them zero weight.
 
         Parameters
         ----------
         timestream : andata.CorrData or containers.SiderealStream
 
-        inputmask : containers.CorrInputMask
+        mask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
         timestream : andata.CorrData or containers.SiderealStream
         """
 
-        # Make sure that timestream is distributed over frequency
+        # Make sure containers are distributed across frequency
         timestream.redistribute('freq')
+        cmask.redistribute('freq')
 
-        # Extract mask
-        mask = inputmask.datasets['input_mask'][:]
+        # Create a slice that will expand the mask to
+        # the same dimensions as the weight array
+        waxis = timestream.weight.attrs['axis']
+        slc = [slice(None)] * len(waxis)
+        for ww, name in enumerate(waxis):
+            if (name not in ['stack', 'prod']) and (name not in cmask.mask.attrs['axis']):
+                slc[ww] = None
 
-        # Apply mask to the vis_weight array
+        # Extract input mask and weight array
         weight = timestream.weight[:]
-        tools.apply_gain(weight, mask[np.newaxis, :, np.newaxis], out=weight)
+        mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
+
+        # Expand mask to same dimension as weight array
+        mask = mask[slc]
+
+        # Determine mapping between inputs in the mask
+        # and inputs in the timestream
+        mask_input = cmask.index_map['input'][:]
+        nminput = mask_input.size
+
+        tstream_input = timestream.index_map['input'][:]
+        ntinput = tstream_input.size
+
+        if nminput == 1:
+
+            # Apply same mask to all products
+            weight *= mask
+
+        else:
+
+            # Map each input to a mask
+            if nminput < ntinput:
+
+                # The expression below will map a mask for each cylinder to the inputs
+                # on that cylinder.  However, we may want to make this more robust and
+                # explicit by passing a telescope or inputmap object as an input and
+                # determining the cylinders mapping from that.
+                iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
+
+                mask = mask[:, iexpand]
+
+            # Use apply_gain function to apply mask based on product map
+            prod = timestream.index_map['prod'][timestream.index_map['stack']['prod']]
+            tools.apply_gain(weight, mask, out=weight, prod_map=prod)
 
         # Return timestream
         return timestream
@@ -756,8 +836,7 @@ class ApplySiderealDayFlag(task.SingleTask):
                         "Will halt pipeline processing.") % this_csd)
 
         # Print whether or not we will continue processing this csd
-        if mpiutil.rank0:
-            print msg
+        self.log.info(msg)
 
         # Return input timestream or None
         return output
