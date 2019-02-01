@@ -80,4 +80,5 @@ class FringeStop(task.SingleTask):
         else:
             tstream_fs = containers.empty_like(tstream)
             tstream_fs.vis[:] = fs_vis
+            tstream_fs.weights[:] = tstream.weights
             return tstream_fs
