@@ -72,7 +72,7 @@ class FringeStop(task.SingleTask):
         nfreq = tstream.vis.local_shape[0]
         end_freq = start_freq + nfreq
         freq = tstream.freq[start_freq:end_freq]
-        prod_map = tstream.index_map['prod']
+        prod_map = tstream.index_map['prod'][tstream.index_map['stack']['prod']]
         src = ephemeris.source_dictionary[self.source]
         feeds = [inputmap[tstream.input[i][0]]
                  for i in range(len(tstream.input))]
