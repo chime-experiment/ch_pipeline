@@ -5,7 +5,7 @@ Tasks for Cross Talk Model (:mod:`~ch_pipeline.xtalk`)
 
 .. currentmodule:: ch_pipeline.xtalk
 
-Tasks for adding cross talk to the data. 
+Tasks for adding cross talk to the data.
 
 Tasks
 =====
@@ -39,11 +39,14 @@ class CrossTalkSameCylinder(task.SingleTask):
         Cross talk due to sky tempereature (default = True)
     bounce : int, optional
         Number of bounces (default 0)
+    coupling_coeff : float, optional
+        Coupling coefficient for bounce (default 0.15)
     """
     set_50K = config.Property(proptype=bool, default=True)
     t_receiver = config.Property(proptype=bool, default=True)
     t_sky = config.Property(proptype=bool, default=True)
     bounce = config.Property(proptype=int, default=0)
+    coupling_coeff = config.Property(proptype=float, default=0.15)
 
     def setup(self, manager):
         """ Setup the simulation for crosstalk.
@@ -69,6 +72,8 @@ class CrossTalkSameCylinder(task.SingleTask):
         self._nfreq = tel.nfreq
         self._nfeeds = tel.nfeed
         self._baselines = np.sqrt(tel.baselines[:, 0]**2 + tel.baselines[:, 1]**2)
+        self._ncyl = int(np.round(np.abs(tel.baselines[:,0]).max() / tel.cylinder_spacing))
+        self._cyl_len = self._nfeeds / 2 / self._ncyl
         self._vis = sstream.vis
         self._freq = tel.frequencies * 1e6
 
@@ -102,7 +107,7 @@ class CrossTalkSameCylinder(task.SingleTask):
                               ('input_b', np.uint16)])
         for i in range(nprod):
             self._prod[i]['input_a'] = tools.icmap(i, self._nfeeds)[0]
-        self._prod[i]['input_b'] = tools.icmap(i, self._nfeeds)[1]
+            self._prod[i]['input_b'] = tools.icmap(i, self._nfeeds)[1]
 
         for i in range(len(alpha_list)):
             if alpha_list[i] == 0.0:
@@ -144,7 +149,7 @@ class CrossTalkSameCylinder(task.SingleTask):
         set_50K = self.set_50K
 
         if nbounce == 0:
-            alpha_list = [0, 0.15]
+            alpha_list = [0, self.coupling_coeff]
             alpha = self.get_coeffs(alpha_list)
             path = self._baselines
             phase_factor = _get_phase(self._freq, path)
@@ -154,7 +159,7 @@ class CrossTalkSameCylinder(task.SingleTask):
 
         elif nbounce == 1:
             # feed to focal line assuming 5m
-            alpha_list = [0.15 for i in range(self._nfeeds)]
+            alpha_list = [self.coupling_coeff for i in range(self._cyl_len)]
             alpha = self.get_coeffs(alpha_list)
             path = 2 * np.sqrt((self._baselines/2)**2 + 5**2)
             phase_factor = _get_phase(self._freq, path)
@@ -163,7 +168,7 @@ class CrossTalkSameCylinder(task.SingleTask):
             print "path is one bounce"
 
         elif nbounce == 2:
-            alpha_list = [0.08 for i in range(self._nfeeds)]
+            alpha_list = [self.coupling_coeff for i in range(self._cyl_len)]
             alpha = self.get_coeffs(alpha_list)
             path = 4 * np.sqrt((self._baselines/2)**2 + 5**2)
             phase_factor = _get_phase(self._freq, path)
@@ -213,6 +218,7 @@ def _sparse_mult(alpha_dot_phase, vis, nfeeds):
     sky_xtalk = np.zeros_like(vis)
     print "Calculating sky xtalk"
     n_alpha = alpha_dot_phase.shape[1]
+
 
     for i in range(nfeeds):
         for j in range(i, nfeeds):
@@ -271,10 +277,10 @@ def _set_treceiver(vis, tsys, nfeeds):
     return treceiver
 
 def _sparse_mult_tsys(alpha_dot_phase, tsys, vis, nfeeds):
-    """ 
+    """
     Parameters
     ----------
-    alpha_dot_phase: 2D np.array of dtype ('index', 'alpha_dot_phase') and 
+    alpha_dot_phase: 2D np.array of dtype ('index', 'alpha_dot_phase') and
     shape (freq,prod). Is sparse.
     tsys: 2D array of shape (freq,prod). Is sparse.
 
@@ -286,15 +292,15 @@ def _sparse_mult_tsys(alpha_dot_phase, tsys, vis, nfeeds):
     xtalk = np.zeros_like(vis)
     for a in range(alpha_dot_phase.shape[1]):
         chan_i, chan_j = alpha_dot_phase['index'][0,a][0], alpha_dot_phase['index'][0,a][1]
-    idx = tools.cmap(chan_i, chan_j, nfeeds)
-        xtalk[:, idx, :] = (alpha_dot_phase['alpha_dot_phase'][:, a, np.newaxis] * 
-                tsys[:, np.newaxis] + 
+        idx = tools.cmap(chan_i, chan_j, nfeeds)
+        xtalk[:, idx, :] = (alpha_dot_phase['alpha_dot_phase'][:, a, np.newaxis] *
+                tsys[:, np.newaxis] +
                 np.conjugate(alpha_dot_phase['alpha_dot_phase'][:, a, np.newaxis]) *
                 tsys[:,np.newaxis])
 
     print "Calculating cross talk due to t_receiver"""
-    
-    return xtalk 
+
+    return xtalk
 
 def _get_phase(nu, dij):
     """ Return  phase due to a path length difference between 2 feeds
