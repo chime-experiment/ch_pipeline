@@ -41,7 +41,7 @@ class TransitGrouper(task.SingleTask):
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
             msg = ("Could not find source {} in catalogue. "
-                   "Must use same spelling as in `ch_util.ephemeris`.")
+                   "Must use same spelling as in `ch_util.ephemeris`.".format(self.source))
             self.log.error(msg)
             raise PipelineConfigError(msg)
         self.cur_transit = None
@@ -82,9 +82,10 @@ class TransitGrouper(task.SingleTask):
 
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
-            self.cur_transit = obs.next_transit(tstream.time[0])
+            self.cur_transit = obs.next_transit(self.src)
+            # subtract half a day from start time to ensure we don't get following day
             self.start_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) - self.ha_span / 2,
-                                           tstream.time[0])
+                                           tstream.time[0] - 43200)
             self.end_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) + self.ha_span / 2,
                                          tstream.time[0])
             self.last_time = tstream.time[-1]
@@ -112,14 +113,18 @@ class TransitGrouper(task.SingleTask):
     def _finalize_transit(self):
 
         # Find where transit starts and ends
+        if len(self.tstreams) == 0:
+            self.log.info("Did not find any transits.")
+            return None
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = np.argmin(np.abs(all_t - self.start_t))
         stop_ind = np.argmin(np.abs(all_t - self.end_t))
 
         # Concatenate timestreams
-        ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
+        ts = tod.concatenate(self.tstreams, start={'time': start_ind},
+                             stop={'time': stop_ind})
         _, dec = self.sky_obs.radec(self.src)
-        ts.attrs['dec'] = dec.degrees
+        ts.attrs['dec'] = dec._degrees
         ts.attrs['source_name'] = self.source
 
         self.tstreams = []
@@ -169,7 +174,7 @@ class TransitRegridder(Regridder):
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
             msg = ("Could not find source {} in catalogue. "
-                   "Must use same spelling as in `ch_util.ephemeris`.")
+                   "Must use same spelling as in `ch_util.ephemeris`.".format(self.source))
             self.log.error(msg)
             raise PipelineConfigError(msg)
 
@@ -198,6 +203,7 @@ class TransitRegridder(Regridder):
         self.sky_obs.date = data.time[0]
 
         ra, _ = self.sky_obs.radec(self.src)
+        ra = ra._degrees
 
         # Get input time grid
         lha = self.sky_obs.unix_to_lsa(data.time) - ra
