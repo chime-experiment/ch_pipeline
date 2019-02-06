@@ -4,13 +4,14 @@
 import numpy as np
 
 from caput import config, tod, mpiarray, mpiutil
-from caput.pipeline import PipelineConfigError
+from caput.pipeline import PipelineConfigError, PipelineRuntimeError
 
 from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream
 
 from ch_util import ephemeris as ephem
+from ch_util import data_index as di
 
 
 class TransitGrouper(task.SingleTask):
@@ -22,10 +23,14 @@ class TransitGrouper(task.SingleTask):
             Span in degrees surrounding transit.
         source: str
             Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+        db_source: str
+            Name of the transiting source as listed in holography database.
+            This is a hack until a better solution is implemented.
     """
 
     ha_span = config.Property(proptype=float, default=180.)
     source = config.Property(proptype=str)
+    db_source = config.Property(proptype=str)
 
     def setup(self, observer=None):
         """Set the local observers position if not using CHIME.
@@ -48,6 +53,13 @@ class TransitGrouper(task.SingleTask):
         self.tstreams = []
         self.last_time = 0
 
+        # Get list of holography observations
+        di.connect_database()
+        self.db_src = di.HolographySource.get(di.HolographySource.name == self.db_source)
+        self.db_runs = di.HolographyObservation.select().where(
+            di.HolographyObservation.source == self.db_src
+        )
+
     def process(self, tstream):
         """ Take in a timestream and accumulate, group into whole transits.
 
@@ -60,9 +72,6 @@ class TransitGrouper(task.SingleTask):
         ts : TimeStream
             Timestream with containing transits of specified length.
         """
-
-        # shortcut
-        obs = self.sky_obs
 
         # Update observer time
         self.sky_obs.date = tstream.time[0]
@@ -82,13 +91,8 @@ class TransitGrouper(task.SingleTask):
 
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
-            self.cur_transit = obs.next_transit(self.src)
-            # subtract half a day from start time to ensure we don't get following day
-            self.start_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) - self.ha_span / 2,
-                                           tstream.time[0] - 43200)
-            self.end_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) + self.ha_span / 2,
-                                         tstream.time[0])
-            self.last_time = tstream.time[-1]
+            self.cur_transit = self.sky_obs.next_transit(self.src)
+            self._transit_bounds(tstream.time[0])
 
         # check if we've accumulated enough past the transit
         if tstream.time[-1] > self.end_t:
@@ -132,6 +136,29 @@ class TransitGrouper(task.SingleTask):
         self.tstreams = []
 
         return ts
+
+    def _transit_bounds(self, t0):
+        # shortcut
+        obs = self.sky_obs
+
+        # subtract half a day from start time to ensure we don't get following day
+        self.start_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) -
+                                       self.ha_span / 2, t0 - 43200)
+        self.end_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) +
+                                     self.ha_span / 2, t0)
+
+        # get bounds of observation from database
+        this_run = self.db_runs.where(
+            di.HolographyObservation.start_time < self.cur_transit,
+            di.HolographyObservation.finish_time > self.cur_transit
+        )
+        if len(this_run) == 0:
+            msg = "Could not find source transit in holography database."
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+        else:
+            self.start_t = max(self.start_t, this_run[0].start_time)
+            self.end_t = min(self.end_t, this_run[0].end_time)
 
 
 class TransitRegridder(Regridder):
