@@ -248,7 +248,7 @@ class TransitRegridder(Regridder):
         # Create new container for output
         ra_grid = (new_grid + ra) % 360.
         new_data = SiderealStream(axes_from=data, attrs_from=data,
-                                  ra=new_grid + ra)
+                                  ra=ra_grid)
         new_data.redistribute('freq')
         new_data.vis[:] = new_vis
         new_data.weight[:] = ni
