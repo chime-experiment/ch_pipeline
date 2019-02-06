@@ -3,7 +3,7 @@
 
 import numpy as np
 
-from caput import config, tod, mpiarray
+from caput import config, tod, mpiarray, mpiutil
 from caput.pipeline import PipelineConfigError
 
 from draco.core import task
@@ -97,6 +97,8 @@ class TransitGrouper(task.SingleTask):
             final_ts = self._finalize_transit()
         else:
             self.tstreams.append(tstream)
+
+        self.last_time = tstream.time[-1]
 
         return final_ts
 
@@ -205,17 +207,19 @@ class TransitRegridder(Regridder):
         ra, _ = self.sky_obs.radec(self.src)
         ra = ra._degrees
 
-        # Get input time grid
-        lha = self.sky_obs.unix_to_lsa(data.time) - ra
+        # Convert input times to hour angle
+        lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
 
         # perform regridding
         new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
 
         # Wrap to produce MPIArray
-        new_vis = mpiarray.MPIArray.wrap(new_vis, axis=data.vis.distributed_axis)
-        ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
+        if mpiutil.size > 1:
+            new_vis = mpiarray.MPIArray.wrap(new_vis, axis=data.vis.distributed_axis)
+            ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
 
         # Create new container for output
+        ra_grid = (new_grid + ra) % 360.
         new_data = SiderealStream(axes_from=data, attrs_from=data,
                                   ra=new_grid + ra)
         new_data.redistribute('freq')
@@ -247,3 +251,10 @@ def wrap_observer(obs):
             alt=obs.altitude,
             lsd_start=obs.lsd_start_day
     )
+
+def unwrap_lha(lsa, src_ra):
+    start_lsa = lsa[0]
+    lsa -= start_lsa
+    lsa[lsa < 0] += 360.
+    return lsa + start_lsa - src_ra
+
