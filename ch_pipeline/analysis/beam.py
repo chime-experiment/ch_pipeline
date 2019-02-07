@@ -1,4 +1,14 @@
-""" Docstring goes here.
+""" Tasks for beam measurement processing.
+
+    Tasks
+    =====
+
+    .. autosummary::
+        :toctree:
+
+        TransitGrouper
+        TransitRegridder
+        MakeHolographyBeam
 """
 
 import numpy as np
