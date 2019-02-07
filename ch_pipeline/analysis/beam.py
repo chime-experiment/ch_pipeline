@@ -99,6 +99,8 @@ class TransitGrouper(task.SingleTask):
             self.cur_transit = None
             self.tstreams.append(tstream)
             final_ts = self._finalize_transit()
+        elif tstream.time[-1] < self.start_t:
+            pass
         else:
             self.tstreams.append(tstream)
 
@@ -158,7 +160,7 @@ class TransitGrouper(task.SingleTask):
             raise PipelineRuntimeError(msg)
         else:
             self.start_t = max(self.start_t, this_run[0].start_time)
-            self.end_t = min(self.end_t, this_run[0].end_time)
+            self.end_t = min(self.end_t, this_run[0].finish_time)
 
 
 class TransitRegridder(Regridder):
@@ -228,6 +230,9 @@ class TransitRegridder(Regridder):
         weight = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
 
+        # Use uniform weights for now
+        weight = np.where(weight == 0., 0., 1.)
+
         # Update observer time
         self.sky_obs.date = data.time[0]
 
@@ -280,8 +285,12 @@ def wrap_observer(obs):
     )
 
 def unwrap_lha(lsa, src_ra):
+    # ensure monotonic
     start_lsa = lsa[0]
     lsa -= start_lsa
     lsa[lsa < 0] += 360.
-    return lsa + start_lsa - src_ra
+    lsa += start_lsa
+    # subtract source RA
+    return np.where(np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.),
+                    lsa - src_ra, lsa - src_ra + 360.)
 
