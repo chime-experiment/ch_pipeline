@@ -64,11 +64,17 @@ class TransitGrouper(task.SingleTask):
         self.last_time = 0
 
         # Get list of holography observations
-        di.connect_database()
-        self.db_src = di.HolographySource.get(di.HolographySource.name == self.db_source)
-        self.db_runs = di.HolographyObservation.select().where(
-            di.HolographyObservation.source == self.db_src
-        )
+        # Only allowed to query database from rank0
+        db_runs = None
+        if mpiutil.rank0:
+            di.connect_database()
+            db_src = di.HolographySource.get(di.HolographySource.name == self.db_source)
+            db_runs = list(di.HolographyObservation.select().where(
+                di.HolographyObservation.source == db_src
+            ))
+            db_runs = [(r.start_time, r.finish_time) for r in db_runs]
+        self.db_runs = mpiutil.bcast(db_runs, root=0)
+        mpiutil.barrier()
 
     def process(self, tstream):
         """ Take in a timestream and accumulate, group into whole transits.
@@ -82,6 +88,9 @@ class TransitGrouper(task.SingleTask):
         ts : TimeStream
             Timestream with containing transits of specified length.
         """
+
+        # Redistribute if needed
+        tstream.redistribute("freq")
 
         # Update observer time
         self.sky_obs.date = tstream.time[0]
@@ -134,13 +143,13 @@ class TransitGrouper(task.SingleTask):
         if len(self.tstreams) == 0:
             self.log.info("Did not find any transits.")
             return None
+        self.log.debug("Finalising transit for {}...".format(ephem.unix_to_datetime(self.start_t)))
         all_t = np.concatenate([ts.time for ts in self.tstreams])
-        start_ind = np.argmin(np.abs(all_t - self.start_t))
-        stop_ind = np.argmin(np.abs(all_t - self.end_t))
+        start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
+        stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
         # Concatenate timestreams
-        ts = tod.concatenate(self.tstreams, start={'time': start_ind},
-                             stop={'time': stop_ind})
+        ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
         _, dec = self.sky_obs.radec(self.src)
         ts.attrs['dec'] = dec._degrees
         ts.attrs['source_name'] = self.source
@@ -160,17 +169,16 @@ class TransitGrouper(task.SingleTask):
                                      self.ha_span / 2, t0)
 
         # get bounds of observation from database
-        this_run = self.db_runs.where(
-            di.HolographyObservation.start_time < self.cur_transit,
-            di.HolographyObservation.finish_time > self.cur_transit
-        )
+        this_run = [
+            r for r in self.db_runs if r[0] < self.cur_transit and r[1] > self.cur_transit
+        ]
         if len(this_run) == 0:
             msg = "Could not find source transit in holography database."
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
         else:
-            self.start_t = max(self.start_t, this_run[0].start_time)
-            self.end_t = min(self.end_t, this_run[0].finish_time)
+            self.start_t = max(self.start_t, this_run[0][0])
+            self.end_t = min(self.end_t, this_run[0][1])
 
 
 class TransitRegridder(Regridder):
@@ -293,6 +301,7 @@ def wrap_observer(obs):
             alt=obs.altitude,
             lsd_start=obs.lsd_start_day
     )
+
 
 def unwrap_lha(lsa, src_ra):
     # ensure monotonic
