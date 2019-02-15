@@ -105,7 +105,6 @@ class TransitGrouper(task.SingleTask):
                 pass
             else:
                 # start on a new transit and return current one
-                self.cur_transit = None
                 final_ts = self._finalize_transit()
 
         # if this is the start of a new grouping, setup transit bounds
@@ -115,7 +114,6 @@ class TransitGrouper(task.SingleTask):
 
         # check if we've accumulated enough past the transit
         if tstream.time[-1] > self.end_t:
-            self.cur_transit = None
             self.tstreams.append(tstream)
             final_ts = self._finalize_transit()
         elif tstream.time[-1] < self.start_t:
@@ -143,7 +141,7 @@ class TransitGrouper(task.SingleTask):
         if len(self.tstreams) == 0:
             self.log.info("Did not find any transits.")
             return None
-        self.log.debug("Finalising transit for {}...".format(ephem.unix_to_datetime(self.start_t)))
+        self.log.debug("Finalising transit for {}...".format(ephem.unix_to_datetime(self.cur_transit)))
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
@@ -153,8 +151,10 @@ class TransitGrouper(task.SingleTask):
         _, dec = self.sky_obs.radec(self.src)
         ts.attrs['dec'] = dec._degrees
         ts.attrs['source_name'] = self.source
+        ts.attrs['transit_time'] = self.cur_transit
 
         self.tstreams = []
+        self.cur_transit = None
 
         return ts
 
