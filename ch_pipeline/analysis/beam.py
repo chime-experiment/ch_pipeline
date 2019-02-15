@@ -141,7 +141,9 @@ class TransitGrouper(task.SingleTask):
         if len(self.tstreams) == 0:
             self.log.info("Did not find any transits.")
             return None
-        self.log.debug("Finalising transit for {}...".format(ephem.unix_to_datetime(self.cur_transit)))
+        self.log.debug("Finalising transit for {}...".format(
+            ephem.unix_to_datetime(self.cur_transit))
+        )
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
@@ -152,6 +154,9 @@ class TransitGrouper(task.SingleTask):
         ts.attrs['dec'] = dec._degrees
         ts.attrs['source_name'] = self.source
         ts.attrs['transit_time'] = self.cur_transit
+        ts.attrs['tag'] = "{}_{}".format(
+            self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
+        )
 
         self.tstreams = []
         self.cur_transit = None
