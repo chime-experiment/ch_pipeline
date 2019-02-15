@@ -253,9 +253,6 @@ class TransitRegridder(Regridder):
         weight = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
 
-        # Use uniform weights for now
-        weight = np.where(weight == 0., 0., 1.)
-
         # Update observer time
         self.sky_obs.date = data.time[0]
 
@@ -267,6 +264,13 @@ class TransitRegridder(Regridder):
 
         # perform regridding
         new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
+
+        # mask out regions beyond bounds of this transit
+        grid_mask = np.ones_like(new_grid)
+        grid_mask[new_grid < lha.min()] = 0.
+        grid_mask[new_grid > lha.max()] = 0.
+        new_vis *= grid_mask
+        ni *= grid_mask
 
         # Wrap to produce MPIArray
         if mpiutil.size > 1:
