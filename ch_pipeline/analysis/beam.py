@@ -18,9 +18,10 @@ from caput.pipeline import PipelineConfigError, PipelineRuntimeError
 
 from draco.core import task
 from draco.analysis.transform import Regridder
-from draco.core.containers import SiderealStream
+from draco.core.containers import SiderealStream, TrackBeam
 
 from ch_util import ephemeris as ephem
+from ch_util import tools
 from ch_util import data_index as di
 
 
@@ -292,15 +293,62 @@ class MakeHolographyBeam(task.SingleTask):
     """ Repackage a holography transit into a beam container.
     """
 
-    def setup(self, inputmap):
-        self.inputmap = inputmap
+    def process(self, data, inputmap):
 
-    def process(self, data):
-        pass
+        # redistribute if needed
+        data.redistribute('freq')
+
         # Sort products by polarization
-        # Make a new feed index map
-        # Rotate polarization into correct basis?
-        # Return a TrackBeam
+        pol = tools.get_feed_polarisations(inputmap)
+        prod_Xa = pol[data.input[data.prod['input_a']]] == 'E'
+        prod_Xb = pol[data.input[data.prod['input_b']]] == 'E'
+        prod_by_pol = {}
+        prod_by_pol['EE'] = np.where(np.logical_and(prod_Xa, prod_Xb))[0]
+        prod_by_pol['SS'] = np.where(np.logical_not(np.logical_or(prod_Xa, prod_Xb)))[0]
+        prod_by_pol['ES'] = np.where(np.logical_and(prod_Xa, np.logical_not(prod_Xb)))[0]
+        prod_by_pol['SE'] = np.where(np.logical_and(prod_Xb, np.logical_not(prod_Xa)))[0]
+        # 26m cross-pol is a special case
+        autos = np.where(np.logical_and(data.prod['input_a'] == data.prod['input_b']))[0]
+        chan_26m = data.prod['input_a'][autos]
+        if len(chan_26m) != 2:
+            msg = ("Did not find exactly two autocorrelations in the data.")
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+        cross_26m = np.where(np.logical_or(
+            np.logical_and(data.prod['input_a'] == chan_26m[0],
+                           data.prod['input_b'] == chan_26m[1]),
+            np.logical_and(data.prod['input_a'] == chan_26m[0],
+                           data.prod['input_b'] == chan_26m[1])
+        ))[0]
+        if len(cross_26m) != 1:
+            msg = ("Did not find exactly one 26m cross-polar product in the data.")
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+        cross_26m = cross_26m[0]
+        missing_pol = 'SE' if prod_by_pol['ES'][cross_26m] else 'SE'
+        prod_by_pol[missing_pol][cross_26m] = True
+
+        # Make new index map
+        phi = data.ra[:]
+        theta = np.ones_like(phi) * data.dec
+        pol = np.array(['EE', 'SS', 'ES', 'SE'])
+        nfeed = np.sum(prod_by_pol['EE'])
+        # assumption is that both polarizations are ordered in the same way for now
+        feed = data.input[:nfeed]
+
+        # Create new container and fill
+        track = TrackBeam(theta=theta, phi=phi, track_type='drift', coords='celestial',
+                          feed=feed, pol=pol, freq=data.freq[:], attrs_from=data,
+                          distributed=data.distributed)
+        for ip, p in enumerate(pol):
+            track.beam[:, ip, :, :] = data.vis[:, prod_by_pol[p], :]
+            track.weight[:, ip, :, :] = data.weight[:, prod_by_pol[p], :]
+        missing_pol_i = pol.index(missing_pol)
+        track.beam[:, missing_pol_i, :, :] = np.conjugate(track.beam[:, missing_pol_i, :, :])
+
+        # TODO: Rotate polarization into correct basis?
+
+        return track
 
 
 def wrap_observer(obs):
