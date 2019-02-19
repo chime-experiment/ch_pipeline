@@ -359,7 +359,8 @@ class MakeHolographyBeam(task.SingleTask):
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
         theta = np.ones_like(phi) * data.attrs['dec']
-        pol = np.array([inputmap[i].pol for i in input_26m])
+        pol = np.array([(inputmap[i].pol == 'E', inputmap[i].pol == 'S') for i in input_26m],
+                       dtype=[('E', np.int8), ('S', np.int8)])
 
         # Create new container and fill
         track = TrackBeam(theta=theta, phi=phi, track_type='drift', coords='celestial',
