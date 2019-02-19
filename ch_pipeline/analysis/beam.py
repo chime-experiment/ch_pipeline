@@ -21,7 +21,7 @@ from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
 
 from ch_util import ephemeris as ephem
-from ch_util import tools
+from ch_util import tools, layout
 from ch_util import data_index as di
 
 
@@ -298,53 +298,164 @@ class MakeHolographyBeam(task.SingleTask):
         # redistribute if needed
         data.redistribute('freq')
 
-        # Sort products by polarization
-        pol = tools.get_feed_polarisations(inputmap)
-        prod_Xa = pol[data.input[data.prod['input_a']]] == 'E'
-        prod_Xb = pol[data.input[data.prod['input_b']]] == 'E'
-        prod_by_pol = {}
-        prod_by_pol['EE'] = np.where(np.logical_and(prod_Xa, prod_Xb))[0]
-        prod_by_pol['SS'] = np.where(np.logical_not(np.logical_or(prod_Xa, prod_Xb)))[0]
-        prod_by_pol['ES'] = np.where(np.logical_and(prod_Xa, np.logical_not(prod_Xb)))[0]
-        prod_by_pol['SE'] = np.where(np.logical_and(prod_Xb, np.logical_not(prod_Xa)))[0]
-        # 26m cross-pol is a special case
-        autos = np.where(np.logical_and(data.prod['input_a'] == data.prod['input_b']))[0]
-        chan_26m = data.prod['input_a'][autos]
-        if len(chan_26m) != 2:
-            msg = ("Did not find exactly two autocorrelations in the data.")
+        prod = data.index_map['prod']
+
+        # Figure out which inputs are the 26m
+        input_26m = prod['input_a'][np.where(prod['input_a'] == prod['input_b'])[0]]
+        if len(input_26m) != 2:
+            msg = ("Did not find exactly two 26m inputs in the data.")
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
+
+        # Separate products into 26m pol
+        
+
+
+        # Get polarizations from inputs
+        ant = []
+        pol = np.empty(len(inputmap), dtype='<U1')
+        pol[:] = '0'
+        input_26m = []
+        #input_by_pol = {'E': [], 'S': []}
+        feed = np.empty(len(inputmap) // 2,
+                        dtype=[('id_E', np.int32), ('id_S', np.int32), ('antenna', '<U8')])
+        feed[:] = (-1, -1, '0')
+        for i, ipt in enumerate(inputmap):
+            if (isinstance(ipt, tools.CHIMEAntenna) or
+                    isinstance(ipt, tools.HolographyAntenna)):
+                if ipt.antenna not in ant:
+                    ant.append(ipt.antenna)
+                    feed_ind = len(ant) - 1
+                    feed[feed_ind]['antenna'] = ipt.antenna
+                else:
+                    feed_ind = ant.index(ipt.antenna)
+                pol[i] = ipt.pol
+                #input_by_pol[ipt.pol].append(i)
+                feed[feed_ind]['id_'+ipt.pol] = ipt.id
+            else:
+                continue
+            if ipt.reflector == '26m_dish':
+                input_26m.append(i)
+        input_26m = np.array(input_26m)
+        if len(input_26m) != 2:
+            msg = ("Did not find exactly two 26m inputs in the data.")
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+        #if len(input_by_pol['S']) != len(input_by_pol['E']):
+        #    msg = ("Did not find same number of E and S inputs.")
+        #    self.log.error(msg)
+        #    raise PipelineRuntimeError(msg)
+
+        # Map products onto feeds and polarizations
+        prod_map = {k: [] for k in ['EE', 'SS', 'ES', 'SE']}
+        feed_map = {k: [] for k in ['EE', 'SS', 'ES', 'SE']}
+        for pi, p in enumerate(prod):
+            this_pol = (pol[data.input[p['input_a']]['chan_id']] +
+                        pol[data.input[p['input_b']]['chan_id']])
+            if '0' in this_pol:
+                continue
+            feed_ind = np.where(feed['id_'+this_pol[0]] == data.input[p['input_a']]['chan_id'])[0]
+            if len(feed_ind) == 0:
+                feed_ind = np.where(feed['id_'+this_pol[1]] == data.input[p['input_b']]['chan_id'])[0]
+            if len(feed_ind) == 0:
+                continue
+            prod_map[this_pol].append(pi)
+            feed_map[this_pol].append(feed_ind[0])
+
+        # 26m cross-pol is a special case
         cross_26m = np.where(np.logical_or(
-            np.logical_and(data.prod['input_a'] == chan_26m[0],
-                           data.prod['input_b'] == chan_26m[1]),
-            np.logical_and(data.prod['input_a'] == chan_26m[0],
-                           data.prod['input_b'] == chan_26m[1])
+            np.logical_and(prod['input_a'] == input_26m[0],
+                           prod['input_b'] == input_26m[1]),
+            np.logical_and(prod['input_a'] == input_26m[0],
+                           prod['input_b'] == input_26m[1])
         ))[0]
         if len(cross_26m) != 1:
             msg = ("Did not find exactly one 26m cross-polar product in the data.")
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
         cross_26m = cross_26m[0]
-        missing_pol = 'SE' if prod_by_pol['ES'][cross_26m] else 'SE'
-        prod_by_pol[missing_pol][cross_26m] = True
+        missing_pol = (pol[data.input[prod[cross_26m]['input_a']]['chan_id']] +
+                       pol[data.input[prod[cross_26m]['input_b']]['chan_id']])[::-1]
+        feed_ind = np.where(feed['id_'+missing_pol[0]] == data.input[prod[cross_26m]['input_a']]['chan_id'])[0]
+        if len(feed_ind) == 0:
+            feed_ind = np.where(feed['id_'+missing_pol[1]] == data.input[prod[cross_26m]['input_b']]['chan_id'])[0]
+        if len(feed_ind > 0):
+            prod_map[missing_pol].append(cross_26m)
+            feed_map[missing_pol].append(feed_ind[0])
+
+        prod_map = {k: np.array(prod_map[k]) for k in prod_map.keys()}
+        feed_map = {k: np.array(feed_map[k]) for k in feed_map.keys()}
+
+        # Sort products by polarization
+        #prod = data.index_map['prod']
+        #prod_Xa = pol[data.input[prod['input_a']]['chan_id']] == 'E'
+        #prod_Xb = pol[data.input[prod['input_b']]['chan_id']] == 'E'
+        #prod_Ya = pol[data.input[prod['input_a']]['chan_id']] == 'S'
+        #prod_Yb = pol[data.input[prod['input_b']]['chan_id']] == 'S'
+        #prod_by_pol = {}
+        #prod_by_pol['EE'] = np.logical_and(prod_Xa, prod_Xb)
+        #prod_by_pol['SS'] = np.logical_and(prod_Ya, prod_Yb)
+        #prod_by_pol['ES'] = np.logical_and(prod_Xa, prod_Yb)
+        #prod_by_pol['SE'] = np.logical_and(prod_Ya, prod_Yb)
+
+        # 26m cross-pol is a special case
+        #cross_26m = np.where(np.logical_or(
+        #    np.logical_and(prod['input_a'] == input_26m[0],
+        #                   prod['input_b'] == input_26m[1]),
+        #    np.logical_and(prod['input_a'] == input_26m[0],
+        #                   prod['input_b'] == input_26m[1])
+        #))[0]
+        #if len(cross_26m) != 1:
+        #    msg = ("Did not find exactly one 26m cross-polar product in the data.")
+        #    self.log.error(msg)
+        #    raise PipelineRuntimeError(msg)
+        #cross_26m = cross_26m[0]
+        #missing_pol = 'SE' if prod_by_pol['ES'][cross_26m] else 'SE'
+        #prod_by_pol[missing_pol][cross_26m] = True
+
+        ## Check dimensions
+        #nfeed = np.sum(prod_by_pol['EE'])
+        #same_dim = (
+        #    nfeed != np.sum(prod_by_pol['SS']) and
+        #    nfeed != np.sum(prod_by_pol['SE']) and
+        #    nfeed != np.sum(prod_by_pol['ES']) and
+        #    nfeed != len(input_by_pol['E']) and
+        #    nfeed != len(input_by_pol['S'])
+        #)
+        #if not same_dim:
+        #    msg = ("Polarization pairs found in data do not all have same dimensions: "
+        #           "{}, {}, {}, {}".format(*[(p, len(prod_by_pol[p])) for p in prod_by_pol.keys()]))
+        #    self.log.error(msg)
+        #    raise PipelineRuntimeError(msg)
 
         # Make new index map
         phi = data.ra[:]
-        theta = np.ones_like(phi) * data.dec
+        if 'dec' not in data.attrs.keys():
+            msg = ("Input stream must have a 'dec' attribute specifying "
+                   "declination of holography source.")
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+        theta = np.ones_like(phi) * data.attrs['dec']
         pol = np.array(['EE', 'SS', 'ES', 'SE'])
-        nfeed = np.sum(prod_by_pol['EE'])
-        # assumption is that both polarizations are ordered in the same way for now
-        feed = data.input[:nfeed]
+        #feed = np.array(
+        #    [(input_by_pol['E'][i], input_by_pol['S'][i], ant[input_by_pol['S'][i]])
+        #        for i in range(nfeed)],
+        #    dtype=[('id_E', 'id_S', 'ant')]
+        #)
+
 
         # Create new container and fill
         track = TrackBeam(theta=theta, phi=phi, track_type='drift', coords='celestial',
                           feed=feed, pol=pol, freq=data.freq[:], attrs_from=data,
                           distributed=data.distributed)
         for ip, p in enumerate(pol):
-            track.beam[:, ip, :, :] = data.vis[:, prod_by_pol[p], :]
-            track.weight[:, ip, :, :] = data.weight[:, prod_by_pol[p], :]
-        missing_pol_i = pol.index(missing_pol)
-        track.beam[:, missing_pol_i, :, :] = np.conjugate(track.beam[:, missing_pol_i, :, :])
+            print feed_map[p].shape
+            print prod_map[p].shape
+            #prod_ind = np.where(prod_by_pol[p])[0]
+            track.beam[:, ip, feed_map[p], :] = data.vis[:, prod_map[p], :]
+            track.weight[:, ip, feed_map[p], :] = data.weight[:, prod_map[p], :]
+        #missing_pol_i = pol.index(missing_pol)
+        #track.beam[:, missing_pol_i, :, :] = np.conjugate(track.beam[:, missing_pol_i, :, :])
 
         # TODO: Rotate polarization into correct basis?
 
