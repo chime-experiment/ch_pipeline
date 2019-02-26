@@ -790,7 +790,7 @@ class ApplyCorrInputMask(task.SingleTask):
             if nminput < ntinput:
 
                 # The expression below will map a mask for each cylinder/polarisation
-                # to the inputs on that cylinder/polarisatoin.  However, we may want to
+                # to the inputs on that cylinder/polarisation.  However, we may want to
                 # make this more robust and explicit by passing a telescope or inputmap
                 # object as an input and determining the cylinders mapping from that.
                 iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
