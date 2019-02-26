@@ -40,13 +40,33 @@ from ..core import containers
 
 
 class RFIFilter(task.SingleTask):
-    """Filter RFI from a Timestream.
-
-    This task works on the parallel
-    :class:`~ch_pipeline.containers.TimeStream` objects.
+    """Identify data contaminated by RFI.
 
     Attributes
     ----------
+    stack: bool
+        Average over all autocorrelations before constructing the mask.
+    flag1d : bool
+        Only apply the MAD cut in the time direction.
+        Useful if the frequency coverage is sparse.
+    rolling : bool
+        Use a rolling window instead of distinct blocks.
+        This is slower, but recommended if stack is True
+        or the number of feeds is small.
+    apply_static_mask : bool
+        Mask out frequencies known to be contaminated by persistent
+        sources of RFI.  Mask is obtained from `ch_util.rfi.frequency_mask`.
+        This is done before computing the median absolute deviation.
+    keep_auto : bool
+        Save the autocorrelations that were used to construct
+        the mask in the output container.
+    keep_ndev : bool
+        Save the number of deviations that were used to construct
+        the mask in the output container.
+    freq_width : float
+        Frequency interval in *MHz* to compare across.
+    time_width : float
+        Time interval in *seconds* to compare across.
     threshold_mad : float
         Threshold above which we mask the data.
     """
@@ -54,51 +74,64 @@ class RFIFilter(task.SingleTask):
     stack = config.Property(proptype=bool, default=False)
     flag1d = config.Property(proptype=bool, default=False)
     rolling = config.Property(proptype=bool, default=False)
+    apply_static_mask = config.Property(proptype=bool, default=False)
+    keep_auto = config.Property(proptype=bool, default=False)
     keep_ndev = config.Property(proptype=bool, default=False)
     freq_width = config.Property(proptype=float, default=10.0)
     time_width = config.Property(proptype=float, default=420.0)
     threshold_mad = config.Property(proptype=float, default=6.0)
 
     def process(self, data):
+        """Creates a mask by identifying outliers in the
+        autocorrelation data.  This mask can be used to zero out
+        frequencies and time samples that are contaminated by RFI.
 
-        self.log.info("RFI filtering %s, stack = %s, flag1d = %s, rolling = %s, keep_ndev = %s, threshold_mad = %0.1f" %
-                     (data.attrs['tag'], self.stack, self.flag1d, self.rolling, self.keep_ndev, self.threshold_mad))
+        Parameters
+        ----------
+        data : ch_util.andata.CorrData
+            Generate the mask from the autocorrelation data
+            in this container.
 
+        Returns
+        -------
+        out : core.containers.RFIMask
+            Boolean mask that can be applied to a timestream container
+            with the task `ApplyCorrInputMask` to mask contaminated
+            frequencies and time samples.
+        """
         # Redistribute across frequency
         data.redistribute('freq')
 
         # Construct RFI mask
-        auto_index, ndev = rfi.number_deviations(data, freq_width=self.freq_width,
-                                                       time_width=self.time_width,
-                                                       flag1d=self.flag1d,
-                                                       rolling=self.rolling,
-                                                       stack=self.stack)
+        auto_index, auto, ndev = rfi.number_deviations(data, apply_static_mask=self.apply_static_mask,
+                                                             freq_width=self.freq_width,
+                                                             time_width=self.time_width,
+                                                             flag1d=self.flag1d,
+                                                             rolling=self.rolling,
+                                                             stack=self.stack)
 
         # Reorder output based on input chan_id
         minput = data.index_map['input'][auto_index]
         isort = np.argsort(minput['chan_id'])
 
         minput = minput[isort]
+        auto = auto[:, isort, :]
         ndev = ndev[:, isort, :]
 
-        # Place cut on the number of deviations
+        # Place cut on the number of deviations.  Note that we are
+        # only flagging positive excursions corresponding to an
+        # increase in measured power relative to the local median.
         mask = ndev > self.threshold_mad
 
-        # Lookup known RFI bands
-        nfreq = data.vis.local_shape[0]
-        sfreq = data.vis.local_offset[0]
-        efreq = sfreq + nfreq
-
-        static_mask = rfi.frequency_mask(data.freq[sfreq:efreq])
-        static_mask = static_mask[:, np.newaxis, np.newaxis]
-
-        # Mask known RFI bands and change flag convention
-        mask = np.logical_not(np.logical_or(mask, static_mask))
+        # Change flag convention
+        mask = np.logical_not(mask)
 
         # Create container to hold output
         out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
         if self.keep_ndev:
             out.add_dataset('ndev')
+        if self.keep_auto:
+            out.add_dataset('auto')
 
         out.redistribute('freq')
 
@@ -107,6 +140,9 @@ class RFIFilter(task.SingleTask):
 
         if self.keep_ndev:
             out.ndev[:] = ndev
+
+        if self.keep_auto:
+            out.auto[:] = auto
 
         # Return output container
         return out
@@ -753,10 +789,10 @@ class ApplyCorrInputMask(task.SingleTask):
             # Map each input to a mask
             if nminput < ntinput:
 
-                # The expression below will map a mask for each cylinder to the inputs
-                # on that cylinder.  However, we may want to make this more robust and
-                # explicit by passing a telescope or inputmap object as an input and
-                # determining the cylinders mapping from that.
+                # The expression below will map a mask for each cylinder/polarisation
+                # to the inputs on that cylinder/polarisatoin.  However, we may want to
+                # make this more robust and explicit by passing a telescope or inputmap
+                # object as an input and determining the cylinders mapping from that.
                 iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
 
                 mask = mask[:, iexpand]

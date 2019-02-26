@@ -55,6 +55,13 @@ class RFIMask(ContainerBase):
             'distributed': True,
             'distributed_axis': 'freq'
         },
+        'auto': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.float32,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
         'ndev': {
             'axes': ['freq', 'input', 'time'],
             'dtype': np.float32,
@@ -67,6 +74,10 @@ class RFIMask(ContainerBase):
     @property
     def mask(self):
         return self.datasets['mask']
+
+    @property
+    def auto(self):
+        return self.datasets['auto']
 
     @property
     def ndev(self):
