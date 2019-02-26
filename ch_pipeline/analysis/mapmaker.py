@@ -124,7 +124,7 @@ class RingMapMaker(task.SingleTask):
 
         yind = np.round(ysep / min_ysep).astype(np.int)
 
-        grid_index = zip(pind, xind, yind)
+        grid_index = list(zip(pind, xind, yind))
 
         # Define several variables describing the baseline configuration.
         nfeed = int(np.round(max_ysep / min_ysep))
@@ -204,11 +204,12 @@ class RingMapMaker(task.SingleTask):
         # Create empty ring map
         rm = containers.RingMap(beam=nbeam, el=el, pol=pol, ra=ra,
                                 axes_from=sstream, attrs_from=sstream)
-        rm.redistribute('freq')
-
         # Add datasets
         rm.add_dataset('rms')
         rm.add_dataset('dirty_beam')
+
+        # Make sure ring map is distributed over frequency
+        rm.redistribute('freq')
 
         # Estimate rms noise in the ring map by propagating estimates
         # of the variance in the visibilities
