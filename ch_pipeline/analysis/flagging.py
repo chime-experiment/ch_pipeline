@@ -745,7 +745,7 @@ class ApplyCorrInputMask(task.SingleTask):
         ----------
         timestream : andata.CorrData or containers.SiderealStream
 
-        mask : containers.RFIMask, containers.CorrInputMask, etc.
+        cmask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
@@ -789,10 +789,11 @@ class ApplyCorrInputMask(task.SingleTask):
             # Map each input to a mask
             if nminput < ntinput:
 
-                # The expression below will map a mask for each cylinder/polarisation
-                # to the inputs on that cylinder/polarisation.  However, we may want to
-                # make this more robust and explicit by passing a telescope or inputmap
-                # object as an input and determining the cylinders mapping from that.
+                # The expression below will expand a mask constructed from the stacked
+                # autocorrelation data for each cylinder/polarisation to the inputs from
+                # that cylinder/polarisation.  However, we may want to make this more robust
+                # and explicit by passing a telescope object or list of correlator inputs
+                # and determining the cylinder/polarisation mapping from that.
                 iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
 
                 mask = mask[:, iexpand]
