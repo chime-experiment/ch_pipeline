@@ -98,7 +98,7 @@ class RingMapMaker(task.SingleTask):
         nfreq = sstream.vis.local_shape[0]
 
         # Extract the right ascension (or calculate from timestamp)
-        ra = getattr(sstream, 'ra', ephemeris.lsa(sstream.time))
+        ra = sstream.ra if 'ra' in sstream.index_map else ephemeris.lsa(sstream.time)
         nra = ra.size
 
         # Construct mapping from vis array to unpacked 2D grid
