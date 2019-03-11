@@ -195,8 +195,7 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        if mpiutil.rank0:
-            print "Reading file %i of %i. (%s)" % (self._file_ptr, len(self.files), file_)
+        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
 
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
@@ -249,8 +248,9 @@ class LoadSetupFile(pipeline.TaskBase):
         if not os.path.exists(self.filename):
             raise RuntimeError('File does not exist: %s' % self.filename)
 
+        self.log.info("Loading file: %s", self.filename)
+
         if mpiutil.rank0:
-            print "Loading file: %s" % self.filename
 
             # Load into container
             cont = memh5.BasicCont.from_file(self.filename, distributed=False)
@@ -314,8 +314,7 @@ class LoadFileFromTag(task.SingleTask):
             if not os.path.exists(filename):
                 raise RuntimeError('File does not exist: %s' % filename)
 
-            if mpiutil.rank0:
-                print "Loading file: %s" % filename
+            self.log.info("Loading file: %s", filename)
 
             self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
 
@@ -346,8 +345,7 @@ class LoadFileFromTag(task.SingleTask):
             if not os.path.exists(filename):
                 raise RuntimeError('File does not exist: %s' % filename)
 
-            if mpiutil.rank0:
-                print "Loading file: %s" % filename
+            self.log.info("Loading file: %s", filename)
 
             # Load into container
             self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
