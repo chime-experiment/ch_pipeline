@@ -261,6 +261,8 @@ class CHIME(telescope.PolarisedTelescope):
         from ch_util import andata
         return andata._generate_input_map(feed_sn, channels)
 
+    _pos = None
+
     @property
     def feedpositions(self):
         """The set of feed positions on *all* cylinders.
@@ -275,14 +277,15 @@ class CHIME(telescope.PolarisedTelescope):
             [[u1, v1], [u2, v2], ...].
         """
 
-        # Fetch cylinder relative positions
-        pos = tools.get_feed_positions(self.feeds)
+        if self._pos is None:
+            # Fetch cylinder relative positions
+            pos = tools.get_feed_positions(self.feeds)
 
-        # The above routine returns NaNs for non CHIME feeds. This is a bit
-        # messy, so turn them into zeros.
-        pos = np.nan_to_num(pos)
+            # The above routine returns NaNs for non CHIME feeds. This is a bit
+            # messy, so turn them into zeros.
+            self._pos = np.nan_to_num(pos)
 
-        return pos
+        return self._pos
 
     @property
     def beamclass(self):

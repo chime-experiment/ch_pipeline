@@ -40,35 +40,112 @@ from ..core import containers
 
 
 class RFIFilter(task.SingleTask):
-    """Filter RFI from a Timestream.
-
-    This task works on the parallel
-    :class:`~ch_pipeline.containers.TimeStream` objects.
+    """Identify data contaminated by RFI.
 
     Attributes
     ----------
+    stack: bool
+        Average over all autocorrelations before constructing the mask.
+    flag1d : bool
+        Only apply the MAD cut in the time direction.
+        Useful if the frequency coverage is sparse.
+    rolling : bool
+        Use a rolling window instead of distinct blocks.
+        This is slower, but recommended if stack is True
+        or the number of feeds is small.
+    apply_static_mask : bool
+        Mask out frequencies known to be contaminated by persistent
+        sources of RFI.  Mask is obtained from `ch_util.rfi.frequency_mask`.
+        This is done before computing the median absolute deviation.
+    keep_auto : bool
+        Save the autocorrelations that were used to construct
+        the mask in the output container.
+    keep_ndev : bool
+        Save the number of deviations that were used to construct
+        the mask in the output container.
+    freq_width : float
+        Frequency interval in *MHz* to compare across.
+    time_width : float
+        Time interval in *seconds* to compare across.
     threshold_mad : float
         Threshold above which we mask the data.
     """
 
-    threshold_mad = config.Property(proptype=float, default=5.0)
-
+    stack = config.Property(proptype=bool, default=False)
     flag1d = config.Property(proptype=bool, default=False)
+    rolling = config.Property(proptype=bool, default=False)
+    apply_static_mask = config.Property(proptype=bool, default=False)
+    keep_auto = config.Property(proptype=bool, default=False)
+    keep_ndev = config.Property(proptype=bool, default=False)
+    freq_width = config.Property(proptype=float, default=10.0)
+    time_width = config.Property(proptype=float, default=420.0)
+    threshold_mad = config.Property(proptype=float, default=6.0)
 
     def process(self, data):
+        """Creates a mask by identifying outliers in the
+        autocorrelation data.  This mask can be used to zero out
+        frequencies and time samples that are contaminated by RFI.
 
-        if mpiutil.rank0:
-            print "RFI filtering %s, flag1d = %s" % (data.attrs['tag'], self.flag1d)
+        Parameters
+        ----------
+        data : ch_util.andata.CorrData
+            Generate the mask from the autocorrelation data
+            in this container.
 
-        # Construct RFI mask
-        mask = rfi.flag_dataset(data, only_autos=False, threshold=self.threshold_mad, flag1d=self.flag1d)
-
-        data.weight[:] *= (1 - mask).astype(data.weight.dtype)  # Switch from mask to inverse noise weight
-
+        Returns
+        -------
+        out : core.containers.RFIMask
+            Boolean mask that can be applied to a timestream container
+            with the task `ApplyCorrInputMask` to mask contaminated
+            frequencies and time samples.
+        """
         # Redistribute across frequency
         data.redistribute('freq')
 
-        return data
+        # Construct RFI mask
+        auto_index, auto, ndev = rfi.number_deviations(data, apply_static_mask=self.apply_static_mask,
+                                                             freq_width=self.freq_width,
+                                                             time_width=self.time_width,
+                                                             flag1d=self.flag1d,
+                                                             rolling=self.rolling,
+                                                             stack=self.stack)
+
+        # Reorder output based on input chan_id
+        minput = data.index_map['input'][auto_index]
+        isort = np.argsort(minput['chan_id'])
+
+        minput = minput[isort]
+        auto = auto[:, isort, :]
+        ndev = ndev[:, isort, :]
+
+        # Place cut on the number of deviations.  Note that we are
+        # only flagging positive excursions corresponding to an
+        # increase in measured power relative to the local median.
+        mask = ndev > self.threshold_mad
+
+        # Change flag convention
+        mask = np.logical_not(mask)
+
+        # Create container to hold output
+        out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+        if self.keep_ndev:
+            out.add_dataset('ndev')
+        if self.keep_auto:
+            out.add_dataset('auto')
+
+        out.redistribute('freq')
+
+        # Save mask to output container
+        out.mask[:] = mask
+
+        if self.keep_ndev:
+            out.ndev[:] = ndev
+
+        if self.keep_auto:
+            out.auto[:] = auto
+
+        # Return output container
+        return out
 
 
 class ChannelFlagger(task.SingleTask):
@@ -658,32 +735,72 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 
 class ApplyCorrInputMask(task.SingleTask):
-    """ Flag out bad correlator inputs from a timestream or sidereal stack.
+    """ Apply an input mask to a timestream.
     """
 
-    def process(self, timestream, inputmask):
-        """Flag out bad correlator inputs by giving them zero weight.
+    def process(self, timestream, cmask):
+        """Flag out events by giving them zero weight.
 
         Parameters
         ----------
         timestream : andata.CorrData or containers.SiderealStream
 
-        inputmask : containers.CorrInputMask
+        cmask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
         timestream : andata.CorrData or containers.SiderealStream
         """
 
-        # Make sure that timestream is distributed over frequency
+        # Make sure containers are distributed across frequency
         timestream.redistribute('freq')
+        cmask.redistribute('freq')
 
-        # Extract mask
-        mask = inputmask.datasets['input_mask'][:]
+        # Create a slice that will expand the mask to
+        # the same dimensions as the weight array
+        waxis = timestream.weight.attrs['axis']
+        slc = [slice(None)] * len(waxis)
+        for ww, name in enumerate(waxis):
+            if (name not in ['stack', 'prod']) and (name not in cmask.mask.attrs['axis']):
+                slc[ww] = None
 
-        # Apply mask to the vis_weight array
+        # Extract input mask and weight array
         weight = timestream.weight[:]
-        tools.apply_gain(weight, mask[np.newaxis, :, np.newaxis], out=weight)
+        mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
+
+        # Expand mask to same dimension as weight array
+        mask = mask[slc]
+
+        # Determine mapping between inputs in the mask
+        # and inputs in the timestream
+        mask_input = cmask.index_map['input'][:]
+        nminput = mask_input.size
+
+        tstream_input = timestream.index_map['input'][:]
+        ntinput = tstream_input.size
+
+        if nminput == 1:
+
+            # Apply same mask to all products
+            weight *= mask
+
+        else:
+
+            # Map each input to a mask
+            if nminput < ntinput:
+
+                # The expression below will expand a mask constructed from the stacked
+                # autocorrelation data for each cylinder/polarisation to the inputs from
+                # that cylinder/polarisation.  However, we may want to make this more robust
+                # and explicit by passing a telescope object or list of correlator inputs
+                # and determining the cylinder/polarisation mapping from that.
+                iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
+
+                mask = mask[:, iexpand]
+
+            # Use apply_gain function to apply mask based on product map
+            prod = timestream.index_map['prod'][timestream.index_map['stack']['prod']]
+            tools.apply_gain(weight, mask, out=weight, prod_map=prod)
 
         # Return timestream
         return timestream
@@ -756,8 +873,7 @@ class ApplySiderealDayFlag(task.SingleTask):
                         "Will halt pipeline processing.") % this_csd)
 
         # Print whether or not we will continue processing this csd
-        if mpiutil.rank0:
-            print msg
+        self.log.info(msg)
 
         # Return input timestream or None
         return output

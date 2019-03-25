@@ -15,6 +15,7 @@ Containers
 .. autosummary::
     :toctree: generated/
 
+    RFIMask
     CorrInputMask
     CorrInputTest
     CorrInputMonitor
@@ -38,6 +39,49 @@ import numpy as np
 from caput import memh5, pipeline
 
 from draco.core.containers import *
+
+class RFIMask(ContainerBase):
+    """Container for holding a mask that indicates
+    data that is free of RFI events.
+    """
+
+    _axes = ('freq', 'input', 'time')
+
+    _dataset_spec = {
+        'mask': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.bool,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'auto': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.float32,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'ndev': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.float32,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    @property
+    def mask(self):
+        return self.datasets['mask']
+
+    @property
+    def auto(self):
+        return self.datasets['auto']
+
+    @property
+    def ndev(self):
+        return self.datasets['ndev']
 
 
 class CorrInputMask(ContainerBase):
@@ -708,6 +752,24 @@ def make_empty_corrdata(freq=None, input=None, time=None,
         prodmap = np.array([[fi, fj] for fi in range(nfeed) for fj in range(fi, nfeed)])
     data.create_index_map('prod', prodmap)
 
+    # Construct and create stack map
+    if axes_from is not None and 'stack' in axes_from.index_map:
+        stackmap = axes_from.index_map['stack']
+        vis_shape = (data.nfreq, len(stackmap), data.ntime)
+        vis_axis = np.array(['freq', 'stack', 'time'])
+    else:
+        stackmap = np.empty_like(prodmap, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
+        stackmap['prod'][:] = np.arange(len(prodmap))
+        stackmap['conjugate'] = 0
+        vis_shape = (data.nfreq, data.nprod, data.ntime)
+        vis_axis = np.array(['freq', 'prod', 'time'])
+    data.create_index_map('stack', stackmap)
+
+    # Construct and create reverse map stack
+    if axes_from is not None and 'stack' in axes_from.reverse_map:
+        reverse_map_stack = axes_from.reverse_map['stack']
+        data.create_reverse_map('stack', reverse_map_stack)
+
     # Determine datatype for weights
     if (axes_from is not None) and hasattr(axes_from, 'flags') and ('vis_weight' in axes_from.flags):
         weight_dtype = axes_from.flags['vis_weight'].dtype
@@ -715,14 +777,19 @@ def make_empty_corrdata(freq=None, input=None, time=None,
         weight_dtype = np.float32
 
     # Create empty datasets, and add axis attributes to them
-    dset = data.create_dataset('vis', shape=(data.nfreq, data.nprod, data.ntime), dtype=np.complex64,
+    dset = data.create_dataset('vis', shape=vis_shape, dtype=np.complex64,
                                distributed=distributed, distributed_axis=distributed_axis)
-    dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
+    dset.attrs['axis'] = vis_axis
     dset[:] = 0.0
 
-    dset = data.create_flag('vis_weight', shape=(data.nfreq, data.nprod, data.ntime), dtype=weight_dtype,
+    dset = data.create_flag('vis_weight', shape=vis_shape, dtype=weight_dtype,
                             distributed=distributed, distributed_axis=distributed_axis)
-    dset.attrs['axis'] = np.array(['freq', 'prod', 'time'])
+    dset.attrs['axis'] = vis_axis
+    dset[:] = 0.0
+
+    dset = data.create_flag('inputs', shape=(data.ninput, data.ntime), dtype=np.float32,
+                            distributed=False, distributed_axis=None)
+    dset.attrs['axis'] = np.array(['input', 'time'])
     dset[:] = 0.0
 
     dset = data.create_dataset('gain', shape=(data.nfreq, data.ninput, data.ntime), dtype=np.complex64,
