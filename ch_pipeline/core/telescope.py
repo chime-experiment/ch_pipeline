@@ -90,12 +90,12 @@ class CHIME(telescope.PolarisedTelescope):
     # Input selection
     input_sel = config.Property(proptype=list, default=None)
 
+    # Auto-correlations setting (overriding default in baseclass)
+    auto_correlations = config.Property(proptype=bool, default=True)
+
     # Fix base properties
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
-
-
-    auto_correlations = True
 
     _pickle_keys = ['_feeds']
 
