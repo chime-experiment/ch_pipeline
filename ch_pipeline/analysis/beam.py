@@ -148,18 +148,6 @@ class TransitGrouper(task.SingleTask):
 
     def _finalize_transit(self):
 
-        def sizeofts(ts, mute=False):
-            tot = 0
-            res = ""
-            for d in ts.datasets.keys():
-                nb = ts.datasets[d]._data.nbytes
-                res += "{}: {:d} ".format(d, nb)
-                tot += nb
-            if not mute:
-                self.log.debug(res)
-            return tot
-        sizeofts(self.tstreams[0])
-        self.log.debug("Size of all timestreams: {:d}".format(sum([sizeofts(t, mute=True) for t in self.tstreams])))
         # Find where transit starts and ends
         if len(self.tstreams) == 0:
             self.log.info("Did not find any transits.")
@@ -184,9 +172,6 @@ class TransitGrouper(task.SingleTask):
         self.tstreams = []
         self.cur_transit = None
 
-        self.log.debug("Size of output: {:d}".format(sizeofts(ts)))
-        self.log.debug("Shape of output: {}".format(ts.vis.global_shape))
-        self.log.debug("Local shape of output: {}".format(ts.vis.local_shape))
         return ts
 
     def _transit_bounds(self, t0):
