@@ -217,6 +217,19 @@ class LoadCorrDataFiles(task.SingleTask):
             # a small bias
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
 
+        def sizeofts(ts):
+            tot = 0
+            res = ""
+            for d in ts.datasets.keys():
+                nb = ts.datasets[d]._data.nbytes
+                res += "{}: {:d} ".format(d, nb)
+                tot += nb
+            self.log.debug(res)
+            return tot
+        self.log.debug("Size of timestream: {:d}".format(sizeofts(ts)))
+        self.log.debug("Size of timestream.vis: {:d}".format(ts.vis._data.nbytes))
+        self.log.debug("Shape of timestream.vis: {}".format(ts.vis.global_shape))
+        self.log.debug("Local shape of timestream.vis: {}".format(ts.vis.local_shape))
         # Return timestream
         return ts
 
