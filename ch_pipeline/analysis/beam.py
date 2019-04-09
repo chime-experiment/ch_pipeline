@@ -24,6 +24,9 @@ from ch_util import ephemeris as ephem
 from ch_util import tools, layout
 from ch_util import data_index as di
 
+from skyfield.constants import ANGVEL
+SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
+
 
 class TransitGrouper(task.SingleTask):
     """ Group transits from a sequence of TimeStream objects.
@@ -111,7 +114,7 @@ class TransitGrouper(task.SingleTask):
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
             self.cur_transit = self.sky_obs.next_transit(self.src)
-            self._transit_bounds(tstream.time[0])
+            self._transit_bounds()
 
         # check if we've accumulated enough past the transit
         if tstream.time[-1] > self.end_t:
@@ -174,24 +177,21 @@ class TransitGrouper(task.SingleTask):
 
         return ts
 
-    def _transit_bounds(self, t0):
-        # shortcut
-        obs = self.sky_obs
+    def _transit_bounds(self):
 
         # subtract half a day from start time to ensure we don't get following day
-        self.start_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) -
-                                       self.ha_span / 2, t0 - 43200)
-        self.end_t = obs.lsa_to_unix(obs.unix_to_lsa(self.cur_transit) +
-                                     self.ha_span / 2, t0)
+        self.start_t = self.cur_transit - self.ha_span / 360. / 2. * SIDEREAL_DAY_SEC
+        self.end_t = self.cur_transit + self.ha_span / 360. / 2. * SIDEREAL_DAY_SEC
 
         # get bounds of observation from database
         this_run = [
             r for r in self.db_runs if r[0] < self.cur_transit and r[1] > self.cur_transit
         ]
         if len(this_run) == 0:
-            msg = "Could not find source transit in holography database."
-            self.log.error(msg)
-            raise PipelineRuntimeError(msg)
+            self.log.warning("Could not find source transit in holography database for {}."
+                             .format(ephem.unix_to_datetime(self.cur_transit)))
+            # skip this file
+            self.cur_transit = None
         else:
             self.start_t = max(self.start_t, this_run[0][0])
             self.end_t = min(self.end_t, this_run[0][1])
