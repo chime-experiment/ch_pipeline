@@ -55,6 +55,9 @@ class RingMapMaker(task.SingleTask):
 
     include_auto: bool
         Include autocorrelations in the calculation.  Default is False.
+
+    single_beam: bool
+        Only calculate the map for the central beam. Default is False.
     """
 
     npix = config.Property(proptype=int, default=512)
@@ -66,6 +69,8 @@ class RingMapMaker(task.SingleTask):
     exclude_intracyl = config.Property(proptype=bool, default=False)
 
     include_auto = config.Property(proptype=bool, default=False)
+
+    single_beam = config.Property(proptype=bool, default=False)
 
     def setup(self, tel):
         """Set the Telescope instance to use.
@@ -130,7 +135,7 @@ class RingMapMaker(task.SingleTask):
         nfeed = int(np.round(max_ysep / min_ysep)) + 1
         nvis_1d = 2 * nfeed - 1
         ncyl = np.max(xind) + 1
-        nbeam = 2 * ncyl - 1
+        nbeam = 1 if self.single_beam else 2 * ncyl - 1
 
         # Define polarisation axis
         pol = np.array([x + y for x in ['X', 'Y'] for y in ['X', 'Y']])
@@ -230,8 +235,12 @@ class RingMapMaker(task.SingleTask):
 
             # Perform inverse discrete fourier transform in y-direction
             # and inverse fast fourier transform in x-direction
-            bfm = np.fft.irfft(np.dot(weight[lfi] * vis[lfi], pa), nbeam, axis=2) * nbeam
-            sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
+            if self.single_beam:
+                bfm = np.sum(np.dot(weight[lfi] * vis[lfi], pa), axis=2)[:, :, np.newaxis, ...]
+                sb = np.sum(np.dot(weight[lfi], pa), axis=2)[:, :, np.newaxis, ...]
+            else:
+                bfm = np.fft.irfft(np.dot(weight[lfi] * vis[lfi], pa), nbeam, axis=2) * nbeam
+                sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
 
             # Save to container
             rm.map[fi] = bfm
