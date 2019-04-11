@@ -195,8 +195,7 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        if mpiutil.rank0:
-            print "Reading file %i of %i. (%s)" % (self._file_ptr, len(self.files), file_)
+        self.log.debug("Reading file %i of %i. (%s)" % (self._file_ptr, len(self.files), file_))
 
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
