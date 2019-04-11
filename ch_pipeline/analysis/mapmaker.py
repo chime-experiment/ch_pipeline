@@ -5,7 +5,7 @@ Map making tasks (:mod:`~ch_pipeline.analysis.mapmaker`)
 
 .. currentmodule:: ch_pipeline.analysis.mapmaker
 
-Tools for map making from CHIME data using the m-mode formalism.
+Tools for making maps from CHIME data.
 
 Tasks
 =====
@@ -13,15 +13,18 @@ Tasks
 .. autosummary::
     :toctree: generated/
 
-    DirtyMapMaker
-    MaximumLikelihoodMapMaker
-    WienerMapMaker
     RingMapMaker
 """
 import numpy as np
+import scipy.constants
+
 from caput import config
 
 from draco.core import task
+from draco.core import io
+from draco.util import tools
+
+from ch_util import ephemeris
 
 from ..core import containers
 
@@ -35,45 +38,47 @@ class RingMapMaker(task.SingleTask):
     Attributes
     ----------
     npix : int
-        Number of map pixels in the el dimension.  Default is 512.
+        Number of map pixels in the declination dimension.  Default is 512.
 
-    weighting : string, one of 'uniform', 'natural', 'inverse_variance'
+    span : float
+        Span of map in the declination dimension. Value of 1.0 generates a map
+        that spans from horizon-to-horizon.  Default is 1.0.
+
+    weight : string ('natural', 'uniform', or 'inverse_variance')
         How to weight the non-redundant baselines:
-            'uniform' - all baselines given equal weight
-            'natural' - each baseline weighted by its redundancy
-            'inverse_variance' - each baselined weighted by its inverse
-                                 variance according to radiometer equation
+            'natural' - each baseline weighted by its redundancy (default)
+            'uniform' - each baseline given equal weight
+            'inverse_variance' - each baseline weighted by the weight attribute
 
-    intracyl : bool
-        Include intracylinder baselines in the calculation.
-        Default is True.
+    exclude_intracyl : bool
+        Exclude intracylinder baselines from the calculation.  Default is False.
 
-    abs_map : bool
-        Only relevant if intracyl is False.  Take the absolute value
-        of the beams instead of the real component.  Default is True.
+    include_auto: bool
+        Include autocorrelations in the calculation.  Default is False.
     """
 
     npix = config.Property(proptype=int, default=512)
 
-    weighting = config.Property(proptype=str, default='natural')
+    span = config.Property(proptype=float, default=1.0)
 
-    intracyl = config.Property(proptype=bool, default=True)
+    weight = config.Property(proptype=str, default='natural')
 
-    abs_map = config.Property(proptype=bool, default=True)
+    exclude_intracyl = config.Property(proptype=bool, default=False)
 
+    include_auto = config.Property(proptype=bool, default=False)
 
-    def setup(self, bt):
-        """Set the beamtransfer matrices to use.
+    def setup(self, tel):
+        """Set the Telescope instance to use.
 
         Parameters
         ----------
-        bt : beamtransfer.BeamTransfer
-            Beam transfer manager object. This does not need to have
-            pre-generated matrices as they are not needed.
+        tel : TransitTelescope
         """
 
-        from draco.core import io
-        self.beamtransfer = io.get_beamtransfer(bt)
+        if self.weight not in ['natural', 'uniform', 'inverse_variance']:
+            KeyError("Do not recognize weight = %s" % self.weight)
+
+        self.telescope = io.get_telescope(tel)
 
     def process(self, sstream):
         """Computes the ringmap.
@@ -88,124 +93,145 @@ class RingMapMaker(task.SingleTask):
         rm : containers.RingMap
         """
 
-        from ch_util import tools
-
-        tel = self.beamtransfer.telescope
-
         # Redistribute over frequency
         sstream.redistribute('freq')
-
         nfreq = sstream.vis.local_shape[0]
-        nra = len(sstream.ra)
 
-        # Define several variables describing the baseline configuration.
-        # Currently pathfinder specific.
-        nfeed = 64
-        nvis_1d = 2 * nfeed - 1
-        sp = 0.3048
-        ncyl = 1 + self.intracyl
-        nbeam = 2 * ncyl - 1
-
-        func = np.abs if self.abs_map else np.real
+        # Extract the right ascension (or calculate from timestamp)
+        ra = sstream.ra if 'ra' in sstream.index_map else ephemeris.lsa(sstream.time)
+        nra = ra.size
 
         # Construct mapping from vis array to unpacked 2D grid
-        feed_list = [ (tel.feeds[fi], tel.feeds[fj]) for fi, fj in sstream.index_map['prod'][:]]
+        nprod = sstream.prod.shape[0]
+        pind = np.zeros(nprod, dtype=np.int)
+        xind = np.zeros(nprod, dtype=np.int)
+        ysep = np.zeros(nprod, dtype=np.float)
 
-        feed_ind = [ ( 2 * int(fi.pol == 'S') + int(fj.pol == 'S'),
-            fi.cyl - fj.cyl, int(np.round((np.array(fi.pos) - np.array(fj.pos))[1] / sp))) for fi, fj in feed_list]
+        for pp, (ii, jj) in enumerate(sstream.prod):
+
+            if self.telescope.feedconj[ii, jj]:
+                ii, jj = jj, ii
+
+            fi = self.telescope.feeds[ii]
+            fj = self.telescope.feeds[jj]
+
+            pind[pp] = 2 * int(fi.pol == 'S') + int(fj.pol == 'S')
+            xind[pp] = np.abs(fi.cyl - fj.cyl)
+            ysep[pp] = fi.pos[1] - fj.pos[1]
+
+        abs_ysep = np.abs(ysep)
+        min_ysep, max_ysep = np.percentile(abs_ysep[abs_ysep > 0.0], [0, 100])
+
+        yind = np.round(ysep / min_ysep).astype(np.int)
+
+        grid_index = list(zip(pind, xind, yind))
+
+        # Define several variables describing the baseline configuration.
+        nfeed = int(np.round(max_ysep / min_ysep))
+        nvis_1d = 2 * nfeed - 1
+        ncyl = np.max(xind) + 1
+        nbeam = 2 * ncyl - 1
 
         # Define polarisation axis
         pol = np.array([x + y for x in ['X', 'Y'] for y in ['X', 'Y']])
         npol = len(pol)
 
-        # Empty array for output
-        vdr = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.complex128)
-        wgh = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
-        smp = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
+        # Create empty array for output
+        vis = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.complex128)
+        invvar = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
+        weight = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
+
+        # If natural or uniform weighting was choosen, then calculate the
+        # redundancy of the collated visibilities.
+        if self.weight != 'inverse_variance':
+            redundancy = tools.calculate_redundancy(sstream.input_flags[:],
+                                                    sstream.index_map['prod'][:],
+                                                    sstream.reverse_map['stack']['stack'][:],
+                                                    sstream.vis.shape[1])
+
+            if self.weight == 'uniform':
+                redundancy = (redundancy > 0).astype(np.float32)
 
         # Unpack visibilities into new array
-        for vis_ind, ind in enumerate(feed_ind):
+        for vis_ind, (p_ind, x_ind, y_ind) in enumerate(grid_index):
 
-            p_ind, x_ind, y_ind = ind
-
-            # Handle different options for weighting
-            if self.weighting == 'uniform':
-                w = 1.0
-
-            elif self.weighting  == 'natural':
-                w = tel.redundancy[vis_ind]
-
-            elif self.weighting == 'inverse_variance':
+            # Handle different options for weighting baselines
+            if self.weight == 'inverse_variance':
                 w = sstream.weight[:, vis_ind]
 
             else:
-                KeyError('Do not recognize requested weighting: %s' % self.weighting)
+                w = (sstream.weight[:, vis_ind] > 0.0).astype(np.float32)
+                w *= redundancy[np.newaxis, vis_ind]
 
-            # Unpack visibilities
-            if (x_ind == 0) and self.intracyl:
-                vdr[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
-                vdr[:, p_ind, :, x_ind, -y_ind] = sstream.vis[:, vis_ind].conj()
+            # Different behavior for intracylinder and intercylinder baselines.
+            if (x_ind == 0):
 
-                wgh[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
-                wgh[:, p_ind, :, x_ind, -y_ind] = sstream.weight[:, vis_ind]
+                if not self.exclude_intracyl:
 
-                smp[:, p_ind, :, x_ind, y_ind] = w
-                smp[:, p_ind, :, x_ind, -y_ind] = w
+                    vis[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
+                    vis[:, p_ind, :, x_ind, -y_ind] = sstream.vis[:, vis_ind].conj()
+
+                    invvar[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
+                    invvar[:, p_ind, :, x_ind, -y_ind] = sstream.weight[:, vis_ind]
+
+                    weight[:, p_ind, :, x_ind, y_ind] = w
+                    weight[:, p_ind, :, x_ind, -y_ind] = w
 
             else:
-                vdr[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.vis[:, vis_ind]
 
-                wgh[:, p_ind, :, x_ind % ncyl, y_ind] = sstream.weight[:, vis_ind]
+                vis[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
 
-                smp[:, p_ind, :, x_ind % ncyl, y_ind] = w
+                invvar[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
+
+                weight[:, p_ind, :, x_ind, y_ind] = w
 
         # Remove auto-correlations
-        if self.intracyl:
-            smp[..., 0, 0] = 0.0
+        if not self.include_auto:
+            weight[..., 0, 0] = 0.0
 
         # Normalize the weighting function
         coeff = np.full(ncyl, 2.0, dtype=np.float)
-        coeff[0] -= self.intracyl
+        coeff[0] = 1.0
+        norm = np.sum(np.dot(coeff, weight), axis=-1)
 
-        smp *= tools.invert_no_zero(np.sum(np.dot(coeff, smp), axis=-1))[..., np.newaxis, np.newaxis]
+        weight *= tools.invert_no_zero(norm)[..., np.newaxis, np.newaxis]
 
         # Construct phase array
-        el = np.linspace(-1.0, 1.0, self.npix)
+        el = self.span * np.linspace(-1.0, 1.0, self.npix)
 
-        vis_pos_1d = np.fft.fftfreq(nvis_1d, d=(1.0 / (nvis_1d * sp)))
+        vis_pos_1d = np.fft.fftfreq(nvis_1d, d=(1.0 / (nvis_1d * min_ysep)))
 
         # Create empty ring map
-        rm = containers.RingMap(beam=nbeam, el=el, pol=pol,
+        rm = containers.RingMap(beam=nbeam, el=el, pol=pol, ra=ra,
                                 axes_from=sstream, attrs_from=sstream)
-        rm.redistribute('freq')
-
         # Add datasets
         rm.add_dataset('rms')
         rm.add_dataset('dirty_beam')
 
-        # Estimate RMS thermal noise in ring map
-        rm.rms[:] = np.sqrt(np.sum(np.dot(coeff, tools.invert_no_zero(wgh) * smp**2.0), axis=-1))
+        # Make sure ring map is distributed over frequency
+        rm.redistribute('freq')
+
+        # Estimate rms noise in the ring map by propagating estimates
+        # of the variance in the visibilities
+        rm.rms[:] = np.sqrt(np.sum(np.dot(coeff,
+                    tools.invert_no_zero(invvar) * weight**2.0), axis=-1))
 
         # Loop over local frequencies and fill ring map
         for lfi, fi in sstream.vis[:].enumerate(0):
 
-            # Get the current freq
-            fr = sstream.freq['centre'][fi]
+            # Get the current frequency and wavelength
+            fr = sstream.freq[fi]
 
-            wv = 3e2 / fr
+            wv = scipy.constants.c * 1e-6 / fr
 
             # Create array that will be used for the inverse
-            # discrete Fourier transform in el direction
-            pa = np.exp(2.0J * np.pi * vis_pos_1d[:, np.newaxis] * el[np.newaxis, :] / wv)
+            # discrete Fourier transform in y-direction
+            pa = np.exp(-2.0J * np.pi * vis_pos_1d[:, np.newaxis] * el[np.newaxis, :] / wv)
 
-            # Compute ring map and dirty beam
-            if self.intracyl:
-                bfm = np.fft.irfft(np.dot(smp[lfi] * vdr[lfi], pa), nbeam, axis=2) * nbeam
-                sb = np.fft.irfft(np.dot(smp[lfi], pa), nbeam, axis=2) * nbeam
-
-            else:
-                bfm = 2.0 * func(np.dot(smp[lfi] * vdr[lfi], pa))
-                sb = 2.0 * func(np.dot(smp[lfi], pa))
+            # Perform inverse discrete fourier transform in y-direction
+            # and inverse fast fourier transform in x-direction
+            bfm = np.fft.irfft(np.dot(weight[lfi] * vis[lfi], pa), nbeam, axis=2) * nbeam
+            sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
 
             # Save to container
             rm.map[fi] = bfm
