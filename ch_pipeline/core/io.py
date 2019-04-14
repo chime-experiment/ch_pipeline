@@ -41,6 +41,7 @@ Several tasks accept groups of files as arguments. These are specified in the YA
         files: ['file1.h5', 'file2.h5']
 """
 
+import re
 import os.path
 import gc
 import numpy as np
@@ -161,13 +162,13 @@ class LoadCorrDataFiles(task.SingleTask):
                                          for freq in self.freq_physical ]))
 
         elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = range(*self.channel_range)
+            self.freq_sel = slice(*self.channel_range)
 
         elif self.channel_index:
             self.freq_sel = self.channel_index
 
         else:
-            self.freq_sel = None
+            self.freq_sel = slice(None)
 
     def process(self):
         """Load in each sidereal day.
@@ -195,10 +196,16 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
-
-        ts = andata.CorrData.from_acq_h5(file_, distributed=True,
-                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
+        if isinstance(self.freq_sel, slice) and prod_sel is None and False:
+            self.log.info("Reading file %i of %i. (%s) [fast io]",
+                          self._file_ptr, len(self.files), file_)
+            ts = andata.CorrData.from_acq_h5_fast(file_, freq_sel=self.freq_sel,
+                                                  comm=self.comm)
+        else:
+            self.log.info("Reading file %i of %i. (%s) [slow io]",
+                          self._file_ptr, len(self.files), file_)
+            ts = andata.CorrData.from_acq_h5(file_, distributed=True, comm=self.comm,
+                                             freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         # Use a simple incrementing string as the tag
         if 'tag' not in ts.attrs:
@@ -351,3 +358,5 @@ class LoadFileFromTag(task.SingleTask):
             self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
 
         return self.outcont
+
+
