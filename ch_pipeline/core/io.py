@@ -360,3 +360,106 @@ class LoadFileFromTag(task.SingleTask):
         return self.outcont
 
 
+class FilterExisting(task.MPILoggedTask):
+    """Filter out files from any list that have already been processed.
+
+    Each file is found in the database and is compared against given
+    criteria to see if has already been processed.
+
+    Attributes
+    ----------
+    regex_csd : str
+        A regular expression to find processed CSDs. Compared to filenames
+        in the current directory.
+    min_files_csd : int
+        The minimum number of files on a CSD for it to be processed.
+    """
+    regex_csd = config.Property(proptype=str, default=None)
+    min_files_csd = config.Property(proptype=int, default=6)
+
+    def __init__(self):
+
+        super(FilterExisting, self).__init__()
+
+        self.csd_list = []
+        self.corr_files = {}
+
+        if mpiutil.rank0:
+            # Look for CSDs in the current directory
+            import glob
+            files = glob.glob("*")
+            if self.regex_csd:
+                for file_ in files:
+                    mo = re.search(self.regex_csd, file_)
+                    if mo is not None:
+                        self.csd_list.append(int(mo.group(1)))
+
+            # Search the database to get the start and end times of all correlation files
+            from ch_util import data_index as di
+            from ch_util import ephemeris
+
+            di.connect_database()
+            query = di.ArchiveFile.select(
+                di.ArchiveAcq.name, di.ArchiveFile.name,
+                di.CorrFileInfo.start_time, di.CorrFileInfo.finish_time
+            ).join(di.ArchiveAcq).switch(di.ArchiveFile).join(di.CorrFileInfo)
+
+            for acq, fname, start, finish in query.tuples():
+
+                if start is None or finish is None:
+                    continue
+
+                start_csd = ephemeris.csd(start)
+                finish_csd = ephemeris.csd(finish)
+
+                name = os.path.join(acq, fname)
+                self.corr_files[name] = (start_csd, finish_csd)
+
+            self.log.debug("Skipping existing CSDs %s", repr(self.csd_list))
+
+        # Broadcast results to other ranks
+        self.corr_files = mpiutil.world.bcast(self.corr_files, root=0)
+        self.csd_list = mpiutil.world.bcast(self.csd_list, root=0)
+
+
+    def next(self, files):
+
+        csd_list = {}
+
+        for path in files:
+
+            acq, fname = path.split('/')[-2:]
+            name = os.path.join(acq, fname)
+
+            # Always include non corr files
+            if name not in self.corr_files:
+                self.log.debug("Non time stream file encountered %s.", name)
+                continue
+
+            # Figure out which CSD the file starts and ends on
+            start, end = [int(t) for t in self.corr_files[name]]
+
+            # Add this file to the set of files for the relevant days
+            csd_list.setdefault(start, set()).add(path)
+            csd_list.setdefault(end, set()).add(path)
+
+        new_files = set()
+
+        for csd, csd_files in sorted(csd_list.items()):
+
+            if csd in self.csd_list:
+                self.log.debug("Skipping existing CSD=%i, files: %s", csd, csd_files)
+                continue
+
+            if len(csd_files) < self.min_files_csd:
+                self.log.debug("Skipping CSD=%i with too few files: %s", csd, csd_files)
+                continue
+
+            # Great, we passed the cut, add to the final set
+            new_files.update(csd_files)
+
+        self.log.debug("Input list %i files, after filtering %i files.",
+                       len(files), len(new_files))
+
+        return sorted(list(new_files))
+
