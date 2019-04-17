@@ -196,7 +196,7 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        if isinstance(self.freq_sel, slice) and prod_sel is None and False:
+        if isinstance(self.freq_sel, slice) and prod_sel is None:
             self.log.info("Reading file %i of %i. (%s) [fast io]",
                           self._file_ptr, len(self.files), file_)
             ts = andata.CorrData.from_acq_h5_fast(file_, freq_sel=self.freq_sel,
