@@ -374,8 +374,9 @@ class FilterExisting(task.MPILoggedTask):
     min_files_csd : int
         The minimum number of files on a CSD for it to be processed.
     """
-    regex_csd = config.Property(proptype=str, default=None)
-    min_files_csd = config.Property(proptype=int, default=6)
+    existing_csd_regex = config.Property(proptype=str, default=None)
+    skip_csd = config.Property(proptype=list, default=[])
+    min_files_in_csd = config.Property(proptype=int, default=6)
 
     def __init__(self):
 
@@ -388,9 +389,9 @@ class FilterExisting(task.MPILoggedTask):
             # Look for CSDs in the current directory
             import glob
             files = glob.glob("*")
-            if self.regex_csd:
+            if self.existing_csd_regex:
                 for file_ in files:
-                    mo = re.search(self.regex_csd, file_)
+                    mo = re.search(self.existing_csd_regex, file_)
                     if mo is not None:
                         self.csd_list.append(int(mo.group(1)))
 
@@ -423,6 +424,7 @@ class FilterExisting(task.MPILoggedTask):
 
 
     def next(self, files):
+        """Filter the incoming file lists."""
 
         csd_list = {}
 
@@ -451,7 +453,11 @@ class FilterExisting(task.MPILoggedTask):
                 self.log.debug("Skipping existing CSD=%i, files: %s", csd, csd_files)
                 continue
 
-            if len(csd_files) < self.min_files_csd:
+            if csd in self.skip_csd:
+                self.log.debug("Skipping specified CSD=%i, files: %s", csd, csd_files)
+                continue
+
+            if len(csd_files) < self.min_files_in_csd:
                 self.log.debug("Skipping CSD=%i with too few files: %s", csd, csd_files)
                 continue
 
