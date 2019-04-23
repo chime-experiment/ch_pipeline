@@ -145,6 +145,7 @@ class SolarGrouper(task.SingleTask):
     min_span = config.Property(proptype=float, default=2.0)
 
     def __init__(self):
+        super(SolarGrouper, self).__init__()
         self._timestream_list = []
         self._current_day = None
 
@@ -843,7 +844,7 @@ class SunCalibration(task.SingleTask):
             csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
             csd = csd + ra / 360.0
             time = ephemeris.csd_to_unix(csd)
-        
+
         nprod = len(sstream.index_map['prod'][sstream.index_map['stack']['prod']])
 
         # Get position of sun at every time sample
