@@ -762,9 +762,6 @@ class SolarClean(task.SingleTask):
         hermweight = suntrans.attrs['hermweight']
         extended = 'coeff' in suntrans.datasets
 
-        # Initialize solar model
-        solarmodel = np.zeros(sstream.vis.local_shape)
-
         # Loop over frequencies
         for ff_local, ff_global in enumerate(range(sfreq, efreq)):
 
@@ -810,13 +807,8 @@ class SolarClean(task.SingleTask):
                         gout = np.sum(gi * gj, axis=-1)
 
                         # Outer product of the gains times the sun phase
-                        solarmodel[ff_global, bb, match] = subtract_sun
-                                                           * model
-                                                           * gout
-                                                           * sunphase
-
-        # Subtract the solar model
-        sstream.vis -=  solarmodel
+                        # Subtract the outer product of the gains times the sun phase
+                        sstream.vis[ff_global, bb, match] -=  subtract_sun * model * gout * sunphase
 
         # Return the clean sidereal stream
         return sstream
