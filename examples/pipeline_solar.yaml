@@ -25,12 +25,6 @@ pipeline:
                 level_rank0: DEBUG
                 level_all: WARNING
 
-        # Uncomment the code below to make a ringmmap
-        # -   type:       draco.core.io.LoadProductManager
-        #     out:        manager
-        #     params:
-        #         product_directory: "/scratch/ssiegel/chime/beam_transfer/chime_16freq"
-
         -   type:       draco.core.io.FindFiles
             out:        filelist
             params:
@@ -41,93 +35,20 @@ pipeline:
             out:        tstream
             params:     freq_params_narrow
 
-        #-   type:       ch_pipeline.core.dataquery.QueryInputs
-        #    in:         tstream
-        #    out:        inputmap
-        #
-        #-   type:       ch_pipeline.analysis.flagging.RFIFilter
-        #    in:         tstream
-        #    out:        rfimask
-        #    params:
-        #        stack: Yes
-        #        flag1d: No
-        #        rolling: Yes
-        #        apply_static_mask: Yes
-        #        keep_auto:  No
-        #        keep_ndev:  No
-        #        freq_width: 10.0
-        #        time_width: 420.0
-        #        threshold_mad: 6.0
-        #        save: No
-        #        output_root:   "rfi_mask_"
-        #
-        #-   type:       ch_pipeline.analysis.flagging.ApplyCorrInputMask
-        #    in:         [tstream, rfimask]
-        #    out:        tstream_rfi
-        #
-        #-   type:       draco.analysis.transform.SelectFreq
-        #    in:         tstream_rfi
-        #    out:        tstream_sub
-        #    params:     freq_params
-
-        -   type:   ch_pipeline.analysis.solar.SolarGrouper
-            in:     tstream
-            out:    groupday
-
-        # The code below requires N2 data, so will not work, just including as an example.
-        # -   type:   ch_pipeline.analysis.solar.SolarCalibration
-        #     in:     [groupday, inputmap, inputmask]
-        #     out:    rsun
-        #     params:
-        #         dualpol:  Yes
-        #         extended: Yes
-        #         neigen:   2
-        #         hermweight:  Yes
-        #         ymin:  1.2
-        #         model_fit:
-        #         nsig: 2.0
-        #         save: Yes
-        #         output_root: "solar_response_"
-        #
-        # -   type:   ch_pipeline.analysis.solar.SolarClean
-        #     in:     [groupday, rsun, inputmap]
-        #     out:    groupday_nosun
-        #     params:
-        #         threshold: 2.5
-        #         save: No
-        #         output_root: "stream_solar_cleaned_"
+        -   type:       ch_pipeline.analysis.solar.SolarGrouper
+            in:         tstream
+            out:        groupday
 
         -   type:       ch_pipeline.analysis.solar.SunCalibration
             in:         [groupday, inputmap]
             out:        groupday_sunonly
             params:
-                     save: Yes
-                     output_root: "stream_sun_only_"
+                save: Yes
+                output_root: "stream_sun_only_"
 
         #-   type:       ch_pipeline.analysis.solar.SunClean2
         #    in:         [groupday, groupday_sunonly]
         #    out:        groupday_nosun
-
-        # Uncomment the code below to make a ringmap
-        # -   type:       draco.analysis.transform.CollateProducts
-        #     requires:   manager
-        #     in:         groupday_nosun
-        #     out:        groupday_nosun_col
-        #     params:
-        #         weight: "natural"
-        #         save:   No
-        #         output_root:   "collated_vis_"
-        #
-        # -   type:       ch_pipeline.analysis.mapmaker.RingMapMaker
-        #     requires:   manager
-        #     in:         groupday_nosun_col
-        #     out:        ringmap
-        #     params:
-        #         weight: "natural"
-        #         exclude_intracyl:  No
-        #         include_auto: No
-        #         save:   Yes
-        #         output_root:   "ringmap_"
 
 #=================================== Frequency Selection ===================================
 
