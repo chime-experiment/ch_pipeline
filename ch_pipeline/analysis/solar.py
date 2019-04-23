@@ -28,6 +28,7 @@ import numpy as np
 
 from caput import config
 from caput import mpiutil
+from caput import time as ctime
 from ch_util import andata, ephemeris, tools, cal_utils
 from draco.core import task
 
