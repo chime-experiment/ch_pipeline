@@ -840,14 +840,18 @@ class SunCalibration(task.SingleTask):
         sstream.redistribute('freq')
 
         # Get array of CSDs for each sample
-        ra = sstream.index_map['ra'][:]
-        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-        csd = csd + ra / 360.0
-
+        if hasattr(sstream, 'time'):
+            time = sstream.time
+            ra = ephemeris.transit_RA(time)
+        else:
+            ra = sstream.index_map['ra'][:]
+            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            csd = csd + ra / 360.0
+            time = ephemeris.csd_to_unix(csd)
+        
         nprod = len(sstream.index_map['prod'][sstream.index_map['stack']['prod']])
 
         # Get position of sun at every time sample
-        times = ephemeris.csd_to_unix(csd)
         sun_pos = np.array([sun_coord(t) for t in time])
 
         # Get hour angle and dec of sun, in radians
@@ -873,7 +877,14 @@ class SunCalibration(task.SingleTask):
         vis_pos[(pol_ind == -1), :] = 0.0
 
         # Initialise new container
-        sunstream = sstream.__class__(axes_from=sstream, attrs_from=sstream)
+        #sunstream = sstream.__class__(axes_from=sstream, attrs_from=sstream)
+
+        newprod = np.array([[0, 0],[0,1],[1,0],[1,1]],
+                           dtype=sstream.index_map['prod'].dtype)
+        newstack = np.empty_like(newprod, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
+        newstack['prod'][:] = np.arange(len(newprod))
+        newstack['conjugate'] = 0
+        sunstream = containers.empty_like(sstream, prod=newprod, stack=newstack)
         sunstream.redistribute('freq')
 
         wv = 3e2 / sstream.index_map['freq']['centre']
@@ -891,7 +902,7 @@ class SunCalibration(task.SingleTask):
                 # Initialize the visiblities matrix
                 vis = sstream.vis[fi, :, ri]
                 weight = sstream.weight[fi, :, ri]
-                sunstream.vis[fi, :, ri] = np.zeros(vis.shape, dtype=vis.dtype)
+                #sunstream.vis[fi, :, ri] = np.zeros(vis.shape, dtype=vis.dtype)
 
                 # Check if sun has set
                 if el[ri] > 0.0:
@@ -918,7 +929,10 @@ class SunCalibration(task.SingleTask):
                         isds = tools.invert_no_zero(sds)
 
                         # Subtract sun contribution from visibilities and place in new array
-                        sunstream.vis[fi, :, ri] += sun_vis_pol * vds * isds
+                        sunstream.vis[fi, pol, ri] = vds * isds
+                else:
+
+                    sunstream.vis[fi, :, ri] = 0
 
         # Return the clean sidereal stream
         return sunstream
