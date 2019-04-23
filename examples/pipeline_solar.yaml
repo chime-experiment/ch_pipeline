@@ -35,6 +35,10 @@ pipeline:
             out:        tstream
             params:     freq_params_narrow
 
+        -   type:       ch_pipeline.core.dataquery.QueryInputs
+            in:         tstream
+            out:        inputmap
+
         -   type:       ch_pipeline.analysis.solar.SolarGrouper
             in:         tstream
             out:        groupday
