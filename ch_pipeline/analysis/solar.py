@@ -188,7 +188,7 @@ class SolarGrouper(task.SingleTask):
 
         # If this file ends during a later day then we need to process the
         # current list and restart the system
-        if self._current_day < day_end:
+        if self._current_day <= day_end:
 
             if tstream.vis.comm.rank == 0:
                 print "Concatenating files for date: %i" % day_start
