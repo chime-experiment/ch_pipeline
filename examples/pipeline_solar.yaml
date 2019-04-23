@@ -39,39 +39,39 @@ pipeline:
         -   type:       ch_pipeline.core.io.LoadCorrDataFiles
             requires:   filelist
             out:        tstream
-            params:     freq_params_wide
+            params:     freq_params_narrow
 
-        -   type:       ch_pipeline.core.dataquery.QueryInputs
-            in:         tstream
-            out:        inputmap
-
-        -   type:       ch_pipeline.analysis.flagging.RFIFilter
-            in:         tstream
-            out:        rfimask
-            params:
-                stack: Yes
-                flag1d: No
-                rolling: Yes
-                apply_static_mask: Yes
-                keep_auto:  No
-                keep_ndev:  No
-                freq_width: 10.0
-                time_width: 420.0
-                threshold_mad: 6.0
-                save: No
-                output_root:   "rfi_mask_"
-
-        -   type:       ch_pipeline.analysis.flagging.ApplyCorrInputMask
-            in:         [tstream, rfimask]
-            out:        tstream_rfi
-
-        -   type:       draco.analysis.transform.SelectFreq
-            in:         tstream_rfi
-            out:        tstream_sub
-            params:     freq_params
+        #-   type:       ch_pipeline.core.dataquery.QueryInputs
+        #    in:         tstream
+        #    out:        inputmap
+        #
+        #-   type:       ch_pipeline.analysis.flagging.RFIFilter
+        #    in:         tstream
+        #    out:        rfimask
+        #    params:
+        #        stack: Yes
+        #        flag1d: No
+        #        rolling: Yes
+        #        apply_static_mask: Yes
+        #        keep_auto:  No
+        #        keep_ndev:  No
+        #        freq_width: 10.0
+        #        time_width: 420.0
+        #        threshold_mad: 6.0
+        #        save: No
+        #        output_root:   "rfi_mask_"
+        #
+        #-   type:       ch_pipeline.analysis.flagging.ApplyCorrInputMask
+        #    in:         [tstream, rfimask]
+        #    out:        tstream_rfi
+        #
+        #-   type:       draco.analysis.transform.SelectFreq
+        #    in:         tstream_rfi
+        #    out:        tstream_sub
+        #    params:     freq_params
 
         -   type:   ch_pipeline.analysis.solar.SolarGrouper
-            in:     tstream_sub
+            in:     tstream
             out:    groupday
 
         # The code below requires N2 data, so will not work, just including as an example.
@@ -136,3 +136,6 @@ freq_params:
 
 freq_params_wide:
     channel_range:      [160, 240]
+
+freq_params_narrow:
+    channel_range:      [200, 202]
