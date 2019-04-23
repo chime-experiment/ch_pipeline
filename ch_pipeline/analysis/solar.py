@@ -172,8 +172,8 @@ class SolarGrouper(task.SingleTask):
         """
 
         # Get the start and end day of the file as an int with format YYYYMMDD
-        day_start = int(unix_to_local_datetime(tstream.time[0]).strftime('%Y%m%d'))
-        day_end = int(unix_to_local_datetime(tstream.time[-1]).strftime('%Y%m%d'))
+        day_start = int(unix_to_localtime(tstream.time[0]).strftime('%Y%m%d'))
+        day_end = int(unix_to_localtime(tstream.time[-1]).strftime('%Y%m%d'))
 
         # If current_day is None then this is the first time we've run
         if self._current_day is None:
