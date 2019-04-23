@@ -1,8 +1,8 @@
 cluster:
     name: chimestack
-    directory: /scratch/ssiegel/chime/pipeline/stack/solar
+    directory: /home/dwulf/solar_pipeline
 
-    venv:               /home/ssiegel/ch_pipeline/venv
+    venv:               /home/dwulf/ch_pipeline/venv
 
     ## Cluster configuration (ignored unless on a cluster)
     name:               chimestack              # Jobname
@@ -34,7 +34,7 @@ pipeline:
         -   type:       draco.core.io.FindFiles
             out:        filelist
             params:
-                files:  "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/*.h5"
+                files:  "/mnt/gong/archive/20190410T141411Z_chimestack_corr/*.h5"
 
         -   type:       ch_pipeline.core.io.LoadCorrDataFiles
             requires:   filelist
