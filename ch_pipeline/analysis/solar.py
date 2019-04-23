@@ -891,7 +891,7 @@ class SunCalibration(task.SingleTask):
                 # Initialize the visiblities matrix
                 vis = sstream.vis[fi, :, ri]
                 weight = sstream.weight[fi, :, ri]
-                sunstream.vis[fi, :, ri] = np.zeros(vis.shape, vis.dtype)
+                sunstream.vis[fi, :, ri] = np.zeros(vis.shape, dtype=vis.dtype)
 
                 # Check if sun has set
                 if el[ri] > 0.0:
