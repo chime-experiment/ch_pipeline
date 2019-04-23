@@ -28,7 +28,11 @@ pipeline:
         -   type:       draco.core.io.FindFiles
             out:        filelist
             params:
-                files:  "/mnt/gong/archive/20190410T141411Z_chimestack_corr/00025447_0000.h5"
+                files:
+                    -   "/mnt/gong/archive/20190410T141411Z_chimestack_corr/00010179_0000.h5"
+                    -   "/mnt/gong/archive/20190410T141411Z_chimestack_corr/00015268_0000.h5"
+                    -   "/mnt/gong/archive/20190410T141411Z_chimestack_corr/00020358_0000.h5"
+                    -   "/mnt/gong/archive/20190410T141411Z_chimestack_corr/00025447_0000.h5"
 
         -   type:       ch_pipeline.core.io.LoadCorrDataFiles
             requires:   filelist
