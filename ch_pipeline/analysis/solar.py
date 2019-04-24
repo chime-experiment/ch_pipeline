@@ -330,7 +330,7 @@ class SolarCalibration(task.SingleTask):
         freq = sstream.index_map['freq']['centre'][sfreq:efreq]
         wv = 3e2 / freq
 
-        # Get times
+        # Get times (ra in degrees)
         if hasattr(sstream, 'time'):
             time = sstream.time
             ra = ephemeris.transit_RA(time)
@@ -368,8 +368,8 @@ class SolarCalibration(task.SingleTask):
         time = np.concatenate([time[slc[0]] for slc in time_slice])
         ra = np.concatenate([ra[slc[0]] for slc in time_slice])
 
-        # Get ra, dec, alt of sun
-        sun_pos = np.array([sun_coord(t) for t in time])
+        # Get ra, dec, alt of sun (in radians)
+        sun_pos = sun_coord(time, deg=False)
 
         # Convert from ra to hour angle
         sun_pos[:, 0] = wrap_phase(np.radians(ra) - sun_pos[:, 0], deg=False)
@@ -440,7 +440,7 @@ class SolarCalibration(task.SingleTask):
         for key in suntrans.datasets.keys():
             suntrans.datasets[key][:] = 0.0
 
-        # Set coordinates
+        # Set coordinates (in radians)
         suntrans.coord[:] = sun_pos
 
         # Create slice for expanding dimensions for solve_gain
@@ -841,7 +841,7 @@ class SunCalibration(task.SingleTask):
 
         sstream.redistribute('freq')
 
-        # Get array of CSDs for each sample
+        # Get array of CSDs for each sample (ra in degrees)
         if hasattr(sstream, 'time'):
             time = sstream.time
             ra = ephemeris.transit_RA(time)
@@ -853,11 +853,11 @@ class SunCalibration(task.SingleTask):
 
         nprod = len(sstream.index_map['prod'][sstream.index_map['stack']['prod']])
 
-        # Get position of sun at every time sample
-        sun_pos = np.array([sun_coord(t) for t in time])
+        # Get position of sun at every time sample (in radians)
+        sun_pos = sun_coord(time, deg=False)
 
         # Get hour angle and dec of sun, in radians
-        ha = 2 * np.pi * (ra / 360.0) - sun_pos[:, 0]
+        ha = np.radians(ra) - sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
 
@@ -960,19 +960,23 @@ class SunClean(task.SingleTask):
 
         sstream.redistribute('freq')
 
-        # Get array of CSDs for each sample
-        ra = sstream.index_map['ra'][:]
-        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-        csd = csd + ra / 360.0
+        # Get array of CSDs for each sample (ra in degrees)
+        if hasattr(sstream, 'time'):
+            times = sstream.time
+            ra = ephemeris.transit_RA(time)
+        else:
+            ra = sstream.index_map['ra'][:]
+            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            csd = csd + ra / 360.0
+            times = ephemeris.csd_to_unix(csd)
 
         nprod = len(sstream.index_map['prod'])
 
-        # Get position of sun at every time sample
-        times = ephemeris.csd_to_unix(csd)
-        sun_pos = np.array([sun_coord(t) for t in time])
+        # Get position of sun at every time sample (in radians)
+        sun_pos = sun_coord(times, deg=False)
 
         # Get hour angle and dec of sun, in radians
-        ha = 2 * np.pi * (ra / 360.0) - sun_pos[:, 0]
+        ha = np.radians(ra) - sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
 
