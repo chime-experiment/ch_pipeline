@@ -20,9 +20,13 @@ from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
 
+from ..core.processed_db import RegisterProcessedFiles, append_product
+
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
 from ch_util import data_index as di
+
+from os import path
 
 from skyfield.constants import ANGVEL
 SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
@@ -76,7 +80,7 @@ class TransitGrouper(task.SingleTask):
             db_runs = list(di.HolographyObservation.select().where(
                 di.HolographyObservation.source == db_src
             ))
-            db_runs = [(r.start_time, r.finish_time) for r in db_runs]
+            db_runs = [(r.id, (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
         mpiutil.barrier()
 
@@ -168,6 +172,7 @@ class TransitGrouper(task.SingleTask):
         ts.attrs['dec'] = dec._degrees
         ts.attrs['source_name'] = self.source
         ts.attrs['transit_time'] = self.cur_transit
+        ts.attrs['observation_id'] = self.obs_id
         ts.attrs['tag'] = "{}_{}".format(
             self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
         )
@@ -185,7 +190,7 @@ class TransitGrouper(task.SingleTask):
 
         # get bounds of observation from database
         this_run = [
-            r for r in self.db_runs if r[0] < self.cur_transit and r[1] > self.cur_transit
+            r for r in self.db_runs if r[1][0] < self.cur_transit and r[1][1] > self.cur_transit
         ]
         if len(this_run) == 0:
             self.log.warning("Could not find source transit in holography database for {}."
@@ -193,8 +198,9 @@ class TransitGrouper(task.SingleTask):
             # skip this file
             self.cur_transit = None
         else:
-            self.start_t = max(self.start_t, this_run[0][0])
-            self.end_t = min(self.end_t, this_run[0][1])
+            self.start_t = max(self.start_t, this_run[0][1][0])
+            self.end_t = min(self.end_t, this_run[0][1][1])
+            self.obs_id = this_run[0][0]
 
 
 class TransitRegridder(Regridder):
@@ -380,6 +386,31 @@ class MakeHolographyBeam(task.SingleTask):
             track.weight[:, ip, :, :] = data.weight[:, prod_groups[ip], :]
 
         return track
+
+
+class RegisterHolographyProcessed(RegisterProcessedFiles):
+
+    def process(self, output):
+
+        # Create a tag for the output file name
+        tag = output.attrs['tag'] if 'tag' in output.attrs else self._count
+
+        # Construct the filename
+        outfile = self.output_root + str(tag) + '.h5'
+
+        # Expand any variables in the path
+        outfile = path.expanduser(outfile)
+        outfile = path.expandvars(outfile)
+
+        self.write_output(outfile, output)
+
+        # Add entry in database
+        # TODO: check for duplicates ?
+        append_product(self.db_fname, outfile, self.product_tag, config=None,
+                       parent_tag=self.parent_tag, git_tags=self.git_tags,
+                       holobs_id=output.attrs['observation_id'])
+
+        return None
 
 
 def wrap_observer(obs):

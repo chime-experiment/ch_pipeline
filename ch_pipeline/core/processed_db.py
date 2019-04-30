@@ -56,7 +56,7 @@ class RegisterProcessedFiles(task.SingleTask):
         return None
 
 
-def append_product(db_fname, prod_fname, prod_tag, config, parent_tag=None, git_tags=[]):
+def append_product(db_fname, prod_fname, prod_tag, config, parent_tag=None, git_tags=[], **kwargs):
     with open(db_fname, 'r') as fh:
         entries = yaml.load(fh)
     if type(entries) is not list:
@@ -67,6 +67,6 @@ def append_product(db_fname, prod_fname, prod_tag, config, parent_tag=None, git_
         'parent_tag': parent_tag,
         'git_tags': git_tags,
         'pipeline_config': config
-    })
+    }.update(kwargs))
     with open(db_fname, 'w') as fh:
         yaml.dump(entries, fh)
