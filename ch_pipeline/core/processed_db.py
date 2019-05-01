@@ -61,12 +61,14 @@ def append_product(db_fname, prod_fname, prod_tag, config, parent_tag=None, git_
         entries = yaml.load(fh)
     if type(entries) is not list:
         raise "Could not parse YAML for processed data record."
-    entries.append({
+    new_entry = {
         'filename': prod_fname,
         'tag': prod_tag,
         'parent_tag': parent_tag,
         'git_tags': git_tags,
         'pipeline_config': config
-    }.update(kwargs))
+    }
+    new_entry.update(kwargs)
+    entries.append(new_entry)
     with open(db_fname, 'w') as fh:
         yaml.dump(entries, fh)
