@@ -409,6 +409,60 @@ class PointSourceTransit(StaticGainData):
         return self.index_map['param_cov2']
 
 
+class TransitFitParams(ContainerBase):
+    """ Container for fit parameters to holography transits.
+    """
+
+    _axes = ('freq', 'pol', 'input', 'param')
+
+    _dataset_spec = {
+        'parameter': {
+            'axes': ['freq', 'pol', 'input', 'param'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'parameter_cov': {
+            'axes': ['freq', 'pol', 'input', 'param', 'param'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    def __init__(self, *args, **kwargs):
+        if 'param' not in kwargs:
+            kwargs['param'] = np.array(['centroid', 'width', 'amplitude',
+                                        'offset', 'chi2', 'transit_phase'])
+        super(TransitFitParams, self).__init__(**kwargs)
+
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']
+
+    @property
+    def pol(self):
+        return self.index_map['pol']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def param(self):
+        return self.index_map['param']
+
+
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit.
     """
