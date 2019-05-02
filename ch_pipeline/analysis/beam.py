@@ -27,6 +27,7 @@ from ch_util import tools, layout
 from ch_util import data_index as di
 
 from os import path
+import yaml
 
 from skyfield.constants import ANGVEL
 SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
@@ -49,6 +50,7 @@ class TransitGrouper(task.SingleTask):
     ha_span = config.Property(proptype=float, default=180.)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
+    proc_db = config.Property(proptype=str, default=None)
 
     def setup(self, observer=None):
         """Set the local observers position if not using CHIME.
@@ -83,6 +85,13 @@ class TransitGrouper(task.SingleTask):
             db_runs = [(r.id, (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
         mpiutil.barrier()
+
+        # Get list of processed transits
+        if self.proc_db is not None:
+            with open(self.proc_db, 'r') as fh:
+                self.proc_transits = yaml.load(fh)
+        else:
+            self.proc_transits = []
 
     def process(self, tstream):
         """ Take in a timestream and accumulate, group into whole transits.
@@ -200,6 +209,10 @@ class TransitGrouper(task.SingleTask):
             self.log.warning("Could not find source transit in holography database for {}."
                              .format(ephem.unix_to_datetime(self.cur_transit)))
             # skip this file
+            self.cur_transit = None
+        elif this_run[0] in [t['holobs_id'] for t in self.proc_transits]:
+            self.log.warning("Already processed transit for {}. Skipping."
+                             .format(ephem.unix_to_datetime(self.cur_transit)))
             self.cur_transit = None
         else:
             self.start_t = max(self.start_t, this_run[0][1][0])
