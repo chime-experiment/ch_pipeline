@@ -76,7 +76,8 @@ class TransitGrouper(task.SingleTask):
         db_runs = None
         if mpiutil.rank0:
             di.connect_database()
-            db_src = di.HolographySource.get(di.HolographySource.name == self.db_source)
+            db_src = di.HolographySource.get(
+                di.HolographySource.name == self.db_source)
             db_runs = list(di.HolographyObservation.select().where(
                 di.HolographyObservation.source == db_src
             ))
@@ -174,7 +175,8 @@ class TransitGrouper(task.SingleTask):
         ts.attrs['transit_time'] = self.cur_transit
         ts.attrs['observation_id'] = self.obs_id
         ts.attrs['tag'] = "{}_{}".format(
-            self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
+            self.source, ephem.unix_to_datetime(
+                self.cur_transit).strftime("%Y%m%dT%H%M%S")
         )
 
         self.tstreams = []
@@ -291,7 +293,8 @@ class TransitRegridder(Regridder):
 
         # Wrap to produce MPIArray
         if mpiutil.size > 1:
-            new_vis = mpiarray.MPIArray.wrap(new_vis, axis=data.vis.distributed_axis)
+            new_vis = mpiarray.MPIArray.wrap(
+                new_vis, axis=data.vis.distributed_axis)
             ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
 
         # Create new container for output
@@ -336,7 +339,8 @@ class MakeHolographyBeam(task.SingleTask):
         inputs = data.index_map['input']
 
         # Figure out which inputs are the 26m
-        input_26m = prod['input_a'][np.where(prod['input_a'] == prod['input_b'])[0]]
+        input_26m = prod['input_a'][np.where(
+            prod['input_a'] == prod['input_b'])[0]]
         if len(input_26m) != 2:
             msg = ("Did not find exactly two 26m inputs in the data.")
             self.log.error(msg)
@@ -415,10 +419,10 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
 def wrap_observer(obs):
     return ephem.SkyfieldObserverWrapper(
-            lon=obs.longitude,
-            lat=obs.latitude,
-            alt=obs.altitude,
-            lsd_start=obs.lsd_start_day
+        lon=obs.longitude,
+        lat=obs.latitude,
+        alt=obs.altitude,
+        lsd_start=obs.lsd_start_day
     )
 
 
@@ -431,4 +435,3 @@ def unwrap_lha(lsa, src_ra):
     # subtract source RA
     return np.where(np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.),
                     lsa - src_ra, lsa - src_ra + 360.)
-
