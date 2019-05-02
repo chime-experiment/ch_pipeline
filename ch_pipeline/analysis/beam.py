@@ -417,6 +417,21 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
+class DetermineHolographyGainsFromFits(task.SingleTask):
+
+    def process(self, fits):
+        self.gain = fits.parameters['transit_phase'] / \
+            fits.parameters['amplitude']
+
+
+class ApplyHolographyGains(task.singleTask):
+
+    def process(self, track, gain):
+        # axes of track['beam'] are freq, pol, input, pix
+        # axes of gain.gain are freq, pol, input (right?)
+        track['beam'] *= gain.gain[:, :, :, np.newaxis]
+
+
 def wrap_observer(obs):
     return ephem.SkyfieldObserverWrapper(
         lon=obs.longitude,
