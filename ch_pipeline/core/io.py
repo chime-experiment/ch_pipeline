@@ -113,7 +113,7 @@ def _list_of_filegroups(groups):
     return groups
 
 
-class LoadCorrDataFiles(task.SingleTask):
+class LoadDataFiles(task.SingleTask):
     """Load data from files passed into the setup routine.
 
     File must be a serialised subclass of :class:`memh5.BasicCont`.
@@ -141,6 +141,15 @@ class LoadCorrDataFiles(task.SingleTask):
     channel_index = config.Property(proptype=list, default=[])
 
     only_autos = config.Property(proptype=bool, default=False)
+
+    acqtype = config.Property(proptype=str, default='corr')
+
+    acqtype_reader = {'corr' : andata.CorrReader, 'hk' : andata.HKReader,
+                      'hkp' : andata.HKPReader,
+                      'weather' : andata.WeatherReader,
+                      'rawadc' : andata.RawADCReader,
+                      'gain' : andata.GainFlagReader,
+                      'flaginput' : andata.GainFlagReader}
 
     def setup(self, files):
         """Set the list of files to load.
@@ -178,6 +187,7 @@ class LoadCorrDataFiles(task.SingleTask):
             The timestream of each sidereal day.
         """
 
+        self.log.info(len(self.files))
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -188,14 +198,30 @@ class LoadCorrDataFiles(task.SingleTask):
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
-        # Set up product selection
+        if self.acqtype in self.acqtype_reader:
+            rd_class = self.acqtype_reader[self.acqtype]
+        else:
+            raise RuntimeError('Not a valid Acquisition type!')
+
+        # Set up a Reader class
+        rd = rd_class(file_)
+
+        if self.acqtype == 'corr':
+            ts = self._corr_data_sels(rd, file_)
+        else:
+            ts = rd.read()
+
+        # Loaded file and log
+        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
+
+        # Return timestream
+        return ts
+
+    def _corr_data_sels(self, rd, file_):
+
         prod_sel = None
         if self.only_autos:
-            rd = andata.CorrReader(file_)
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
-
-        # Load file
-        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
 
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
@@ -216,7 +242,51 @@ class LoadCorrDataFiles(task.SingleTask):
             # a small bias
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
 
-        # Return timestream
+        return ts
+
+
+LoadCorrDataFiles = LoadDataFiles
+
+
+class LoadWeatherFiles(task.SingleTask):
+    """Task to load weather files"""
+
+    files = None
+    _file_ptr = 0
+
+    def setup(self, files):
+        """Set the list of files to load.
+
+        Parameters
+        ----------
+        files : list
+        """
+        if not isinstance(files, (list, tuple)):
+            raise RuntimeError('Argument must be list of files.')
+
+        self.files = files
+
+    def process(self):
+        """ Load in each weather file
+
+        Returns
+        -------
+        ts : andata.WeatherData
+        """
+        if len(self.files) == self._file_ptr:
+            raise pipeline.PipelineStopIteration
+
+        # Collect garbage to remove any prior CorrData objects
+        gc.collect()
+        # Fetch and remove the first item in the list
+        file_ = self.files[self._file_ptr]
+        self._file_ptr += 1
+
+        # Load file
+        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
+
+        ts = andata.WeatherData.from_acq_h5(file_)
+
         return ts
 
 
