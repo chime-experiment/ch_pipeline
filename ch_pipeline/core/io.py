@@ -245,49 +245,8 @@ class LoadDataFiles(task.SingleTask):
         return ts
 
 
+# For backwards compatibility
 LoadCorrDataFiles = LoadDataFiles
-
-
-class LoadWeatherFiles(task.SingleTask):
-    """Task to load weather files"""
-
-    files = None
-    _file_ptr = 0
-
-    def setup(self, files):
-        """Set the list of files to load.
-
-        Parameters
-        ----------
-        files : list
-        """
-        if not isinstance(files, (list, tuple)):
-            raise RuntimeError('Argument must be list of files.')
-
-        self.files = files
-
-    def process(self):
-        """ Load in each weather file
-
-        Returns
-        -------
-        ts : andata.WeatherData
-        """
-        if len(self.files) == self._file_ptr:
-            raise pipeline.PipelineStopIteration
-
-        # Collect garbage to remove any prior CorrData objects
-        gc.collect()
-        # Fetch and remove the first item in the list
-        file_ = self.files[self._file_ptr]
-        self._file_ptr += 1
-
-        # Load file
-        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
-
-        ts = andata.WeatherData.from_acq_h5(file_)
-
-        return ts
 
 
 class LoadSetupFile(pipeline.TaskBase):

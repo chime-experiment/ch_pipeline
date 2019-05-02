@@ -194,7 +194,6 @@ class QueryDatabase(pipeline.TaskBase):
                 f.include_26m_obs(self.source_26m)
 
             results = f.get_results()
-            print(results)
             files = [ fname for result in results for fname in result[0] ]
             files.sort()
 
