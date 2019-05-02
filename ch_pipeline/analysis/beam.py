@@ -166,6 +166,9 @@ class TransitGrouper(task.SingleTask):
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
+        # Save list of filenames
+        filenames = [ts.filename for ts in self.tstreams]
+
         # Concatenate timestreams
         ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
         _, dec = self.sky_obs.radec(self.src)
@@ -176,6 +179,7 @@ class TransitGrouper(task.SingleTask):
         ts.attrs['tag'] = "{}_{}".format(
             self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
         )
+        ts.attrs['archivefiles'] = filenames
 
         self.tstreams = []
         self.cur_transit = None
@@ -404,11 +408,14 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
         self.write_output(outfile, output)
 
+        obs_id = output.attrs.get('observation_id', None)
+        files = output.attrs.get('archivefiles', None)
+
         # Add entry in database
         # TODO: check for duplicates ?
-        append_product(self.db_fname, outfile, self.product_tag, config=None,
-                       parent_tag=self.parent_tag, git_tags=self.git_tags,
-                       holobs_id=output.attrs['observation_id'])
+        append_product(self.db_fname, outfile, self.product_type, config=None,
+                       tag=self.tag, git_tags=self.git_tags, holobs_id=obs_id,
+                       archivefiles=files)
 
         return None
 
