@@ -20,14 +20,13 @@ from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
 
-from ..core.processed_db import RegisterProcessedFiles, append_product
+from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
 from ch_util import data_index as di
 
 from os import path
-import yaml
 
 from skyfield.constants import ANGVEL
 SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
@@ -82,14 +81,13 @@ class TransitGrouper(task.SingleTask):
             db_runs = list(di.HolographyObservation.select().where(
                 di.HolographyObservation.source == db_src
             ))
-            db_runs = [(r.id, (r.start_time, r.finish_time)) for r in db_runs]
+            db_runs = [(int(r.id), (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
         mpiutil.barrier()
 
         # Get list of processed transits
         if self.proc_db is not None:
-            with open(self.proc_db, 'r') as fh:
-                self.proc_transits = yaml.load(fh)
+            self.proc_transits = get_proc_transits(self.proc_db)
         else:
             self.proc_transits = []
 
@@ -176,7 +174,7 @@ class TransitGrouper(task.SingleTask):
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
         # Save list of filenames
-        filenames = [ts.filename for ts in self.tstreams]
+        filenames = [ts._data.filename for ts in self.tstreams]
 
         # Concatenate timestreams
         ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
@@ -210,7 +208,7 @@ class TransitGrouper(task.SingleTask):
                              .format(ephem.unix_to_datetime(self.cur_transit)))
             # skip this file
             self.cur_transit = None
-        elif this_run[0] in [t['holobs_id'] for t in self.proc_transits]:
+        elif this_run[0][0] in [int(t['holobs_id']) for t in self.proc_transits]:
             self.log.warning("Already processed transit for {}. Skipping."
                              .format(ephem.unix_to_datetime(self.cur_transit)))
             self.cur_transit = None
