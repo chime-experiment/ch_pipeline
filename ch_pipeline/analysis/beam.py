@@ -418,18 +418,61 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
 
 class DetermineHolographyGainsFromFits(task.SingleTask):
+    """Determine holography gains of a transit from Gaussian fits to
+    the transit.
+    """
 
     def process(self, fits):
-        self.gain = fits.parameters['transit_phase'] / \
+    """use transit phase and 1/peak amplitude as the gain, peak normalizing
+    the transit.
+    
+    Parameters
+    ----------
+    fits: TransitFitParams
+    """
+        return fits.parameters['transit_phase'] / \
             fits.parameters['amplitude']
 
 
 class ApplyHolographyGains(task.singleTask):
 
-    def process(self, track, gain):
+    """Apply gains to a holography transit
+
+    Parameters
+    ----------
+    overwrite: bool (default: False)
+        if True, overwrite the input TrackBeam
+    """
+
+    overwrite = config.Property(proptype=bool, default=False)
+
+    def process(self, track_in, gain):
+        """Apply gain
+
+        Parameters
+        ----------
+        track: draco.core.containers.TrackBeam
+            holography track to apply gains to. Will apply gains to
+            track['beam'], expecting axes to be freq, pol, input, ha
+        gain: np.array
+            gain to apply. Expected axes are freq, pol, and input
+        """
         # axes of track['beam'] are freq, pol, input, pix
-        # axes of gain.gain are freq, pol, input (right?)
+        # axes of gain are freq, pol, input (right?)
+
+        if self.overwrite:
+            track = track_in
+        else:
+            track = TrackBeam(theta=track_in.theta, phi=track_in.phi,
+                              track_type=track_in.track_type, coords=track_in.coords,
+                              input=track_in.input, pol=track_in.pol,
+                              freq=track_in.freq, attrs_from=track_in.attrs_from,
+                              distributed=track_in.distributed)
+            track['beam'] = track_in['beam'][:]
+            track['weight'] = track_in['weight'][:]
         track['beam'] *= gain.gain[:, :, :, np.newaxis]
+
+        return track
 
 
 def wrap_observer(obs):
