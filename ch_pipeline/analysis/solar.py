@@ -82,7 +82,7 @@ def sun_coord(unix_time, deg=True):
     -------
     coord : np.ndarray
         2D array of type `float` with shape `(ntime, 4)` that contains
-        the right ascension, declination, altitude, and azimuth of the
+        the hour angle, declination, altitude, and azimuth of the
         sun at each time.
 
     """
@@ -115,8 +115,8 @@ def sun_coord(unix_time, deg=True):
     coord[:, 0] = coord[:, 0] + (era - gast)
 
     # Convert to hour angle
-    coord[:, 0] = _correct_phase_wrap(coord[:, 0] -
-                                      np.radians(ephemeris.lsa(date)))
+    coord[:, 0] = _correct_phase_wrap(coord[:, 0]
+                                      - np.radians(ephemeris.lsa(date)))
 
     if deg:
         coord = np.degrees(coord)
@@ -333,7 +333,7 @@ class SolarCalibration(task.SingleTask):
         # Get times (ra in degrees)
         if hasattr(sstream, 'time'):
             time = sstream.time
-            ra = ephemeris.transit_RA(time)
+            ra = ephemeris.lsa(time)
         else:
             ra = sstream.index_map['ra'][:]
             csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
@@ -370,9 +370,6 @@ class SolarCalibration(task.SingleTask):
 
         # Get ra, dec, alt of sun (in radians)
         sun_pos = sun_coord(time, deg=False)
-
-        # Convert from ra to hour angle
-        sun_pos[:, 0] = wrap_phase(np.radians(ra) - sun_pos[:, 0], deg=False)
 
         # Determine good inputs
         nfeed = len(inputmap)
@@ -688,8 +685,8 @@ class SolarClean(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
-            Sidereal stream.
+        sstream: andata.CorrData or containers.SiderealStream
+            Timestream collected during the day.
         suntrans : containers.SolarTransit
             Response to the sun.
         inputmap : list of :class:`CorrInput`s
@@ -830,8 +827,10 @@ class SunCalibration(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
-            Sidereal stream.
+        sstream: andata.CorrData or containers.SiderealStream
+            Timestream collected during the day.
+        inputmap : list of :class:`CorrInput`s
+            A list describing the inputs as they are in the file.
 
         Returns
         -------
@@ -844,7 +843,7 @@ class SunCalibration(task.SingleTask):
         # Get array of CSDs for each sample (ra in degrees)
         if hasattr(sstream, 'time'):
             time = sstream.time
-            ra = ephemeris.transit_RA(time)
+            ra = ephemeris.lsa(time)
         else:
             ra = sstream.index_map['ra'][:]
             csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
@@ -857,7 +856,7 @@ class SunCalibration(task.SingleTask):
         sun_pos = sun_coord(time, deg=False)
 
         # Get hour angle and dec of sun, in radians
-        ha = np.radians(ra) - sun_pos[:, 0]
+        ha = sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
 
@@ -873,21 +872,30 @@ class SunCalibration(task.SingleTask):
         pol_ind = np.full(len(feed_list), -1, dtype=np.int)
         for ii, (fi, fj) in enumerate(feed_list):
             if tools.is_chime(fi) and tools.is_chime(fj):
-                pol_ind[ii] = 2 * tools.is_chime_y(fi) + tools.is_chime_y(fj)
+                pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
 
         # Change vis_pos for non-CHIME feeds from NaN to 0.0
         vis_pos[(pol_ind == -1), :] = 0.0
 
         # Initialise new container
-        #sunstream = sstream.__class__(axes_from=sstream, attrs_from=sstream)
-
         newprod = np.array([[0, 0],[0,1],[1,0],[1,1]],
                            dtype=sstream.index_map['prod'].dtype)
-        newstack = np.empty_like(newprod, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
+        newstack = np.zeros(4, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
         newstack['prod'][:] = np.arange(len(newprod))
         newstack['conjugate'] = 0
-        sunstream = containers.empty_like(sstream, prod=newprod, stack=newstack)
+        
+        if isinstance(sstream, containers.SiderealStream):
+            OutputContainer = containers.SiderealStream
+        else:
+            OutputContainer = containers.TimeStream
+
+        sunstream = OutputContainer(prod=newprod, stack=newstack,
+                                    axes_from=sstream, attrs_from=sstream)
+        
+        #sunstream = containers.empty_like(sstream, prod=newprod, stack=newstack)
+        
         sunstream.redistribute('freq')
+        sunstream.vis[:] = 0.0
 
         wv = 3e2 / sstream.index_map['freq']['centre']
 
@@ -923,7 +931,8 @@ class SunCalibration(task.SingleTask):
                     for pol in range(4):
 
                         # Mask out other polarisations in the visibility vector
-                        sun_vis_pol = sun_vis * (pol_ind == pol)
+                        # Also mask out intra-cylinder baselines
+                        sun_vis_pol = sun_vis * (pol_ind == pol) * (u == 0)
 
                         # Calculate various projections
                         vds = (vis * sun_vis_pol.conj() * weight).sum(axis=0)
@@ -934,7 +943,7 @@ class SunCalibration(task.SingleTask):
                         sunstream.vis[fi, pol, ri] = vds * isds
                 else:
 
-                    sunstream.vis[fi, :, ri] = 0
+                    sunstream.vis[fi, :, ri] = 0.0
 
         # Return the clean sidereal stream
         return sunstream
@@ -949,8 +958,10 @@ class SunClean(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
-            Sidereal stream.
+        sstream: andata.CorrData or containers.SiderealStream
+            Timestream collected during the day.
+        inputmap : list of :class:`CorrInput`s
+            A list describing the inputs as they are in the file.
 
         Returns
         -------
@@ -963,7 +974,7 @@ class SunClean(task.SingleTask):
         # Get array of CSDs for each sample (ra in degrees)
         if hasattr(sstream, 'time'):
             times = sstream.time
-            ra = ephemeris.transit_RA(time)
+            ra = ephemeris.lsa(time)
         else:
             ra = sstream.index_map['ra'][:]
             csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
@@ -1058,10 +1069,10 @@ class SunClean2(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
-            Sidereal stream.
+        sstream: andata.CorrData or containers.SiderealStream
+            Timestream collected during the day.
 
-        sunstream : containers.SiderealStream
+        sunstream : containers.SiderealStream or containers.TimeStream
             Sun's contribution to sidereal stream
 
         Returns
