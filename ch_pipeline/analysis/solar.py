@@ -30,7 +30,6 @@ Usage
 from datetime import datetime
 import numpy as np
 import h5py
-#import ephem
 import skyfield.api
 
 from caput import config
@@ -145,8 +144,8 @@ class SolarGrouper(task.SingleTask):
 
     Attributes
     ----------
-    min_span: float
-        The minimum solar day length(in hours) to process.
+    min_span : float
+        The minimum solar day length (in hours) to process.
         Default is 2.
     """
 
@@ -162,14 +161,14 @@ class SolarGrouper(task.SingleTask):
 
         Parameters
         ----------
-        tstream: andata.CorrData
+        tstream : andata.CorrData
             Timestream to group together.
 
         Returns
         -------
-        ts: andata.CorrData or None
+        ts : andata.CorrData or None
             Returns the timestream of each solar day when we have received
-            the last file, otherwise returns: obj: `None`.
+            the last file, otherwise returns :obj:`None`.
         """
 
         # Get the start and end day of the file as an int with format YYYYMMDD
@@ -211,9 +210,9 @@ class SolarGrouper(task.SingleTask):
 
         Returns
         -------
-        ts: andata.CorrData or None
+        ts : andata.CorrData or None
             Returns the timestream of the final day if it's long
-            enough, otherwise returns: obj: `None`.
+            enough, otherwise returns :obj:`None`.
         """
 
         # If we are here there is no more data coming, we just need to process any remaining data
@@ -275,7 +274,7 @@ class SolarCalibration(task.SingleTask):
         Fit a model to the primary beam.
     nsig: float, default 2.0
         Relevant if model_fit is True.  The model is only fit to
-        time samples within + /- nsig sigma from the expected
+        time samples within +/- nsig sigma from the expected
         peak location.
     """
 
@@ -294,17 +293,17 @@ class SolarCalibration(task.SingleTask):
 
         Parameters
         ----------
-        sstream: andata.CorrData or containers.SiderealStream
+        sstream : andata.CorrData or containers.SiderealStream
             Timestream collected during the day.
-        inputmap: list of: class: `CorrInput`s
+        inputmap : list of :class:`CorrInput`s
             A list describing the inputs as they are in the file.
-        inputmask: containers.CorrInputMask
+        inputmask : containers.CorrInputMask
             Mask indicating which correlator inputs to use in the
             eigenvalue decomposition.
 
         Returns
         -------
-        suntrans: containers.SunTransit
+        suntrans : containers.SunTransit
             Response to the sun.
         """
 
@@ -607,15 +606,8 @@ class SolarCalibration(task.SingleTask):
             # Estimate peak RA
             i_transit = np.argmin(np.abs(sun_pos[:, 0]))
 
-            # TODO: remove reliance on pyephem
-            #body = ephem.Sun()
-            #obs = ephemeris._get_chime()
-            #obs.date = ephemeris.unix_to_ephem_time(time[i_transit])
-            #body.compute(obs)
-
             planets = skyfield.api.load('de421.bsp')
             body = planets['sun']
-
             peak_ra = ephemeris.peak_RA(body, date=time[i_transit], deg=True)
             dra = ra - peak_ra
             dra = np.abs(wrap_phase(dra, deg=True))
@@ -669,7 +661,7 @@ class SolarClean(task.SingleTask):
 
     Attributes
     ----------
-    threshold: float, default 2.5
+    threshold : float, default 2.5
         Do not subtract sun if the is_sun metric defined in
         SolarCalibration module is less than threshold.
     savesun : bool, default False
@@ -685,7 +677,7 @@ class SolarClean(task.SingleTask):
 
         Parameters
         ----------
-        sstream: andata.CorrData or containers.SiderealStream
+        sstream : andata.CorrData or containers.SiderealStream
             Timestream collected during the day.
         suntrans : containers.SolarTransit
             Response to the sun.
@@ -883,7 +875,7 @@ class SunCalibration(task.SingleTask):
         newstack = np.zeros(4, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
         newstack['prod'][:] = np.arange(len(newprod))
         newstack['conjugate'] = 0
-        
+
         if isinstance(sstream, containers.SiderealStream):
             OutputContainer = containers.SiderealStream
         else:
@@ -891,9 +883,9 @@ class SunCalibration(task.SingleTask):
 
         sunstream = OutputContainer(prod=newprod, stack=newstack,
                                     axes_from=sstream, attrs_from=sstream)
-        
+
         #sunstream = containers.empty_like(sstream, prod=newprod, stack=newstack)
-        
+
         sunstream.redistribute('freq')
         sunstream.vis[:] = 0.0
 
