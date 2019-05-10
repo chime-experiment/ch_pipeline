@@ -49,7 +49,6 @@ class TransitGrouper(task.SingleTask):
     ha_span = config.Property(proptype=float, default=180.)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
-    proc_db = config.Property(proptype=str, default=None)
 
     def setup(self, observer=None):
         """Set the local observers position if not using CHIME.
@@ -77,19 +76,10 @@ class TransitGrouper(task.SingleTask):
         db_runs = None
         if mpiutil.rank0:
             di.connect_database()
-            db_src = di.HolographySource.get(di.HolographySource.name == self.db_source)
-            db_runs = list(di.HolographyObservation.select().where(
-                di.HolographyObservation.source == db_src
-            ))
+            db_runs = list(get_holography_obs(self.db_source))
             db_runs = [(int(r.id), (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
         mpiutil.barrier()
-
-        # Get list of processed transits
-        if self.proc_db is not None:
-            self.proc_transits = get_proc_transits(self.proc_db)
-        else:
-            self.proc_transits = []
 
     def process(self, tstream):
         """ Take in a timestream and accumulate, group into whole transits.
@@ -207,10 +197,6 @@ class TransitGrouper(task.SingleTask):
             self.log.warning("Could not find source transit in holography database for {}."
                              .format(ephem.unix_to_datetime(self.cur_transit)))
             # skip this file
-            self.cur_transit = None
-        elif this_run[0][0] in [int(t['holobs_id']) for t in self.proc_transits]:
-            self.log.warning("Already processed transit for {}. Skipping."
-                             .format(ephem.unix_to_datetime(self.cur_transit)))
             self.cur_transit = None
         else:
             self.start_t = max(self.start_t, this_run[0][1][0])
@@ -431,6 +417,45 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
+class FilterHolographyProcessed(task.SingleTask):
+
+    db_fname = config.Property(proptype=str)
+    source = config.Property(proptype=str)
+
+    def setup(self):
+        # Read database of processed transits
+        self.proc_transits = get_proc_transits(self.db_fname)
+
+        # Query database for observations of this source
+        hol_obs = None
+        if mpiutil.rank0:
+            hol_obs = list(get_holography_obs(self.source))
+        self.hol_obs = mpiutil.bcast(hol_obs, root=0)
+        mpiutil.barrier()
+
+    def process(self, file_interval):
+        start, end = file_interval[1]
+        # find holography observation that overlaps this file
+        this_obs = [
+            o for o in self.hol_obs
+            if (o.start_time >= start and o.start_time <= end) or
+            (o.finish_time >= start and o.finish_time <= end) or
+            (o.start_time <= start and o.finish_time >= end)
+        ]
+
+        if len(this_obs) == 0:
+            self.log.warning("Could not find source transit in holography database for {}."
+                             .format(ephem.unix_to_datetime(start)))
+            # skip this file
+            return None
+        elif this_obs[0].id in [int(t['holobs_id']) for t in self.proc_transits]:
+            self.log.warning("Already processed transit for {}. Skipping."
+                             .format(ephem.unix_to_datetime(start)))
+            return None
+        else:
+            return file_interval[0]
+
+
 def wrap_observer(obs):
     return ephem.SkyfieldObserverWrapper(
             lon=obs.longitude,
@@ -450,3 +475,11 @@ def unwrap_lha(lsa, src_ra):
     return np.where(np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.),
                     lsa - src_ra, lsa - src_ra + 360.)
 
+
+def get_holography_obs(src):
+    di.connect_database()
+    db_src = di.HolographySource.get(di.HolographySource.name == src)
+    db_obs = di.HolographyObservation.select().where(
+        di.HolographyObservation.source == db_src
+    )
+    return db_obs
