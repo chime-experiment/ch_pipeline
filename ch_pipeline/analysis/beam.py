@@ -417,7 +417,7 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
-class FilterHolographyProcessed(task.SingleTask):
+class FilterHolographyProcessed(task.MPILoggedTask):
 
     db_fname = config.Property(proptype=str)
     source = config.Property(proptype=str)
@@ -433,27 +433,34 @@ class FilterHolographyProcessed(task.SingleTask):
         self.hol_obs = mpiutil.bcast(hol_obs, root=0)
         mpiutil.barrier()
 
-    def process(self, file_interval):
-        start, end = file_interval[1]
-        # find holography observation that overlaps this file
-        this_obs = [
-            o for o in self.hol_obs
-            if (o.start_time >= start and o.start_time <= end) or
-            (o.finish_time >= start and o.finish_time <= end) or
-            (o.start_time <= start and o.finish_time >= end)
-        ]
+    def next(self, intervals):
+        self.log.info("Starting next for task %s" % self.__class__.__name__)
 
-        if len(this_obs) == 0:
-            self.log.warning("Could not find source transit in holography database for {}."
-                             .format(ephem.unix_to_datetime(start)))
-            # skip this file
-            return None
-        elif this_obs[0].id in [int(t['holobs_id']) for t in self.proc_transits]:
-            self.log.warning("Already processed transit for {}. Skipping."
-                             .format(ephem.unix_to_datetime(start)))
-            return None
-        else:
-            return file_interval[0]
+        self.comm.Barrier()
+
+        files = []
+        for fi in intervals:
+            start, end = fi[1]
+            # find holography observation that overlaps this set
+            this_obs = [
+                o for o in self.hol_obs
+                if (o.start_time >= start and o.start_time <= end) or
+                (o.finish_time >= start and o.finish_time <= end) or
+                (o.start_time <= start and o.finish_time >= end)
+            ]
+
+            if len(this_obs) == 0:
+                self.log.warning("Could not find source transit in holography database for {}."
+                                 .format(ephem.unix_to_datetime(start)))
+            elif this_obs[0].id in [int(t['holobs_id']) for t in self.proc_transits]:
+                self.log.warning("Already processed transit for {}. Skipping."
+                                 .format(ephem.unix_to_datetime(start)))
+            else:
+                files += fi[0]
+
+        self.log.info("Leaving next for task %s" % self.__class__.__name__)
+
+        return files
 
 
 def wrap_observer(obs):
