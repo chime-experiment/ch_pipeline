@@ -68,12 +68,13 @@ from ch_util import tools, ephemeris
 
 _DEFAULT_NODE_SPOOF = {'cedar': '/project/rpp-krs/chime/chime_online/'}
 
+
 class QueryDatabase(pipeline.TaskBase):
     """Find files from specified database queries.
-    
+
     This routine will query the database as specified in the runtime
     configuration file.
-    
+
     Attributes
     ----------
     node_spoof : dictionary
@@ -105,36 +106,37 @@ class QueryDatabase(pipeline.TaskBase):
     accept_all_global_flags : bool (default: False)
         Accept all global flags. Due to a bug as of 2019-1-16, this may need to
         be set to True
-    
+
     """
-    
+
+    return_intervals = config.Property(proptype=bool, default=False)
+
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
-    
+
     instrument = config.Property(proptype=str, default='chimestack')
     source_26m = config.Property(proptype=str, default=None)
-    
+
     start_time = config.Property(default=None)
     end_time = config.Property(default=None)
 
     exclude_daytime = config.Property(proptype=bool, default=False)
-    
+
     exclude_sun = config.Property(proptype=bool, default=False)
     exclude_sun_time_delta = config.Property(proptype=float, default=None)
     exclude_sun_time_delta_rise_set = config.Property(proptype=float, default=None)
-    
+
     exclude_transits = config.Property(default=None)
-    
+
     start_RA = config.Property(proptype=float, default=None)
     end_RA = config.Property(proptype=float, default=None)
-    
 
     run_name = config.Property(proptype=str, default=None)
-    
+
     accept_all_global_flags = config.Property(proptype=bool, default=False)
-    
+
     def setup(self):
         """Query the database and fetch the files
-        
+
         Returns
         -------
         files : list
@@ -142,9 +144,9 @@ class QueryDatabase(pipeline.TaskBase):
         """
         from ch_util import layout
         from ch_util import data_index as di
-        
+
         files = None
-        
+
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
 
@@ -152,43 +154,46 @@ class QueryDatabase(pipeline.TaskBase):
                 return self.QueryRun()
 
             layout.connect_database()
-            
-            f = di.Finder(node_spoof = self.node_spoof)
+
+            f = di.Finder(node_spoof=self.node_spoof)
 
             # should be redundant if an instrument has been specified
             f.only_corr()
-            
+
             if self.accept_all_global_flags:
                 f.accept_all_global_flags()
-            
+
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
             # f.include_time_interval(self.start_time, self.end_time)
             f.set_time_range(self.start_time, self.end_time)
-            
+
             if self.start_RA and self.end_RA:
                 f.include_RA_interval(self.start_RA, self.end_RA)
             elif (self.start_RA or self.start_RA):
                     print('WARNING: one but not both of start_RA and end_RA are set. Ignoring both.')
-            
+
             f.filter_acqs(di.ArchiveInst.name == self.instrument)
-            
+
             if self.exclude_daytime:
                 f.exclude_daytime()
-            
+
             if self.exclude_sun:
                 f.exclude_sun(time_delta=self.exclude_sun_time_delta,
-                            time_delta_rise_set=self.exclude_sun_time_delta_rise_set)
+                              time_delta_rise_set=self.exclude_sun_time_delta_rise_set)
             if self.exclude_transits:
                 f.exclude_transits(self.exclude_transits)
-           
+
             if self.source_26m:
                 f.include_26m_obs(self.source_26m)
-                
-            
+
             results = f.get_results()
-            files = [ fname for result in results for fname in result[0] ]
-            files.sort()
+            if not self.return_intervals:
+                files = [ fname for result in results for fname in result[0] ]
+                files.sort()
+            else:
+                files = results
+                files.sort(key=lambda x: x[1][0])
 
         files = mpiutil.world.bcast(files, root=0)
 
