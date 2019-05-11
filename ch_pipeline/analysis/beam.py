@@ -164,7 +164,7 @@ class TransitGrouper(task.SingleTask):
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
         # Save list of filenames
-        filenames = [ts._data.filename for ts in self.tstreams]
+        filenames = [ts.attrs['filename'] for ts in self.tstreams]
 
         # Concatenate timestreams
         ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
