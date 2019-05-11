@@ -1,5 +1,5 @@
 
-from caput import config
+from caput import config, mpiutil
 from draco.core import task
 import yaml
 from os import path
@@ -48,10 +48,11 @@ class RegisterProcessedFiles(task.SingleTask):
 
         self.write_output(outfile, output)
 
-        # Add entry in database
-        # TODO: check for duplicates ?
-        append_product(self.db_fname, outfile, self.product_type, config=None,
-                       tag=self.tag, git_tags=self.git_tags)
+        if mpiutil.rank0:
+            # Add entry in database
+            # TODO: check for duplicates ?
+            append_product(self.db_fname, outfile, self.product_type, config=None,
+                           tag=self.tag, git_tags=self.git_tags)
 
         return None
 

@@ -408,11 +408,12 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         obs_id = output.attrs.get('observation_id', None)
         files = output.attrs.get('archivefiles', None)
 
-        # Add entry in database
-        # TODO: check for duplicates ?
-        append_product(self.db_fname, outfile, self.product_type, config=None,
-                       tag=self.tag, git_tags=self.git_tags, holobs_id=obs_id,
-                       archivefiles=files)
+        if mpiutil.rank0:
+            # Add entry in database
+            # TODO: check for duplicates ?
+            append_product(self.db_fname, outfile, self.product_type, config=None,
+                           tag=self.tag, git_tags=self.git_tags, holobs_id=obs_id,
+                           archivefiles=files)
 
         return None
 
