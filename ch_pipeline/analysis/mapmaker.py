@@ -157,15 +157,19 @@ class RingMapMaker(task.SingleTask):
             if self.weight == 'uniform':
                 redundancy = (redundancy > 0).astype(np.float32)
 
+        # De-reference distributed arrays outside loop to save repeated MPI calls
+        ssv = sstream.vis[:]
+        ssw = sstream.weight[:]
+
         # Unpack visibilities into new array
         for vis_ind, (p_ind, x_ind, y_ind) in enumerate(grid_index):
 
             # Handle different options for weighting baselines
             if self.weight == 'inverse_variance':
-                w = sstream.weight[:, vis_ind]
+                w = ssw[:, vis_ind]
 
             else:
-                w = (sstream.weight[:, vis_ind] > 0.0).astype(np.float32)
+                w = (ssw[:, vis_ind] > 0.0).astype(np.float32)
                 w *= redundancy[np.newaxis, vis_ind]
 
             # Different behavior for intracylinder and intercylinder baselines.
@@ -173,20 +177,20 @@ class RingMapMaker(task.SingleTask):
 
                 if not self.exclude_intracyl:
 
-                    vis[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
-                    vis[:, p_ind, :, x_ind, -y_ind] = sstream.vis[:, vis_ind].conj()
+                    vis[:, p_ind, :, x_ind, y_ind] = ssv[:, vis_ind]
+                    vis[:, p_ind, :, x_ind, -y_ind] = ssv[:, vis_ind].conj()
 
-                    invvar[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
-                    invvar[:, p_ind, :, x_ind, -y_ind] = sstream.weight[:, vis_ind]
+                    invvar[:, p_ind, :, x_ind, y_ind] = ssw[:, vis_ind]
+                    invvar[:, p_ind, :, x_ind, -y_ind] = ssw[:, vis_ind]
 
                     weight[:, p_ind, :, x_ind, y_ind] = w
                     weight[:, p_ind, :, x_ind, -y_ind] = w
 
             else:
 
-                vis[:, p_ind, :, x_ind, y_ind] = sstream.vis[:, vis_ind]
+                vis[:, p_ind, :, x_ind, y_ind] = ssv[:, vis_ind]
 
-                invvar[:, p_ind, :, x_ind, y_ind] = sstream.weight[:, vis_ind]
+                invvar[:, p_ind, :, x_ind, y_ind] = ssw[:, vis_ind]
 
                 weight[:, p_ind, :, x_ind, y_ind] = w
 
@@ -221,6 +225,10 @@ class RingMapMaker(task.SingleTask):
         rm.rms[:] = np.sqrt(np.sum(np.dot(coeff,
                     tools.invert_no_zero(invvar) * weight**2.0), axis=-1))
 
+        # Dereference datasets
+        rmm = rm.map[:]
+        rmb = rm.dirty_beam[:]
+
         # Loop over local frequencies and fill ring map
         for lfi, fi in sstream.vis[:].enumerate(0):
 
@@ -245,7 +253,7 @@ class RingMapMaker(task.SingleTask):
                 sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
 
             # Save to container
-            rm.map[fi] = bfm
-            rm.dirty_beam[fi] = sb
+            rmm[lfi] = bfm
+            rmb[lfi] = sb
 
         return rm
