@@ -281,7 +281,17 @@ class TransitRegridder(Regridder):
         lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
 
         # perform regridding
-        new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
+        success = 1
+        try:
+            new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
+        except np.linalg.LinAlgError as e:
+            self.log.error(str(e))
+            success = 0
+        # Check other ranks have completed
+        success = mpiutil.allreduce(success)
+        if success != mpiutil.size:
+            self.log.warning("Regridding failed. Skipping transit.")
+            return None
 
         # mask out regions beyond bounds of this transit
         grid_mask = np.ones_like(new_grid)
