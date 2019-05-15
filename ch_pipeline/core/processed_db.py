@@ -1,5 +1,5 @@
 
-from caput import config
+from caput import config, mpiutil
 from draco.core import task
 import yaml
 from os import path
@@ -9,8 +9,8 @@ import git
 class RegisterProcessedFiles(task.SingleTask):
 
     output_root = config.Property(proptype=str, default=None)
-    product_tag = config.Property(proptype=str, default=None)
-    parent_tag = config.Property(proptype=str, default=None)
+    product_type = config.Property(proptype=str, default=None)
+    tag = config.Property(proptype=str, default=None)
     db_fname = config.Property(proptype=str)
 
     def setup(self):
@@ -48,25 +48,39 @@ class RegisterProcessedFiles(task.SingleTask):
 
         self.write_output(outfile, output)
 
-        # Add entry in database
-        # TODO: check for duplicates ?
-        append_product(self.db_fname, outfile, self.product_tag, config=None,
-                       parent_tag=self.parent_tag, git_tags=self.git_tags)
+        if mpiutil.rank0:
+            # Add entry in database
+            # TODO: check for duplicates ?
+            append_product(self.db_fname, outfile, self.product_type, config=None,
+                           tag=self.tag, git_tags=self.git_tags)
 
         return None
 
 
-def append_product(db_fname, prod_fname, prod_tag, config, parent_tag=None, git_tags=[], **kwargs):
+def append_product(db_fname, prod_fname, prod_type, config, tag=None, git_tags=[], **kwargs):
     with open(db_fname, 'r') as fh:
         entries = yaml.load(fh)
     if type(entries) is not list:
         raise "Could not parse YAML for processed data record."
-    entries.append({
+    new_entry = {
         'filename': prod_fname,
-        'tag': prod_tag,
-        'parent_tag': parent_tag,
+        'type': prod_type,
+        'tag': tag,
         'git_tags': git_tags,
         'pipeline_config': config
-    }.update(kwargs))
+    }
+    new_entry.update(kwargs)
+    entries.append(new_entry)
     with open(db_fname, 'w') as fh:
         yaml.dump(entries, fh)
+
+
+def get_proc_transits(db_fname):
+    with open(db_fname, 'r') as fh:
+        entries = yaml.load(fh)
+    entries_filt = []
+    for e in entries:
+        if isinstance(e, dict) and 'holobs_id' in e.keys():
+            entries_filt.append(e)
+    return entries_filt
+

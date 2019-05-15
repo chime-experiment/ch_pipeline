@@ -20,7 +20,7 @@ from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
 
-from ..core.processed_db import RegisterProcessedFiles, append_product
+from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
@@ -76,12 +76,8 @@ class TransitGrouper(task.SingleTask):
         db_runs = None
         if mpiutil.rank0:
             di.connect_database()
-            db_src = di.HolographySource.get(
-                di.HolographySource.name == self.db_source)
-            db_runs = list(di.HolographyObservation.select().where(
-                di.HolographyObservation.source == db_src
-            ))
-            db_runs = [(r.id, (r.start_time, r.finish_time)) for r in db_runs]
+            db_runs = list(get_holography_obs(self.db_source))
+            db_runs = [(int(r.id), (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
         mpiutil.barrier()
 
@@ -167,6 +163,9 @@ class TransitGrouper(task.SingleTask):
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
+        # Save list of filenames
+        filenames = [ts.attrs['filename'] for ts in self.tstreams]
+
         # Concatenate timestreams
         ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
         _, dec = self.sky_obs.radec(self.src)
@@ -178,6 +177,7 @@ class TransitGrouper(task.SingleTask):
             self.source, ephem.unix_to_datetime(
                 self.cur_transit).strftime("%Y%m%dT%H%M%S")
         )
+        ts.attrs['archivefiles'] = filenames
 
         self.tstreams = []
         self.cur_transit = None
@@ -282,7 +282,17 @@ class TransitRegridder(Regridder):
         lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
 
         # perform regridding
-        new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
+        success = 1
+        try:
+            new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
+        except np.linalg.LinAlgError as e:
+            self.log.error(str(e))
+            success = 0
+        # Check other ranks have completed
+        success = mpiutil.allreduce(success)
+        if success != mpiutil.size:
+            self.log.warning("Regridding failed. Skipping transit.")
+            return None
 
         # mask out regions beyond bounds of this transit
         grid_mask = np.ones_like(new_grid)
@@ -408,11 +418,15 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
         self.write_output(outfile, output)
 
-        # Add entry in database
-        # TODO: check for duplicates ?
-        append_product(self.db_fname, outfile, self.product_tag, config=None,
-                       parent_tag=self.parent_tag, git_tags=self.git_tags,
-                       holobs_id=output.attrs['observation_id'])
+        obs_id = output.attrs.get('observation_id', None)
+        files = output.attrs.get('archivefiles', None)
+
+        if mpiutil.rank0:
+            # Add entry in database
+            # TODO: check for duplicates ?
+            append_product(self.db_fname, outfile, self.product_type, config=None,
+                           tag=self.tag, git_tags=self.git_tags, holobs_id=obs_id,
+                           archivefiles=files)
 
         return None
 
@@ -425,7 +439,7 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
     def process(self, fits):
     """use transit phase and 1/peak amplitude as the gain, peak normalizing
     the transit.
-    
+
     Parameters
     ----------
     fits: TransitFitParams
@@ -473,6 +487,50 @@ class ApplyHolographyGains(task.singleTask):
         track['beam'] *= gain.gain[:, :, :, np.newaxis]
 
         return track
+class FilterHolographyProcessed(task.MPILoggedTask):
+
+    db_fname = config.Property(proptype=str)
+    source = config.Property(proptype=str)
+
+    def setup(self):
+        # Read database of processed transits
+        self.proc_transits = get_proc_transits(self.db_fname)
+
+        # Query database for observations of this source
+        hol_obs = None
+        if mpiutil.rank0:
+            hol_obs = list(get_holography_obs(self.source))
+        self.hol_obs = mpiutil.bcast(hol_obs, root=0)
+        mpiutil.barrier()
+
+    def next(self, intervals):
+        self.log.info("Starting next for task %s" % self.__class__.__name__)
+
+        self.comm.Barrier()
+
+        files = []
+        for fi in intervals:
+            start, end = fi[1]
+            # find holography observation that overlaps this set
+            this_obs = [
+                o for o in self.hol_obs
+                if (o.start_time >= start and o.start_time <= end) or
+                (o.finish_time >= start and o.finish_time <= end) or
+                (o.start_time <= start and o.finish_time >= end)
+            ]
+
+            if len(this_obs) == 0:
+                self.log.warning("Could not find source transit in holography database for {}."
+                                 .format(ephem.unix_to_datetime(start)))
+            elif this_obs[0].id in [int(t['holobs_id']) for t in self.proc_transits]:
+                self.log.warning("Already processed transit for {}. Skipping."
+                                 .format(ephem.unix_to_datetime(start)))
+            else:
+                files += fi[0]
+
+        self.log.info("Leaving next for task %s" % self.__class__.__name__)
+
+        return files
 
 
 def wrap_observer(obs):
@@ -493,3 +551,12 @@ def unwrap_lha(lsa, src_ra):
     # subtract source RA
     return np.where(np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.),
                     lsa - src_ra, lsa - src_ra + 360.)
+
+
+def get_holography_obs(src):
+    di.connect_database()
+    db_src = di.HolographySource.get(di.HolographySource.name == src)
+    db_obs = di.HolographyObservation.select().where(
+        di.HolographyObservation.source == db_src
+    )
+    return db_obs

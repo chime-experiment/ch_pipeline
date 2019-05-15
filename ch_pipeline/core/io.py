@@ -200,6 +200,9 @@ class LoadCorrDataFiles(task.SingleTask):
         ts = andata.CorrData.from_acq_h5(file_, distributed=True,
                                          freq_sel=self.freq_sel, prod_sel=prod_sel)
 
+        # Store file name
+        ts.attrs['filename'] = file_
+
         # Use a simple incrementing string as the tag
         if 'tag' not in ts.attrs:
             tag = 'file%03i' % self._file_ptr
