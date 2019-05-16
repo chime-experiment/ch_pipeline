@@ -19,17 +19,22 @@ from caput.pipeline import PipelineConfigError, PipelineRuntimeError
 from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
+from draco.util import tools
 
 from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
+from ..core.containers import TransitFitParams
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
 from ch_util import data_index as di
+from ch_util.cal_utils import fit_point_source_transit
 
 from os import path
 
 from skyfield.constants import ANGVEL
 SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
+SPEED_LIGHT = 299.7  # 10^6 m / s
+CHIME_CYL_W = 20.  # m
 
 
 class TransitGrouper(task.SingleTask):
@@ -431,24 +436,66 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
+class TransitFit(task.SingleTask):
+
+    def process(self, transit):
+
+        transit.beam.redistribute('freq')
+
+        # Set bounds of fit to twice FWHM
+        local_slice = slice(transit.beam.local_offset,
+                            transit.beam.local_offset + transit.beam.local_shape[0])
+        fit_bnd = (2 * SPEED_LIGHT / transit.freq[local_slice] /
+                   CHIME_CYL_W / 1.95 / 2 / np.pi * 360.)
+
+        # Collapse polarization axis to use function from ch_util
+        tmp_shape = (transit.beam.shape[0], transit.beam.shape[1]*transit.beam.shape[2],
+                     transit.beam.shape[3])
+
+        # Flag missing data and outside bounds
+        flagged = (transit.weight != 0.).reshape(tmp_shape)
+        flagged = np.logical_and(
+            flagged, (np.abs(transit.pix['phi']) < fit_bnd[:, np.newaxis])[:, np.newaxis, :]
+        )
+
+        # Perform fit
+        res = fit_point_source_transit(
+            transit.pix['phi'],
+            transit.beam[:].reshape(tmp_shape),
+            np.sqrt(tools.invert_no_zero(transit.weight[:].reshape(tmp_shape))),
+            flagged
+        )
+
+        # Pack into container
+        param_labels = ['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope',
+                        'phase_quad', 'phase_cube', 'phase_quart', 'phase_quint']
+        fit = TransitFitParams(parameter=res[0].reshape(transit.beam.shape[:-1]),
+                               parameter_cov=res[1].reshape(transit.beam.shape[:-1]),
+                               param=param_labels, axes_from=transit)
+
+        return fit
+
+
 class DetermineHolographyGainsFromFits(task.SingleTask):
     """Determine holography gains of a transit from Gaussian fits to
     the transit.
     """
 
     def process(self, fits):
-    """use transit phase and 1/peak amplitude as the gain, peak normalizing
-    the transit.
+        """use transit phase and 1/peak amplitude as the gain, peak normalizing
+        the transit.
 
-    Parameters
-    ----------
-    fits: TransitFitParams
-    """
-        return fits.parameters['transit_phase'] / \
-            fits.parameters['amplitude']
+        Parameters
+        ----------
+        fits: TransitFitParams
+        """
+
+        # TODO: Define gains container
+        return (np.exp(-1j * np.radians(fits.parameter['phase_intercept'])) /
+                fits.parameter['peak_amplitude'])
 
 
-class ApplyHolographyGains(task.singleTask):
+class ApplyHolographyGains(task.SingleTask):
 
     """Apply gains to a holography transit
 
@@ -471,22 +518,20 @@ class ApplyHolographyGains(task.singleTask):
         gain: np.array
             gain to apply. Expected axes are freq, pol, and input
         """
-        # axes of track['beam'] are freq, pol, input, pix
-        # axes of gain are freq, pol, input (right?)
 
         if self.overwrite:
             track = track_in
         else:
-            track = TrackBeam(theta=track_in.theta, phi=track_in.phi,
-                              track_type=track_in.track_type, coords=track_in.coords,
-                              input=track_in.input, pol=track_in.pol,
-                              freq=track_in.freq, attrs_from=track_in.attrs_from,
-                              distributed=track_in.distributed)
+            track = TrackBeam(axes_from=track_in, attrs_from=track_in)
             track['beam'] = track_in['beam'][:]
             track['weight'] = track_in['weight'][:]
+
         track['beam'] *= gain.gain[:, :, :, np.newaxis]
+        track['weight'] *= tools.invert_no_zero((gain.gain**2)[:, :, :, np.newaxis])
 
         return track
+
+
 class FilterHolographyProcessed(task.MPILoggedTask):
 
     db_fname = config.Property(proptype=str)
