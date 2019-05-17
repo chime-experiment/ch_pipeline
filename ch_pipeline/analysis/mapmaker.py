@@ -127,7 +127,7 @@ class RingMapMaker(task.SingleTask):
         grid_index = list(zip(pind, xind, yind))
 
         # Define several variables describing the baseline configuration.
-        nfeed = int(np.round(max_ysep / min_ysep))
+        nfeed = int(np.round(max_ysep / min_ysep)) + 1
         nvis_1d = 2 * nfeed - 1
         ncyl = np.max(xind) + 1
         nbeam = 2 * ncyl - 1
