@@ -106,6 +106,8 @@ class QueryDatabase(pipeline.TaskBase):
     accept_all_global_flags : bool (default: False)
         Accept all global flags. Due to a bug as of 2019-1-16, this may need to
         be set to True
+    exclude_data_flag_types: list of string
+        Reject time intervals that overlap with DataFlags of these types.
 
     """
 
@@ -133,6 +135,8 @@ class QueryDatabase(pipeline.TaskBase):
     run_name = config.Property(proptype=str, default=None)
 
     accept_all_global_flags = config.Property(proptype=bool, default=False)
+
+    exclude_data_flag_types = config.Property(proptype=list, default=[])
 
     def setup(self):
         """Query the database and fetch the files
@@ -186,6 +190,9 @@ class QueryDatabase(pipeline.TaskBase):
 
             if self.source_26m:
                 f.include_26m_obs(self.source_26m)
+
+            if len(self.exclude_data_flag_types) > 0:
+                f.exclude_data_flag_type(self.exclude_data_flag_types)
 
             results = f.get_results()
             if not self.return_intervals:
