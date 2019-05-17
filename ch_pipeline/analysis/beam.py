@@ -39,6 +39,8 @@ class TransitGrouper(task.SingleTask):
         ----------
         ha_span: float
             Span in degrees surrounding transit.
+        min_span: float
+            Minimum span (deg) of a transit to accept.
         source: str
             Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
         db_source: str
@@ -47,6 +49,7 @@ class TransitGrouper(task.SingleTask):
     """
 
     ha_span = config.Property(proptype=float, default=180.)
+    min_span = config.Property(proptype=float, default=0.)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
 
@@ -166,17 +169,29 @@ class TransitGrouper(task.SingleTask):
         # Save list of filenames
         filenames = [ts.attrs['filename'] for ts in self.tstreams]
 
-        # Concatenate timestreams
-        ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
-        _, dec = self.sky_obs.radec(self.src)
-        ts.attrs['dec'] = dec._degrees
-        ts.attrs['source_name'] = self.source
-        ts.attrs['transit_time'] = self.cur_transit
-        ts.attrs['observation_id'] = self.obs_id
-        ts.attrs['tag'] = "{}_{}".format(
-            self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
-        )
-        ts.attrs['archivefiles'] = filenames
+        dt = ts.time[1] - ts.time[0]
+        if dt <= 0:
+            self.log.warning("Time steps are not positive definite: dt={:.3f}".format(dt)
+                             + " Skipping.")
+            ts = None
+        elif stop_ind - start_ind > int(self.min_span / 360. * SIDEREAL_DAY_SEC / dt):
+            if len(self.tstreams) > 1:
+                # Concatenate timestreams
+                ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
+            else:
+                ts = ts[0]
+            _, dec = self.sky_obs.radec(self.src)
+            ts.attrs['dec'] = dec._degrees
+            ts.attrs['source_name'] = self.source
+            ts.attrs['transit_time'] = self.cur_transit
+            ts.attrs['observation_id'] = self.obs_id
+            ts.attrs['tag'] = "{}_{}".format(
+                self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
+            )
+            ts.attrs['archivefiles'] = filenames
+        else:
+            self.log.info("Transit too short. Skipping.")
+            ts = None
 
         self.tstreams = []
         self.cur_transit = None
@@ -285,6 +300,9 @@ class TransitRegridder(Regridder):
         try:
             new_grid, new_vis, ni = self._regrid(vis_data, weight, lha)
         except np.linalg.LinAlgError as e:
+            self.log.error(str(e))
+            success = 0
+        except ValueError as e:
             self.log.error(str(e))
             success = 0
         # Check other ranks have completed
