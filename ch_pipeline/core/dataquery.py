@@ -66,7 +66,7 @@ import os
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {'cedar': '/project/rpp-krs/chime/chime_online/'}
+_DEFAULT_NODE_SPOOF = {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'}
 
 class QueryDatabase(pipeline.TaskBase):
     """Find files from specified database queries.
@@ -83,8 +83,14 @@ class QueryDatabase(pipeline.TaskBase):
         start and end times to restrict the database search to
         can be in any format ensure_unix will support, including eg
             20190116T150323 and 2019-1-16 08:03:23 -7
-    instrument : string (default: 'chimestack')
-        data set to use
+    acqtype : string (default: 'corr')
+        Type of acquisition. Options for acqtype are: 'corr', 'hk', 'weather',
+        'rawadc', 'gain', 'flaginput', 'digitalgain'.
+    instrument : string (optional)
+        Set the instrument name. Common ArchiveInst names are: 'chimeN2',
+        'chimestack', 'chime26m', 'chimetiming', 'chimecal', 'mingun' etc.
+        While acqtype returns all 'corr' data, one must specify the instrument
+        to get e.g. only stacked data (i.e. instrument = 'chimestack')
     source_26m : string (default: None)
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
@@ -110,7 +116,9 @@ class QueryDatabase(pipeline.TaskBase):
     
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
     
-    instrument = config.Property(proptype=str, default='chimestack')
+    acqtype = config.Property(proptype=str, default='corr')
+    instrument = config.Property(proptype=str, default=None)
+
     source_26m = config.Property(proptype=str, default=None)
     
     start_time = config.Property(default=None)
@@ -155,23 +163,23 @@ class QueryDatabase(pipeline.TaskBase):
             
             f = di.Finder(node_spoof = self.node_spoof)
 
-            # should be redundant if an instrument has been specified
-            f.only_corr()
-            
+            f.filter_acqs(di.AcqType.name == self.acqtype)
+
+            if self.instrument is not None:
+                f.filter_acqs(di.ArchiveInst.name == self.instrument)
+
             if self.accept_all_global_flags:
                 f.accept_all_global_flags()
-            
+
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
             # f.include_time_interval(self.start_time, self.end_time)
             f.set_time_range(self.start_time, self.end_time)
-            
+
             if self.start_RA and self.end_RA:
                 f.include_RA_interval(self.start_RA, self.end_RA)
             elif (self.start_RA or self.start_RA):
                     print('WARNING: one but not both of start_RA and end_RA are set. Ignoring both.')
-            
-            f.filter_acqs(di.ArchiveInst.name == self.instrument)
             
             if self.exclude_daytime:
                 f.exclude_daytime()
@@ -184,8 +192,7 @@ class QueryDatabase(pipeline.TaskBase):
            
             if self.source_26m:
                 f.include_26m_obs(self.source_26m)
-                
-            
+
             results = f.get_results()
             files = [ fname for result in results for fname in result[0] ]
             files.sort()
