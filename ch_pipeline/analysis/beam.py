@@ -561,6 +561,42 @@ class ApplyHolographyGains(task.SingleTask):
         return track
 
 
+class TransitStacker(task.SingleTask):
+
+    def setup(self):
+        self.stack = None
+        self.norm = None
+
+    def process(self, transit):
+
+        if self.stack is None:
+            # TODO: Copy over attributes?
+            self.stack = TrackBeam(axes_from=transit, attrs_from=transit)
+            self.stack.beam[:] = transit.beam[:]
+            self.stack.weight[:] = tools.invert_no_zero(transit.weight[:])
+            self.norm = np.where(transit.weight == 0., 0., 1.)
+        else:
+            if transit.beam.shape != self.stack.beam.shape:
+                self.log.error("Transit has different shape than stack: {}, {}".format(
+                    transit.beam.shape, self.stack.beam.shape
+                    ) + " Skipping."
+                )
+                return None
+            self.stack.beam += transit.beam[:]
+            self.stack.weight += tools.invert_no_zero(transit.weight[:])
+            self.norm += np.where(transit.weight == 0., 0., 1.)
+
+        return None
+
+    def finish(self):
+        self.stack.beam *= tools.invert_no_zero(self.norm)
+        self.stack.weight[:] = self.norm**2 * tools.invert_no_zero(self.stack.weight)
+
+        # TODO: attributes?
+
+        return self.stack
+
+
 class FilterHolographyProcessed(task.MPILoggedTask):
     """ Filter list of archive files to exlclude holography transits
         that have already been processed for the given source, based
