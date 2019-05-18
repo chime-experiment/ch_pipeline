@@ -409,8 +409,18 @@ class MakeHolographyBeam(task.SingleTask):
 
 
 class RegisterHolographyProcessed(RegisterProcessedFiles):
+    """ Register processed holography transit in temporary processed data
+        database.
+    """
 
     def process(self, output):
+        """ Register and save an output file.
+
+            Parameters
+            ----------
+            output: TrackBeam
+                Transit to be saved.
+        """
 
         # Create a tag for the output file name
         tag = output.attrs['tag'] if 'tag' in output.attrs else self._count
@@ -438,8 +448,22 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
 
 class HolographyTransitFit(task.SingleTask):
+    """ Fit a gaussian to a transit.
+    """
 
     def process(self, transit):
+        """ Perform the gaussian fit.
+
+            Parameters
+            ----------
+            transit: TrackBeam
+                Transit to be fit to.
+
+            Returns
+            -------
+            fit: HolographyTransitFitParams
+                Fit parameters.
+        """
 
         transit.beam.redistribute('freq')
 
@@ -538,6 +562,10 @@ class ApplyHolographyGains(task.SingleTask):
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
+    """ Filter list of archive files to exlclude holography transits
+        that have already been processed for the given source, based
+        on the records in the processed data database (file).
+    """
 
     db_fname = config.Property(proptype=str)
     source = config.Property(proptype=str)
@@ -554,6 +582,14 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         mpiutil.barrier()
 
     def next(self, intervals):
+        """ Filter list of files and time intervals.
+
+            Parameters
+            ----------
+            intervals: ch_util.data_index.DataIntervalList
+                Files and time intervals for transits.
+        """
+
         self.log.info("Starting next for task %s" % self.__class__.__name__)
 
         self.comm.Barrier()
