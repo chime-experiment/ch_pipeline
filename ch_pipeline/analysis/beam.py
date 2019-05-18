@@ -22,7 +22,7 @@ from draco.core.containers import SiderealStream, TrackBeam
 from draco.util import tools
 
 from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
-from ..core.containers import TransitFitParams
+from ..core.containers import HolographyTransitFitParams, HolographyTransitGain
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
@@ -369,7 +369,8 @@ class MakeHolographyBeam(task.SingleTask):
             )[0])
 
         # Check we have the expected number of products
-        if prod_groups[0].shape[0] != inputs.shape[0] or prod_groups[1].shape[0] != inputs.shape[0]:
+        if (prod_groups[0].shape[0] != inputs.shape[0] or
+            prod_groups[1].shape[0] != inputs.shape[0]):
             msg = ("Products do not separate into two groups with the length of the input map. "
                    "({:d}, {:d}) != {:d}").format(prod_groups[0].shape[0],
                                                   prod_groups[1].shape[0], inputs.shape[0])
@@ -436,7 +437,7 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
-class TransitFit(task.SingleTask):
+class HolographyTransitFit(task.SingleTask):
 
     def process(self, transit):
 
@@ -469,9 +470,11 @@ class TransitFit(task.SingleTask):
         # Pack into container
         param_labels = ['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope',
                         'phase_quad', 'phase_cube', 'phase_quart', 'phase_quint']
-        fit = TransitFitParams(parameter=res[0].reshape(transit.beam.shape[:-1]),
-                               parameter_cov=res[1].reshape(transit.beam.shape[:-1]),
-                               param=param_labels, axes_from=transit)
+        fit = HolographyTransitFitParams(
+            parameter=res[0].reshape(transit.beam.shape[:-1]),
+            parameter_cov=res[1].reshape(transit.beam.shape[:-1]),
+            param=param_labels, axes_from=transit
+        )
 
         return fit
 
@@ -482,7 +485,7 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
     """
 
     def process(self, fits):
-        """use transit phase and 1/peak amplitude as the gain, peak normalizing
+        """Use transit phase and 1/peak amplitude as the gain, peak normalizing
         the transit.
 
         Parameters
@@ -490,9 +493,11 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
         fits: TransitFitParams
         """
 
-        # TODO: Define gains container
-        return (np.exp(-1j * np.radians(fits.parameter['phase_intercept'])) /
-                fits.parameter['peak_amplitude'])
+        gain = HolographyTransitGain(axes_from=fits)
+        gain.gain[:] = (np.exp(-1j * np.radians(fits.parameter['phase_intercept'])) /
+                        fits.parameter['peak_amplitude'])
+
+        return gain
 
 
 class ApplyHolographyGains(task.SingleTask):

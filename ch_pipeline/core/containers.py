@@ -409,7 +409,7 @@ class PointSourceTransit(StaticGainData):
         return self.index_map['param_cov2']
 
 
-class TransitFitParams(ContainerBase):
+class HolographyTransitFitParams(ContainerBase):
     """ Container for fit parameters to holography transits.
     """
 
@@ -461,6 +461,39 @@ class TransitFitParams(ContainerBase):
     @property
     def param(self):
         return self.index_map['param']
+
+
+class HolographyTransitGain(ContainerBase):
+    """Basic container for gains to be applied to regridded holography transits.
+    """
+
+    _axes = ('freq', 'pol', 'input')
+
+    _dataset_spec = {
+        'gain': {
+            'axes': ['freq', 'pol', 'input'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+    }
+
+    @property
+    def gain(self):
+        return self.datasets['gain']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']['centre']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def pol(self):
+        return self.index_map['pol']
 
 
 class SunTransit(ContainerBase):
