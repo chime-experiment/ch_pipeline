@@ -15,6 +15,7 @@ Tasks
 .. autosummary::
     :toctree: generated/
 
+    QueryDatabase
     QueryRun
     QueryDataspec
     QueryInputs

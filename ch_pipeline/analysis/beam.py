@@ -9,6 +9,8 @@
         TransitGrouper
         TransitRegridder
         MakeHolographyBeam
+        RegisterHolographyProcessed
+        FilterHolographyProcessed
 """
 
 import numpy as np
@@ -418,8 +420,23 @@ class MakeHolographyBeam(task.SingleTask):
 
 
 class RegisterHolographyProcessed(RegisterProcessedFiles):
+    """ Register a processed (fringestopped, regridded) holography transit in
+        the processed data database (at the moment this is a YAML file,
+        specified by the 'db_fname' config parameter).
+
+        Saves the transit to with the prefix specified in the  'output_root'
+        config parameter.
+    """
 
     def process(self, output):
+        """ Register and save a processed transit.
+
+            Parameters
+            ----------
+            output: TrackBeam
+                The transit to be saved. Should include attributes
+                'observation_id' and 'archivefiles.
+        """
 
         # Create a tag for the output file name
         tag = output.attrs['tag'] if 'tag' in output.attrs else self._count
@@ -447,11 +464,19 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
+    """ Filter holography transit DataIntervals produced by `io.QueryDatabase`
+        to exclude those that have already been registered in the database
+        (in the file specified by config parameter 'db_fname').
+    """
 
     db_fname = config.Property(proptype=str)
     source = config.Property(proptype=str)
 
     def setup(self):
+        """ Read processed transits from database ('db_fname' parameter) and
+            and load list of observations from holography database.
+        """
+
         # Read database of processed transits
         self.proc_transits = get_proc_transits(self.db_fname)
 
@@ -463,6 +488,19 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         mpiutil.barrier()
 
     def next(self, intervals):
+        """ Filter files and time intervals to exclude those already processed.
+
+            Parameters
+            ----------
+            intervals: list of ch_util.data_index.DataInterval
+                List intervals to filter.
+
+            Returns
+            -------
+            files: list of str
+                List of files to be processed.
+        """
+
         self.log.info("Starting next for task %s" % self.__class__.__name__)
 
         self.comm.Barrier()
@@ -493,6 +531,19 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
 
 def wrap_observer(obs):
+    """ Wrap a `ch_util.ephemeris.chime_observer()` with the
+        `ch_util.ephemeris.SkyfieldObserverWrapper` class.
+
+        Parameters
+        ----------
+        obs: caput.time.Observer
+            CHIME observer.
+
+        Returns
+        -------
+        obs: ch_util.ephemeris.SkyfieldObserverWrapper
+            Wrapped observer.
+    """
     return ephem.SkyfieldObserverWrapper(
             lon=obs.longitude,
             lat=obs.latitude,
@@ -502,6 +553,20 @@ def wrap_observer(obs):
 
 
 def unwrap_lha(lsa, src_ra):
+    """ Convert LSA into HA for a source's RA. Ensures HA is monotonically increasing.
+
+        Parameters
+        ----------
+        lsa: array
+            Local sidereal angle.
+        src_ra: float
+            The RA of the source.
+
+        Returns
+        -------
+        ha: array
+            Hour angle.
+    """
     # ensure monotonic
     start_lsa = lsa[0]
     lsa -= start_lsa
