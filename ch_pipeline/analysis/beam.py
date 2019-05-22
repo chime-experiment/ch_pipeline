@@ -20,7 +20,7 @@ from draco.core import task
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TrackBeam
 
-from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
+from ..core.processed_db import RegisterProcessedFiles, append_product
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
@@ -513,9 +513,41 @@ def unwrap_lha(lsa, src_ra):
 
 
 def get_holography_obs(src):
+    """ Query database for list of all holography observations for the given
+        source.
+
+        Parameters
+        ----------
+        src: str
+            Source name.
+
+        Returns
+        -------
+        db_obs: list of ch_util.data_index.HolographyObservation
+            Observations of this source.
+    """
     di.connect_database()
     db_src = di.HolographySource.get(di.HolographySource.name == src)
     db_obs = di.HolographyObservation.select().where(
         di.HolographyObservation.source == db_src
     )
     return db_obs
+
+
+def get_proc_transits(db_fname):
+    """ Read processed holography transits from the processed database
+        YAML file.
+
+        Parameters
+        ----------
+        db_fname: str
+            Path to YAML database file.
+    """
+
+    with open(db_fname, 'r') as fh:
+        entries = yaml.load(fh)
+    entries_filt = []
+    for e in entries:
+        if isinstance(e, dict) and 'holobs_id' in e.keys():
+            entries_filt.append(e)
+    return entries_filt

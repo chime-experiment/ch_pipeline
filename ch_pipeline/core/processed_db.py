@@ -73,14 +73,3 @@ def append_product(db_fname, prod_fname, prod_type, config, tag=None, git_tags=[
     entries.append(new_entry)
     with open(db_fname, 'w') as fh:
         yaml.dump(entries, fh)
-
-
-def get_proc_transits(db_fname):
-    with open(db_fname, 'r') as fh:
-        entries = yaml.load(fh)
-    entries_filt = []
-    for e in entries:
-        if isinstance(e, dict) and 'holobs_id' in e.keys():
-            entries_filt.append(e)
-    return entries_filt
-
