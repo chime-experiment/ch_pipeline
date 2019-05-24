@@ -370,7 +370,7 @@ class MakeHolographyBeam(task.SingleTask):
 
         # Check we have the expected number of products
         if (prod_groups[0].shape[0] != inputs.shape[0] or
-            prod_groups[1].shape[0] != inputs.shape[0]):
+                prod_groups[1].shape[0] != inputs.shape[0]):
             msg = ("Products do not separate into two groups with the length of the input map. "
                    "({:d}, {:d}) != {:d}").format(prod_groups[0].shape[0],
                                                   prod_groups[1].shape[0], inputs.shape[0])
@@ -571,7 +571,15 @@ class TransitStacker(task.SingleTask):
 
         if self.stack is None:
             # TODO: Copy over attributes?
-            self.stack = TrackBeam(axes_from=transit, attrs_from=transit)
+            self.stack = TrackBeam(axes_from=transit)
+
+            # Copy over relevant attributes
+            self.stack.attrs['filenames'] = [transit.attrs['filename']]
+            self.stack.attrs['observation_ids'] = [transit.attrs['observation_id']]
+            self.stack.attrs['dec'] = transit.attrs['dec']
+            self.stack.attrs['source_name'] = transit.attrs['source_name']
+            self.stack.attrs['source_ra'] = transit.attrs['source_ra']
+
             self.stack.beam[:] = transit.beam[:]
             self.stack.weight[:] = tools.invert_no_zero(transit.weight[:])
             self.norm = np.where(transit.weight == 0., 0., 1.)
@@ -582,6 +590,10 @@ class TransitStacker(task.SingleTask):
                     ) + " Skipping."
                 )
                 return None
+
+            self.stack.attrs['filenames'].append(transit.attrs['filename'])
+            self.stack.attrs['observation_ids'].append(transit.attrs['observation_id'])
+
             self.stack.beam += transit.beam[:]
             self.stack.weight += tools.invert_no_zero(transit.weight[:])
             self.norm += np.where(transit.weight == 0., 0., 1.)
@@ -591,8 +603,6 @@ class TransitStacker(task.SingleTask):
     def finish(self):
         self.stack.beam *= tools.invert_no_zero(self.norm)
         self.stack.weight[:] = self.norm**2 * tools.invert_no_zero(self.stack.weight)
-
-        # TODO: attributes?
 
         return self.stack
 
