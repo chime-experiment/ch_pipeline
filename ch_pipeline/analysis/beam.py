@@ -566,6 +566,7 @@ class TransitStacker(task.SingleTask):
     def setup(self):
         self.stack = None
         self.norm = None
+        self.noise_var = None
 
     def process(self, transit):
 
@@ -580,8 +581,10 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs['source_name'] = transit.attrs['source_name']
             self.stack.attrs['source_ra'] = transit.attrs['source_ra']
 
+            # Copy data for first transit
             self.stack.beam[:] = transit.beam[:]
-            self.stack.weight[:] = tools.invert_no_zero(transit.weight[:])
+            self.stack.weight[:] = np.abs(transit.beam[:])**2
+            self.noise_var = tools.invert_no_zero(transit.weight[:])
             self.norm = np.where(transit.weight == 0., 0., 1.)
         else:
             if transit.beam.shape != self.stack.beam.shape:
@@ -594,15 +597,24 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs['filenames'].append(transit.attrs['filename'])
             self.stack.attrs['observation_ids'].append(transit.attrs['observation_id'])
 
+            # Accumulate transit data
             self.stack.beam += transit.beam[:]
-            self.stack.weight += tools.invert_no_zero(transit.weight[:])
+            self.stack.weight += np.abs(transit.beam[:])**2
+            self.noise_var += tools.invert_no_zero(transit.weight[:])
             self.norm += np.where(transit.weight == 0., 0., 1.)
 
         return None
 
     def finish(self):
-        self.stack.beam *= tools.invert_no_zero(self.norm)
-        self.stack.weight[:] = self.norm**2 * tools.invert_no_zero(self.stack.weight)
+        # Divide by norm to get average transit
+        inv_norm = tools.invert_no_zero(self.norm)
+        self.stack.beam *= inv_norm
+
+        # Add noise variance and variance between transits
+        self.stack.weight[:] = tools.invert_no_zero(
+            self.noise_var * inv_norm**2 +
+            (self.stack.weight[:] * inv_norm - np.abs(self.stack.beam[:])**2)
+        )
 
         return self.stack
 
