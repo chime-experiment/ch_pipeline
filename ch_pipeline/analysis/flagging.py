@@ -28,11 +28,13 @@ Tasks
     DayMask
     MaskData
     MaskCHIMEData
+    DataFlagger
 """
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
+from ch_util import data_index as di
 
 from draco.core import task, io
 
@@ -1473,3 +1475,143 @@ class MaskCHIMEMisc(task.SingleTask):
         return ss
 
 
+class DataFlagger(task.SingleTask):
+    """Flag data based on DataFlags in database.
+
+    Parameters
+    ----------
+    flag_type : list
+        List of DataFlagType names to apply. Defaults to 'all'
+    """
+
+    flag_type = config.Property(proptype=list, default=['all'])
+
+    def setup(self):
+        """Query the database for flags of the requested types."""
+        flags = {}
+
+        # Query flag database if on 0th node
+        if self.comm.rank == 0:
+            di.connect_database()
+            flag_types = di.DataFlagType.select()
+            possible_flags = []
+            for ft in flag_types:
+                possible_flags.append(ft.name)
+                if ft.name in self.flag_type or 'all' in self.flag_type:
+                    self.log.info('Querying for %s Flags' % ft.name)
+                    new_flags = di.DataFlag.select().where(di.DataFlag.type == ft)
+                    flags[ft.name] = list(new_flags)
+
+            # Check that user-proved flag names are valid
+            for flag_name in self.flag_type:
+                if flag_name != 'all' and flag_name not in possible_flags:
+                    self.log.warning('Warning: Unrecognized Flag %s' % flag_name)
+
+        # Share flags with other nodes
+        flags = self.comm.bcast(flags, root=0)
+
+        # Save flags to class attribute
+        self.log.info('Found %d Flags in Total.' % sum([len(flg) for flg in flags.values()]))
+        self.flags = flags
+
+    def process(self, timestream):
+        """Set weight to zero for range of data covered by the database flags.
+
+        Flags are applied based on time, frequency, and (for non-stacked data) input.
+
+        Parameters
+        ----------
+        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+            Timestream to flag.
+
+        Returns
+        -------
+        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+            Returns the same timestream object with a modified weight dataset.
+        """
+        # Redistribute over the frequency direction
+        timestream.redistribute('freq')
+
+        # Determine whether timestream is stacked data
+        stacked = (len(timestream.index_map['prod']) >
+                   len(timestream.index_map['stack']['prod']))
+
+        # If not stacked, determine which inputs are in the timestream.
+        # If stacked, assume flags apply to all products.
+        if not stacked:
+            inputs = timestream.index_map['input']['chan_id'][:]
+            ninputs = len(inputs)
+        else:
+            ninputs = 1
+
+        # Get time axis or convert RA axis
+        if 'ra' in timestream.index_map:
+            ra = timestream.index_map['ra'][:]
+            if 'lsd' in timestream.attrs:
+                csd = timestream.attrs['lsd']
+            else:
+                csd = timestream.attrs['csd']
+            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+        else:
+            time = timestream.time
+
+        ntime = len(time)
+
+        # Determine local frequencies
+        sf = timestream.weight.local_offset[0]
+        ef = sf + timestream.weight.local_shape[0]
+        local_freq = timestream.freq[sf:ef]
+        nfreq = len(local_freq)
+
+        # Find the bin number of each local frequency
+        basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+        local_bin = np.array([np.argmin(np.abs(ff - basefreq)) for ff in local_freq])
+
+        # Initiate weight mask (1 means not flagged)
+        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=np.bool)
+
+        # Loop over flags of requested types
+        for flag_type, flag_list in self.flags.items():
+            for flag in flag_list:
+                # Identify flagged times
+                time_idx = (time >= flag.start_time) & (time <= flag.finish_time)
+                if np.any(time_idx):
+                    # Print info to log about why the data is being flagged
+                    msg = ('%d (of %d) samples flagged by a %s DataFlag covering %s to %s.' %
+                           (np.sum(time_idx), time_idx.size, flag_type,
+                            ephemeris.unix_to_datetime(flag.start_time).strftime("%Y%m%dT%H%M%SZ"),
+                            ephemeris.unix_to_datetime(flag.finish_time).strftime("%Y%m%dT%H%M%SZ")
+                            )
+                           )
+                    self.log.info(msg)
+
+                    # Refine the mask based on any frequency or input selection
+                    flag_mask = time_idx[np.newaxis, np.newaxis, :]
+                    if flag.freq is not None:
+                        # `and` with flagged local frequencies
+                        # By default, all frequencies are flagged
+                        flag_mask = flag_mask & flag.freq_mask[local_bin, np.newaxis, np.newaxis]
+
+                    if flag.inputs is not None and not stacked:
+                        # `and` with flagged inputs
+                        # By default, all inputs are flagged
+                        flag_mask = flag_mask & flag.input_mask[np.newaxis, inputs, np.newaxis]
+
+                    # set weight=0 where flag=1
+                    weight_mask = weight_mask & np.logical_not(flag_mask)
+
+        # Multiply weight mask by existing weight dataset
+        weight = timestream.weight[:]
+        weight_mask = weight_mask.astype(weight.dtype)
+        if stacked:
+            # Apply same mask to all products
+            weight *= weight_mask
+        else:
+            # Use apply_gain function to apply mask based on product map
+            products = timestream.index_map['prod'][timestream.index_map['stack']['prod']]
+            tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
+
+        self.log.info('%0.2f percent of data was flagged as bad.' %
+                       (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),))
+
+        return timestream
