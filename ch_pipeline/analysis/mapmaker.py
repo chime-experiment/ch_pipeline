@@ -25,6 +25,7 @@ from draco.core import io
 from draco.util import tools
 
 from ch_util import ephemeris
+from ch_util import tools as ch_tools
 
 from ..core import containers
 
@@ -238,3 +239,279 @@ class RingMapMaker(task.SingleTask):
             rm.dirty_beam[fi] = sb
 
         return rm
+
+
+
+class CombinedRingMapMaker(task.SingleTask):
+    """A map-maker that forms a single map by combining different beams along the meridian.
+
+    This is designed to run on data after it has been collapsed down to
+    non-redundant baselines only.
+
+    Attributes
+    ----------
+    npix_dec : int
+        Number of map pixels in the declination dimension.  Default is 512.
+
+    span_dec : float
+        Span of map in the declination dimension. Default is 80. degrees.
+
+    weight : string ('natural', 'uniform', or 'inverse_variance')
+        How to weight the non-redundant baselines:
+            'natural' - each baseline weighted by its redundancy (default)
+            'uniform' - each baseline given equal weight
+            'inverse_variance' - each baseline weighted by the weight attribute
+
+    exclude_intracyl : bool
+        Exclude intracylinder baselines from the calculation.  Default is False.
+
+    include_auto: bool
+        Include autocorrelations in the calculation.  Default is False.
+    time_window_s: float
+        Time window in seconds. For a given transit time, a map is formed in 
+        a window of time_window_s seconds (time_window_s/2. at each side of 
+        the transit time) and added to the map stack. Default is 900. (15 min 
+        at each side of a given transit time)
+    src_name: string ('CygA', 'CasA', 'TauA', 'VirA')
+        Calibration source. The beam profile is normalized at the declination of
+        the calibrator
+    """
+
+    npix_dec = config.Property(proptype=int, default=512)
+
+    span_dec = config.Property(proptype=float, default=80.0)
+
+    weight = config.Property(proptype=str, default='natural')
+
+    exclude_intracyl = config.Property(proptype=bool, default=False)
+
+    include_auto = config.Property(proptype=bool, default=False)
+
+    time_window_s = config.Property(proptype=float, default=900.)
+
+    src_name = config.Property(proptype=str, default='CygA')
+
+    def setup(self, tel):
+        """Set the Telescope instance to use.
+
+        Parameters
+        ----------
+        tel : TransitTelescope
+        """
+
+        if self.weight not in ['natural', 'uniform', 'inverse_variance']:
+            KeyError("Do not recognize weight = %s" % self.weight)
+
+        self.telescope = io.get_telescope(tel)
+
+    def process(self, sstream):
+        """Computes the ringmap.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream
+            The input sidereal stream.
+
+        Returns
+        -------
+        rm : containers.RingMap
+        """
+
+        # Redistribute over frequency
+        sstream.redistribute('freq')
+        nfreq = sstream.vis.local_shape[0]
+
+        # Extract the right ascension (or calculate from timestamp)
+        ra = sstream.ra if 'ra' in sstream.index_map else ephemeris.lsa(sstream.time)
+        nra = ra.size
+
+        # Get baseline of each stack product
+        baselines = self.telescope.baselines.copy()
+        autos_stack_prods = np.sqrt(baselines[:, 0]**2 + baselines[:, 1]**2)==0.0
+        intracyl_stack_prods = baselines[:, 0]==0.0
+        
+        # Get polarization of each stack product. Taken from the RingMapMaker class code
+        nstack = sstream.prod.shape[0]
+        pol = np.array([x + y for x in ['X', 'Y'] for y in ['X', 'Y']])
+        npol = len(pol)
+        pol_index = np.zeros(nstack, dtype=np.int) #pol of each vis from to convention above
+        
+        for sp, (ii, jj) in enumerate(sstream.prod):
+
+            if self.telescope.feedconj[ii, jj]:
+                ii, jj = jj, ii
+
+            fi = self.telescope.feeds[ii]
+            fj = self.telescope.feeds[jj]
+
+            pol_index[sp] = 2 * int(fi.pol == 'S') + int(fj.pol == 'S')
+
+        # Get window size in number of RA pixels
+        delta_ra = 360. / float(nra) # RA spacing in degrees. Assumes unifom spacing
+        delta_t = delta_ra  * 240.  # RA spacing in seconds (~240 sec/degree)
+        npix_w_side = int((self.time_window_s/2.) / delta_t) # N win pixels at each side of transit
+        ha_w_index = np.arange(-npix_w_side, npix_w_side + 1, dtype=np.int32) 
+        ha_w = delta_ra * ha_w_index # Window hour angle
+        npix_w = len(ha_w) # Number of pixels of time window
+
+        # Declination array
+        lat = ephemeris.CHIMELATITUDE # latitude of CHIME array
+        dec = np.linspace(lat-self.span_dec/2., lat+self.span_dec/2., self.npix_dec, 
+                          endpoint=False)
+
+        # Construct phase array
+        # Get local frequencies. Taken from solar module
+        sfreq = sstream.vis.local_offset[0]
+        efreq = sfreq + nfreq
+        f_MHz = sstream.freq[sfreq:efreq]
+        # Calculate wavelengths
+        wv = scipy.constants.c * 1e-6 / f_MHz
+        # u and v arrays, each has dimensions [freq bin, stack prod, time]
+        u = baselines[np.newaxis, :, 0, np.newaxis] / wv[:, np.newaxis, np.newaxis]
+        v = baselines[np.newaxis, :, 1, np.newaxis] / wv[:, np.newaxis, np.newaxis]
+        # Construct window phase array and beam profile
+        npix = npix_w * self.npix_dec
+        fs_phase = np.zeros((nfreq, nstack, npix), dtype=np.complex128)
+        for i, DEC in enumerate(dec): # Fringestop phase at every ra for given DEC
+            fs_phase[:, :, i*npix_w:(i+1)*npix_w] = ch_tools.fringestop_phase(
+                                                    np.radians(ha_w)[np.newaxis, np.newaxis, :], 
+                                                    np.radians(lat), np.radians(DEC), u, v)
+        
+        # Get Beam profile. Taken from Mateus' Quasar Stack code.
+        # beam dimensions according to RingMap container
+        beam = np.zeros((nfreq, npol, npix_w, self.npix_dec), dtype=np.float64)
+        for pp in range(npol):
+            beam[:, pp] = self._beamfunc(np.radians(ha_w)[np.newaxis, :, np.newaxis], pp, 
+                                         f_MHz[:, np.newaxis, np.newaxis], 
+                                         np.radians(dec)[np.newaxis, np.newaxis, :])
+        # Normalize beam. Currently the beam is normalized by th sum of beam pixel values 
+        # at the declination of the calibration source. With this normalization, the
+        # flux of a calibration point source at transit time should be correct after map stacking
+        src_dict = {'CygA': ephemeris.CygA, 'CasA': ephemeris.CasA, 
+                    'TauA': ephemeris.TauA, 'VirA': ephemeris.VirA}
+        dec_cal = np.rad2deg(src_dict[self.src_name].dec.radians) # Declination of the calibrator
+        dec_cal_index = np.argmin(abs(dec-dec_cal)) # Declination index closest to dec_cal
+        beam /= np.sum(beam[:, :, :, dec_cal_index], axis=2)[:, :, np.newaxis, np.newaxis]
+
+        # Construct weight function.
+        # Handle different options for weighting baselines
+        if self.weight == 'inverse_variance':
+            weight = sstream.weight[:]
+        else: # natural or uniform weighting. Need to calculate redundancy
+            redundancy = tools.calculate_redundancy(sstream.input_flags[:],
+                                                    sstream.index_map['prod'][:],
+                                                    sstream.reverse_map['stack']['stack'][:],
+                                                    sstream.vis.shape[1])
+
+            if self.weight == 'uniform':
+                redundancy = (redundancy > 0).astype(np.float32)
+
+            weight = (sstream.weight[:] > 0.0).astype(np.float32)
+            # redundancy has shape [stack prod, time]
+            weight *= redundancy[np.newaxis, :, :]
+        # Remove intracylinder baselines
+        if self.exclude_intracyl:
+            weight[:, intracyl_stack_prods] = 0.0
+        # Remove auto-correlations
+        if not self.include_auto:
+            weight[:, autos_stack_prods] = 0.0
+        # Normalize weight function. Each polarization separately
+        pol_stack_prods = np.zeros((npol, nstack), dtype=bool) # I need this later
+        for pp in range(npol): 
+            pol_stack_prods[pp] = pol_index==pp # stack products of polarization pp
+            norm_pol = np.sum(weight[:, pol_stack_prods[pp]], axis=1)
+            weight[:, pol_stack_prods[pp]] *= tools.invert_no_zero(norm_pol)[:, np.newaxis, :]
+
+        # Create empty ring map. Note that the declination goes into el parameter
+        rm = containers.RingMap(beam=1, el=dec, pol=pol, ra=ra,
+                                axes_from=sstream, attrs_from=sstream)
+        # Add datasets
+        rm.add_dataset('rms')
+        rm.add_dataset('dirty_beam')
+        # Make sure ring map is distributed over frequency
+        rm.redistribute('freq')
+
+        # Fill map
+        # Loop over polarization
+        for pp in range(npol): 
+            # Estimate rms noise in the ring map by propagating estimates
+            # of the variance in the visibilities. Does not include the beam yet
+            rm.rms[:, pp] = np.sum(tools.invert_no_zero(sstream.weight[:][:, pol_stack_prods[pp]]) 
+                                   * weight[:, pol_stack_prods[pp]]**2.0, axis=1)
+            # Loop over local frequencies 
+            for lfi, fi in sstream.vis[:].enumerate(0):
+                vis = sstream.vis[:][lfi, pol_stack_prods[pp]] # vis data [stack_prod, ra]
+                z = fs_phase[lfi, pol_stack_prods[pp]] # fs phase [stack_prod, pixel]
+                w = weight[lfi, pol_stack_prods[pp]] # weight [stack_prod, ra]
+                # Get map for local field for every ra
+                m = np.dot(z.T, vis * w).real # local map [pixel, ra]
+                db = np.dot(z.T, w).real # local dirty beam [pixel, ra]
+                # place local map into rm.map and multiply by beam
+                for ra_index, RA in enumerate(ra):
+                    m_ha = m[:, ra_index].reshape(self.npix_dec, npix_w) # local map [dec, ha]
+                    db_ha = db[:, ra_index].reshape(self.npix_dec, npix_w)
+                    # Find position of local map in rm.map
+                    ra_index_range = ha_w_index + ra_index
+                    # Wrap ra indices around edges
+                    ra_index_range[ra_index_range < 0] += nra
+                    ra_index_range[ra_index_range >= nra] -= nra
+                    # Add local map to map stack
+                    rm.map[fi, pp, ra_index_range, 0, :] += np.fliplr(m_ha).T * beam[lfi, pp]
+                    rm.dirty_beam[fi, pp, ra_index_range, 0, :] += np.fliplr(db_ha).T * beam[lfi, pp]
+
+        return rm
+
+
+    def _beamfunc(self, ha, pol, freq, dec, zenith=0.70999994):
+        """Beam model. Taken from Mateus' Quasar stack code which only works for XX and YY. 
+        For cross-polarizations returns ones everywhere
+
+        Parameters
+        ----------
+        ha : array or float
+            Hour angle (in radians) to compute beam at.
+        freq : array or float
+            Frequency in MHz
+        dec : array or float
+            Declination in radians
+        pol : int
+            Polarization index. XX : 0, XY: 1, YX: 2, YY : 3
+        zenith : float
+            Polar angle of the telescope zenith in radians. 
+            Equal to pi/2 - latitude
+        
+        Returns
+        -------
+        b: array
+            Beam model. Its shape is given by the broadcast of the arguments together.
+        """
+        def _sig(pp, freq, dec):
+            """
+            """
+            sig_amps = {0:14.87857614, 3:9.95746878}
+            return sig_amps[pp]/freq/np.cos(dec)
+    
+        def _amp(pp, dec, zenith):
+            """
+            """
+            def _flat_top_gauss6(x, A, sig, x0):
+                """Flat-top gaussian. Power of 6."""
+                return A*np.exp(-abs((x-x0)/sig)**6)
+            def _flat_top_gauss3(x, A, sig, x0):
+                """Flat-top gaussian. Power of 3."""
+                return A*np.exp(-abs((x-x0)/sig)**3)
+
+            prm_ns_x = np.array([9.97981768e-01, 1.29544939e+00, 0.])
+            prm_ns_y = np.array([9.86421047e-01, 8.10213326e-01, 0.])
+
+            if pp==0:
+                return _flat_top_gauss6(dec - (0.5 * np.pi - zenith), *prm_ns_x)
+            elif pp==3:
+                return _flat_top_gauss3(dec - (0.5 * np.pi - zenith), *prm_ns_y)
+
+        ha0 = 0.
+        if pol in [0, 3]: #co-pol. Use quasar beam model
+            return _amp(pol, dec, zenith)*np.exp(-((ha-ha0)/_sig(pol, freq, dec))**2)
+        else: # cross-pol. For now return a beam which is one everywhere
+            return np.ones((ha+freq+dec).shape, dtype=np.float64)
+            
