@@ -451,13 +451,13 @@ class CombinedRingMapMaker(task.SingleTask):
                     m_ha = m[:, ra_index].reshape(self.npix_dec, npix_w) # local map [dec, ha]
                     db_ha = db[:, ra_index].reshape(self.npix_dec, npix_w)
                     # Find position of local map in rm.map
-                    ra_index_range = ha_w_index + ra_index
+                    ra_index_range = ra_index - ha_w_index #-ve ha index means RApixel > RA
                     # Wrap ra indices around edges
                     ra_index_range[ra_index_range < 0] += nra
                     ra_index_range[ra_index_range >= nra] -= nra
                     # Add local map to map stack
-                    rm.map[fi, pp, ra_index_range, 0, :] += np.fliplr(m_ha).T * beam[lfi, pp]
-                    rm.dirty_beam[fi, pp, ra_index_range, 0, :] += np.fliplr(db_ha).T * beam[lfi, pp]
+                    rm.map[fi, pp, ra_index_range, 0, :] += m_ha.T * beam[lfi, pp]
+                    rm.dirty_beam[fi, pp, ra_index_range, 0, :] += db_ha.T * beam[lfi, pp]
 
         return rm
 
