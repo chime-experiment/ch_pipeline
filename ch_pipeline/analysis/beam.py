@@ -346,6 +346,9 @@ class MakeHolographyBeam(task.SingleTask):
     """ Repackage a holography transit into a beam container.
         The visibilities will be grouped according to their respective 26 m
         input (along the `pol` axis, labelled by the 26 m polarisation of that input).
+
+        The form of the beam dataset is A_{i} = < E_{i} * E_{26m}^{*} >, i.e. the 26m
+        input is the conjugate part of the visbility.
     """
 
     def process(self, data, inputmap):
@@ -393,14 +396,26 @@ class MakeHolographyBeam(task.SingleTask):
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
 
-        # Sort by input
+        # Sort based on the id in the layout database
+        corr_id = np.array([inp.id for inp in inputmap])
+        isort = np.argsort(corr_id)
+
+        # Create new input axis using id and serial number in database
+        inputs_sorted = np.array([(inputmap[ii].id, inputmap[ii].input_sn) for ii in isort],
+                                 dtype=inputs.dtype)
+
+        # Sort the products based on the input id in database and
+        # determine which products should be conjugated.
+        conj = []
+        prod_groups_sorted = []
         for i, pg in enumerate(prod_groups):
-            ipt_to_sort = (
-                'input_a' if np.sum(np.where(prod[pg]['input_a'] == input_26m[i])[0]) == 1
-                else 'input_b'
-            )
-            pg = pg[np.argsort(prod[pg][ipt_to_sort])]
-        inputs_sorted = inputs[np.argsort(inputs['chan_id'])]
+            group_prod = prod[pg]
+            group_conj = group_prod['input_a'] == input_26m[i]
+            group_inputs = np.where(group_conj, group_prod['input_b'], group_prod['input_a'])
+            group_sort = np.argsort(corr_id[group_inputs])
+
+            prod_groups_sorted.append(pg[group_sort])
+            conj.append(group_conj[group_sort])
 
         # Make new index map
         ra = data.attrs['source_ra']
@@ -418,8 +433,10 @@ class MakeHolographyBeam(task.SingleTask):
                           input=inputs_sorted, pol=pol, freq=data.freq[:], attrs_from=data,
                           distributed=data.distributed)
         for ip in range(len(pol)):
-            track.beam[:, ip, :, :] = data.vis[:, prod_groups[ip], :]
-            track.weight[:, ip, :, :] = data.weight[:, prod_groups[ip], :]
+            track.beam[:, ip, :, :] = data.vis[:, prod_groups_sorted[ip], :]
+            track.weight[:, ip, :, :] = data.weight[:, prod_groups_sorted[ip], :]
+            if np.any(conj[ip]):
+                track.beam[:, ip, conj[ip], :] = track.beam[:, ip, conj[ip], :].conj()
 
         return track
 
