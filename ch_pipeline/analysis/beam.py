@@ -292,8 +292,11 @@ class TransitRegridder(Regridder):
         # Update observer time
         self.sky_obs.date = data.time[0]
 
-        ra, _ = self.sky_obs.radec(self.src)
-        ra = ra._degrees
+        # Get apparent source RA, including precession effects
+        ra, _ = ephem.object_coords(self.src, date=self.sky_obs.date,
+                                    observer=self.sky_obs, deg=True)
+        # Get catalogue RA for reference
+        ra_icrs, _ = ephem.object_coords(self.src, deg=True)
 
         # Convert input times to hour angle
         lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
@@ -333,7 +336,8 @@ class TransitRegridder(Regridder):
         new_data.redistribute('freq')
         new_data.vis[:] = new_vis
         new_data.weight[:] = ni
-        new_data.attrs['source_ra'] = ra
+        new_data.attrs['cirs_ra'] = ra
+        new_data.attrs['icrs_ra'] = ra_icrs
 
         return new_data
 
