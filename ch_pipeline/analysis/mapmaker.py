@@ -275,6 +275,10 @@ class CombinedRingMapMaker(task.SingleTask):
     src_name: string ('CygA', 'CasA', 'TauA', 'VirA')
         Calibration source. The beam profile is normalized at the declination of
         the calibrator
+    beam: string ('uniform', 'gaussian')
+        Beam profile to weight samples from different RAs into a single pixel
+        'uniform' - Uniform beam (boxcar)
+        'gaussian' - Gaussian beam
     """
 
     npix_dec = config.Property(proptype=int, default=512)
@@ -290,6 +294,8 @@ class CombinedRingMapMaker(task.SingleTask):
     time_window_s = config.Property(proptype=float, default=900.)
 
     src_name = config.Property(proptype=str, default='CygA')
+
+    beam = config.Property(proptype=str, default='gaussian')
 
     def setup(self, tel):
         """Set the Telescope instance to use.
@@ -377,13 +383,16 @@ class CombinedRingMapMaker(task.SingleTask):
                                                     np.radians(ha_w)[np.newaxis, np.newaxis, :], 
                                                     np.radians(lat), np.radians(DEC), u, v)
         
-        # Get Beam profile. Taken from Mateus' Quasar Stack code.
+        # Get Beam profile.
         # beam dimensions according to RingMap container
-        beam = np.zeros((nfreq, npol, npix_w, self.npix_dec), dtype=np.float64)
-        for pp in range(npol):
-            beam[:, pp] = self._beamfunc(np.radians(ha_w)[np.newaxis, :, np.newaxis], pp, 
-                                         f_MHz[:, np.newaxis, np.newaxis], 
-                                         np.radians(dec)[np.newaxis, np.newaxis, :])
+        if self.beam == 'uniform': # Uniform beam
+            beam = np.ones((nfreq, npol, npix_w, self.npix_dec), dtype=np.float64)
+        else:#Gaussian beam. Taken from Mateus' Quasar Stack code.
+            beam = np.zeros((nfreq, npol, npix_w, self.npix_dec), dtype=np.float64)
+            for pp in range(npol):
+                beam[:, pp] = self._beamfunc(np.radians(ha_w)[np.newaxis, :, np.newaxis], pp, 
+                                             f_MHz[:, np.newaxis, np.newaxis], 
+                                             np.radians(dec)[np.newaxis, np.newaxis, :])
         # Normalize beam. Currently the beam is normalized by th sum of beam pixel values 
         # at the declination of the calibration source. With this normalization, the
         # flux of a calibration point source at transit time should be correct after map stacking
