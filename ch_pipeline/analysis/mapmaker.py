@@ -473,7 +473,7 @@ class CombinedRingMapMaker(task.SingleTask):
 
     def _beamfunc(self, ha, pol, freq, dec, zenith=0.70999994):
         """Beam model. Taken from Mateus' Quasar stack code which only works for XX and YY. 
-        For cross-polarizations returns ones everywhere
+        For cross-polarizations returns the geometric mean of XX and YY beams
 
         Parameters
         ----------
@@ -492,7 +492,7 @@ class CombinedRingMapMaker(task.SingleTask):
         Returns
         -------
         b: array
-            Beam model. Its shape is given by the broadcast of the arguments together.
+            Power beam model. Its shape is given by the broadcast of the arguments together.
         """
         def _sig(pp, freq, dec):
             """
@@ -521,6 +521,7 @@ class CombinedRingMapMaker(task.SingleTask):
         ha0 = 0.
         if pol in [0, 3]: #co-pol. Use quasar beam model
             return _amp(pol, dec, zenith)*np.exp(-((ha-ha0)/_sig(pol, freq, dec))**2)
-        else: # cross-pol. For now return a beam which is one everywhere
-            return np.ones((ha+freq+dec).shape, dtype=np.float64)
+        else: # cross-pol. Return geometric mean of XX and YY beams
+            return np.sqrt(_amp(0, dec, zenith)*np.exp(-((ha-ha0)/_sig(0, freq, dec))**2) * 
+                           _amp(3, dec, zenith)*np.exp(-((ha-ha0)/_sig(3, freq, dec))**2))
             
