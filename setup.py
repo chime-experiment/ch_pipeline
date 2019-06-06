@@ -7,7 +7,15 @@ setup(
     version=0.1,
 
     packages=find_packages(),
-    package_data={ "ch_pipeline": [ "data/*" ] },
+    package_data={"ch_pipeline": ["data/*"]},
+
+    install_requires=[
+        'Click',
+    ],
+    entry_points="""
+        [console_scripts]
+        chp=ch_pipeline.processing.client:cli
+    """,
 
     author="CHIME collaboration",
     author_email="richard@phas.ubc.ca",
