@@ -418,7 +418,7 @@ class MakeHolographyBeam(task.SingleTask):
             conj.append(group_conj[group_sort])
 
         # Make new index map
-        ra = data.attrs['source_ra']
+        ra = data.attrs['cirs_ra']
         phi = unwrap_lha(data.ra[:], ra)
         if 'dec' not in data.attrs.keys():
             msg = ("Input stream must have a 'dec' attribute specifying "
