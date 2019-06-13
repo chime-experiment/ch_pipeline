@@ -438,6 +438,9 @@ class MakeHolographyBeam(task.SingleTask):
             if np.any(conj[ip]):
                 track.beam[:, ip, conj[ip], :] = track.beam[:, ip, conj[ip], :].conj()
 
+        # Store 26 m inputs
+        track.attrs['26m_inputs'] = [inputs[ii] for ii in input_26m]
+
         return track
 
 
