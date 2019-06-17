@@ -20,6 +20,7 @@ Containers
     CorrInputTest
     CorrInputMonitor
     SiderealDayFlag
+    TransitFitParams
     PointSourceTransit
     SunTransit
     RingMap
@@ -271,8 +272,74 @@ class SiderealDayFlag(ContainerBase):
         return self.index_map['csd']
 
 
+class TransitFitParams(ContainerBase):
+    """Parallel container for holding the results of fitting a model to a point source transit.
+    """
+
+    _axes = ('freq', 'input', 'param', 'component')
+
+    _dataset_spec = {
+        'parameter': {
+            'axes': ['freq', 'input', 'param'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'parameter_cov': {
+            'axes': ['freq', 'input', 'param', 'param'],
+            'dtype': np.float32,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'chisq': {
+            'axes': ['freq', 'input', 'component'],
+            'dtype': np.float32,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'ndof': {
+            'axes': ['freq', 'input', 'component'],
+            'dtype': np.int,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
+    }
+
+    @property
+    def parameter(self):
+        return self.datasets['parameter']
+
+    @property
+    def parameter_cov(self):
+        return self.datasets['parameter_cov']
+
+    @property
+    def freq(self):
+        return self.index_map['freq']['centre']
+
+    @property
+    def input(self):
+        return self.index_map['input']
+
+    @property
+    def param(self):
+        return self.index_map['param']
+
+    @property
+    def component(self):
+        return self.index_map['component']
+
+
 class PointSourceTransit(StaticGainData):
-    """Parallel container for holding the results of a fit to a point source transit.
+    """Parallel container for holding sidereal calibration.
+
+    Contains the response of each feed to the source inferred from the eigendecomposition,
+    the largest eigenvalues, the parameters of a model fit to the response, and the gain
+    obtained by evaluating that model at transit.
     """
 
     _axes = ('freq', 'input', 'ra', 'pol_x', 'pol_y',
