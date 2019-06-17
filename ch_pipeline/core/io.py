@@ -46,7 +46,7 @@ import os.path
 import gc
 import numpy as np
 
-from caput import pipeline, mpiutil, memh5
+from caput import pipeline, memh5
 from caput import config
 
 from ch_util import andata
@@ -227,9 +227,8 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadSetupFile(pipeline.TaskBase):
-    """Loads a file from disk into a memh5 container
-    during setup.
+class LoadSetupFile(task.MPILoggedTask):
+    """Loads a file from disk into a memh5 container during setup.
 
     Attributes
     ----------
@@ -246,27 +245,22 @@ class LoadSetupFile(pipeline.TaskBase):
         -------
         cont : subclass of `memh5.BasicCont`
         """
-
-        from caput import memh5
-
-        cont = None
-
         # Check that the file exists
         if not os.path.exists(self.filename):
             raise RuntimeError('File does not exist: %s' % self.filename)
 
         self.log.info("Loading file: %s", self.filename)
 
-        if mpiutil.rank0:
-
-            # Load into container
+        # Load into container
+        cont = None
+        if self.comm.rank == 0:
             cont = memh5.BasicCont.from_file(self.filename, distributed=False)
 
         # Broadcast to other nodes
-        cont = mpiutil.world.bcast(cont, root=0)
+        cont = self.comm.bcast(cont, root=0)
 
         # Make sure all nodes have container before return
-        mpiutil.world.Barrier()
+        self.comm.Barrier()
 
         # Return container
         return cont
