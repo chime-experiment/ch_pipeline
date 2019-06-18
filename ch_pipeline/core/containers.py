@@ -568,14 +568,14 @@ class RingMap(ContainerBase):
 
     _dataset_spec = {
         'map': {
-            'axes': ['freq', 'pol', 'ra', 'beam', 'el'],
+            'axes': ['beam', 'pol', 'freq', 'ra', 'el'],
             'dtype': np.float64,
             'initialise': True,
             'distributed': True,
             'distributed_axis': 'freq'
         },
         'dirty_beam': {
-            'axes': ['freq', 'pol', 'ra', 'beam', 'el'],
+            'axes': ['beam', 'pol', 'freq', 'ra', 'el'],
             'dtype': np.float64,
             'initialise': False,
             'distributed': True,

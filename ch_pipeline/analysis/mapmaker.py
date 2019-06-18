@@ -252,8 +252,8 @@ class RingMapMaker(task.SingleTask):
                 bfm = np.fft.irfft(np.dot(weight[lfi] * vis[lfi], pa), nbeam, axis=2) * nbeam
                 sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
 
-            # Save to container
-            rmm[lfi] = bfm
-            rmb[lfi] = sb
+            # Save to container (shifting to the final axis ordering)
+            rmm[:, :, lfi] = bfm.transpose(2, 0, 1, 3)
+            rmb[:, :, lfi] = sb.transpose(2, 0, 1, 3)
 
         return rm
