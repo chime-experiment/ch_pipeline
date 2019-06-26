@@ -666,3 +666,223 @@ class SiderealCalibration(task.SingleTask):
 
         # Return gain data
         return gain_data
+
+
+class ThermalCalibration(task.SingleTask):
+    """Use weather temperature information to correct calibration
+       in between point source calibrations.
+
+    Attributes
+    ----------
+    caltime_path : 
+
+
+    """
+
+    caltime_path = config.Property(proptype=str)
+
+    def setup(self):
+        """
+        """
+        import h5py
+        from datetime import datetime
+        # Load calibration times data
+        self.caltime_file = h5py.File(self.caltime_path, 'r')
+
+        # Load weather temperatures
+        self.log.info("Loading weather temperatures")
+        start_time = np.amin(self.caltime_file['tref']) - 10.*3600.
+        start_time = ephemeris.unix_to_datetime(start_time)
+        end_time = datetime.now()
+        self._load_weather(start_time, end_time)
+
+    def process(self, data):
+        """Determine calibration from a sidereal stream.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        """
+        # Frequencies and RA/time
+        freq = data.index_map['freq']['centre'][:]
+        timestamp = self._ra2unix(data.attrs['lsd'], data.index_map['ra'][:])
+
+        # Find refference times for each timestamp.
+        # This is the time of the transit from which the gains
+        # applied to the data were derived.
+        self.log.info("Getting refference times")
+        reftime = self._get_reftime(timestamp, self.caltime_file)
+
+        # Compute gain corrections
+        self.log.info("Computing gains corrections")
+        g = self._reftime2gain(reftime, timestamp, freq)
+
+        # Ensure data is distributed in something else than RA/time or freq.
+        # That is: 'el' for maps, 'stack' or 'prod' for sstreams.
+        self.log.info("Redistributing data")
+        data.redistribute(['el', 'stack', 'prod'])
+
+        # Apply gain correction
+        # For now, just assume the following shapes:
+        # For maps: ['freq', 'pol', 'ra', 'beam', 'el']
+        # For sstreams: ['freq', 'stack', 'ra']
+#        freqslice = np.s_[:10]
+        self.log.info("Applying gain correction")
+        if ('vis' in data.keys()):
+            data['vis'][:] *= g[:, np.newaxis, :]
+#            data['vis'][freqslice] *= g[freqslice, np.newaxis, :]
+        else: # ('map' in data.keys())
+            data['map'][:] *= g[:, np.newaxis, :, np.newaxis, np.newaxis]
+#            data['map'][freqslice] *= g[freqslice, np.newaxis, :, np.newaxis, np.newaxis]
+
+        return data
+
+
+    def _ra2unix(self, csd, ra):
+        """ csd must be integer """
+        ra0tm = ephemeris.csd_to_unix(csd)
+        return ra * (ephemeris.SIDEREAL_S*3600.*24.) / 360. + ra0tm
+
+    def _reftime2gain(self, reftime, timestamp, frequency):
+        """
+        """
+        ntimes = len(timestamp)
+        nfreq = len(frequency)
+        if not isinstance(frequency, (list, np.ndarray)):
+            frequency = np.array([frequency])
+        # Ones. Don't modify data where there are no gains
+        g = np.ones((nfreq, ntimes), dtype=np.float)
+        finitemask = np.isfinite(reftime)
+        reftemp = self._interpolate_temperature(
+                self.wtime, self.wtemp, reftime[finitemask])
+        temp = self._interpolate_temperature(
+                self.wtime, self.wtemp, timestamp[finitemask])
+        g[:, finitemask] = self.gaincorr(
+                reftemp[np.newaxis, :], temp[np.newaxis, :],
+                frequency[:, np.newaxis], squared=True)
+    
+        return g
+
+    def _interpolate_temperature(self, temptime, tempdata, times):
+        # Interpolate temperatures
+        x = times
+        xp = temptime
+        fp = tempdata
+    
+        return np.interp(x, xp, fp)
+
+    # TODO: Should move this to ch_util!
+    def gaincorr(self, T0, T, freq, squared=False):#, pol):
+        """
+        Parameters
+        ----------
+        freq : float or array of foats
+            Frequencies in MHz
+        squared : bool
+            If true, return 1 + 2*corr. To avoid squaring
+            the gain corrections when applying to visibility
+            data or maps.
+
+        Returns
+        -------
+        g : float or array of floats
+            Gain amplitude corrections. Multiply by data
+            to correct it.
+        """
+    #     if pol==0:
+    #         m_params = [-4.15588627e-09, 8.27318534e-06, -2.02181757e-03]
+    #     else:
+    #         m_params = [-4.40948632e-09, 8.51834265e-06, -1.99043022e-03]
+        m_params = [-4.28268629e-09, 8.39576400e-06, -2.00612389e-03]
+        m = np.polyval(m_params, freq)
+        
+        if squared:
+            return 1. + 2.* m * (T - T0)
+        else:
+            return 1. + m * (T - T0)
+
+    def _get_reftime(self, tms, calfl):
+        """
+        """
+        # Len of tms, indices in calfl.
+        last_start_index = np.searchsorted(calfl['tstart'][:], tms) - 1
+        # Len of tms, indices in calfl.
+        last_end_index = np.searchsorted(calfl['tend'][:], tms) - 1
+        # TODO: add test for indices < 0 here.
+    
+        last_start_time = calfl['tstart'][:][last_start_index]
+        
+        reftime = np.full(len(tms), np.nan, dtype=np.float)
+        is_restart = calfl['is_restart'][:]
+        tref = calfl['tref'][:]
+        
+        # Acquisition restart. We load an old gain.
+        acqrestart = (is_restart[last_start_index] == 1)
+        reftime[acqrestart] = tref[last_start_index][acqrestart]
+        
+        # FPGA restart. Data not calibrated.
+        fpgarestart = (is_restart[last_start_index] == 2)
+        # I think the file has a tref for those.
+        # TODO: Should I use them?
+        # reftime[fpgarestart] = tref[last_start_index][fpgarestart]
+        
+        # Gain transition. Need to interpolate gains.
+        gaintrans = (last_start_index == (last_end_index+1))
+        # Previous update was a restart.
+        prev_isrestart = is_restart[last_start_index - 1].astype(bool)
+        # Previous update was a gain update.
+        prev_isgain = np.invert(prev_isrestart)
+        # This update is in gain transition and previous update was a restart.
+        # Just use new gain, no interpolation.
+        prev_isrestart = prev_isrestart & gaintrans
+        reftime[prev_isrestart] = tref[last_start_index][prev_isrestart]
+        # This update is in gain transition and previous update was a gain update.
+        # Need to interpolate gains.
+        # TODO: To correct interpolated gains I need to know what 
+        # the applied gains were! For now, just correct for the new gain.
+        prev_isgain = np.invert(prev_isrestart) & gaintrans
+        reftime[prev_isgain] = tref[last_start_index][prev_isgain]
+    
+        # Calibrated range. Gain transition has finished.
+        calrange = (last_start_index == last_end_index)
+        reftime[calrange] = tref[last_start_index][calrange]
+    
+        return reftime
+
+    def _load_weather(self, start_time, end_time):
+        """
+        """
+        from ch_util import data_index
+        ntime = None
+
+        # Can only query the database from one rank.
+        if mpiutil.rank == 0:
+            f = data_index.Finder(node_spoof={"cedar_archive": '/project/rpp-krs/chime/chime_archive'})
+            f.only_weather()
+            f.set_time_range(start_time, end_time)
+            f.accept_all_global_flags()
+            results_list = f.get_results()
+            if len(results_list) != 1:
+                msg = 'Cannot deal with multiple weather acquisitions'
+                raise RuntimeError(msg)
+            result = results_list[0]
+            wdata = result.as_loaded_data()
+
+            self.wtime, self.wtemp = wdata.time[:], wdata['outTemp'][:]
+            ntime = len(self.wtime)
+
+        # Broadcast the times and temperatures to all ranks.
+        ntime = mpiutil.world.bcast(ntime, root=0)
+        if mpiutil.rank != 0:
+            self.wtime = np.empty(ntime, dtype=np.float64)
+            self.wtemp = np.empty(ntime, dtype=np.float64)
+
+        # For some reason I need to cast as float here.
+        # Bcast chokes when I use np.float64...
+        self.wtime = self.wtime.astype(float)
+        self.wtemp = self.wtemp.astype(float)
+        mpiutil.world.Bcast(self.wtime, root=0)
+        mpiutil.world.Bcast(self.wtemp, root=0)
+
