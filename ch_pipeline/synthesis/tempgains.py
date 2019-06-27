@@ -10,14 +10,15 @@ import h5py
 from scipy import interpolate
 from caput import config, mpiarray, mpiutil, pipeline
 
-from ch_util import data_index, ephemeris
+from ch_util import data_index, ephemeris, fluxcat
 
 from draco.core import containers, task, io
 from draco.synthesis import gain
 
 SOLAR_SEC_PER_DAY = 86400.
-SOURCES = {'CygA' : ephemeris.CygA, 'CasA' : ephemeris.CasA, 'TauA' : ephemeris.TauA}
+SOURCES = {'CygA' : ephemeris.CygA, 'CasA' : ephemeris.CasA, 'TauA' : ephemeris.TauA, 'VirA' : ephemeris.VirA}
 
+SOURCE_PRIORITY = {'CygA' : 1, 'CasA' : 2, 'TauA': 3, 'VirA' : 4}
 
 class SiderealTempGains(gain.BaseGains):
     """TThis class comprises a new function called _generate_temperrors which
@@ -50,9 +51,17 @@ class SiderealTempGains(gain.BaseGains):
 
     temperror_type = config.enum(['delay', 'random'], default='random')
     max_temp_delay = config.Property(default=900, proptype=int)
+
     cal_src = config.Property(default='CygA', proptype=str)
 
+    # Configurable list of sources to select.
+    sources = config.Property(proptype=list)
+
+    # Only to use night time
+    night_time = config.Property(proptype=bool, default=False)
+
     _prev_caltemp = None
+    _prev_sunset = None
 
     cadence = 1.
     filt_length = 3600
@@ -236,7 +245,17 @@ class SiderealTempGains(gain.BaseGains):
         exp_func = _exponential(n)
         filt[trans_idx:trans_idx + n] = exp_func
 
+
+        # apply a slope when delta tau is set to zero
+        # nt = self.ntimesamp
+        nt = 5
+        ts = trans_idx - nt
+        te = trans_idx + nt
+        tshape = temp_error[ts:te].shape[0]
+        temp_slope = np.linspace(temp_error[ts], temp_error[te], tshape)
+
         temp_error = temp_error * filt[np.newaxis]
+        temp_error[:, ts:te] = temp_slope
 
         return temp_error
 
@@ -245,7 +264,7 @@ class SiderealTempGains(gain.BaseGains):
          Parameters
         ----------
         time : np.ndarray
-            Generate temperature fluctuations for this time period.
+            Generate temperature drifts for this time period.
         wstream : class
             HKData object."""
         wtime = wstream.time
@@ -255,25 +274,171 @@ class SiderealTempGains(gain.BaseGains):
         f_temp = interpolate.interp1d(wtime, outtemp)
         temp = f_temp(time)
 
-        # Assume that we do sidereal calibration once per day
-        trans_time = ephemeris.transit_times(SOURCES[self.cal_src], time[0], time[-1])[0]
-        trans_idx = np.argmin(abs(time - trans_time))
-        caltemp = temp[trans_idx]
+        if self.night_time:
+            night_transits = []
+            sel_sources = {s: SOURCES[s] for s in self.sources}
 
+            # Get night times
+            start_night, end_night = self._night_times(time)
+
+            # Check which of these sources transit at night
+            for src in sel_sources.keys():
+                transit = ephemeris.transit_times(SOURCES[src], start_night, end_night)
+
+                if transit.size > 0:
+                    night_transits.append(src)
+
+            # Check which calibration source we prefer.
+            src_ranking = [SOURCE_PRIORITY[src] for src in night_transits]
+            src_ranking.sort()
+
+            inv_map = {v: k for k, v in SOURCE_PRIORITY.items()}
+            cal_source = inv_map[src_ranking[0]]
+
+            self.log.info("CAL SOURCE")
+            self.log.info(cal_source)
+
+            # Cal_source is the source that has the highest priority transiting last night.
+            # Figure out transit times and transit indices.
+            trans_time = ephemeris.transit_times(SOURCES[cal_source], time[0], time[-1])[0]
+            trans_idx = np.argmin(abs(time - trans_time))
+
+            # Find the calibration temperatures at point source transit.
+            cal_temp = temp[trans_idx]
+            cal_temp_arr = np.ones(temp.shape[0], dtype=float)
+            # Cal temperature until night source transit is the temperature of last
+            # sidereals day calibration
+            # If I am running the first time need to set prev_caltemp
+            if self._prev_caltemp is None:
+                self._prev_caltemp = cal_temp
+
+            cal_temp_arr[:trans_idx] = self._prev_caltemp
+            cal_temp_arr[trans_idx:] = cal_temp
+
+            # Interpolate gains at point source transit.
+            nt = 5
+            ts = trans_idx - nt
+            te = trans_idx + nt
+            tshape = cal_temp_arr[ts:te].shape[0]
+            temp_slope = np.linspace(cal_temp_arr[ts], cal_temp_arr[te], tshape)
+
+            cal_temp_arr[ts:te] = temp_slope
+
+            delta_temp = temp - cal_temp_arr
+
+            mask = self._mask_day(time)
+
+            delta_temp[~mask] = 0.0
+
+            self._prev_caltemp = cal_temp
+
+            return delta_temp
+
+
+        # If I am running the first time calculate where to slice the data
         if self._prev_caltemp is None:
-            delta_temp = temp - caltemp
 
-        else:
-            caltemp_arr = np.ones(temp.shape, dtype=float)
-            caltemp_arr[:trans_idx] = self._prev_caltemp
-            caltemp_arr[trans_idx:] = caltemp
-            delta_temp = temp - caltemp_arr
-            self.log.info("caltemp %f", caltemp)
-            self.log.info("prev caltemp %f", self._prev_caltemp)
+            src_list = ['TauA', 'VirA', 'CygA', 'CasA']
+            # src_list =['CygA']
+            # src_list = ['TauA', 'CygA']
+            # Figure out transit times and transit indices.
+            trans_times = [ephemeris.transit_times(SOURCES[src], time[0], time[-1])[0] for src in src_list]
+            trans_times.sort()
+            idxs = [np.argmin(abs(time - tt)) for tt in trans_times]
+            slc = [slice(idxs[i], idxs[i+1]) if i < (len(idxs) -1) else slice(idxs[i], None) for i in range(len(idxs))]
+            self.idxs = idxs
+            self.slc = slc
+            self._prev_caltemp = temp[idxs][0]
 
-        self._prev_caltemp = caltemp
+        # Find the calibration temperatures at point source transit.
+        caltemps = temp[self.idxs]
+        caltemp_arr = np.ones(temp.shape, dtype=float)
+        # Cal temperature until first point source transit is the temperature of last
+        # sidereals day calibration
+        caltemp_arr[:self.idxs[0]] = self._prev_caltemp
+
+        # Populate caltemp_arr with the temperatures at the time of point source calibration.
+        for i in range(caltemps.shape[0]):
+            caltemp_arr[self.slc[i]] = caltemps[i]
+            nt = 10
+            ts = self.idxs[i] - nt
+            te = self.idxs[i] + nt
+            tshape = caltemp_arr[ts:te].shape[0]
+            temp_slope = np.linspace(caltemp_arr[ts], caltemp_arr[te], tshape)
+
+            caltemp_arr[ts:te] = temp_slope
+
+        delta_temp = temp - caltemp_arr
+
+        if self.mask_sun:
+            delta_temp = self._mask_sun(time, delta_temp)
+
+        self._prev_caltemp = caltemps[-1]
 
         return delta_temp
+
+    def _mask_day(self, time):
+        """Returns True if its night"""
+        # Get sunrise and sunset times in this sidereal day
+        sunrise = ephemeris.solar_rising(time[0], time[-1])
+        sunset = ephemeris.solar_setting(time[0], time[-1])
+
+        # Check if len of arrays are not zero get indices
+        if len(sunrise) != 0 and len(sunset) != 0:
+            sunrise_idx = np.argmin(abs(time - sunrise[0]))
+            sunset_idx = np.argmin(abs(time - sunset[0]))
+
+            if sunset_idx < sunrise_idx:
+                mask = np.zeros(time.shape[0], dtype=bool)
+                mask[sunset_idx:sunrise_idx] = True
+            else:
+                mask = np.ones(time.shape[0], dtype=bool)
+                mask[sunrise_idx:sunset_idx] = False
+
+        if len(sunset) == 0:
+            sunrise_idx = np.argmin(abs(time - sunrise[0]))
+            mask = np.zeros(time.shape[0], dtype=bool)
+            mask[:sunrise_idx] = True
+
+        if len(sunrise) == 0:
+            sunset_idx = np.argmin(abs(time - sunset[0]))
+            mask = np.zeros(time.shape[0], dtype=bool)
+            mask[sunset_idx:] = True
+
+        return mask
+
+    def _night_times(self, time):
+        # If this is the first time we run pretend sunset was at start of file.
+        if self._prev_sunset is None:
+            self._prev_sunset = time[0]
+
+        # Get sunrise and sunset times in this sidereal day
+        sunrise = ephemeris.solar_rising(time[0], time[-1])
+        sunset = ephemeris.solar_setting(time[0], time[-1])
+
+        # Check if len of arrays are not zero get indices
+        # Then sunrise and sunset exist in time
+        if len(sunrise) != 0 and len(sunset) != 0:
+            # Check if sunrise or sunset is greater
+            if sunset < sunrise:
+                start_night = sunset[0]
+                end_night = sunrise[0]
+
+            else:
+                start_night = self._prev_sunset
+                end_night = sunrise[0]
+
+            self._prev_sunset = sunset[0]
+
+        if len(sunset) == 0:
+            start_night = self._prev_sunset
+            end_night = sunrise[0]
+
+        if len(sunrise) == 0:
+            start_night = sunset[0]
+            end_night = time[-1]
+
+        return start_night, end_night
 
     def _initialize_tempdelays(self, ninput):
         """Initialise temperature delays for input channels if
