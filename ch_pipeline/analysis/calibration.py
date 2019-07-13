@@ -23,6 +23,7 @@ Tasks
     InterpolateGainOverFrequency
     SiderealCalibration
 """
+import json
 
 import numpy as np
 from scipy import interpolate
@@ -495,6 +496,8 @@ class EigenCalibration(task.SingleTask):
     med_phase_ref : bool
         Overides `phase_ref`, instead referencing the phase with respect
         to the median value over feeds of a given polarisation.
+    neigen : int
+        Number of eigenvalues to include in the orthogonalization.
     window : float
         Fraction of the maximum hour angle considered on source.
     dyn_rng_threshold : float
@@ -507,7 +510,9 @@ class EigenCalibration(task.SingleTask):
     eigen_ref = config.Property(proptype=int, default=0)
     phase_ref = config.Property(proptype=list, default=[1152, 1408])
     med_phase_ref = config.Property(proptype=bool, default=False)
+    neigen = config.Property(proptype=int, default=2)
     window = config.Property(proptype=float, default=0.75)
+    dyn_rng_threshold = config.Property(proptype=float, default=3.0)
 
     def process(self, data, inputmap):
         """Determine feed response from eigendecomposition.
@@ -531,7 +536,7 @@ class EigenCalibration(task.SingleTask):
         data.redistribute('freq')
 
         # Determine local dimensions
-        nfreq, neigen, ninput, ntime = data.evec.local_shape
+        nfreq, neigen, ninput, ntime = data.datasets['evec'].local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -564,30 +569,34 @@ class EigenCalibration(task.SingleTask):
         lat = np.radians(ephemeris.CHIMELATITUDE)
 
         # Dereference datasets
-        evec = data.datasets['evec'][:]
-        evalue = data.datasets['eval'][:]
-        erms = data.datasets['erms'][:]
-        vis = data.datasets['vis'][:]
-        weight = data.flags['weight'][:]
+        evec = data.datasets['evec'][:].view(np.ndarray)
+        evalue = data.datasets['eval'][:].view(np.ndarray)
+        erms = data.datasets['erms'][:].view(np.ndarray)
+        vis = data.datasets['vis'][:].view(np.ndarray)
+        weight = data.flags['vis_weight'][:].view(np.ndarray)
 
         # Find inputs that were not included in the eigenvalue decomposition
         eps = 10.0 * np.finfo(evec.dtype).eps
-        input_flag = np.all(np.abs(evec[:, 0]) < eps,  axis=(0, 2))
-        input_flag = np.logical_not(mpiutil.allreduce(input_flag, op=MPI.LAND, comm=data.comm))
+        evec_all_zero = np.all(np.abs(evec[:, 0]) < eps,  axis=(0, 2))
+
+        input_flags = np.zeros(ninput, dtype=np.bool)
+        for ii in range(ninput):
+            input_flags[ii] = np.logical_not(mpiutil.allreduce(evec_all_zero[ii],
+                                                               op=MPI.LAND, comm=data.comm))
 
         self.log.info("%d inputs missing from eigenvalue decomposition." %
                       np.sum(~input_flags))
 
         # Check that we have data for the phase reference
         for ref in self.phase_ref:
-            if not input_flag[ref]:
+            if not input_flags[ref]:
                 ValueError("Requested phase reference (%d) "
                            "was not included in decomposition." % ref)
 
         # Determine x and y pol index
-        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flag[idf] and
+        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
                            tools.is_array_x(inp)])
-        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flag[idf] and
+        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
                            tools.is_array_y(inp)])
 
         nfeed = xfeeds.size + yfeeds.size
@@ -612,10 +621,10 @@ class EigenCalibration(task.SingleTask):
         dyn = evalue[:, 1, :] * tools.invert_no_zero(eval0_off_source[:, np.newaxis])
 
         # Determine frequencies to mask
-        not_rfi = ~rfi.frequency_mask(data.freq)
+        not_rfi = ~rfi.frequency_mask(freq)
         not_rfi = not_rfi[:, np.newaxis]
 
-        dyn_flg = dyn > self.dyn_rng_threshold
+        dyn_flag = dyn > self.dyn_rng_threshold
 
         flag = dyn_flag & not_rfi
 
@@ -635,11 +644,11 @@ class EigenCalibration(task.SingleTask):
         response = containers.SiderealStream(ra=ra, attrs_from=data, axes_from=data,
                                              distributed=data.distributed, comm=data.comm)
 
-        response.attrs['source_name'] = source
+        response.attrs['source_name'] = self.source
         response.attrs['transit_time'] = ttrans
         response.attrs['lsd'] = csd
 
-        reponse.input_flags[:] = input_flag[:, np.newaxis]
+        response.input_flags[:] = input_flags[:, np.newaxis]
 
         out_vis = response.vis[:]
         out_weight = response.weight[:]
@@ -654,7 +663,6 @@ class EigenCalibration(task.SingleTask):
             # Loop over frequencies
             for ff in range(nfreq):
 
-                flg = flag[ff, :]
                 ww = weight[ff, feeds, :]
 
                 # Normalize by eigenvalue and correct for pi phase flips in process.
@@ -679,7 +687,7 @@ class EigenCalibration(task.SingleTask):
                 resp = resp[:, feeds, -1].T
 
                 # Compute error on response
-                dataflg = (flg[np.newaxis, :] & (np.abs(resp) > 0.0) &
+                dataflg = (flag[ff, np.newaxis, :] & (np.abs(resp) > 0.0) &
                            (ww > 0.0) & np.isfinite(ww)).astype(np.float32)
 
                 resp_err = (dataflg * base_err[ff, :, :] * np.sqrt(vis[ff, feeds, :].real) *
@@ -785,7 +793,7 @@ class TransitFit(task.SingleTask):
         sfreq = response.vis.local_offset[0]
         efreq = sfreq + nfreq
 
-        freq = data.freq[sfreq:efreq]
+        freq = response.freq[sfreq:efreq]
 
         # Calculate the hour angle using the source and transit time saved to attributes
         source_obj = ephemeris.source_dictionary[response.attrs['source_name']]
@@ -797,33 +805,34 @@ class TransitFit(task.SingleTask):
         ha = ((ha + 180.0) % 360.0) - 180.0
 
         # Determine the fit window
-        input_flag = np.any(response.input_flags[:], axis=-1)
+        input_flags = np.any(response.input_flags[:], axis=-1)
 
-        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flag[idf] and
+        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
                            tools.is_array_x(inp)])
-        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flag[idf] and
+        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
                            tools.is_array_y(inp)])
 
         pol = {'X': xfeeds, 'Y': yfeeds}
 
         sigma = np.zeros((nfreq, ninput), dtype=np.float32)
         for pstr, feed in pol.items():
-            sigma[:, feed] = cal_utils.guess_fwhm(freq, pol=pstr, dec=src_dec,
+            sigma[:, feed] = cal_utils.guess_fwhm(freq, pol=pstr, dec=np.radians(src_dec),
                                                   sigma=True, voltage=True)[:, np.newaxis]
 
         # Dereference datasets
-        vis = response.vis[:]
-        weight = response.weight[:]
+        vis = response.vis[:].view(np.ndarray)
+        weight = response.weight[:].view(np.ndarray)
         err = np.sqrt(tools.invert_no_zero(weight))
 
         # Flag data with zero weight or data that is outside the fit window
         # set by nsigma config parameter
-        flag = (weight > 0.0)
+        flag = weight > 0.0
         if self.nsigma is not None:
-            flag &= ha[np.newaxis, np.newaxis, :] < (self.nsigma * sigma[:, :, np.newaxis])
+            flag &= (np.abs(ha[np.newaxis, np.newaxis, :]) <=
+                     (self.nsigma * sigma[:, :, np.newaxis]))
 
         # Call the fitting routine
-        if poly:
+        if self.poly:
             moving_window = self.nsigma_move and self.nsigma_move * sigma
 
             param, param_cov, fit_info, chisq, ndof = cal_utils.fit_poly_point_source_transit(
@@ -852,9 +861,16 @@ class TransitFit(task.SingleTask):
                                           distributed=response.distributed,
                                           comm=response.comm)
 
+        fit.add_dataset('chisq')
+        fit.add_dataset('ndof')
+
         # Transfer fit information to container attributes
         for key, val in fit_info.items():
-            fit.attrs[key] = val
+            self.log.info("Setting attribute %s = %s" % (key, str(val)))
+            if isinstance(val, dict):
+                fit.attrs[key] = json.dumps(val)
+            else:
+                fit.attrs[key] = val
 
         # Save datasets
         fit.parameter[:] = param
@@ -877,7 +893,7 @@ class GainFromTransitFit(task.SingleTask):
         than this threshold.
     """
 
-    evaluate = config.Property(proptype=str, default='transit')
+    evaluate = config.enum(['transit', 'peak'], default='transit')
     chisq_per_dof_threshold = config.Property(proptype=float, default=20.0)
 
     def process(self, fit):
@@ -901,19 +917,19 @@ class GainFromTransitFit(task.SingleTask):
         # Distribute over frequency
         fit.redistribute('freq')
 
-        nfreq, ninput, _ = fit.parameters.local_shape
+        nfreq, ninput, _ = fit.parameter.local_shape
 
         # Import the function for evaluating the model and keyword arguments
         model_function = locate(fit.attrs['model_function'])
         model_error_function = locate(fit.attrs['model_error_function'])
         model_peak_function = locate(fit.attrs['model_peak_function'])
-
-        model_kwargs = fit.attrs.get('model_kwargs', {})
+        model_kwargs = json.loads(fit.attrs['model_kwargs'])
 
         # Create output container
         out = containers.StaticGainData(axes_from=fit, attrs_from=fit,
                                         distributed=fit.distributed,
                                         comm=fit.comm)
+        out.add_dataset('weight')
 
         # Initialize gains and weights to zeros
         out.gain[:] = np.zeros(out.gain.local_shape, dtype=out.gain.dtype)
@@ -923,9 +939,10 @@ class GainFromTransitFit(task.SingleTask):
         ha = 0.0 if self.evaluate == 'transit' else None
 
         # Dereference datasets
-        param = fit.parameter[:]
-        param_cov = fit.parameter_cov[:]
-        chisq_per_dof = fit.chisq[:] * tools.invert_no_zero(fit.ndof[:].astype(np.float32))
+        param = fit.parameter[:].view(np.ndarray)
+        param_cov = fit.parameter_cov[:].view(np.ndarray)
+        chisq_per_dof = fit.chisq[:].view(np.ndarray) * tools.invert_no_zero(
+                        fit.ndof[:].view(np.ndarray).astype(np.float32))
 
         gain = out.gain[:]
         weight = out.weight[:]
@@ -955,7 +972,13 @@ class GainFromTransitFit(task.SingleTask):
 
                 # Use convention that you multiply by gain to calibrate
                 gain[ff, ii] = tools.invert_no_zero(g)
-                weight[ff, ii] = tools.invert_no_zero(err**2) * np.abs(g)**4
+                weight[ff, ii] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
+
+        # Can occassionally get Infs when evaluating fits to anomalous data.  Replace with zeros.
+        not_finite = ~(np.isfinite(gain) & np.isfinite(weight))
+        if np.any(not_finite):
+            gain[not_finite] = 0.0 + 0.0J
+            weight[not_finite] = 0.0
 
         return out
 
@@ -1016,6 +1039,8 @@ class FlagAmplitude(task.SingleTask):
         gain : containers.StaticGain
             The input gain container with modified weights.
         """
+        from mpi4py import MPI
+
         # Distribute over frequency
         gain.redistribute('freq')
 
@@ -1025,8 +1050,8 @@ class FlagAmplitude(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Dereference datasets
-        flag = gain.weight[:] > 0.0
-        amp = np.abs(gain.gain[:])
+        flag = gain.weight[:].view(np.ndarray) > 0.0
+        amp = np.abs(gain.gain[:].view(np.ndarray))
 
         # Determine x and y pol index
         xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if tools.is_array_x(inp)])
@@ -1073,7 +1098,7 @@ class FlagAmplitude(task.SingleTask):
                 else:
                     full_med_amp_by_pol = None
 
-                mpiutil.gather_local(full_med_amp_by_pol, med_amp_by_pol, sfreq,
+                mpiutil.gather_local(full_med_amp_by_pol, med_amp_by_pol, (sfreq,),
                                      root=0, comm=gain.comm)
 
                 # Flag outlier frequencies on rank 0
@@ -1086,36 +1111,43 @@ class FlagAmplitude(task.SingleTask):
                                                           window=self.window_med_outlier,
                                                           nsigma=self.nsigma_med_outlier)
 
+                    self.log.info("Pol %s:  %d frequencies are outliers." %
+                                  (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int)))
+
                 # Broadcast outlier frequencies to other ranks
-                gain.comm.bcast(not_outlier, root=0)
+                not_outlier = gain.comm.bcast(not_outlier, root=0)
                 gain.comm.Barrier()
 
                 flag[:, feeds] &= not_outlier[sfreq:efreq, np.newaxis]
-
-                self.log.info("Pol %s:  %d frequencies are outliers." %
-                              (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int)))
 
         # Determine bad frequencies
         flag_freq = ((np.sum(flag, axis=1, dtype=np.float32) / float(ninput)) >
                      self.threshold_good_freq)
 
         good_freq = list(sfreq + np.flatnonzero(flag_freq))
-        good_freq = mpiutil.allreduce(good_freq, op=MPI.SUM, comm=gain.comm)
+        good_freq = np.array(mpiutil.allreduce(good_freq, op=MPI.SUM, comm=gain.comm))
 
         flag &= flag_freq[:, np.newaxis]
 
+        self.log.info("%d good frequencies after flagging amplitude." % good_freq.size)
+
         # Determine bad inputs
         flag = mpiarray.MPIArray.wrap(flag, axis=0, comm=gain.comm)
-        flag.redistribute(1)
+        flag = flag.redistribute(1)
 
         fraction_good = (np.sum(flag[good_freq, :], axis=0, dtype=np.float32) *
                          tools.invert_no_zero(float(good_freq.size)))
         flag_input = fraction_good > self.threshold_good_input
 
+        good_input = list(flag.local_offset[1] + np.flatnonzero(flag_input))
+        good_input = np.array(mpiutil.allreduce(good_input, op=MPI.SUM, comm=gain.comm))
+
         flag[:] &= flag_input[np.newaxis, :]
 
+        self.log.info("%d good inputs after flagging amplitude." % good_input.size)
+
         # Redistribute flags back over frequencies and update container
-        flag.redistribute(0)
+        flag = flag.redistribute(0)
 
         gain.weight[:] *= flag.astype(gain.weight.dtype)
 
@@ -1154,18 +1186,21 @@ class InterpolateGainOverFrequency(task.SingleTask):
         # Redistribute over input
         gain.redistribute('input')
 
+        # Deference datasets
+        g = gain.gain[:].view(np.ndarray)
+        w = gain.weight[:].view(np.ndarray)
+
         # Determine flagged frequencies
-        flag = gain.weight[:] > 0.0
+        flag = w > 0.0
 
         # Interpolate the gain at non-flagged frequencies to the flagged frequencies
-        interp_gain, interp_weight = cal_utils.interpolate_gain(gain.freq[:], gain.gain[:],
-                                                                gain.weight[:], flag=flag,
-                                                                length_scale=self.interp_scale)
+        ginterp, winterp = cal_utils.interpolate_gain(gain.freq[:], g, w, flag=flag,
+                                                      length_scale=self.interp_scale)
 
         # Replace the gain and weight datasets with the interpolated arrays
         # Note that the gain and weight for non-flagged frequencies have not changed
-        gain.gain[:] = interp_gain
-        gain.weight[:] = interp_weight
+        gain.gain[:] = ginterp
+        gain.weight[:] = winterp
 
         gain.redistribute('freq')
 

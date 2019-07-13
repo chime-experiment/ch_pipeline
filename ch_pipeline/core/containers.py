@@ -318,6 +318,14 @@ class TransitFitParams(ContainerBase):
         return self.datasets['parameter_cov']
 
     @property
+    def chisq(self):
+        return self.datasets['chisq']
+
+    @property
+    def ndof(self):
+        return self.datasets['ndof']
+
+    @property
     def freq(self):
         return self.index_map['freq']['centre']
 
