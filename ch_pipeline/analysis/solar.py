@@ -114,8 +114,8 @@ def sun_coord(unix_time, deg=True):
     coord[:, 0] = coord[:, 0] + (era - gast)
 
     # Convert to hour angle
-    coord[:, 0] = _correct_phase_wrap(coord[:, 0]
-                                      - np.radians(ephemeris.lsa(date)))
+    # defined as local stellar angle minus source right ascension
+    coord[:, 0] = _correct_phase_wrap(np.radians(ephemeris.lsa(date)) - coord[:, 0])
 
     if deg:
         coord = np.degrees(coord)
@@ -851,14 +851,18 @@ class SunCalibration(task.SingleTask):
         ha = sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
+        
+        # CHIME Latitude
+        latitude = np.radians(ephemeris.CHIMELATITUDE)
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in
-            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
-
+        
         feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in
             sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]]
+        
+        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in
+            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
 
         # Determine polarisation for each visibility
         pol_ind = np.full(len(feed_list), -1, dtype=np.int)
@@ -884,8 +888,6 @@ class SunCalibration(task.SingleTask):
         sunstream = OutputContainer(prod=newprod, stack=newstack,
                                     axes_from=sstream, attrs_from=sstream)
 
-        #sunstream = containers.empty_like(sstream, prod=newprod, stack=newstack)
-
         sunstream.redistribute('freq')
         sunstream.vis[:] = 0.0
 
@@ -910,34 +912,34 @@ class SunCalibration(task.SingleTask):
                 if el[ri] > 0.0:
 
                     # Calculate the phase that the sun would have using the fringestop routine
-                    sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
-
-                    # Calculate the visibility vector for the sun
-                    sun_vis = sun_vis.conj()
+                    sun_fringe_phase = tools.fringestop_phase(ha[ri], latitude, dec[ri], u, v)
 
                     # Mask out the auto-correlations
-                    sun_vis *= np.logical_or(u != 0.0, v != 0.0)
+                    sun_fringe_phase *= np.logical_or(u != 0.0, v != 0.0)
+                    
+                    # Mask out intracylinder baselines
+                    sun_fringe_phase *= (u == 0.0)
 
                     # Iterate over polarisations to do projection independently for each.
                     # This is needed because of the different beams for each pol.
                     for pol in range(4):
 
                         # Mask out other polarisations in the visibility vector
-                        # Also mask out intra-cylinder baselines
-                        sun_vis_pol = sun_vis * (pol_ind == pol) * (u == 0)
+                        sun_fringe_phase_pol = sun_fringe_phase * (pol_ind == pol)
 
-                        # Calculate various projections
-                        vds = (vis * sun_vis_pol.conj() * weight).sum(axis=0)
-                        sds = (sun_vis_pol * sun_vis_pol.conj() * weight).sum(axis=0)
+                        # Calculate various projections, then take average over products
+                        vds = (vis * sun_fringe_phase_pol * weight).sum(axis=0)
+                        sds = weight.sum(axis=0)
                         isds = tools.invert_no_zero(sds)
+                        fringe_stopped_sun = vds * isds
 
-                        # Subtract sun contribution from visibilities and place in new array
-                        sunstream.vis[fi, pol, ri] = vds * isds
+                        # Add fringestopped and averaged data to new array
+                        sunstream.vis[fi, pol, ri] = fringe_stopped_sun
                 else:
 
                     sunstream.vis[fi, :, ri] = 0.0
 
-        # Return the clean sidereal stream
+        # Return the fringestopped, averaged sidereal stream
         return sunstream
 
 
@@ -979,7 +981,7 @@ class SunClean(task.SingleTask):
         sun_pos = sun_coord(times, deg=False)
 
         # Get hour angle and dec of sun, in radians
-        ha = np.radians(ra) - sun_pos[:, 0]
+        ha = sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
 
@@ -1026,9 +1028,6 @@ class SunClean(task.SingleTask):
                     # Calculate the phase that the sun would have using the fringestop routine
                     sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
 
-                    # Calculate the visibility vector for the sun
-                    sun_vis = sun_vis.conj()
-
                     # Mask out the auto-correlations
                     sun_vis *= np.logical_or(u != 0.0, v != 0.0)
 
@@ -1040,12 +1039,12 @@ class SunClean(task.SingleTask):
                         sun_vis_pol = sun_vis * (pol_ind == pol)
 
                         # Calculate various projections
-                        vds = (vis * sun_vis_pol.conj() * weight).sum(axis=0)
-                        sds = (sun_vis_pol * sun_vis_pol.conj() * weight).sum(axis=0)
+                        vds = (vis * sun_vis_pol * weight).sum(axis=0)
+                        sds = weight.sum(axis=0)
                         isds = tools.invert_no_zero(sds)
 
                         # Subtract sun contribution from visibilities and place in new array
-                        sscut.vis[fi, :, ri] -= sun_vis_pol * vds * isds
+                        sscut.vis[fi, :, ri] -= sun_vis_pol.conj() * vds * isds
 
         # Return the clean sidereal stream
         return sscut
