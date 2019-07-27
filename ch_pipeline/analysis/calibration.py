@@ -754,18 +754,15 @@ class TransitFit(task.SingleTask):
         Must be less than `nsigma`.  Relevant if `poly = True`.
     """
 
-    # Parameters relevant for nonlinear gaussian fit or linear polynomial fit
-    absolute_sigma = config.Property(proptype=bool, default=False)
-    alpha = config.Property(proptype=float, default=0.32)
+    model = config.enum(['gauss_amp_poly_phase', 'poly_log_amp_poly_phase'],
+                        default='gauss_amp_poly_phase')
     nsigma = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.60)
-
-    # Parameters for polynomial fit
-    poly = config.Property(proptype=bool, default=False)
     poly_type = config.Property(proptype=str, default='standard')
     poly_deg_amp = config.Property(proptype=int, default=5)
     poly_deg_phi = config.Property(proptype=int, default=5)
+    absolute_sigma = config.Property(proptype=bool, default=False)
     niter = config.Property(proptype=int, default=5)
-    nsigma_move = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.30)
+    moving_window = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.30)
 
     def process(self, response, inputmap):
         """Fit model to the point source response for each feed and frequency.
@@ -783,6 +780,25 @@ class TransitFit(task.SingleTask):
         fit : containers.TransitFitParams
             Parameters of the model fit and their covariance.
         """
+        # Define the model
+        fit_kwargs = {"absolute_sigma": self.absolute_sigma}
+
+        if model == "gauss_amp_poly_phase":
+            model_class = cal_utils.FitGaussAmpPolyPhase
+            model_kwargs = {"poly_type": self.poly_type,
+                            "poly_deg_phi": self.poly_deg_phi}
+
+        elif model == "poly_log_amp_poly_phase":
+            model_class = cal_utils.FitPolyLogAmpPolyPhase
+            model_kwargs = {"poly_type": self.poly_type,
+                            "poly_deg_amp": self.poly_deg_amp,
+                            "poly_deg_phi": self.poly_deg_phi}
+            fit_kwargs.update({"niter": self.niter, "moving_window": self.moving_window})
+
+        else:
+            raise ValueError("Do not recognize model %s.  Options are %s and %s." %
+                             (model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase"))
+
         # Ensure that we are distributed over frequency
         response.redistribute('freq')
 
@@ -824,39 +840,20 @@ class TransitFit(task.SingleTask):
         weight = response.weight[:].view(np.ndarray)
         err = np.sqrt(tools.invert_no_zero(weight))
 
-        # Flag data with zero weight or data that is outside the fit window
-        # set by nsigma config parameter
-        flag = weight > 0.0
+        # Flag data that is outside the fit window set by nsigma config parameter
         if self.nsigma is not None:
-            flag &= (np.abs(ha[np.newaxis, np.newaxis, :]) <=
-                     (self.nsigma * sigma[:, :, np.newaxis]))
+            err *= (np.abs(ha[np.newaxis, np.newaxis, :]) <=
+                    (self.nsigma * sigma[:, :, np.newaxis])).astype(err.dtype)
 
-        # Call the fitting routine
-        if self.poly:
-            moving_window = self.nsigma_move and self.nsigma_move * sigma
+        # Instantiate the model fitter
+        mdl = model_class(**model_kwargs)
 
-            param, param_cov, fit_info, chisq, ndof = cal_utils.fit_poly_point_source_transit(
-                                                            ha, vis, err, flag=flag,
-                                                            poly_type=self.poly_type,
-                                                            poly_deg_amp=self.poly_deg_amp,
-                                                            poly_deg_phi=self.poly_deg_phi,
-                                                            niter=self.niter,
-                                                            window=moving_window,
-                                                            absolute_sigma=self.absolute_sigma,
-                                                            alpha=self.alpha)
-        else:
-            param, param_cov, fit_info, chisq, ndof = cal_utils.fit_gauss_point_source_transit(
-                                                            ha, vis, err, flag=flag,
-                                                            fwhm=2.35482 * sigma,
-                                                            verbose=False,
-                                                            absolute_sigma=self.absolute_sigma,
-                                                            alpha=self.alpha)
+        # Fit the model
+        mdl.fit(ha, vis, err, width=sigma, **fit_kwargs)
 
         # Create an output container
-        param_axis = fit_info.pop('parameter_names')
-        component_axis = fit_info.pop('component')
-
-        fit = containers.TransitFitParams(param=param_axis, component=component_axis,
+        fit = containers.TransitFitParams(param=mdl.parameter_names,
+                                          component=mdl.component,
                                           axes_from=response, attrs_from=response,
                                           distributed=response.distributed,
                                           comm=response.comm)
@@ -865,18 +862,15 @@ class TransitFit(task.SingleTask):
         fit.add_dataset('ndof')
 
         # Transfer fit information to container attributes
-        for key, val in fit_info.items():
-            self.log.info("Setting attribute %s = %s" % (key, str(val)))
-            if isinstance(val, dict):
-                fit.attrs[key] = json.dumps(val)
-            else:
-                fit.attrs[key] = val
+        fit.attrs['model_kwargs'] = json.dumps(mdl.model_kwargs)
+        fit.attrs['model_class'] = '.'.join([getattr(model_class, key)
+                                             for key in ['__module__', '__name__']])
 
         # Save datasets
-        fit.parameter[:] = param
-        fit.parameter_cov[:] = param_cov
-        fit.chisq[:] = chisq
-        fit.ndof[:] = ndof
+        fit.parameter[:] = mdl.param[:]
+        fit.parameter_cov[:] = mdl.param_cov[:]
+        fit.chisq[:] = mdl.chisq[:]
+        fit.ndof[:] = mdl.ndof[:]
 
         return fit
 
@@ -891,10 +885,13 @@ class GainFromTransitFit(task.SingleTask):
     chisq_per_dof_threshold : float
         Set gain to zero if the chisq per degree of freedom of the fit is less
         than this threshold.
+    alpha : float
+        Use confidence level 1 - alpha for the uncertainty on the gain.
     """
 
     evaluate = config.enum(['transit', 'peak'], default='transit')
     chisq_per_dof_threshold = config.Property(proptype=float, default=20.0)
+    alpha = config.Property(proptype=float, default=0.32)
 
     def process(self, fit):
         """Determine gain from best-fit model.
@@ -903,9 +900,8 @@ class GainFromTransitFit(task.SingleTask):
         ----------
         fit : containers.TransitFitParams
             Parameters of the model fit and their covariance.
-            Must also contain 'model_function', 'model_error_function',
-            'model_peak_function', and 'model_kwargs' attributes that
-            can be used to evaluate the model.
+            Must also contain 'model_class' and 'model_kwargs'
+            attributes that can be used to evaluate the model.
 
         Returns
         -------
@@ -920,9 +916,7 @@ class GainFromTransitFit(task.SingleTask):
         nfreq, ninput, _ = fit.parameter.local_shape
 
         # Import the function for evaluating the model and keyword arguments
-        model_function = locate(fit.attrs['model_function'])
-        model_error_function = locate(fit.attrs['model_error_function'])
-        model_peak_function = locate(fit.attrs['model_peak_function'])
+        ModelClass = locate(fit.attrs['model_class'])
         model_kwargs = json.loads(fit.attrs['model_kwargs'])
 
         # Create output container
@@ -931,54 +925,46 @@ class GainFromTransitFit(task.SingleTask):
                                         comm=fit.comm)
         out.add_dataset('weight')
 
-        # Initialize gains and weights to zeros
-        out.gain[:] = np.zeros(out.gain.local_shape, dtype=out.gain.dtype)
-        out.weight[:] = np.zeros(out.weight.local_shape, dtype=out.weight.dtype)
-
-        # Determine hour angle of evaluation
-        ha = 0.0 if self.evaluate == 'transit' else None
-
         # Dereference datasets
         param = fit.parameter[:].view(np.ndarray)
         param_cov = fit.parameter_cov[:].view(np.ndarray)
-        chisq_per_dof = fit.chisq[:].view(np.ndarray) * tools.invert_no_zero(
-                        fit.ndof[:].view(np.ndarray).astype(np.float32))
+        chisq = fit.chisq[:].view(np.ndarray)
+        ndof = fit.ndof[:].view(np.ndarray)
+
+        chisq_per_dof = chisq * tools.invert_no_zero(ndof.astype(np.float32))
 
         gain = out.gain[:]
         weight = out.weight[:]
 
-        # Loop over local frequencies
-        for ff in range(nfreq):
+        # Instantiate the model object
+        mdl = ModelClass(param=param, param_cov=param_cov,
+                         chisq=chisq, ndof=ndof, **model_kwargs)
 
-            # Loop over inputs
-            for ii in range(ninput):
+        # Determine hour angle of evaluation
+        if self.evaluate == 'peak':
+            ha = mdl.peak()
+            elementwise = True
+        else:
+            ha = 0.0
+            elementwise = False
 
-                # Make sure all parameters are finite
-                if np.any(~np.isfinite(param[ff, ii, :])):
-                    continue
+        # Predict model and uncertainty at desired hour angle
+        g = model.predict(ha, elementwise=elementwise)
 
-                # Make sure chisq per degree of freedom is below threshold
-                if np.any(chisq_per_dof[ff, ii, :] > self.chisq_per_dof_threshold):
-                    continue
+        gerr = model.uncertainty(ha, alpha=self.alpha, elementwise=elementwise)
 
-                if self.evaluate == 'peak':
-                    ha = model_peak_function(param[ff, ii, :], **model_kwargs)
-
-                if ha is None:
-                    continue
-
-                g = model_function(ha, param[ff, ii], **model_kwargs)
-                gerr = model_error_function(ha, param[ff, ii], param_cov[ff, ii], **model_kwargs)
-
-                # Use convention that you multiply by gain to calibrate
-                gain[ff, ii] = tools.invert_no_zero(g)
-                weight[ff, ii] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
+        # Use convention that you multiply by gain to calibrate
+        gain[:] = tools.invert_no_zero(g)
+        weight[:] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
 
         # Can occassionally get Infs when evaluating fits to anomalous data.  Replace with zeros.
-        not_finite = ~(np.isfinite(gain) & np.isfinite(weight))
-        if np.any(not_finite):
-            gain[not_finite] = 0.0 + 0.0J
-            weight[not_finite] = 0.0
+        # Also zero data where the chi-squared per degree of freedom is greater than threshold.
+        not_valid = ~(np.isfinite(gain) & np.isfinite(weight) &
+                       np.all(chisq_per_dof <= self.chisq_per_dof_threshold, axis=-1))
+
+        if np.any(not_valid):
+            gain[not_valid] = 0.0 + 0.0J
+            weight[not_valid] = 0.0
 
         return out
 
