@@ -129,6 +129,9 @@ class LoadCorrDataFiles(task.SingleTask):
     channel_index : list
         List of frequency channel indices.
         Given third priority.
+    datasets : list
+        List of datasets to load.  Defaults to all
+        available datasets.
     only_autos : bool
         Only load the autocorrelations.
     """
@@ -140,6 +143,8 @@ class LoadCorrDataFiles(task.SingleTask):
     freq_physical = config.Property(proptype=list, default=[])
     channel_range = config.Property(proptype=list, default=[])
     channel_index = config.Property(proptype=list, default=[])
+
+    datasets = config.Property(default=None)
 
     only_autos = config.Property(proptype=bool, default=False)
 
@@ -196,7 +201,7 @@ class LoadCorrDataFiles(task.SingleTask):
             prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
 
         # Load file
-        if isinstance(self.freq_sel, slice) and prod_sel is None:
+        if isinstance(self.freq_sel, slice) and (prod_sel is None) and (self.datasets is None):
             self.log.info("Reading file %i of %i. (%s) [fast io]",
                           self._file_ptr, len(self.files), file_)
             ts = andata.CorrData.from_acq_h5_fast(file_, freq_sel=self.freq_sel,
@@ -204,7 +209,8 @@ class LoadCorrDataFiles(task.SingleTask):
         else:
             self.log.info("Reading file %i of %i. (%s) [slow io]",
                           self._file_ptr, len(self.files), file_)
-            ts = andata.CorrData.from_acq_h5(file_, distributed=True, comm=self.comm,
+            ts = andata.CorrData.from_acq_h5(file_, datasets=self.datasets,
+                                             distributed=True, comm=self.comm,
                                              freq_sel=self.freq_sel, prod_sel=prod_sel)
 
         # Use a simple incrementing string as the tag
