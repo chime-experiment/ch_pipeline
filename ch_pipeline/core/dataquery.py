@@ -17,6 +17,7 @@ Tasks
 
     QueryRun
     QueryDataspec
+    QueryAcquisitions
     QueryInputs
 
 Routines
@@ -65,6 +66,7 @@ import os
 
 from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
+from draco.core import task
 
 _DEFAULT_NODE_SPOOF = {'cedar': '/project/rpp-krs/chime/chime_online/'}
 
@@ -432,6 +434,115 @@ class QueryDataspec(pipeline.TaskBase):
             dspec['node_spoof'] = self.node_spoof
 
         files = files_from_spec(dspec, node_spoof=self.node_spoof)
+
+        return files
+
+
+class QueryAcquisitions(task.MPILoggedTask):
+    """Iterate over acquisitions.
+
+    This routine will query the database as specified in the runtime
+    configuration file.  It will iterate over the returned acquisitions
+    in chronological order, outputing a list of the corresponding files.
+
+    Attributes
+    ----------
+    node_spoof : dict
+        Host and directory in which to find data.
+    start_time, end_time : str
+        Find all acquisitions between this start and end time.
+    instrument : str
+        Find all acquisitions from this instrument.
+    accept_all_global_flags : bool
+        Accept all global flags.
+    min_num_files : int
+        Do not process acquisitions that contain less than this number of files.
+    max_num_files : int
+        Maximum number of files to return at once.  If an acquisition
+        contains more than this number of files, then it will be split
+        up into multiple blocks (pipeline iterations) of size roughly
+        equal to max_num_files.
+    """
+
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    instrument = config.Property(proptype=str, default='chimestack')
+    start_time = config.Property(default=None)
+    end_time = config.Property(default=None)
+    accept_all_global_flags = config.Property(proptype=bool, default=False)
+    min_num_files = config.Property(proptype=int, default=None)
+    max_num_files = config.Property(proptype=int, default=None)
+
+    def setup(self):
+        """Query the database, fetch the files, and save to attribute."""
+        from ch_util import layout
+        from ch_util import data_index as di
+
+        # Function to break a list of files into groups of roughly the same size
+        def _choose_group_size(n, m, accept):
+            if (n % m) < accept:
+                return m
+            l, u = m - 1, m + 1
+            while ((n % l) > accept) and ((n % u) > accept):
+                l, u = l - 1, u + 1
+            if (n % l) < (n % u):
+                return l
+            else:
+                return u
+
+        # Query the database on rank=0 only, and broadcast to everywhere else
+        files = None
+        if self.comm.rank == 0:
+
+            layout.connect_database()
+
+            finder = di.Finder(node_spoof = self.node_spoof)
+            finder.only_corr()
+            if self.accept_all_global_flags:
+                finder.accept_all_global_flags()
+            finder.set_time_range(self.start_time, self.end_time)
+            finder.filter_acqs(di.ArchiveInst.name == self.instrument)
+
+            files = []
+            for aa, acq in enumerate(finder.acqs):
+
+                acq_results = finder.get_results_acq(aa)
+
+                filelist = [ff for acqr in acq_results for ff in acqr[0]]
+                nfiles = len(filelist)
+
+                if (self.min_num_files is not None) and (nfiles < self.min_num_files):
+                    continue
+
+                if (self.max_num_files is None) or (nfiles <= self.max_num_files):
+                    files.append(filelist)
+
+                else:
+                    group_size = _choose_group_size(nfiles, self.max_num_files,
+                                                    max(1, int(0.10 * self.max_num_files)))
+
+                    bnd = list(range((nfiles % group_size) // 2, nfiles, group_size))
+                    bnd[0], bnd[-1] = 0, nfiles
+
+                    files += [filelist[bnd[ii]:bnd[ii+1]] for ii in range(len(bnd)-1)]
+
+        # Broadcast the files to the other nodes
+        files = self.comm.bcast(files, root=0)
+        self.comm.Barrier()
+
+        self.files = files
+
+    def next(self):
+        """Return the files from the next acquisition.
+
+        Returns
+        -------
+        files : list
+            List of files to load
+        """
+        if len(self.files) == 0:
+            raise pipeline.PipelineStopIteration
+
+        files = self.files.pop(0)
 
         return files
 
