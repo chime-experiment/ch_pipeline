@@ -731,11 +731,15 @@ class TransitFit(task.SingleTask):
 
     Attributes
     ----------
+    model : str
+        Name of the model to fit.  One of 'gauss_amp_poly_phase' or
+        'poly_log_amp_poly_phase'.
     nsigma : float
         Number of standard deviations away from transit to fit.
-    poly : bool
-        Peform linear fit of a polynomial to log amplitude and phase
-        instead of a nonlinear fit to complex valued data.
+    absolute_sigma : bool
+        Set to True if the errors provided are absolute.  Set to False if
+        the errors provided are relative, in which case the parameter covariance
+        will be scaled by the chi-squared per degree-of-freedom.
     poly_type : str
         Type of polynomial.  Either 'standard', 'hermite', or 'chebychev'.
         Relevant if `poly = True`.
@@ -748,7 +752,7 @@ class TransitFit(task.SingleTask):
     niter : int
         Number of times to update the errors using model amplitude.
         Relevant if `poly = True`.
-    nsigma_move : int
+    moving_window : int
         Number of standard deviations away from peak to fit.
         The peak location is updated with each iteration.
         Must be less than `nsigma`.  Relevant if `poly = True`.
@@ -757,10 +761,10 @@ class TransitFit(task.SingleTask):
     model = config.enum(['gauss_amp_poly_phase', 'poly_log_amp_poly_phase'],
                         default='gauss_amp_poly_phase')
     nsigma = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.60)
+    absolute_sigma = config.Property(proptype=bool, default=False)
     poly_type = config.Property(proptype=str, default='standard')
     poly_deg_amp = config.Property(proptype=int, default=5)
     poly_deg_phi = config.Property(proptype=int, default=5)
-    absolute_sigma = config.Property(proptype=bool, default=False)
     niter = config.Property(proptype=int, default=5)
     moving_window = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.30)
 
@@ -783,13 +787,13 @@ class TransitFit(task.SingleTask):
         # Define the model
         fit_kwargs = {"absolute_sigma": self.absolute_sigma}
 
-        if model == "gauss_amp_poly_phase":
-            model_class = cal_utils.FitGaussAmpPolyPhase
+        if self.model == "gauss_amp_poly_phase":
+            ModelClass = cal_utils.FitGaussAmpPolyPhase
             model_kwargs = {"poly_type": self.poly_type,
                             "poly_deg_phi": self.poly_deg_phi}
 
-        elif model == "poly_log_amp_poly_phase":
-            model_class = cal_utils.FitPolyLogAmpPolyPhase
+        elif self.model == "poly_log_amp_poly_phase":
+            ModelClass = cal_utils.FitPolyLogAmpPolyPhase
             model_kwargs = {"poly_type": self.poly_type,
                             "poly_deg_amp": self.poly_deg_amp,
                             "poly_deg_phi": self.poly_deg_phi}
@@ -797,7 +801,7 @@ class TransitFit(task.SingleTask):
 
         else:
             raise ValueError("Do not recognize model %s.  Options are %s and %s." %
-                             (model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase"))
+                             (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase"))
 
         # Ensure that we are distributed over frequency
         response.redistribute('freq')
@@ -846,14 +850,14 @@ class TransitFit(task.SingleTask):
                     (self.nsigma * sigma[:, :, np.newaxis])).astype(err.dtype)
 
         # Instantiate the model fitter
-        mdl = model_class(**model_kwargs)
+        model = ModelClass(**model_kwargs)
 
         # Fit the model
-        mdl.fit(ha, vis, err, width=sigma, **fit_kwargs)
+        model.fit(ha, vis, err, width=sigma, **fit_kwargs)
 
         # Create an output container
-        fit = containers.TransitFitParams(param=mdl.parameter_names,
-                                          component=mdl.component,
+        fit = containers.TransitFitParams(param=model.parameter_names,
+                                          component=model.component,
                                           axes_from=response, attrs_from=response,
                                           distributed=response.distributed,
                                           comm=response.comm)
@@ -862,15 +866,15 @@ class TransitFit(task.SingleTask):
         fit.add_dataset('ndof')
 
         # Transfer fit information to container attributes
-        fit.attrs['model_kwargs'] = json.dumps(mdl.model_kwargs)
-        fit.attrs['model_class'] = '.'.join([getattr(model_class, key)
+        fit.attrs['model_kwargs'] = json.dumps(model.model_kwargs)
+        fit.attrs['model_class'] = '.'.join([getattr(ModelClass, key)
                                              for key in ['__module__', '__name__']])
 
         # Save datasets
-        fit.parameter[:] = mdl.param[:]
-        fit.parameter_cov[:] = mdl.param_cov[:]
-        fit.chisq[:] = mdl.chisq[:]
-        fit.ndof[:] = mdl.ndof[:]
+        fit.parameter[:] = model.param[:]
+        fit.parameter_cov[:] = model.param_cov[:]
+        fit.chisq[:] = model.chisq[:]
+        fit.ndof[:] = model.ndof[:]
 
         return fit
 
@@ -883,8 +887,8 @@ class GainFromTransitFit(task.SingleTask):
     evaluate : str
         Evaluate the model at this location, either 'transit' or 'peak'.
     chisq_per_dof_threshold : float
-        Set gain to zero if the chisq per degree of freedom of the fit is less
-        than this threshold.
+        Set gain and weight to zero if the chisq per degree of freedom
+        of the fit is less than this threshold.
     alpha : float
         Use confidence level 1 - alpha for the uncertainty on the gain.
     """
@@ -937,12 +941,12 @@ class GainFromTransitFit(task.SingleTask):
         weight = out.weight[:]
 
         # Instantiate the model object
-        mdl = ModelClass(param=param, param_cov=param_cov,
+        model = ModelClass(param=param, param_cov=param_cov,
                          chisq=chisq, ndof=ndof, **model_kwargs)
 
         # Determine hour angle of evaluation
         if self.evaluate == 'peak':
-            ha = mdl.peak()
+            ha = model.peak()
             elementwise = True
         else:
             ha = 0.0
