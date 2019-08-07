@@ -30,6 +30,13 @@ Tasks
     MaskCHIMEData
     DataFlagger
 """
+# === Start Python 2/3 compatibility
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+# === End Python 2/3 compatibility
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
@@ -270,7 +277,7 @@ class MonitorCorrInput(task.SingleTask):
             List of filenames to monitor good correlator inputs.
         """
 
-        from sidereal import get_times, _days_in_csd
+        from .sidereal import get_times, _days_in_csd
 
         self.files = np.array(files)
 
@@ -370,7 +377,7 @@ class MonitorCorrInput(task.SingleTask):
             csd, time_range = self.timemap[i_dist]
 
             # Print status
-            print "Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd)
+            print("Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd))
 
             # Create an instance of chan_monitor for this day
             cm = chan_monitor.ChanMonitor(*time_range)
@@ -942,7 +949,7 @@ class RadiometerWeight(task.SingleTask):
         timestream : andata.CorrData
         """
 
-        from calibration import _extract_diagonal as diag
+        from .calibration import _extract_diagonal as diag
 
         # Redistribute over the frequency direction
         timestream.redistribute('freq')
@@ -950,7 +957,7 @@ class RadiometerWeight(task.SingleTask):
         if isinstance(timestream, andata.CorrData):
 
             if mpiutil.rank0:
-                print "Converting weights to effective number of samples."
+                print("Converting weights to effective number of samples.")
 
             # Extract number of samples per integration period
             max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
@@ -984,7 +991,7 @@ class RadiometerWeight(task.SingleTask):
         elif isinstance(timestream, containers.SiderealStream):
 
             if mpiutil.rank0:
-                print "Scaling weights by outer product of inverse receiver temperature."
+                print("Scaling weights by outer product of inverse receiver temperature.")
 
             # Extract the autocorrelation
             Trec = diag(timestream.vis).real
@@ -1064,7 +1071,7 @@ class BadNodeFlagger(task.SingleTask):
                 if nind >= sf and nind < ef:
                     timestream.weight[nind] = 0
 
-                    print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
+                    print("Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind))
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
         this_acq = timestream.attrs.get('acquisition_name', None)
@@ -1081,7 +1088,7 @@ class BadNodeFlagger(task.SingleTask):
                     if nind >= sf and nind < ef:
                         timestream.weight[nind] = 0
 
-                        print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
+                        print("Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind))
 
         # Return timestream with bad nodes flagged
         return timestream

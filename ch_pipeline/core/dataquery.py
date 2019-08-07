@@ -61,6 +61,12 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
+# === Start Python 2/3 compatibility
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+# === End Python 2/3 compatibility
 
 import os
 
@@ -505,7 +511,7 @@ class QueryAcquisitions(task.MPILoggedTask):
 
         self.files = files
 
-    def next(self):
+    def __next__(self):
         """Return the files from the next acquisition.
 
         Returns

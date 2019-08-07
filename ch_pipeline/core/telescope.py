@@ -17,6 +17,12 @@ Classes
 
     CHIME
 """
+# === Start Python 2/3 compatibility
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+# === End Python 2/3 compatibility
 
 import numpy as np
 import h5py
@@ -170,7 +176,7 @@ class CHIME(telescope.PolarisedTelescope):
         # configuring from YAML.
 
         if self.layout is not None:
-            print "Loading layout: %s" % str(self.layout)
+            print("Loading layout: %s" % str(self.layout))
             self._load_layout()
 
     #
@@ -255,7 +261,7 @@ class CHIME(telescope.PolarisedTelescope):
         for generating synthetic datasets.
         """
         # Extract lists of channel ID and serial numbers
-        channels, feed_sn = zip(*[(feed.id, feed.input_sn) for feed in self.feeds])
+        channels, feed_sn = list(zip(*[(feed.id, feed.input_sn) for feed in self.feeds]))
 
         # Create an input index map and return it.
         from ch_util import andata
@@ -471,7 +477,7 @@ class CHIMEExternalBeam(CHIME):
             raise ValueError("Polarisation not supported by this feed",
                              feed_obj)
         try:
-            print "Attempting to read beam file from disk..."
+            print("Attempting to read beam file from disk...")
             with h5py.File(fname, 'r') as f:
                 map_freq = f['freq'][:]
                 freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)

@@ -28,7 +28,14 @@ Generally you would want to use these tasks together. Starting with a
 :class:`SiderealRegridder` to grid onto each sidereal day, and then into
 :class:`SiderealStacker` if you want to combine the different days.
 """
+# === Start Python 2/3 compatibility
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+# === End Python 2/3 compatibility
 
+from past.builtins import basestring
 import gc
 import numpy as np
 
@@ -111,7 +118,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ]))
 
         elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = range(*self.channel_range)
+            self.freq_sel = list(range(*self.channel_range))
 
         elif self.channel_index:
             self.freq_sel = self.channel_index
@@ -136,7 +143,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         dfiles = sorted([ self.files[fi] for fi in fmap ])
 
         if mpiutil.rank0:
-            print "Starting read of CSD:%i [%i files]" % (csd, len(fmap))
+            print("Starting read of CSD:%i [%i files]" % (csd, len(fmap)))
 
         # Set up product selection
         prod_sel = None
@@ -247,7 +254,7 @@ class SiderealMean(task.SingleTask):
             Sidereal stream containing only the mean value.
         """
 
-        from flagging import daytime_flag
+        from .flagging import daytime_flag
         from ch_util import cal_utils, tools
         import weighted as wq
 
@@ -313,7 +320,7 @@ class SiderealMean(task.SingleTask):
                 raise RuntimeError('Format of `sstream` argument is unknown.')
 
             # Find data free of bright point sources
-            for src_name, src_ephem in ephemeris.source_dictionary.iteritems():
+            for src_name, src_ephem in ephemeris.source_dictionary.items():
 
                 peak_ra = ephemeris.peak_RA(src_ephem, deg=True)
                 src_window = 3.0*cal_utils.guess_fwhm(400.0, pol='X', dec=src_ephem._dec, sigma=True)

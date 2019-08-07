@@ -24,6 +24,12 @@ Usage
 
 
 """
+# === Start Python 2/3 compatibility
+from __future__ import (absolute_import, division,
+                        print_function, unicode_literals)
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+# === End Python 2/3 compatibility
 
 from datetime import datetime
 import numpy as np
@@ -127,14 +133,14 @@ class SolarGrouper(task.SingleTask):
             self._timestream_list.append(tstream)
 
         if tstream.vis.comm.rank == 0:
-            print "Adding file into group for date: %i" % day_start
+            print("Adding file into group for date: %i" % day_start)
 
         # If this file ends during a later day then we need to process the
         # current list and restart the system
         if self._current_day < day_end:
 
             if tstream.vis.comm.rank == 0:
-                print "Concatenating files for date: %i" % day_start
+                print("Concatenating files for date: %i" % day_start)
 
             # Combine timestreams into a single container for the whole day this
             # could get returned as None if there wasn't enough data
@@ -180,7 +186,7 @@ class SolarGrouper(task.SingleTask):
             return None
 
         if self._timestream_list[0].vis.comm.rank == 0:
-            print "Constructing %s [%i files]" % (day, len(self._timestream_list))
+            print("Constructing %s [%i files]" % (day, len(self._timestream_list)))
 
         # Construct the combined timestream
         ts = andata.concatenate(self._timestream_list)
@@ -232,7 +238,7 @@ class SolarCalibration(task.SingleTask):
 
         from operator import itemgetter
         from itertools import groupby
-        from calibration import _extract_diagonal, solve_gain
+        from .calibration import _extract_diagonal, solve_gain
 
         # Ensure that we are distributed over frequency
         sstream.redistribute('freq')
@@ -275,8 +281,8 @@ class SolarCalibration(task.SingleTask):
 
         time_slice = []
         ntime = 0
-        for key, group in groupby(enumerate(time_index), lambda (index, item): index - item):
-            group = map(itemgetter(1), group)
+        for key, group in groupby(enumerate(time_index), lambda index_item: index_item[0] - index_item[1]):
+            group = list(map(itemgetter(1), group))
             ngroup = len(group)
             time_slice.append((slice(group[0], group[-1] + 1), slice(ntime, ntime + ngroup)))
             ntime += ngroup
@@ -443,7 +449,7 @@ class SolarClean(task.SingleTask):
         prod_map = sstream.index_map['prod'][:]
         nprod = prod_map.size
 
-        if nprod != (ninput * (ninput + 1) / 2):
+        if nprod != (ninput * (ninput + 1) // 2):
             raise Exception("Number of inputs does not match the number of products.")
 
         feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prod_map]
