@@ -418,6 +418,39 @@ class MakeHolographyBeam(task.SingleTask):
             prod_groups_sorted.append(pg[group_sort])
             conj.append(group_conj[group_sort])
 
+        # Regroup by co/cross-pol
+        copol, xpol = [], []
+        prod_groups_cox = [pg.copy() for pg in prod_groups_sorted]
+        conj_cox = [pg.copy() for pg in conj]
+        input_pol = np.array(
+            [ipt.pol if isinstance(ipt, (tools.CHIMEAntenna, tools.HolographyAntenna))
+             else inputmap[input_26m[0]].pol for ipt in inputmap]
+        )
+        for i, pg in enumerate(prod_groups_sorted):
+            group_prod = prod[pg]
+            # Determine co/cross in each prod group
+            cp = input_pol[group_prod['input_a']] == inputmap[input_26m[i]].pol
+            if np.any(conj[i]):
+                cp[conj[i]] = (input_pol[group_prod['input_b'][conj[i]]] ==
+                               inputmap[input_26m[i]].pol)
+            xp = np.logical_not(cp)
+            copol.append(cp)
+            xpol.append(xp)
+            # Move products to co/cross-based groups
+            prod_groups_cox[0][cp] = pg[cp]
+            prod_groups_cox[1][xp] = pg[xp]
+            conj_cox[0][cp] = conj[i][cp]
+            conj_cox[1][xp] = conj[i][xp]
+        # Check for compeleteness
+        consistent = (
+            np.all(copol[0] + copol[1] == np.ones(copol[0].shape)) and
+            np.all(xpol[0] + xpol[1] == np.ones(xpol[0].shape))
+        )
+        if not consistent:
+            msg = ("Products do not separate exclusively into co- and cross-polar groups.")
+            self.log.error(msg)
+            raise PipelineRuntimeError(msg)
+
         # Make new index map
         ra = data.attrs['cirs_ra']
         phi = unwrap_lha(data.ra[:], ra)
@@ -427,17 +460,17 @@ class MakeHolographyBeam(task.SingleTask):
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
         theta = np.ones_like(phi) * data.attrs['dec']
-        pol = np.array([inputmap[i].pol for i in input_26m], dtype='S1')
+        pol = np.array(['co', 'cross'], dtype='S5')
 
         # Create new container and fill
         track = TrackBeam(theta=theta, phi=phi, track_type='drift', coords='celestial',
                           input=inputs_sorted, pol=pol, freq=data.freq[:], attrs_from=data,
                           distributed=data.distributed)
         for ip in range(len(pol)):
-            track.beam[:, ip, :, :] = data.vis[:, prod_groups_sorted[ip], :]
-            track.weight[:, ip, :, :] = data.weight[:, prod_groups_sorted[ip], :]
-            if np.any(conj[ip]):
-                track.beam[:, ip, conj[ip], :] = track.beam[:, ip, conj[ip], :].conj()
+            track.beam[:, ip, :, :] = data.vis[:, prod_groups_cox[ip], :]
+            track.weight[:, ip, :, :] = data.weight[:, prod_groups_cox[ip], :]
+            if np.any(conj_cox[ip]):
+                track.beam[:, ip, conj_cox[ip], :] = track.beam[:, ip, conj_cox[ip], :].conj()
 
         # Store 26 m inputs
         track.attrs['26m_inputs'] = [inputs[ii] for ii in input_26m]
