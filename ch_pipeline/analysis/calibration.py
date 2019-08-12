@@ -476,6 +476,64 @@ class GatedNoiseCalibration(task.SingleTask):
         return gain_data
 
 
+class DetermineSourceTransit(task.SingleTask):
+    """Determine the sources that are transiting within time range covered by container.
+
+    Attributes
+    ----------
+    source_list : list of str
+        List of source names to consider.  If not specified, all sources
+        contained in `ch_util.ephemeris.source_dictionary` will be considered.
+    freq : float
+        Frequency in MHz.  Sort the sources by the flux at this frequency.
+    """
+
+    source_list = config.Property(proptype=list, default=[])
+    freq = config.Property(proptype=float, default=600.0)
+
+    def setup(self):
+        """Set list of sources, sorted by flux in descending order."""
+        self.source_list = reversed(
+            sorted(self.source_list or ephemeris.source_dictionary.keys(),
+            key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq)))
+
+    def process(self, sstream):
+        """Add attributes to container describing source transit contained within.
+
+        Parameters
+        ----------
+        sstream : containers.SiderealStream, containers.TimeStream, or equivalent
+            Container covering the source transit.
+
+        Returns
+        -------
+        sstream : containers.SiderealStream, containers.TimeStream, or equivalent
+            Container covering the source transit, now with `source_name` and
+            `transit_time` attributes.
+        """
+        # Determine the time covered by input container
+        if 'time' in sstream.index_map:
+            timestamp = sstream.time
+        else:
+            lsd = sstream.attrs.get('lsd', sstream.attrs.get('csd'))
+            timestamp = ephemeris.csd_to_unix(lsd + sstream.ra / 360.0)
+
+        # Loop over sources and check if there is a transit within time range
+        # covered by container.  If so, then add attributes describing that source
+        # and break from the loop.
+        for src in self.source_list:
+            transit_time = ephemeris.transit_times(ephemeris.source_dictionary[src],
+                                                   timestamp[0], timestamp[-1])
+            if transit_time.size > 0:
+                self.log.info("Data stream contains %s transit on LSD %d." %
+                              (src, ephemeris.csd(transit_time[0])))
+                sstream.attrs['source_name'] = src
+                sstream.attrs['transit_time'] = transit_time[0]
+                break
+
+        return sstream
+
+
 class EigenCalibration(task.SingleTask):
     """Deteremine response of each feed to a point source.
 
@@ -504,15 +562,19 @@ class EigenCalibration(task.SingleTask):
         Ratio of the second largest eigenvalue on source to the largest eigenvalue
         off source below which frequencies and times will be considered contaminated
         and discarded from further analysis.
+    telescope_rotation : float
+        Rotation of the telescope from true north in degrees.  A positive rotation is
+        anti-clockwise when looking down at the telescope from the sky.
     """
 
-    source = config.Property(proptype=str, default='CYG_A')
+    source = config.Property(default=None)
     eigen_ref = config.Property(proptype=int, default=0)
     phase_ref = config.Property(proptype=list, default=[1152, 1408])
     med_phase_ref = config.Property(proptype=bool, default=False)
     neigen = config.Property(proptype=int, default=2)
     window = config.Property(proptype=float, default=0.75)
     dyn_rng_threshold = config.Property(proptype=float, default=3.0)
+    telescope_rotation = config.Property(proptype=float, default=-0.088)
 
     def process(self, data, inputmap):
         """Determine feed response from eigendecomposition.
@@ -544,8 +606,14 @@ class EigenCalibration(task.SingleTask):
 
         freq = data.freq[sfreq:efreq]
 
+        # Determine source name.  If not provided as config property, then check data attributes.
+        source_name = self.source or data.attrs.get('source_name', None)
+        if source_name is None:
+            raise ValueError("The source name must be specified as a configuration property " \
+                             "or added to input container attributes by an earlier task.")
+
         # Compute flux of source
-        source_obj = fluxcat.FluxCatalog[self.source]
+        source_obj = fluxcat.FluxCatalog[source_name]
         inv_rt_flux_density = tools.invert_no_zero(np.sqrt(source_obj.predict_flux(freq)))
 
         # Determine source coordinates
@@ -607,7 +675,14 @@ class EigenCalibration(task.SingleTask):
 
         phase_ref_by_pol = [pol[pp].tolist().index(self.phase_ref[pp]) for pp in range(npol)]
 
+        # Create new product map for the output container that has `input_b` set to
+        # the phase reference feed.  Necessary to apply the timing correction later.
+        prod = np.copy(data.prod)
+        for pp, feeds in enumerate(pol):
+            prod['input_b'][feeds] = self.phase_ref[pp]
+
         # Compute distances
+        tools.change_chime_location(rotation=self.telescope_rotation)
         dist = tools.get_feed_positions(inputmap)
         for pp, feeds in enumerate(pol):
             dist[feeds, :] -= dist[self.phase_ref[pp], np.newaxis, :]
@@ -641,12 +716,14 @@ class EigenCalibration(task.SingleTask):
             ValueError("Reference feed %d is incorrect." % self.eigen_ref)
 
         # Create output container
-        response = containers.SiderealStream(ra=ra, attrs_from=data, axes_from=data,
+        response = containers.SiderealStream(ra=ra, prod=prod, stack=None,
+                                             attrs_from=data, axes_from=data,
                                              distributed=data.distributed, comm=data.comm)
 
-        response.attrs['source_name'] = self.source
+        response.attrs['source_name'] = source_name
         response.attrs['transit_time'] = ttrans
         response.attrs['lsd'] = csd
+        response.attrs['tag'] = '%s_lsd_%d' % (source_name.lower(), csd)
 
         response.input_flags[:] = input_flags[:, np.newaxis]
 
@@ -723,11 +800,12 @@ class EigenCalibration(task.SingleTask):
 class TransitFit(task.SingleTask):
     """Fit model to the transit of a point source.
 
-    Multiple model choices are available.  Default is a nonlinear fit
+    Multiple model choices are available and can be specified through the `model`
+    config property.  Default is `gauss_amp_poly_phase`, a nonlinear fit
     of a gaussian in amplitude and a polynomial in phase to the complex data.
-    Setting the config property `poly = True` will result instead in an
-    iterative weighted least squares fit of a polynomial to log amplitude and phase.
-    Type of polynomial can be chosen through `poly_type` config property.
+    There is also `poly_log_amp_poly_phase`, an iterative weighted least squares
+    fit of a polynomial to log amplitude and phase.  The type of polynomial can be
+    chosen through the `poly_type`, `poly_deg_amp`, and `poly_deg_phi` config properties.
 
     Attributes
     ----------
@@ -1019,14 +1097,14 @@ class FlagAmplitude(task.SingleTask):
 
         Parameters
         ----------
-        gain : containers.StaticGain
+        gain : containers.StaticGainData
             Gain derived from point source transit.
         inputmap : list of CorrInput's
             List describing the inputs as ordered in gain.
 
         Returns
         -------
-        gain : containers.StaticGain
+        gain : containers.StaticGainData
             The input gain container with modified weights.
         """
         from mpi4py import MPI
@@ -1184,8 +1262,8 @@ class InterpolateGainOverFrequency(task.SingleTask):
         flag = w > 0.0
 
         # Interpolate the gain at non-flagged frequencies to the flagged frequencies
-        ginterp, winterp = cal_utils.interpolate_gain(gain.freq[:], g, w, flag=flag,
-                                                      length_scale=self.interp_scale)
+        ginterp, winterp = cal_utils.interpolate_gain_quiet(gain.freq[:], g, w, flag=flag,
+                                                            length_scale=self.interp_scale)
 
         # Replace the gain and weight datasets with the interpolated arrays
         # Note that the gain and weight for non-flagged frequencies have not changed
