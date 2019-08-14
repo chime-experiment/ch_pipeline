@@ -451,6 +451,8 @@ class HolographyTransitFit(task.SingleTask):
     """ Fit a gaussian to a transit.
     """
 
+    nfwhm = config.Property(proptype=int, default=2)
+
     def process(self, transit):
         """ Perform the gaussian fit.
 
@@ -470,7 +472,7 @@ class HolographyTransitFit(task.SingleTask):
         # Set bounds of fit to twice FWHM
         local_slice = slice(transit.beam.local_offset,
                             transit.beam.local_offset + transit.beam.local_shape[0])
-        fit_bnd = (2 * SPEED_LIGHT / transit.freq[local_slice] /
+        fit_bnd = (self.nfwhm * SPEED_LIGHT / transit.freq[local_slice] /
                    CHIME_CYL_W / 1.95 / 2 / np.pi * 360.)
 
         # Collapse polarization axis to use function from ch_util
