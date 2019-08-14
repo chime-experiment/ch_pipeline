@@ -480,7 +480,7 @@ class HolographyTransitFit(task.SingleTask):
                      transit.beam.shape[3])
 
         # Flag missing data and outside bounds
-        flagged = (transit.weight != 0.).reshape(tmp_shape)
+        flagged = (transit.weight[:] != 0.).reshape(tmp_shape)
         flagged = np.logical_and(
             flagged, (np.abs(transit.pix['phi']) < fit_bnd[:, np.newaxis])[:, np.newaxis, :]
         )
@@ -587,7 +587,7 @@ class TransitStacker(task.SingleTask):
             self.stack.beam[:] = transit.beam[:]
             self.stack.weight[:] = np.abs(transit.beam[:])**2
             self.noise_var = tools.invert_no_zero(transit.weight[:])
-            self.norm = np.where(transit.weight == 0., 0., 1.)
+            self.norm = np.where(transit.weight[:] == 0., 0., 1.)
         else:
             if transit.beam.shape != self.stack.beam.shape:
                 self.log.error("Transit has different shape than stack: {}, {}".format(
@@ -603,7 +603,7 @@ class TransitStacker(task.SingleTask):
             self.stack.beam += transit.beam[:]
             self.stack.weight += np.abs(transit.beam[:])**2
             self.noise_var += tools.invert_no_zero(transit.weight[:])
-            self.norm += np.where(transit.weight == 0., 0., 1.)
+            self.norm += np.where(transit.weight[:] == 0., 0., 1.)
 
         return None
 
