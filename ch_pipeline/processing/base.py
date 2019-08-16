@@ -228,7 +228,7 @@ def queue_job(script, submit=True):
     import os
     import tempfile
 
-    with tempfile.NamedTemporaryFile("w+r") as fh:
+    with tempfile.NamedTemporaryFile("w+") as fh:
         fh.write(script)
         fh.flush()
 
