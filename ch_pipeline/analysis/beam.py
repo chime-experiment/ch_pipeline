@@ -563,7 +563,7 @@ class ApplyHolographyGains(task.SingleTask):
             track['weight'] = track_in['weight'][:]
 
         track['beam'] *= gain.gain[:, :, :, np.newaxis]
-        track['weight'] *= tools.invert_no_zero((gain.gain**2)[:, :, :, np.newaxis])
+        track['weight'] *= tools.invert_no_zero((np.abs(gain.gain[:])**2)[:, :, :, np.newaxis])
 
         return track
 
