@@ -605,10 +605,11 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs['observation_ids'].append(transit.attrs['observation_id'])
 
             # Accumulate transit data
-            self.stack.beam += transit.beam[:]
-            self.stack.weight += np.abs(transit.beam[:])**2
-            self.noise_var += tools.invert_no_zero(transit.weight[:])
-            self.norm += np.where(transit.weight[:] == 0., 0., 1.)
+            flag = (transit.weight[:] > 0.0).astype(np.float32)
+            self.stack.beam += flag * transit.beam[:]
+            self.stack.weight += flag * np.abs(transit.beam[:])**2
+            self.noise_var += flag * tools.invert_no_zero(transit.weight[:])
+            self.norm += flag
 
         return None
 
