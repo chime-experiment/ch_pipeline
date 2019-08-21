@@ -16,6 +16,7 @@ Tasks
     NoiseSourceCalibration
     NoiseSourceFold
     GatedNoiseCalibration
+    DetermineSourceTransit
     EigenCalibration
     TransitFit
     GainFromTransitFit
@@ -486,10 +487,14 @@ class DetermineSourceTransit(task.SingleTask):
         contained in `ch_util.ephemeris.source_dictionary` will be considered.
     freq : float
         Frequency in MHz.  Sort the sources by the flux at this frequency.
+    require_transit: bool
+        If this is True and a source transit is not found in the container,
+        then the task will return None.
     """
 
     source_list = config.Property(proptype=list, default=[])
     freq = config.Property(proptype=float, default=600.0)
+    require_transit = config.Property(proptype=bool, default=True)
 
     def setup(self):
         """Set list of sources, sorted by flux in descending order."""
@@ -521,6 +526,7 @@ class DetermineSourceTransit(task.SingleTask):
         # Loop over sources and check if there is a transit within time range
         # covered by container.  If so, then add attributes describing that source
         # and break from the loop.
+        contains_transit = False
         for src in self.source_list:
             transit_time = ephemeris.transit_times(ephemeris.source_dictionary[src],
                                                    timestamp[0], timestamp[-1])
@@ -529,9 +535,13 @@ class DetermineSourceTransit(task.SingleTask):
                               (src, ephemeris.csd(transit_time[0])))
                 sstream.attrs['source_name'] = src
                 sstream.attrs['transit_time'] = transit_time[0]
+                contains_transit = True
                 break
 
-        return sstream
+        if contains_transit or not self.require_transit:
+            return sstream
+        else:
+            return None
 
 
 class EigenCalibration(task.SingleTask):
@@ -695,13 +705,16 @@ class EigenCalibration(task.SingleTask):
 
         dyn = evalue[:, 1, :] * tools.invert_no_zero(eval0_off_source[:, np.newaxis])
 
-        # Determine frequencies to mask
+        # Determine frequencies and times to mask
         not_rfi = ~rfi.frequency_mask(freq)
         not_rfi = not_rfi[:, np.newaxis]
 
+        self.log.info("Using a dynamic range threshold of %0.2f." % self.dyn_rng_threshold)
         dyn_flag = dyn > self.dyn_rng_threshold
 
-        flag = dyn_flag & not_rfi
+        converged = erms > 0.0
+
+        flag = converged & dyn_flag & not_rfi
 
         # Calculate base error
         base_err = erms[:, np.newaxis, :]
@@ -720,13 +733,25 @@ class EigenCalibration(task.SingleTask):
                                              attrs_from=data, axes_from=data,
                                              distributed=data.distributed, comm=data.comm)
 
+        response.input_flags[:] = input_flags[:, np.newaxis]
+
+        # Create attributes identifying the transit
         response.attrs['source_name'] = source_name
         response.attrs['transit_time'] = ttrans
         response.attrs['lsd'] = csd
         response.attrs['tag'] = '%s_lsd_%d' % (source_name.lower(), csd)
 
-        response.input_flags[:] = input_flags[:, np.newaxis]
+        # Add an attribute that indicates if the transit occured during the daytime
+        is_daytime = 0
+        solar_rise = ephemeris.solar_rising(ttrans - 86400.0)
+        for sr in solar_rise:
+            ss = ephemeris.solar_setting(sr)[0]
+            if (ttrans >= sr) and (ttrans <= ss):
+                is_daytime = 1
+                break
+        response.attrs['daytime_transit'] = is_daytime
 
+        # Dereference the output datasets
         out_vis = response.vis[:]
         out_weight = response.weight[:]
 
@@ -1020,33 +1045,37 @@ class GainFromTransitFit(task.SingleTask):
 
         # Instantiate the model object
         model = ModelClass(param=param, param_cov=param_cov,
-                         chisq=chisq, ndof=ndof, **model_kwargs)
+                           chisq=chisq, ndof=ndof, **model_kwargs)
 
-        # Determine hour angle of evaluation
-        if self.evaluate == 'peak':
-            ha = model.peak()
-            elementwise = True
-        else:
-            ha = 0.0
-            elementwise = False
+        # Suppress numpy floating errors
+        with np.errstate(all='ignore'):
 
-        # Predict model and uncertainty at desired hour angle
-        g = model.predict(ha, elementwise=elementwise)
+            # Determine hour angle of evaluation
+            if self.evaluate == 'peak':
+                ha = model.peak()
+                elementwise = True
+            else:
+                ha = 0.0
+                elementwise = False
 
-        gerr = model.uncertainty(ha, alpha=self.alpha, elementwise=elementwise)
+            # Predict model and uncertainty at desired hour angle
+            g = model.predict(ha, elementwise=elementwise)
 
-        # Use convention that you multiply by gain to calibrate
-        gain[:] = tools.invert_no_zero(g)
-        weight[:] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
+            gerr = model.uncertainty(ha, alpha=self.alpha, elementwise=elementwise)
 
-        # Can occassionally get Infs when evaluating fits to anomalous data.  Replace with zeros.
-        # Also zero data where the chi-squared per degree of freedom is greater than threshold.
-        not_valid = ~(np.isfinite(gain) & np.isfinite(weight) &
-                       np.all(chisq_per_dof <= self.chisq_per_dof_threshold, axis=-1))
+            # Use convention that you multiply by gain to calibrate
+            gain[:] = tools.invert_no_zero(g)
+            weight[:] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
 
-        if np.any(not_valid):
-            gain[not_valid] = 0.0 + 0.0J
-            weight[not_valid] = 0.0
+            # Can occassionally get Infs when evaluating fits to anomalous data.
+            # Replace with zeros. Also zero data where the chi-squared per
+            # degree of freedom is greater than threshold.
+            not_valid = ~(np.isfinite(gain) & np.isfinite(weight) &
+                          np.all(chisq_per_dof <= self.chisq_per_dof_threshold, axis=-1))
+
+            if np.any(not_valid):
+                gain[not_valid] = 0.0 + 0.0J
+                weight[not_valid] = 0.0
 
         return out
 
@@ -1082,6 +1111,10 @@ class FlagAmplitude(task.SingleTask):
         it is considered bad and the data for all frequencies is flagged.
         Note that the fraction is relative to the number of frequencies
         that pass the test described in `threshold_good_freq`.
+    valid_gains_frac_good_freq : float
+        If the fraction of frequencies that remain after flagging is less than
+        this value, then the task will return None and the processing of the
+        sidereal day will not proceed further.
     """
 
     min_amp_scale_factor = config.Property(proptype=float, default=0.05)
@@ -1091,6 +1124,7 @@ class FlagAmplitude(task.SingleTask):
     window_med_outlier = config.Property(proptype=int, default=24)
     threshold_good_freq = config.Property(proptype=float, default=0.70)
     threshold_good_input = config.Property(proptype=float, default=0.80)
+    valid_gains_frac_good_freq =  config.Property(proptype=float, default=0.0)
 
     def process(self, gain, inputmap):
         """Set weight to zero for feeds and frequencies with outlier gain amplitude.
@@ -1198,6 +1232,13 @@ class FlagAmplitude(task.SingleTask):
         flag &= flag_freq[:, np.newaxis]
 
         self.log.info("%d good frequencies after flagging amplitude." % good_freq.size)
+
+        # If fraction of good frequencies is less than threshold, stop and return None
+        frac_good_freq = good_freq.size / float(gain.freq.size)
+        if frac_good_freq < self.valid_gains_frac_good_freq:
+            self.log.info("Only %0.1f%% of frequencies remain after flagging amplitude.  Will " \
+                          "not process this sidereal day further." % (100.0 * frac_good_freq,))
+            return None
 
         # Determine bad inputs
         flag = mpiarray.MPIArray.wrap(flag, axis=0, comm=gain.comm)
