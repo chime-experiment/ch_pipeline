@@ -526,6 +526,8 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
         gain.gain[:] = (np.exp(-1j * phase_intercept) *
                         tools.invert_no_zero(peak_amplitude))
 
+        gain.gain[np.isfinite(peak_amplitude) == 0] = 0
+
         return gain
 
 
