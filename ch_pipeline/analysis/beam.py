@@ -490,7 +490,8 @@ class HolographyTransitFit(task.SingleTask):
             transit.pix['phi'],
             transit.beam[:].reshape(tmp_shape),
             np.sqrt(tools.invert_no_zero(transit.weight[:].reshape(tmp_shape))),
-            flagged
+            flagged,
+            fwhm=np.repeat((fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.shape[2], axis=1)
         )
 
         # Pack into container
