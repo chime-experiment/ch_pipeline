@@ -521,8 +521,10 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
         """
 
         gain = HolographyTransitGain(axes_from=fits)
-        gain.gain[:] = (np.exp(-1j * np.radians(fits.parameter['phase_intercept'])) /
-                        fits.parameter['peak_amplitude'])
+        phase_intercept = np.radians(fits.parameter[..., list(fits.param).index('phase_intercept')])
+        peak_amplitude = fits.parameter[..., list(fits.param).index('peak_amplitude')]
+        gain.gain[:] = (np.exp(-1j * phase_intercept) *
+                        tools.invert_no_zero(peak_amplitude))
 
         return gain
 
