@@ -48,6 +48,8 @@ class RFIFilter(task.SingleTask):
     ----------
     stack: bool
         Average over all autocorrelations before constructing the mask.
+    normalize : bool
+        Normalize by the median value over time prior to stacking.
     flag1d : bool
         Only apply the MAD cut in the time direction.
         Useful if the frequency coverage is sparse.
@@ -74,6 +76,7 @@ class RFIFilter(task.SingleTask):
     """
 
     stack = config.Property(proptype=bool, default=False)
+    normalize = config.Property(proptype=bool, default=False)
     flag1d = config.Property(proptype=bool, default=False)
     rolling = config.Property(proptype=bool, default=False)
     apply_static_mask = config.Property(proptype=bool, default=False)
@@ -110,7 +113,8 @@ class RFIFilter(task.SingleTask):
                                                              time_width=self.time_width,
                                                              flag1d=self.flag1d,
                                                              rolling=self.rolling,
-                                                             stack=self.stack)
+                                                             stack=self.stack,
+                                                             normalize=self.normalize)
 
         # Reorder output based on input chan_id
         minput = data.index_map['input'][auto_index]
@@ -771,7 +775,7 @@ class ApplyCorrInputMask(task.SingleTask):
         mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
 
         # Expand mask to same dimension as weight array
-        mask = mask[slc]
+        mask = mask[tuple(slc)]
 
         # Determine mapping between inputs in the mask
         # and inputs in the timestream
