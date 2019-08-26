@@ -93,7 +93,7 @@ class ApplyTimingCorrection(task.SingleTask):
 
         # Find the right timing correction
         for tcorr in self.tcorr:
-            if timestamp[0] > tcorr.time[0] and timestamp[-1] < tcorr.time[-1]:
+            if timestamp[0] >= tcorr.time[0] and timestamp[-1] <= tcorr.time[-1]:
                 break
         else:
             raise RuntimeError(
