@@ -70,7 +70,7 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
 import os
 
-from caput import mpiutil, config
+from caput import mpiutil, config, pipeline
 from draco.core import task
 from ch_util import tools, ephemeris
 
@@ -511,7 +511,7 @@ class QueryAcquisitions(task.MPILoggedTask):
 
         self.files = files
 
-    def __next__(self):
+    def next(self):
         """Return the files from the next acquisition.
 
         Returns
