@@ -706,10 +706,10 @@ class CalibrationCorrection(task.SingleTask):
             flag_types = finder.DataFlagType.select()
             for ft in flag_types:
                 if ft.name == self.name_of_flag:
-                    flags = list(finder.DataFlag.select().where(finder.DataFlag.type == ft))
+                    ftemp = list(finder.DataFlag.select().where(finder.DataFlag.type == ft))
                     # Only keep flags that will produce nonzero corrections, as defined by
                     # the _correction_is_nonzero method
-                    flags += [flg for flg in flags if self._correction_is_nonzero(**flg.metadata)]
+                    flags += [flg for flg in ftemp if self._correction_is_nonzero(**flg.metadata)]
 
         # Share flags with other nodes
         flags = self.comm.bcast(flags, root=0)
