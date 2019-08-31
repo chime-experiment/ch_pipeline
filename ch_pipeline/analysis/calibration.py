@@ -709,8 +709,7 @@ class CalibrationCorrection(task.SingleTask):
                     flags = list(finder.DataFlag.select().where(finder.DataFlag.type == ft))
                     # Only keep flags that will produce nonzero corrections, as defined by
                     # the _correction_is_nonzero method
-                    flags = [flg for flg in flags if self._correction_is_nonzero(**flg.metadata)]
-                    break
+                    flags += [flg for flg in flags if self._correction_is_nonzero(**flg.metadata)]
 
         # Share flags with other nodes
         flags = self.comm.bcast(flags, root=0)
@@ -725,7 +724,7 @@ class CalibrationCorrection(task.SingleTask):
         Parameters
         ----------
         sstream : andata.CorrData, containers.SiderealStream, or equivalent
-            Apply a phase correction to the `vis` dataset in this container.
+            Apply a correction to the `vis` dataset in this container.
         inputmap : list of :class:`CorrInput`
             List describing the inputs as they are in the file, output from
             `tools.get_correlator_inputs()`
