@@ -267,14 +267,13 @@ class CombinedRingMapMaker(task.SingleTask):
 
     include_auto: bool
         Include autocorrelations in the calculation.  Default is False.
+    
     time_window_s: float
         Time window in seconds. For a given transit time, a map is formed in 
         a window of time_window_s seconds (time_window_s/2. at each side of 
         the transit time) and added to the map stack. Default is 900. (15 min 
         at each side of a given transit time)
-    src_name: string ('CygA', 'CasA', 'TauA', 'VirA')
-        Calibration source. The beam profile is normalized at the declination of
-        the calibrator
+    
     beam: string ('uniform', 'gaussian')
         Beam profile to weight samples from different RAs into a single pixel
         'uniform' - Uniform beam (boxcar)
@@ -292,8 +291,6 @@ class CombinedRingMapMaker(task.SingleTask):
     include_auto = config.Property(proptype=bool, default=False)
 
     time_window_s = config.Property(proptype=float, default=300.)
-
-    src_name = config.Property(proptype=str, default='CygA')
 
     beam = config.Property(proptype=str, default='gaussian')
 
@@ -393,16 +390,12 @@ class CombinedRingMapMaker(task.SingleTask):
                 beam[:, pp] = self._beamfunc(np.radians(ha_w)[np.newaxis, :, np.newaxis], pp, 
                                              f_MHz[:, np.newaxis, np.newaxis], 
                                              np.radians(dec)[np.newaxis, np.newaxis, :])
-        # Normalize beam. Currently the beam is normalized by th sum of the squares of the
-        # beam pixel values at the declination of the calibration source. With this normalization, 
-        # and assuming the true beam, the flux of a point source at the calibration declination
-        # at transit time should be correct after map stacking (note I normalize the beam squared
-        # because the data alreaddy has one factor of the beam in it)
-        src_dict = {'CygA': ephemeris.CygA, 'CasA': ephemeris.CasA, 
-                    'TauA': ephemeris.TauA, 'VirA': ephemeris.VirA}
-        dec_cal = np.rad2deg(src_dict[self.src_name].dec.radians) # Declination of the calibrator
-        dec_cal_index = np.argmin(abs(dec-dec_cal)) # Declination index closest to dec_cal
-        beam /= np.sum(beam[:, :, :, dec_cal_index]**2, axis=2)[:, :, np.newaxis, np.newaxis]
+        # Normalize beam. Currently the beam is normalized by the sum of the squares of the
+        # beam pixel values at each declination (each dec separately). With this normalization,
+        # and assuming the true beam, the flux of a point source at transit time should be 
+        # correct after map stacking (note I normalize the beam squared because the data 
+        # already has one factor of the beam in it)
+        beam /= np.sum(beam**2, axis=2)[:, :, np.newaxis, :]
 
         # Construct weight function.
         # Handle different options for weighting baselines
