@@ -75,6 +75,17 @@ class CHIME(telescope.PolarisedTelescope):
     input_sel : list, optional
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
+    baseline_masking_type : string, optional
+        Select a subset of baselines.
+        `total_length` selects baselines according to their total length. Need to
+        specifiy `minlength` and `maxlength` properties (defined in baseclass).
+        `individual_length` selects baselines according to their seperation
+        in the North-South (specify `minlength_ns` and `maxlength_ns`) or
+        the East-West (specify `minlength_ew` and `maxlength_ew`).
+    minlength_ns, maxlength_ns : scalar
+        Minimum and maximum North-South baseline lengths to include (in metres)
+    minlength_ew, maxlength_ew:
+        Minimum and maximum East-West baseline lengths to include (in metres)
     """
 
     # Configure which feeds and layout to use
@@ -95,6 +106,14 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Input selection
     input_sel = config.Property(proptype=list, default=None)
+
+    # Baseline masking options
+    baseline_masking_type = config.enum(['total_length', 'individual_length'],
+                                          default='individual_length')
+    minlength_ew = config.Property(proptype=float, default=0.0)
+    maxlength_ew = config.Property(proptype=float, default=1.0e7)
+    minlength_ns = config.Property(proptype=float, default=0.0)
+    maxlength_ns = config.Property(proptype=float, default=1.0e7)
 
     # Auto-correlations setting (overriding default in baseclass)
     auto_correlations = config.Property(proptype=bool, default=True)
@@ -422,6 +441,39 @@ class CHIME(telescope.PolarisedTelescope):
         # # triangle (and do not reorder to make EW baselines)
         if self.stack_type != 'unique':
             super(CHIME, self)._make_ew()
+
+    def _unique_baselines(self):
+        # Reimplement unique baselines in order to mask out either according the baseline
+        # length or maximum NS and EW baseline seperation.
+
+        from drift.core import telescope
+
+        # Construct array of indices
+        fshape = [self.nfeed, self.nfeed]
+        f_ind = np.indices(fshape)
+
+        # Construct array of baseline separations
+        bl1 = (self.feedpositions[f_ind[0]] - self.feedpositions[f_ind[1]])
+        bl2 = np.around(bl1[..., 0] + 1.0J * bl1[..., 1], self._bl_tol)
+
+        # Construct array of baseline lengths
+        blen = np.sum(bl**2, axis=-1)**0.5
+
+        if self.baseline_masking_type = 'total_length':
+            # Create mask of included baselines
+            mask = np.logical_and(blen >= self.minlength, blen <= self.maxlength)
+        else:
+            mask_ew = np.logical_and(abs(bl1[..., 0]) >= minlength_ew,
+                                     abs(bl1[..., 0]) <= maxlength_ew)
+            mask_ns = np.logical_and(abs(bl1[..., 1]) >= self.minlength_ns,
+                                     abs(bl1[..., 1]) <= self.maxlength_ns)
+            mask = np.logical_and(mask_ew, mask_ns)
+
+        # Remove the auto correlated baselines between all polarisations
+        if not self.auto_correlations:
+            mask = np.logical_and(blen > 0.0, mask)
+
+        return _remap_keyarray(bl2, mask), mask
 
     def _unique_beams(self):
         # Override to mask out any feed where the beamclass is less than zero.
