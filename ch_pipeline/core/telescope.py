@@ -95,7 +95,7 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Redundancy settings
     stack_type = config.enum(['redundant', 'redundant_cyl', 'unique'],
-                                 default='redundant')
+                             default='redundant')
 
     # Configure frequency properties
     use_pathfinder_freq = config.Property(proptype=bool, default=True)
@@ -109,7 +109,7 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Baseline masking options
     baseline_masking_type = config.enum(['total_length', 'individual_length'],
-                                          default='individual_length')
+                                        default='individual_length')
     minlength_ew = config.Property(proptype=float, default=0.0)
     maxlength_ew = config.Property(proptype=float, default=1.0e7)
     minlength_ns = config.Property(proptype=float, default=0.0)
@@ -226,7 +226,7 @@ class CHIME(telescope.PolarisedTelescope):
     # Set non-zero rotation angle for pathfinder
     @property
     def rotation_angle(self):
-        if self.correlator=='pathfinder':
+        if self.correlator == 'pathfinder':
             return tools._PF_ROT
         else:
             return 0.0
@@ -247,7 +247,7 @@ class CHIME(telescope.PolarisedTelescope):
 
             # If requested, select subset of frequencies.
             if self.freq_physical:
-                basefreq = basefreq[ [ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ] ]
+                basefreq = basefreq[[np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical]]
 
             elif self.channel_range and (len(self.channel_range) <= 3):
                 basefreq = basefreq[slice(*self.channel_range)]
@@ -332,9 +332,9 @@ class CHIME(telescope.PolarisedTelescope):
 
         def _feedclass(f, redundant_cyl=False):
             if tools.is_array(f):
-                if tools.is_array_x(f): # feed is X polarisation
+                if tools.is_array_x(f):  # feed is X polarisation
                     pol = 0
-                else: # feed is Y polarisation
+                else:  # feed is Y polarisation
                     pol = 1
 
                 if redundant_cyl:
@@ -443,8 +443,8 @@ class CHIME(telescope.PolarisedTelescope):
             super(CHIME, self)._make_ew()
 
     def _unique_baselines(self):
-        # Reimplement unique baselines in order to mask out either according the baseline
-        # length or maximum NS and EW baseline seperation.
+        # Reimplement unique baselines in order to mask out either according to total
+        # baseline length or maximum North-South and East-West baseline seperation.
 
         from drift.core import telescope
 
@@ -457,14 +457,14 @@ class CHIME(telescope.PolarisedTelescope):
         bl2 = np.around(bl1[..., 0] + 1.0J * bl1[..., 1], self._bl_tol)
 
         # Construct array of baseline lengths
-        blen = np.sum(bl**2, axis=-1)**0.5
+        blen = np.sum(bl1**2, axis=-1)**0.5
 
-        if self.baseline_masking_type = 'total_length':
+        if self.baseline_masking_type == 'total_length':
             # Create mask of included baselines
             mask = np.logical_and(blen >= self.minlength, blen <= self.maxlength)
         else:
-            mask_ew = np.logical_and(abs(bl1[..., 0]) >= minlength_ew,
-                                     abs(bl1[..., 0]) <= maxlength_ew)
+            mask_ew = np.logical_and(abs(bl1[..., 0]) >= self.minlength_ew,
+                                     abs(bl1[..., 0]) <= self.maxlength_ew)
             mask_ns = np.logical_and(abs(bl1[..., 1]) >= self.minlength_ns,
                                      abs(bl1[..., 1]) <= self.maxlength_ns)
             mask = np.logical_and(mask_ew, mask_ns)
@@ -473,7 +473,7 @@ class CHIME(telescope.PolarisedTelescope):
         if not self.auto_correlations:
             mask = np.logical_and(blen > 0.0, mask)
 
-        return _remap_keyarray(bl2, mask), mask
+        return telescope._remap_keyarray(bl2, mask), mask
 
     def _unique_beams(self):
         # Override to mask out any feed where the beamclass is less than zero.
