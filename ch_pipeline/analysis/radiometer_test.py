@@ -41,12 +41,11 @@ class generate_products(task.SingleTask):
     """Generate time-frequency dataset for weights and autocorrelations
 
     """
-    #Define some parameters to be used. Should mostly be the time
-
-    def process(self, data):
-
     def get_auto_ids(data, inputmap):
-        
+    """Get the IDs for autos from the stack data
+       Further return the indices of the order in which
+       the polarizations are stored
+    """    
         auto_stack_id = []
         ind_XX=[]
         ind_YY=[]
@@ -67,6 +66,9 @@ class generate_products(task.SingleTask):
         return auto_stack_id,ind_XX,ind_YY 
 
     def live_feeds(cyl, pol, feedmap):
+    """Get the number of active feeds for the given cylinder
+       based on the input mask provided. This would be a function of time
+    """
 
 	start_index_cyl = 2*(ord(cyl)-ord('A'))
 	start_index_pol = 0 if (pol=='YY') else 1
@@ -76,7 +78,7 @@ class generate_products(task.SingleTask):
 
 	return np.asarray(good_feeds)
 
-    def stack_weights(self, data):
+    def stack_weights(self, data): #Same as sensitivity analyzer in dias
 
         # Get Unix time for the start time for timestamp
         time_tuple = start_time.timetuple()
@@ -185,53 +187,25 @@ class generate_products(task.SingleTask):
             inv_counter = tools.invert_no_zero(counter)
             var *= inv_counter ** 2
 
-            # Compute metric to be exported
-            self.sens.labels(pol="EW").set(
-                1.0e6 * np.sqrt(1.0 / np.sum(tools.invert_no_zero(var[:, 0, :])))
-            )
-            self.sens.labels(pol="NS").set(
-                1.0e6 * np.sqrt(1.0 / np.sum(tools.invert_no_zero(var[:, 1, :])))
-            )
-
-            # Write to file
-            output_file = os.path.join(
-                self.write_dir, "%d_%s.h5" % (timestamp[0], self.output_suffix)
-            )
-            self.logger.info("Writing output file...")
-            self.update_data_index(data.time[0], data.time[-1], filename=output_file)
-
-            with h5py.File(output_file, "w") as handler:
-
-                index_map = handler.create_group("index_map")
-                index_map.create_dataset("freq", data=data.index_map["freq"][:])
-                index_map.create_dataset("pol", data=np.string_(polstr))
-                index_map.create_dataset("time", data=data.time)
-
-                dset = handler.create_dataset("rms", data=np.sqrt(var))
-                dset.attrs["axis"] = np.array(["freq", "pol", "time"], dtype="S")
-
-                dset = handler.create_dataset("count", data=counter.astype(np.int))
-                dset.attrs["axis"] = np.array(["freq", "pol", "time"], dtype="S")
-
-                handler.attrs["instrument_name"] = self.correlator
-                handler.attrs["collection_server"] = subprocess.check_output(
-                    ["hostname"]
-                ).strip()
-                handler.attrs["system_user"] = subprocess.check_output(
-                    ["id", "-u", "-n"]
-                ).strip()
-                handler.attrs["git_version_tag"] = dias_version_tag
-            self.logger.info("File successfully written out.")
-
-    return np.sqrt(var).T #Same shape as that of autocorrelation
+            #np.sqrt(var).T goes into the container
     
     def stack_auto_noise(self, data):
+
+	#Some initializations, have to be moved to right place
+	feed_qnt = 256
+	ncyl   = 4
+	nfreq  = 1024
+	band   = 400.0 * 1e6
+	fstart = 0 
+	fstop  = nfreq
+
 	#Relative cylinder weightings and intercylinder baselines
 	N_XX   = 0
 	N_YY   = 0
 	Nbl_XX = 0
 	Nbl_YY = 0	
 
+	#Read the file, not needed here though
 	f = data_index.Finder(node_spoof = {"gong" : "/mnt/gong/archive"}) 
 	f.set_time_range(start_time, stop_time)
 	f.accept_all_global_flags()
@@ -242,26 +216,30 @@ class generate_products(task.SingleTask):
 	if not all_files:
 	    raise IndexError()
 
+	#Get the input and reverse maps for baseline selection
 	inputmap = tools.get_correlator_inputs(ephemeris.unix_to_datetime(start_time),
                                                correlator='chime')
 	data = andata.CorrData.from_acq_h5(all_files[0], start=0, stop=1,
                                            datasets=['reverse_map', 'flags/inputs'],
                                            apply_gain=False, renormalize=False)
 
+	#Get the stack IDs of auto inputs to be read
 	auto_stack_id,ind_XX,ind_YY = get_auto_ids(data, inputmap)
 	
         freq_sel = slice(fstart, fstop)
 
+	#Read the autos, flags, lost packet freactions, and inputs
 	auto_data = andata.CorrData.from_acq_h5(all_files, freq_sel=freq_sel,
                                      datasets=['vis', 'flags/vis_weight','flags/frac_lost','flags/inputs'],
                                      apply_gain=False, renormalize=False,\
                                      stack_sel = auto_stack_id)
-
+	
 	bflag = (auto_data.weight.data == 0.0)
 	bvis  = auto_data.vis.data
 	bfrac = (auto_data.flags['frac_lost'].data)
 	binp  = auto_data.flags['inputs']
 
+	#Derive weights for each cylinder, based on the number of active feeds
 	live_feed_cyl_XX=np.zeros((ncyl, len(auto_data.time)))
 	live_feed_cyl_YY=np.zeros((ncyl, len(auto_data.time)))
 
@@ -271,9 +249,11 @@ class generate_products(task.SingleTask):
 	live_feed_frac_XX = live_feed_cyl_XX/float(feed_qnt)
 	live_feed_frac_YY = live_feed_cyl_YY/float(feed_qnt)
 
+	#Average autos across cylinders
 	vis_avg_XX = np.zeros((nfreq,len(auto_data.time)), dtype='complex64')
 	vis_avg_YY = np.zeros((nfreq,len(auto_data.time)), dtype='complex64')
 
+	#Averaging for pol XX
 	for i in ind_XX:
 	    for j in ind_XX:
 		if i>=j: #Avoid double counting
@@ -283,15 +263,18 @@ class generate_products(task.SingleTask):
 		vis_avg_XX +=  bvis[:,i,:]*bvis[:,j,:]*n_feeds_cyl_XX/feed_qnt**2 #(nfreq,ntime) * (ntime)
 		Nbl_XX += n_feeds_cyl_XX
 		
+	#Averaging for pol YY
 	for i in ind_YY:
 	    for j in ind_YY:
-		if i>=j: #Avoid double counting
+		if i>=j: 
 		    continue 
 		n_feeds_cyl_YY = live_feeds(chr(i+ord('A')-len(ind_XX)),'YY',binp)*live_feeds(chr(j+ord('A')-len(ind_XX)),'YY',binp)
 		N_YY += n_feeds_cyl_YY/feed_qnt**2
 		vis_avg_YY +=  bvis[:,i,:]*bvis[:,j,:]*n_feeds_cyl_YY/feed_qnt**2
 		Nbl_YY += n_feeds_cyl_YY
 
+	#Get the quantities for normalization: 
+	#integration time, number of baselines, fraction of packets lost and frequency resolution
 	tint = np.median(np.diff(auto_data.time)) #there is a slight different in integrations at micro seconds, ignoring it
 
 	n_b_tau_XX = band/nfreq * tint* Nbl_XX * (1-bfrac)
@@ -299,12 +282,11 @@ class generate_products(task.SingleTask):
 
 	vis_avg_XX_norm=np.sqrt(vis_avg_XX/(N_XX*n_b_tau_XX))
 	vis_avg_YY_norm=np.sqrt(vis_avg_YY/(N_YY*n_b_tau_YY))
+        
+        #Combine the above two datasets to be store in the container
 
-	ratio_XX=np.asarray((arr_vis_0).T/(vis_avg_XX_norm), dtype='float64')
-	ratio_YY=np.asarray((arr_vis_1).T/(vis_avg_YY_norm), dtype='float64')
-
-
-    def get_baselines(self, indexmap, inputmap, reversemap):
+    
+    def get_baselines(self, indexmap, inputmap, reversemap): #almost the same as sensitivity analyzer
         """Return baseline indices for averaging."""
         prod = defaultdict(list)
         prodmap = defaultdict(list)
@@ -387,6 +369,8 @@ class generate_products(task.SingleTask):
 
         return prod, prodmap, dist, conj, cyl, scale
 
-    def get_cyl(self, cyl_num):
+    def get_cyl(cyl_num):
         """Return the cylinfer ID (char)."""
-        return chr(cyl_num - self.cyl_start_num + self.cyl_start_char)
+	cyl_start_num  = 2
+	cyl_start_char = 65	
+        return chr(cyl_num - cyl_start_num + cyl_start_char)
