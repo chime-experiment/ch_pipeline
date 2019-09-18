@@ -45,7 +45,38 @@ class generate_products(task.SingleTask):
 
     def process(self, data):
 
-    def stack_dataset(self, data):
+    def get_auto_ids(data, inputmap):
+        
+        auto_stack_id = []
+        ind_XX=[]
+        ind_YY=[]
+        pol_ind=0
+        
+        for pp, (this_prod, this_conj) in enumerate(data.index_map['stack']):
+            bb, aa = data.index_map['prod'][this_prod]
+            if aa==bb:
+                auto_stack_id.append(pp)
+                inp_aa = inputmap[aa]
+                inp_bb = inputmap[bb]
+                if tools.is_array_x(inp_aa) and tools.is_array_x(inp_bb):
+                    ind_XX.append(pol_ind)
+                elif tools.is_array_y(inp_aa) and tools.is_array_y(inp_bb):
+                    ind_YY.append(pol_ind)
+                pol_ind+=1
+
+        return auto_stack_id,ind_XX,ind_YY 
+
+    def live_feeds(cyl, pol, feedmap):
+
+	start_index_cyl = 2*(ord(cyl)-ord('A'))
+	start_index_pol = 0 if (pol=='YY') else 1
+	index = start_index_cyl + start_index_pol
+	sel_ind = range(index*feed_qnt, (index+1)*(feed_qnt))
+	good_feeds = np.sum(feedmap[sel_ind], axis=0)
+
+	return np.asarray(good_feeds)
+
+    def stack_weights(self, data):
 
         # Get Unix time for the start time for timestamp
         time_tuple = start_time.timetuple()
@@ -191,6 +222,87 @@ class generate_products(task.SingleTask):
                 ).strip()
                 handler.attrs["git_version_tag"] = dias_version_tag
             self.logger.info("File successfully written out.")
+
+    return np.sqrt(var).T #Same shape as that of autocorrelation
+    
+    def stack_auto_noise(self, data):
+	#Relative cylinder weightings and intercylinder baselines
+	N_XX   = 0
+	N_YY   = 0
+	Nbl_XX = 0
+	Nbl_YY = 0	
+
+	f = data_index.Finder(node_spoof = {"gong" : "/mnt/gong/archive"}) 
+	f.set_time_range(start_time, stop_time)
+	f.accept_all_global_flags()
+	f.only_corr()
+	f.filter_acqs((data_index.ArchiveInst.name == 'chimestack'))
+	file_list = f.get_results()
+	all_files = file_list[0][0]
+	if not all_files:
+	    raise IndexError()
+
+	inputmap = tools.get_correlator_inputs(ephemeris.unix_to_datetime(start_time),
+                                               correlator='chime')
+	data = andata.CorrData.from_acq_h5(all_files[0], start=0, stop=1,
+                                           datasets=['reverse_map', 'flags/inputs'],
+                                           apply_gain=False, renormalize=False)
+
+	auto_stack_id,ind_XX,ind_YY = get_auto_ids(data, inputmap)
+	
+        freq_sel = slice(fstart, fstop)
+
+	auto_data = andata.CorrData.from_acq_h5(all_files, freq_sel=freq_sel,
+                                     datasets=['vis', 'flags/vis_weight','flags/frac_lost','flags/inputs'],
+                                     apply_gain=False, renormalize=False,\
+                                     stack_sel = auto_stack_id)
+
+	bflag = (auto_data.weight.data == 0.0)
+	bvis  = auto_data.vis.data
+	bfrac = (auto_data.flags['frac_lost'].data)
+	binp  = auto_data.flags['inputs']
+
+	live_feed_cyl_XX=np.zeros((ncyl, len(auto_data.time)))
+	live_feed_cyl_YY=np.zeros((ncyl, len(auto_data.time)))
+
+	for i in range(0,ncyl):
+	    live_feed_cyl_XX[i]=live_feeds(chr(i+ord('A')),'XX',binp)
+	    live_feed_cyl_YY[i]=live_feeds(chr(i+ord('A')),'YY',binp)
+	live_feed_frac_XX = live_feed_cyl_XX/float(feed_qnt)
+	live_feed_frac_YY = live_feed_cyl_YY/float(feed_qnt)
+
+	vis_avg_XX = np.zeros((nfreq,len(auto_data.time)), dtype='complex64')
+	vis_avg_YY = np.zeros((nfreq,len(auto_data.time)), dtype='complex64')
+
+	for i in ind_XX:
+	    for j in ind_XX:
+		if i>=j: #Avoid double counting
+		    continue 
+		n_feeds_cyl_XX=live_feeds(chr(i+ord('A')),'XX',binp)*live_feeds(chr(j+ord('A')),'XX',binp)
+		N_XX += n_feeds_cyl_XX/feed_qnt**2 #(ntime)
+		vis_avg_XX +=  bvis[:,i,:]*bvis[:,j,:]*n_feeds_cyl_XX/feed_qnt**2 #(nfreq,ntime) * (ntime)
+		Nbl_XX += n_feeds_cyl_XX
+		
+	for i in ind_YY:
+	    for j in ind_YY:
+		if i>=j: #Avoid double counting
+		    continue 
+		n_feeds_cyl_YY = live_feeds(chr(i+ord('A')-len(ind_XX)),'YY',binp)*live_feeds(chr(j+ord('A')-len(ind_XX)),'YY',binp)
+		N_YY += n_feeds_cyl_YY/feed_qnt**2
+		vis_avg_YY +=  bvis[:,i,:]*bvis[:,j,:]*n_feeds_cyl_YY/feed_qnt**2
+		Nbl_YY += n_feeds_cyl_YY
+
+	tint = np.median(np.diff(auto_data.time)) #there is a slight different in integrations at micro seconds, ignoring it
+
+	n_b_tau_XX = band/nfreq * tint* Nbl_XX * (1-bfrac)
+	n_b_tau_YY = band/nfreq * tint* Nbl_YY * (1-bfrac)
+
+	vis_avg_XX_norm=np.sqrt(vis_avg_XX/(N_XX*n_b_tau_XX))
+	vis_avg_YY_norm=np.sqrt(vis_avg_YY/(N_YY*n_b_tau_YY))
+
+	ratio_XX=np.asarray((arr_vis_0).T/(vis_avg_XX_norm), dtype='float64')
+	ratio_YY=np.asarray((arr_vis_1).T/(vis_avg_YY_norm), dtype='float64')
+
 
     def get_baselines(self, indexmap, inputmap, reversemap):
         """Return baseline indices for averaging."""
