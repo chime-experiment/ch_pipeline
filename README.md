@@ -15,7 +15,7 @@ Important notes:
 
 The idea behind this repository is to keep track of the CHIME pipeline development, such that the union of the input data and this repository always gives the same output. This requires that we keep track of not only the code and scripts in this repository, but also any dependencies (discussed below).
 
-As far as possible the pipeline code should be using Kiyo's pipeline task module `caput.pipeline`  ([doc](http://bao.phas.ubc.ca/codedoc/caput/)).
+As far as possible the pipeline code should be using Kiyo's pipeline task module `caput.pipeline`  ([doc](https://caput.readthedocs.io/en/latest/generated/caput.pipeline.html#module-caput.pipeline)).
 
 ### Structure
 
