@@ -2,6 +2,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from future.builtins import *  # noqa  pylint: disable=W0401, W0614
 from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
 # === End Python 2/3 compatibility
 
 import datetime
@@ -19,47 +20,32 @@ class DailyProcessing(base.ProcessingType):
 
     # Parameters of the job processing
     default_params = {
-
         # Time range(s) to process
         "intervals": [
             # Intervals as defined by Mateus
             # Pass A (start trimmed for timing sols)
-            {
-                "start": "20181221T000000Z",
-                "end": "20181229T000000Z"
-            },
+            {"start": "20181221T000000Z", "end": "20181229T000000Z"},
             # Pass B
-            {
-                "start": "20190111T000000Z",
-                "end": "20190207T000000Z"
-            },
+            {"start": "20190111T000000Z", "end": "20190207T000000Z"},
             # Pass C (end trimmed for timing sols)
-            {
-                "start": "20190210T000000Z",
-                "end": "20190304T000000Z"
-            }
+            {"start": "20190210T000000Z", "end": "20190304T000000Z"},
         ],
-
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
-
         # Frequencies to process
         "freq": [0, 1024],
-
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/scratch/jrs65/bt_empty/chime_4cyl_allfreq/",
-
         # File for the timing correction
         "timing_file": (
-            "/scratch/ssiegel/timing/v1/referenced/" +
-            "20181220T235147Z_to_20190304T135948Z_chimetiming_delay.h5"
+            "/scratch/ssiegel/timing/v1/referenced/"
+            + "20181220T235147Z_to_20190304T135948Z_chimetiming_delay.h5"
         ),
-
         # Job params
         "time": 180,  # How long in minutes?
         "nodes": 16,  # Number of nodes to use.
         "ompnum": 6,  # Number of OpenMP threads
-        "pernode": 8  # Jobs per node
+        "pernode": 8,  # Jobs per node
     }
 
     def _create(self):
@@ -70,8 +56,9 @@ class DailyProcessing(base.ProcessingType):
 
         # Write default configuration into directory
         with (configdir / "revconfig.yaml").open("w") as fh:
-            dump = yaml.safe_dump(self.default_params, encoding='utf-8',
-                                  allow_unicode=True)
+            dump = yaml.safe_dump(
+                self.default_params, encoding="utf-8", allow_unicode=True
+            )
             fh.write(str(dump))  # TODO: Python 3 - str needed
         with (configdir / "jobtemplate.yaml").open("w") as fh:
             fh.write(DEFAULT_SCRIPT)
@@ -128,12 +115,14 @@ class DailyProcessing(base.ProcessingType):
         csd = float(tag)
 
         jobparams = dict(self._revparams)
-        jobparams.update({
-            "jobname": self.job_name(tag),
-            "dir": str(self.base_path / tag),
-            "tempdir": str(self._workingdir / tag),
-            "csd": [csd - self._padding, csd + 1 + self._padding]
-        })
+        jobparams.update(
+            {
+                "jobname": self.job_name(tag),
+                "dir": str(self.base_path / tag),
+                "tempdir": str(self._workingdir / tag),
+                "csd": [csd - self._padding, csd + 1 + self._padding],
+            }
+        )
 
         venv = find_venv()
 
@@ -153,21 +142,17 @@ class TestDailyProcessing(DailyProcessing):
 
     # Override params above
     default_params = DailyProcessing.default_params.copy()
-    default_params.update({
-        "intervals": [
-            {
-                "start": "20181221T000000Z",
-                "end": "20181225T000000Z"
-            }
-        ],
-        "freq": [192, 208],
-        "product_path": "/scratch/jrs65/bt_empty/chime_4cyl_10freq/",
-
-        "time": 60,  # How long in minutes?
-        "nodes": 1,  # Number of nodes to use.
-        "ompnum": 12,  # Number of OpenMP threads
-        "pernode": 4  # Jobs per node
-    })
+    default_params.update(
+        {
+            "intervals": [{"start": "20181221T000000Z", "end": "20181225T000000Z"}],
+            "freq": [192, 208],
+            "product_path": "/scratch/jrs65/bt_empty/chime_4cyl_10freq/",
+            "time": 60,  # How long in minutes?
+            "nodes": 1,  # Number of nodes to use.
+            "ompnum": 12,  # Number of OpenMP threads
+            "pernode": 4,  # Jobs per node
+        }
+    )
 
 
 def csds_in_range(start, end):

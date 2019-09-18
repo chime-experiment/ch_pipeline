@@ -29,10 +29,10 @@ Generally you would want to use these tasks together. Starting with a
 :class:`SiderealStacker` if you want to combine the different days.
 """
 # === Start Python 2/3 compatibility
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 from future.builtins import *  # noqa  pylint: disable=W0401, W0614
 from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
 # === End Python 2/3 compatibility
 
 from past.builtins import basestring
@@ -104,10 +104,12 @@ class LoadTimeStreamSidereal(task.SingleTask):
             days = np.unique(np.floor(se_csd).astype(np.int))
 
             # Construct list of files in each day
-            filemap = [ (day, _days_in_csd(day, se_csd, extra=self.padding)) for day in days ]
+            filemap = [
+                (day, _days_in_csd(day, se_csd, extra=self.padding)) for day in days
+            ]
 
             # Filter our days with only a few files in them.
-            filemap = [ (day, dmap) for day, dmap in filemap if dmap.size > 1 ]
+            filemap = [(day, dmap) for day, dmap in filemap if dmap.size > 1]
             filemap.sort()
 
         self.filemap = mpiutil.world.bcast(filemap, root=0)
@@ -115,7 +117,9 @@ class LoadTimeStreamSidereal(task.SingleTask):
         # Set up frequency selection.
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ]))
+            self.freq_sel = sorted(
+                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+            )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
             self.freq_sel = list(range(*self.channel_range))
@@ -140,7 +144,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
         # Extract filelist for this CSD
         csd, fmap = self.filemap.pop(0)
-        dfiles = sorted([ self.files[fi] for fi in fmap ])
+        dfiles = sorted([self.files[fi] for fi in fmap])
 
         if mpiutil.rank0:
             print("Starting read of CSD:%i [%i files]" % (csd, len(fmap)))
@@ -149,21 +153,29 @@ class LoadTimeStreamSidereal(task.SingleTask):
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(dfiles)
-            prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
+            prod_sel = np.array(
+                [ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1]]
+            )
 
         # Load files
-        ts = andata.CorrData.from_acq_h5(dfiles, distributed=True,
-                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
+        ts = andata.CorrData.from_acq_h5(
+            dfiles, distributed=True, freq_sel=self.freq_sel, prod_sel=prod_sel
+        )
 
         # Add attributes for the CSD and a tag for labelling saved files
-        ts.attrs['tag'] = ('csd_%i' % csd)
-        ts.attrs['lsd'] = csd
+        ts.attrs["tag"] = "csd_%i" % csd
+        ts.attrs["lsd"] = csd
 
         # Add a weight dataset if needed
-        if 'vis_weight' not in ts.flags:
-            weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                         distributed=True, distributed_axis=0)
-            weight_dset.attrs['axis'] = ts.vis.attrs['axis']
+        if "vis_weight" not in ts.flags:
+            weight_dset = ts.create_flag(
+                "vis_weight",
+                shape=ts.vis.shape,
+                dtype=np.uint8,
+                distributed=True,
+                distributed_axis=0,
+            )
+            weight_dset.attrs["axis"] = ts.vis.attrs["axis"]
 
             # Set weight to maximum value (255), unless the vis value is
             # zero which presumably came from missing data. NOTE: this may have
@@ -260,16 +272,20 @@ class SiderealMean(task.SingleTask):
         """Determine which sources will be masked, if any."""
         from ch_util import fluxcat
 
-        self._name_of_statistic = 'median' if self.median else 'mean'
+        self._name_of_statistic = "median" if self.median else "mean"
 
         self.body = []
         if self.apply_mask and self.mask_sources:
             for src, body in ephemeris.source_dictionary.items():
-                if (fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL) >
-                    self.flux_threshold) and (body.dec.degrees > self.dec_threshold):
+                if (
+                    fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
+                    > self.flux_threshold
+                ) and (body.dec.degrees > self.dec_threshold):
 
-                    self.log.info("Will mask %s prior to calculating sidereal %s." %
-                                  (src, self._name_of_statistic))
+                    self.log.info(
+                        "Will mask %s prior to calculating sidereal %s."
+                        % (src, self._name_of_statistic)
+                    )
 
                     self.body.append(body)
 
@@ -290,26 +306,26 @@ class SiderealMean(task.SingleTask):
         import weighted as wq
 
         # Make sure we are distributed over frequency
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Extract lsd
-        lsd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-        lsd_list = lsd if hasattr(lsd, '__iter__') else [lsd]
+        lsd = sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+        lsd_list = lsd if hasattr(lsd, "__iter__") else [lsd]
 
         # Calculate the right ascension, method differs depending on input container
-        if 'ra' in sstream.index_map:
+        if "ra" in sstream.index_map:
             ra = sstream.ra
             timestamp = {dd: ephemeris.csd_to_unix(dd + ra / 360.0) for dd in lsd_list}
             flag_quiet = np.ones(ra.size, dtype=np.bool)
 
-        elif 'time' in sstream.index_map:
+        elif "time" in sstream.index_map:
 
             ra = ephemeris.lsa(sstream.time)
             timestamp = {lsd: sstream.time}
             flag_quiet = np.fix(ephemeris.unix_to_csd(sstream.time)) == lsd
 
         else:
-            raise RuntimeError('Format of `sstream` argument is unknown.')
+            raise RuntimeError("Format of `sstream` argument is unknown.")
 
         # If requested, determine "quiet" region of sky
         if self.apply_mask:
@@ -327,10 +343,15 @@ class SiderealMean(task.SingleTask):
 
         # Create output container
         newra = np.mean(ra[flag_quiet], keepdims=True)
-        mustream = containers.SiderealStream(ra=newra, axes_from=sstream, attrs_from=sstream,
-                                             distributed=True, comm=sstream.comm)
-        mustream.redistribute('freq')
-        mustream.attrs['statistic'] = self._name_of_statistic
+        mustream = containers.SiderealStream(
+            ra=newra,
+            axes_from=sstream,
+            attrs_from=sstream,
+            distributed=True,
+            comm=sstream.comm,
+        )
+        mustream.redistribute("freq")
+        mustream.attrs["statistic"] = self._name_of_statistic
 
         # Dereference visibilities
         all_vis = sstream.vis[:].view(np.ndarray)
@@ -356,10 +377,11 @@ class SiderealMean(task.SingleTask):
                     # wq.median will generate warnings and return NaN if the weights are all zero.
                     # Check for this case and set the mean visibility to 0+0j.
                     if np.any(weight):
-                        mu_vis[ff, bb, 0] = (wq.median(vis.real, weight) +
-                                             1.0J * wq.median(vis.imag, weight))
+                        mu_vis[ff, bb, 0] = wq.median(
+                            vis.real, weight
+                        ) + 1.0j * wq.median(vis.imag, weight)
                     else:
-                        mu_vis[ff, bb, 0] = 0.0 + 0.0J
+                        mu_vis[ff, bb, 0] = 0.0 + 0.0j
 
         else:
             # Otherwise calculate the mean
@@ -407,12 +429,12 @@ class ChangeSiderealMean(task.SingleTask):
             ValueError("Mean value has incorrect shape, must be (nfreq, nprod, 1).")
 
         # Ensure both inputs are distributed over frequency
-        sstream.redistribute('freq')
-        mustream.redistribute('freq')
+        sstream.redistribute("freq")
+        mustream.redistribute("freq")
 
         # Determine indices of autocorrelations
-        prod = mustream.index_map['prod'][mustream.index_map['stack']['prod']]
-        not_auto = (prod['input_a'] != prod['input_b']).astype(np.float32)
+        prod = mustream.index_map["prod"][mustream.index_map["stack"]["prod"]]
+        not_auto = (prod["input_a"] != prod["input_b"]).astype(np.float32)
         not_auto = not_auto[np.newaxis, :, np.newaxis]
 
         # Add or subtract value to the cross-correlations
@@ -447,7 +469,7 @@ def get_times(acq_files):
         end = ad_empty.timestamp[-1]
         return start, end
     else:
-        raise Exception('Input %s, not understood' % repr(acq_files))
+        raise Exception("Input %s, not understood" % repr(acq_files))
 
 
 def _days_in_csd(day, se_csd, extra=0.005):
