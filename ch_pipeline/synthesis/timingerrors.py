@@ -9,10 +9,10 @@ Tasks
     TimingErrors
 """
 # === Start Python 2/3 compatibility
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 from future.builtins import *  # noqa  pylint: disable=W0401, W0614
 from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
 # === End Python 2/3 compatibility
 
 
@@ -63,10 +63,11 @@ class TimingErrors(gain.BaseGains):
     corr_length_delay = config.Property(proptype=float, default=3600)
     sigma_delay = config.Property(proptype=float, default=1e-12)
 
-    sim_type = config.enum(['relative', 'common_mode_cyl',
-                            'common_mode_iceboard'], default='relative')
+    sim_type = config.enum(
+        ["relative", "common_mode_cyl", "common_mode_iceboard"], default="relative"
+    )
 
-    common_mode_type = config.enum(['random', 'sinusoidal'], default='random')
+    common_mode_type = config.enum(["random", "sinusoidal"], default="random")
 
     # Default periods of chime specific timing jitter with the clock
     # distribution system informed by data see doclib 704
@@ -89,39 +90,48 @@ class TimingErrors(gain.BaseGains):
         cf_delay = self._corr_func(self.corr_length_delay, self.sigma_delay)
 
         # Check if we are simulating relative delays or common mode delays
-        if self.sim_type == 'relative':
+        if self.sim_type == "relative":
             n_realisations = self.ninput_local
 
             # Generate delay fluctuations
-            self.delay_error = gain.generate_fluctuations(time, cf_delay,
-                                                          n_realisations,
-                                                          self._prev_time,
-                                                          self._prev_delay)
+            self.delay_error = gain.generate_fluctuations(
+                time, cf_delay, n_realisations, self._prev_time, self._prev_delay
+            )
 
-            gain_phase = (2.0 * np.pi * freq[:, np.newaxis, np.newaxis] *
-                          1e6 * self.delay_error[np.newaxis, :, :] /
-                          np.sqrt(self.ndays))
+            gain_phase = (
+                2.0
+                * np.pi
+                * freq[:, np.newaxis, np.newaxis]
+                * 1e6
+                * self.delay_error[np.newaxis, :, :]
+                / np.sqrt(self.ndays)
+            )
 
-        if self.sim_type == 'common_mode_cyl':
+        if self.sim_type == "common_mode_cyl":
             n_realisations = 1
             ninput = self.ninput_global
 
             # Generates as many random delay errors as there are cylinders
             if self.comm.rank == 0:
-                if self.common_mode_type == 'sinusoidal':
+                if self.common_mode_type == "sinusoidal":
                     P1 = self.sinusoidal_period[0]
                     P2 = self.sinusoidal_period[1]
                     omega1 = 2 * np.pi / P1
                     omega2 = 2 * np.pi / P2
 
-                    delay_error = self.sigma_delay * (np.sin(omega1 * time) -
-                                                      np.sin(omega2 * time))[np.newaxis, :]
+                    delay_error = (
+                        self.sigma_delay
+                        * (np.sin(omega1 * time) - np.sin(omega2 * time))[np.newaxis, :]
+                    )
 
-                if self.common_mode_type == 'random':
-                    delay_error = gain.generate_fluctuations(time, cf_delay,
-                                                             n_realisations,
-                                                             self._prev_time,
-                                                             self._prev_delay)
+                if self.common_mode_type == "random":
+                    delay_error = gain.generate_fluctuations(
+                        time,
+                        cf_delay,
+                        n_realisations,
+                        self._prev_time,
+                        self._prev_delay,
+                    )
             else:
                 delay_error = None
 
@@ -136,17 +146,21 @@ class TimingErrors(gain.BaseGains):
             gain_phase = np.zeros((lfreq, ninput, ntime), dtype=complex)
             # Since we have 2 cylinders populate half of them with a delay)
             # TODO: generalize this for 3 or even 4 cylinders in the future.
-            gain_phase[:, ninput//self.ncyl:, :] = (2.0 * np.pi *
-                                                   freq[sfreq:efreq, np.newaxis, np.newaxis] *
-                                                   1e6 * self.delay_error[np.newaxis, :, :]
-                                                   / np.sqrt(self.ndays))
+            gain_phase[:, ninput // self.ncyl :, :] = (
+                2.0
+                * np.pi
+                * freq[sfreq:efreq, np.newaxis, np.newaxis]
+                * 1e6
+                * self.delay_error[np.newaxis, :, :]
+                / np.sqrt(self.ndays)
+            )
 
             gain_phase = mpiarray.MPIArray.wrap(gain_phase, axis=0, comm=self.comm)
             # Redistribute over input to match rest of the code
             gain_phase = gain_phase.redistribute(axis=1)
             gain_phase = gain_phase.view(np.ndarray)
 
-        if self.sim_type == 'common_mode_iceboard':
+        if self.sim_type == "common_mode_iceboard":
             nchannel = self.nchannel
             ninput = self.ninput_global
             # Number of channels on a board
@@ -154,10 +168,9 @@ class TimingErrors(gain.BaseGains):
 
             # Generates as many random delay errors as there are iceboards
             if self.comm.rank == 0:
-                delay_error = gain.generate_fluctuations(time, cf_delay,
-                                                         nboards,
-                                                         self._prev_time,
-                                                         self._prev_delay)
+                delay_error = gain.generate_fluctuations(
+                    time, cf_delay, nboards, self._prev_time, self._prev_delay
+                )
             else:
                 delay_error = None
 
@@ -165,13 +178,20 @@ class TimingErrors(gain.BaseGains):
             self.delay_error = self.comm.bcast(delay_error, root=0)
 
             # Calculate the corresponding phase by multiplying with frequencies
-            phase = (2.0 * np.pi * freq[:, np.newaxis, np.newaxis] * 1e6 *
-                     self.delay_error[np.newaxis, :] / np.sqrt(self.ndays))
+            phase = (
+                2.0
+                * np.pi
+                * freq[:, np.newaxis, np.newaxis]
+                * 1e6
+                * self.delay_error[np.newaxis, :]
+                / np.sqrt(self.ndays)
+            )
 
             # Create an array to hold all inputs, which are common-mode within
             # one iceboard
-            gain_phase = mpiarray.MPIArray((nfreq, ninput, ntime), axis=1,
-                                           dtype=np.complex128, comm=self.comm)
+            gain_phase = mpiarray.MPIArray(
+                (nfreq, ninput, ntime), axis=1, dtype=np.complex128, comm=self.comm
+            )
             gain_phase[:] = 0.0
 
             # Loop over inputs and and group common-mode phases on every board

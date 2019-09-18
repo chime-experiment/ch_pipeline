@@ -12,10 +12,10 @@ Tasks
     ConstructTimingCorrection
 """
 # === Start Python 2/3 compatibility
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 from future.builtins import *  # noqa  pylint: disable=W0401, W0614
 from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
 # === End Python 2/3 compatibility
 
 
@@ -73,14 +73,16 @@ class ApplyTimingCorrection(task.SingleTask):
             Timestream with corrected visibilities.
         """
         # Determine times
-        if 'time' in tstream.index_map:
+        if "time" in tstream.index_map:
             timestamp = tstream.time
         else:
-            csd = tstream.attrs['lsd'] if 'lsd' in tstream.attrs else tstream.attrs['csd']
+            csd = (
+                tstream.attrs["lsd"] if "lsd" in tstream.attrs else tstream.attrs["csd"]
+            )
             timestamp = ephemeris.csd_to_unix(csd + tstream.ra / 360.0)
 
         # Extract local frequencies
-        tstream.redistribute('freq')
+        tstream.redistribute("freq")
 
         nfreq = tstream.vis.local_shape[0]
         sfreq = tstream.vis.local_offset[0]
@@ -98,8 +100,8 @@ class ApplyTimingCorrection(task.SingleTask):
         else:
             raise RuntimeError(
                 "Could not find timing correction file covering "
-                "range of timestream data (%s to %s)" %
-                tuple(ephemeris.unix_to_datetime([timestamp[0], timestamp[-1]]))
+                "range of timestream data (%s to %s)"
+                % tuple(ephemeris.unix_to_datetime([timestamp[0], timestamp[-1]]))
             )
 
         self.log.info("Using correction file %s" % tcorr.attrs["tag"])
@@ -107,26 +109,36 @@ class ApplyTimingCorrection(task.SingleTask):
         # If requested, reference the timing correct with respect to source transit time
         if self.refer_to_transit:
             # First check for transit_time attribute in file
-            ttrans = tstream.attrs.get('transit_time', None)
+            ttrans = tstream.attrs.get("transit_time", None)
             if ttrans is None:
-                source = tstream.attrs['source_name']
-                ttrans = ephemeris.transit_times(ephemeris.source_dictionary[source],
-                                                 tstream.time[0], tstream.time[-1])
+                source = tstream.attrs["source_name"]
+                ttrans = ephemeris.transit_times(
+                    ephemeris.source_dictionary[source],
+                    tstream.time[0],
+                    tstream.time[-1],
+                )
                 if ttrans.size != 1:
-                    raise RuntimeError("Found %d transits of %s in timestream.  "
-                                       "Require single transit." % (ttrans.size, source))
+                    raise RuntimeError(
+                        "Found %d transits of %s in timestream.  "
+                        "Require single transit." % (ttrans.size, source)
+                    )
                 else:
                     ttrans = ttrans[0]
 
-            self.log.info("Referencing timing correction to %s (RA=%0.1f deg)." %
-                          (ephemeris.unix_to_datetime(ttrans).strftime("%Y%m%dT%H%M%SZ"),
-                           ephemeris.lsa(ttrans)))
+            self.log.info(
+                "Referencing timing correction to %s (RA=%0.1f deg)."
+                % (
+                    ephemeris.unix_to_datetime(ttrans).strftime("%Y%m%dT%H%M%SZ"),
+                    ephemeris.lsa(ttrans),
+                )
+            )
 
-            tcorr.set_global_reference_time(ttrans, interpolate=True, interp='linear')
+            tcorr.set_global_reference_time(ttrans, interpolate=True, interp="linear")
 
         # Apply the timing correction
-        tcorr.apply_timing_correction(tstream, time=timestamp, freq=freq,
-                                      input_flags=input_flags, copy=False)
+        tcorr.apply_timing_correction(
+            tstream, time=timestamp, freq=freq, input_flags=input_flags, copy=False
+        )
 
         return tstream
 
@@ -175,15 +187,30 @@ class ConstructTimingCorrection(task.SingleTask):
     min_freq = config.Property(proptype=float, default=420.0)
     max_freq = config.Property(proptype=float, default=780.0)
     max_iter_weight = config.Property(proptype=int, default=2)
-    input_sel = config.Property(proptype=(lambda val: val if val is None else list(val)),
-                                default=None)
-    output_suffix = config.Property(proptype=str, default='chimetiming_delay')
+    input_sel = config.Property(
+        proptype=(lambda val: val if val is None else list(val)), default=None
+    )
+    output_suffix = config.Property(proptype=str, default="chimetiming_delay")
 
-    _parameters = ['check_amp', 'check_sig', 'nsigma', 'threshold', 'nparam',
-                   'min_freq', 'max_freq', 'max_iter_weight', 'input_sel']
+    _parameters = [
+        "check_amp",
+        "check_sig",
+        "nsigma",
+        "threshold",
+        "nparam",
+        "min_freq",
+        "max_freq",
+        "max_iter_weight",
+        "input_sel",
+    ]
 
-    _datasets_fixed_for_acq = ['static_phi', 'weight_static_phi', 'static_phi_fit',
-                               'static_amp', 'weight_static_amp']
+    _datasets_fixed_for_acq = [
+        "static_phi",
+        "weight_static_phi",
+        "static_phi_fit",
+        "static_amp",
+        "weight_static_amp",
+    ]
 
     def setup(self):
         """Get ready to generate timing corrections."""
@@ -208,8 +235,9 @@ class ConstructTimingCorrection(task.SingleTask):
         # Determine the acquisition
         new_acq = np.unique([os.path.basename(os.path.dirname(ff)) for ff in filelist])
         if new_acq.size > 1:
-            raise RuntimeError("Cannot process multiple acquisitions.  Received %d." %
-                               new_acq.size)
+            raise RuntimeError(
+                "Cannot process multiple acquisitions.  Received %d." % new_acq.size
+            )
         else:
             new_acq = new_acq[0]
 
@@ -222,13 +250,17 @@ class ConstructTimingCorrection(task.SingleTask):
                 self.kwargs[key] = None
 
         # Process the chimetiming data
-        self.log.info("Processing %d files from %s." % (len(filelist), self.current_acq))
+        self.log.info(
+            "Processing %d files from %s." % (len(filelist), self.current_acq)
+        )
 
-        tcorr = timing.TimingData.from_acq_h5(filelist,
-                                              only_correction=True,
-                                              distributed=self.comm.size > 1,
-                                              comm=self.comm,
-                                              **self.kwargs)
+        tcorr = timing.TimingData.from_acq_h5(
+            filelist,
+            only_correction=True,
+            distributed=self.comm.size > 1,
+            comm=self.comm,
+            **self.kwargs
+        )
 
         # Save the static phase and amplitude to be used on subsequent iterations
         # within this acquisition
@@ -245,11 +277,11 @@ class ConstructTimingCorrection(task.SingleTask):
         tfmt = "%Y%m%dT%H%M%SZ"
         start_time = ephemeris.unix_to_datetime(tcorr.time[0]).strftime(tfmt)
         end_time = ephemeris.unix_to_datetime(tcorr.time[-1]).strftime(tfmt)
-        tag = [start_time, 'to', end_time]
+        tag = [start_time, "to", end_time]
         if self.output_suffix:
             tag.append(self.output_suffix)
 
-        tcorr.attrs['tag'] = '_'.join(tag)
+        tcorr.attrs["tag"] = "_".join(tag)
 
         # Return timing correction
         return tcorr

@@ -19,10 +19,10 @@ Tasks
     SiderealCalibration
 """
 # === Start Python 2/3 compatibility
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 from future.builtins import *  # noqa  pylint: disable=W0401, W0614
 from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
 # === End Python 2/3 compatibility
 
 import numpy as np
@@ -60,12 +60,15 @@ def _extract_diagonal(utmat, axis=1):
     """
 
     # Estimate nside from the array shape
-    nside = int((2 * utmat.shape[axis])**0.5)
+    nside = int((2 * utmat.shape[axis]) ** 0.5)
 
     # Check that this nside is correct
     if utmat.shape[axis] != (nside * (nside + 1) // 2):
-        msg = ('Array length (%i) of axis %i does not correspond upper triangle\
-                of square matrix' % (utmat.shape[axis], axis))
+        msg = (
+            "Array length (%i) of axis %i does not correspond upper triangle\
+                of square matrix"
+            % (utmat.shape[axis], axis)
+        )
         raise RuntimeError(msg)
 
     # Find indices of the diagonal
@@ -111,7 +114,7 @@ def solve_gain(data, feeds=None, norm=None):
     data = data[:].view(np.ndarray)
 
     # Calcuate the number of feeds in the data matrix
-    tfeed = int((2 * data.shape[1])**0.5)
+    tfeed = int((2 * data.shape[1]) ** 0.5)
 
     # If not set, create the list of included feeds (i.e. all feeds)
     feeds = np.array(feeds) if feeds is not None else np.arange(tfeed)
@@ -124,13 +127,15 @@ def solve_gain(data, feeds=None, norm=None):
 
     # Set up normalisation matrix
     if norm is None:
-        norm = (_extract_diagonal(data, axis=1).real)**0.5
+        norm = (_extract_diagonal(data, axis=1).real) ** 0.5
         norm = tools.invert_no_zero(norm)
         norm = norm[:, feeds]
 
     elif norm.shape != gain.shape:
-        ValueError("Input normalization matrix has shape %s, should have shape %s." %
-                   (norm.shape, gain.shape))
+        ValueError(
+            "Input normalization matrix has shape %s, should have shape %s."
+            % (norm.shape, gain.shape)
+        )
 
     # Pre-generate the array of inverted norms
     inv_norm = tools.invert_no_zero(norm)
@@ -147,7 +152,9 @@ def solve_gain(data, feeds=None, norm=None):
                 continue
 
             # Unpack visibility and normalisation array into square matrix
-            _fast_tools._unpack_product_array_fast(data[fi, :, ti].copy(), cd, feeds, tfeed)
+            _fast_tools._unpack_product_array_fast(
+                data[fi, :, ti].copy(), cd, feeds, tfeed
+            )
 
             # Apply weighting
             w = norm[fi, :, ti]
@@ -162,12 +169,17 @@ def solve_gain(data, feeds=None, norm=None):
 
             # Construct gain solutions
             if evals[-1] > 0:
-                sign0 = (1.0 - 2.0 * (evecs[0, -1].real < 0.0))
-                gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
+                sign0 = 1.0 - 2.0 * (evecs[0, -1].real < 0.0)
+                gain[fi, :, ti] = (
+                    sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1] ** 0.5
+                )
 
-                gain_error[fi, :, ti] = (inv_norm[fi, :, ti] *
-                                         1.4826 * np.median(np.abs(evals[:-1] - np.median(evals[:-1]))) /
-                                         evals[-1]**0.5)
+                gain_error[fi, :, ti] = (
+                    inv_norm[fi, :, ti]
+                    * 1.4826
+                    * np.median(np.abs(evals[:-1] - np.median(evals[:-1])))
+                    / evals[-1] ** 0.5
+                )
 
                 evalue[fi, :, ti] = evals
 
@@ -202,7 +214,9 @@ def interp_gains(trans_times, gain_mat, times, axis=-1):
     -------
     Array of interpolated gains
     """
-    f = interpolate.interp1d(trans_times, gain_mat, kind='linear', axis=axis, bounds_error=False)
+    f = interpolate.interp1d(
+        trans_times, gain_mat, kind="linear", axis=axis, bounds_error=False
+    )
 
     gains = f(times)
     gains[..., times < trans_times[0]] = gain_mat[..., 0, np.newaxis]
@@ -224,8 +238,13 @@ def _adiff(ts, dt):
     if dt is None:
         return ts
 
-    return ts - 0.5 * (np.mean(ts[..., :dt], axis=-1) +
-                       np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
+    return (
+        ts
+        - 0.5
+        * (np.mean(ts[..., :dt], axis=-1) + np.mean(ts[..., -dt:], axis=-1))[
+            ..., np.newaxis
+        ]
+    )
 
 
 class NoiseSourceFold(task.SingleTask):
@@ -261,10 +280,11 @@ class NoiseSourceFold(task.SingleTask):
         if (self.period is None) or (not self.phase):
             ni_params = None
         else:
-            ni_params = {'ni_period': self.period, 'ni_on_bins': self.phase}
+            ni_params = {"ni_period": self.period, "ni_on_bins": self.phase}
 
-        folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params,
-                                                 only_off=self.only_off)
+        folded_ts = ni_utils.process_synced_data(
+            ts, ni_params=ni_params, only_off=self.only_off
+        )
 
         return folded_ts
 
@@ -329,7 +349,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Ensure that we are distributed over frequency
 
-        ts.redistribute('freq')
+        ts.redistribute("freq")
 
         # Create noise injection data object from input timestream
         nidata = ni_utils.ni_data(ts, self.nchannels, self.ch_ref, self.fbin_ref)
@@ -362,13 +382,19 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
-        cts = containers.TimeStream(timestamp, ts.freq, vis.global_shape[1],
-                                    comm=vis.comm, copy_attrs=ts, gain=True)
+        cts = containers.TimeStream(
+            timestamp,
+            ts.freq,
+            vis.global_shape[1],
+            comm=vis.comm,
+            copy_attrs=ts,
+            gain=True,
+        )
 
         cts.vis[:] = vis
         cts.gain[:] = gain
         cts.gain_dr[:] = dr
-        cts.common['input'] = ts.input
+        cts.common["input"] = ts.input
 
         cts.redistribute(0)
 
@@ -384,7 +410,7 @@ class GatedNoiseCalibration(task.SingleTask):
         Specify what to use to normalise the matrix.
     """
 
-    norm = config.Property(proptype=str, default='off')
+    norm = config.Property(proptype=str, default="off")
 
     def process(self, ts, inputmap):
         """Find gains from noise injection data and apply them to visibilities.
@@ -404,32 +430,34 @@ class GatedNoiseCalibration(task.SingleTask):
         """
 
         # Ensure that we are distributed over frequency
-        ts.redistribute('freq')
+        ts.redistribute("freq")
 
         # Figure out which input channel is the noise source (used as gain reference)
         noise_channel = tools.get_noise_channel(inputmap)
 
         # Get the norm matrix
-        if self.norm == 'gated':
-            norm_array = _extract_diagonal(ts.datasets['gated_vis0'][:])**0.5
+        if self.norm == "gated":
+            norm_array = _extract_diagonal(ts.datasets["gated_vis0"][:]) ** 0.5
             norm_array = tools.invert_no_zero(norm_array)
-        elif self.norm == 'off':
-            norm_array = _extract_diagonal(ts.vis[:])**0.5
+        elif self.norm == "off":
+            norm_array = _extract_diagonal(ts.vis[:]) ** 0.5
             norm_array = tools.invert_no_zero(norm_array)
 
             # Extract the points with zero weight (these will get zero norm)
-            w = (_extract_diagonal(ts.weight[:]) > 0)
+            w = _extract_diagonal(ts.weight[:]) > 0
             w[:, noise_channel] = True  # Make sure we keep the noise channel though!
 
             norm_array *= w
 
-        elif self.norm == 'none':
-            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
+        elif self.norm == "none":
+            norm_array = np.ones(
+                [ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8
+            )
         else:
-            raise RuntimeError('Value of norm not recognised.')
+            raise RuntimeError("Value of norm not recognised.")
 
         # Take a view now to avoid some MPI issues
-        gate_view = ts.datasets['gated_vis0'][:].view(np.ndarray)
+        gate_view = ts.datasets["gated_vis0"][:].view(np.ndarray)
         norm_view = norm_array[:].view(np.ndarray)
 
         # Find gains with the eigenvalue method
@@ -442,7 +470,7 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Create container from gains
         gain_data = containers.GainData(axes_from=ts)
-        gain_data.add_dataset('weight')
+        gain_data.add_dataset("weight")
 
         # Copy data into container
         gain_data.gain[:] = gain
@@ -498,7 +526,7 @@ class SiderealCalibration(task.SingleTask):
 
     """
 
-    source = config.Property(proptype=str, default='CygA')
+    source = config.Property(proptype=str, default="CygA")
     model_fit = config.Property(proptype=bool, default=False)
     use_peak = config.Property(proptype=bool, default=False)
     threshold = config.Property(proptype=float, default=3.0)
@@ -525,7 +553,7 @@ class SiderealCalibration(task.SingleTask):
         """
 
         # Ensure that we are distributed over frequency
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Find the local frequencies
         nfreq = sstream.vis.local_shape[0]
@@ -533,7 +561,7 @@ class SiderealCalibration(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Get the local frequency axis
-        freq = sstream.freq['centre'][sfreq:efreq]
+        freq = sstream.freq["centre"][sfreq:efreq]
 
         # Fetch source
         source = ephemeris.source_dictionary[self.source]
@@ -546,7 +574,9 @@ class SiderealCalibration(task.SingleTask):
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
+        slice_width_deg = 3.0 * cal_utils.guess_fwhm(
+            400.0, pol="X", dec=source._dec, sigma=True
+        )
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -558,15 +588,29 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets["input_mask"][:]]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_x(inp)])
-        yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and tools.is_chime_y(inp)])
+        xfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if (idx in good_input) and tools.is_chime_x(inp)
+            ]
+        )
+        yfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if (idx in good_input) and tools.is_chime_y(inp)
+            ]
+        )
 
         if mpiutil.rank0:
-            print("Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)." %
-                  (len(good_input), nfeed, len(xfeeds), len(yfeeds)))
+            print(
+                "Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)."
+                % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
+            )
 
         # Extract the diagonal (to be used for weighting)
         # prior to differencing on-source and off-source
@@ -578,15 +622,21 @@ class SiderealCalibration(task.SingleTask):
         vis_slice = _adiff(vis_slice, diff)
 
         # Fringestop the data
-        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, inputmap, source)
+        vis_slice = tools.fringestop_pathfinder(
+            vis_slice, ra_slice, freq, inputmap, source
+        )
 
         # Create arrays to hold point source response
         resp = np.zeros([nfreq, nfeed, nra], np.complex128)
         resp_err = np.zeros([nfreq, nfeed, nra], np.float64)
 
         # Solve for the point source response of each set of polarisations
-        evalue_x, resp[:, xfeeds, :], resp_err[:, xfeeds, :] = solve_gain(vis_slice, feeds=xfeeds, norm=norm[:, xfeeds])
-        evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
+        evalue_x, resp[:, xfeeds, :], resp_err[:, xfeeds, :] = solve_gain(
+            vis_slice, feeds=xfeeds, norm=norm[:, xfeeds]
+        )
+        evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(
+            vis_slice, feeds=yfeeds, norm=norm[:, yfeeds]
+        )
 
         # Extract flux density of the source
         rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict_flux(freq))
@@ -598,8 +648,8 @@ class SiderealCalibration(task.SingleTask):
         resp_err /= rt_flux_density[:, np.newaxis, np.newaxis]
 
         # Define units
-        unit_in = sstream.vis.attrs.get('units', 'rt-correlator-units')
-        unit_out = 'rt-Jy'
+        unit_in = sstream.vis.attrs.get("units", "rt-correlator-units")
+        unit_out = "rt-Jy"
 
         # Construct the final gain array from the point source response at transit
         gain = resp[:, :, slice_centre]
@@ -615,25 +665,37 @@ class SiderealCalibration(task.SingleTask):
             # Only fit ra values above the specified dynamic range threshold
             # that are contiguous about the expected peak position.
             fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
-            fit_flag[:, xfeeds, :] = contiguous_flag(dr_x > self.threshold, centre=slice_centre)[:, np.newaxis, :]
-            fit_flag[:, yfeeds, :] = contiguous_flag(dr_y > self.threshold, centre=slice_centre)[:, np.newaxis, :]
+            fit_flag[:, xfeeds, :] = contiguous_flag(
+                dr_x > self.threshold, centre=slice_centre
+            )[:, np.newaxis, :]
+            fit_flag[:, yfeeds, :] = contiguous_flag(
+                dr_y > self.threshold, centre=slice_centre
+            )[:, np.newaxis, :]
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra_slice, resp, resp_err, flag=fit_flag)
+            param, param_cov = cal_utils.fit_point_source_transit(
+                ra_slice, resp, resp_err, flag=fit_flag
+            )
 
             # Overwrite the initial gain estimates for frequencies/feeds
             # where the model fit was successful
             if self.use_peak:
-                gain = np.where(np.isnan(param[:, :, 0]), gain,
-                                param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])))
+                gain = np.where(
+                    np.isnan(param[:, :, 0]),
+                    gain,
+                    param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])),
+                )
             else:
                 for index in np.ndindex(nfreq, nfeed):
                     if np.all(np.isfinite(param[index])):
-                        gain[index] = cal_utils.model_point_source_transit(peak_ra, *param[index])
+                        gain[index] = cal_utils.model_point_source_transit(
+                            peak_ra, *param[index]
+                        )
 
             # Create container to hold results of fit
-            gain_data = containers.PointSourceTransit(ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds,
-                                                      axes_from=sstream)
+            gain_data = containers.PointSourceTransit(
+                ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream
+            )
 
             gain_data.evalue_x[:] = evalue_x
             gain_data.evalue_y[:] = evalue_y
@@ -644,8 +706,8 @@ class SiderealCalibration(task.SingleTask):
             gain_data.parameter_cov[:] = param_cov
 
             # Update units
-            gain_data.response.attrs['units'] = unit_in + ' / ' + unit_out
-            gain_data.response_error.attrs['units'] = unit_in + ' / ' + unit_out
+            gain_data.response.attrs["units"] = unit_in + " / " + unit_out
+            gain_data.response_error.attrs["units"] = unit_in + " / " + unit_out
 
         else:
 
@@ -657,18 +719,18 @@ class SiderealCalibration(task.SingleTask):
 
         # Copy to container all quantities that are common to both
         # StaticGainData and PointSourceTransit containers
-        gain_data.add_dataset('weight')
+        gain_data.add_dataset("weight")
 
         gain_data.gain[:] = gain
         gain_data.weight[:] = dr
 
         # Update units and unit conversion
-        gain_data.gain.attrs['units'] = unit_in + ' / ' + unit_out
-        gain_data.gain.attrs['converts_units_to'] = 'Jy'
+        gain_data.gain.attrs["units"] = unit_in + " / " + unit_out
+        gain_data.gain.attrs["converts_units_to"] = "Jy"
 
         # Add attribute with the name of the point source
         # that was used for calibration
-        gain_data.attrs['source'] = self.source
+        gain_data.attrs["source"] = self.source
 
         # Return gain data
         return gain_data
