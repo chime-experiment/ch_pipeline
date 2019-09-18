@@ -23,13 +23,8 @@ Tasks should go into the appropriate subdirectory of `ch_pipeline/`. Ask for cla
 
 ### Coding Standards
 
-Code should adhere to [PEP8](https://www.python.org/dev/peps/pep-0008/). If you
-haven't looked at it please do so. We're a little more flexible on line length
-than PEP8 (up to 100 characters is fine), but pretty strict on everything else.
-Top tip is that decent editors (e.g. [Atom](http://atom.io/)) can be set to
-automatically check PEP8 compliance as you code with tools like `Pylint`,
-`flake8` or `autopep8`. Some of these also statically check your code for bugs,
-which can be a real time saver.
+Code should adhere to the [CHIME contribution guidelines](https://github.com/chime-experiment/Pipeline/blob/master/CONTRIBUTING.md).
+If you haven't looked at it please do so.
 
 Code should be well documented, with a docstring expected for each public
 function, class or method. These should be done according to Numpy docstring
