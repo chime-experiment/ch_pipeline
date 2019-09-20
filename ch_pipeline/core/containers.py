@@ -448,7 +448,7 @@ class HolographyTransitFitParams(ContainerBase):
 
     @property
     def freq(self):
-        return self.index_map['freq']
+        return self.index_map['freq']['centre']
 
     @property
     def pol(self):
