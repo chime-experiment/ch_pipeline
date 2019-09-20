@@ -434,8 +434,9 @@ class HolographyTransitFitParams(ContainerBase):
 
     def __init__(self, *args, **kwargs):
         if 'param' not in kwargs:
-            kwargs['param'] = np.array(['centroid', 'width', 'amplitude',
-                                        'offset', 'chi2', 'transit_phase'])
+            kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept',
+                                        'phase_slope', 'phase_quad', 'phase_cube', 
+                                        'phase_quart', 'phase_quint'])
         super(TransitFitParams, self).__init__(**kwargs)
 
     @property
