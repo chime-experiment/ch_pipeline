@@ -145,7 +145,7 @@ class RingMapMaker(task.SingleTask):
         nbeam = 1 if self.single_beam else 2 * ncyl - 1
 
         # Define polarisation axis
-        pol = np.array([x + y for x in ["X", "Y"] for y in ["X", "Y"]])
+        pol = np.array(["XX", "reXY", "imXY", "YY"])
         npol = len(pol)
 
         # Create empty array for output
@@ -176,42 +176,25 @@ class RingMapMaker(task.SingleTask):
             # Handle different options for weighting baselines
             if self.weight == "inverse_variance":
                 w = ssw[:, vis_ind]
-
             else:
                 w = (ssw[:, vis_ind] > 0.0).astype(np.float32)
                 w *= redundancy[np.newaxis, vis_ind]
 
-            # Different behavior for intracylinder and intercylinder baselines.
-            if x_ind == 0:
-
-                if not self.exclude_intracyl:
-
-                    vis[:, p_ind, :, x_ind, y_ind] = ssv[:, vis_ind]
-                    vis[:, p_ind, :, x_ind, -y_ind] = ssv[:, vis_ind].conj()
-
-                    invvar[:, p_ind, :, x_ind, y_ind] = ssw[:, vis_ind]
-                    invvar[:, p_ind, :, x_ind, -y_ind] = ssw[:, vis_ind]
-
-                    weight[:, p_ind, :, x_ind, y_ind] = w
-                    weight[:, p_ind, :, x_ind, -y_ind] = w
-
-            else:
-
+            if x_ind != 0 or not self.exclude_intracyl:
                 vis[:, p_ind, :, x_ind, y_ind] = ssv[:, vis_ind]
-
                 invvar[:, p_ind, :, x_ind, y_ind] = ssw[:, vis_ind]
-
                 weight[:, p_ind, :, x_ind, y_ind] = w
 
         # Remove auto-correlations
         if not self.include_auto:
             weight[..., 0, 0] = 0.0
+        # Autos get double-counted at the end
+        weight[..., 0, 0] *= 0.5
+
 
         # Normalize the weighting function
-        coeff = np.full(ncyl, 2.0, dtype=np.float)
-        coeff[0] = 1.0
-        norm = np.sum(np.dot(coeff, weight), axis=-1)
-
+        # Multiply by 2 here to count negative baselines
+        norm = 2 * np.sum(weight, axis=(-2, -1))
         weight *= tools.invert_no_zero(norm)[..., np.newaxis, np.newaxis]
 
         # Construct phase array
@@ -233,7 +216,7 @@ class RingMapMaker(task.SingleTask):
         # Estimate rms noise in the ring map by propagating estimates
         # of the variance in the visibilities
         rm.rms[:] = np.sqrt(
-            np.sum(np.dot(coeff, tools.invert_no_zero(invvar) * weight ** 2.0), axis=-1)
+            2 * np.sum(tools.invert_no_zero(invvar) * weight ** 2.0, axis=(-2, -1))
         )
 
         # Dereference datasets
@@ -256,24 +239,36 @@ class RingMapMaker(task.SingleTask):
 
             # Perform inverse discrete fourier transform in y-direction
             # and inverse fast fourier transform in x-direction
+            bfm = np.dot(weight[lfi] * vis[lfi], pa)
+            sb = np.dot(weight[lfi], pa)
             if self.single_beam:
                 # Only need the 0th term if the irfft, equivalent to adding in EW direction
-                weight[
-                    lfi, :, :, 1:
-                ] *= 2.0  # factor to include negative elements in sum below
-                bfm = np.sum(np.dot(weight[lfi] * vis[lfi], pa), axis=2).real[
-                    :, :, np.newaxis, ...
-                ]
-                sb = np.sum(np.dot(weight[lfi], pa), axis=2).real[:, :, np.newaxis, ...]
+                bfm = np.sum(bfm, axis=2)[:, :, np.newaxis, ...]
+                sb = np.sum(sb, axis=2)[:, :, np.newaxis, ...]
             else:
-                bfm = (
-                    np.fft.irfft(np.dot(weight[lfi] * vis[lfi], pa), nbeam, axis=2)
-                    * nbeam
+                bfm = np.fft.fftshift(
+                    np.fft.ifft(bfm, nbeam, axis=2) * nbeam,
+                    axes=2
                 )
-                sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
+                sb = np.fft.fftshift(
+                    np.fft.ifft(sb, nbeam, axis=2) * nbeam,
+                    axes=2
+                )
 
             # Save to container (shifting to the final axis ordering)
-            rmm[:, :, lfi] = bfm.transpose(2, 0, 1, 3)
-            rmb[:, :, lfi] = sb.transpose(2, 0, 1, 3)
+            # for co-pol we take twice the real part
+            # to complete sum over negative baselines
+            copol_ind = [0, 3]
+            rmm[:, copol_ind, lfi] = 2 * bfm[copol_ind].real.transpose(2, 0, 1, 3)
+            rmb[:, copol_ind, lfi] = 2 * sb[copol_ind].real.transpose(2, 0, 1, 3)
+            # for cross-pol we save real and imaginary parts of complex map formed
+            # by combining positive and negative baselines (which are in the other index)
+            xpol_ind = [1, 2]
+            rmm[:, xpol_ind, lfi] = (
+                bfm[xpol_ind[0]] + bfm[xpol_ind[1]].conj()
+            ).view("(2,)float").transpose(1, 3, 0, 2)
+            rmb[:, xpol_ind, lfi] = (
+                sb[xpol_ind[0]] + sb[xpol_ind[1]].conj()
+            ).view("(2,)float").transpose(1, 3, 0, 2)
 
         return rm
