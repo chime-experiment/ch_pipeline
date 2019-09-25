@@ -223,6 +223,14 @@ class RingMapMaker(task.SingleTask):
         rmm = rm.map[:]
         rmb = rm.dirty_beam[:]
 
+        # Pre-allocate arrays that will be reused inside loop
+        save_nb = 1 if self.single_beam else nbeam
+        pa = np.zeros(vis_pos_1d.shape + el.shape, dtype=vis.dtype)
+        bfm_y = np.zeros((npol, nra, ncyl, self.npix), dtype=vis.dtype)
+        sb_y = np.zeros((npol, nra, ncyl, self.npix), dtype=vis.dtype)
+        bfm = np.zeros((npol, nra, save_nb, self.npix), dtype=vis.dtype)
+        sb = np.zeros((npol, nra, save_nb, self.npix), dtype=vis.dtype)
+
         # Loop over local frequencies and fill ring map
         for lfi, fi in sstream.vis[:].enumerate(0):
 
@@ -231,27 +239,26 @@ class RingMapMaker(task.SingleTask):
 
             wv = scipy.constants.c * 1e-6 / fr
 
-            # Create array that will be used for the inverse
-            # discrete Fourier transform in y-direction
-            pa = np.exp(
-                -2.0j * np.pi * vis_pos_1d[:, np.newaxis] * el[np.newaxis, :] / wv
+            # Inverse discrete Fourier transform in y-direction
+            pa[:] = np.exp(
+                (-2.0j * np.pi / wv * vis_pos_1d[:, np.newaxis]) * el[np.newaxis, :]
             )
 
             # Perform inverse discrete fourier transform in y-direction
             # and inverse fast fourier transform in x-direction
-            bfm = np.dot(weight[lfi] * vis[lfi], pa)
-            sb = np.dot(weight[lfi], pa)
+            bfm_y[:] = np.dot(weight[lfi] * vis[lfi], pa)
+            sb_y[:] = np.dot(weight[lfi], pa)
             if self.single_beam:
                 # Only need the 0th term if the irfft, equivalent to adding in EW direction
-                bfm = np.sum(bfm, axis=2)[:, :, np.newaxis, ...]
-                sb = np.sum(sb, axis=2)[:, :, np.newaxis, ...]
+                bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
+                sb[:] = np.sum(sb_y, axis=2)[:, :, np.newaxis, ...]
             else:
-                bfm = np.fft.fftshift(
-                    np.fft.ifft(bfm, nbeam, axis=2) * nbeam,
+                bfm[:] = np.fft.fftshift(
+                    np.fft.ifft(bfm_y, nbeam, axis=2) * nbeam,
                     axes=2
                 )
-                sb = np.fft.fftshift(
-                    np.fft.ifft(sb, nbeam, axis=2) * nbeam,
+                sb[:] = np.fft.fftshift(
+                    np.fft.ifft(sb_y, nbeam, axis=2) * nbeam,
                     axes=2
                 )
 
