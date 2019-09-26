@@ -253,14 +253,8 @@ class RingMapMaker(task.SingleTask):
                 bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
                 sb[:] = np.sum(sb_y, axis=2)[:, :, np.newaxis, ...]
             else:
-                bfm[:] = np.fft.fftshift(
-                    np.fft.ifft(bfm_y, nbeam, axis=2) * nbeam,
-                    axes=2
-                )
-                sb[:] = np.fft.fftshift(
-                    np.fft.ifft(sb_y, nbeam, axis=2) * nbeam,
-                    axes=2
-                )
+                bfm[:] = np.fft.ifft(bfm_y, nbeam, axis=2) * nbeam
+                sb[:] = np.fft.ifft(sb_y, nbeam, axis=2) * nbeam
 
             # Save to container (shifting to the final axis ordering)
             # for co-pol we take twice the real part
