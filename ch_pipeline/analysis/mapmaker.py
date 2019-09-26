@@ -246,8 +246,8 @@ class RingMapMaker(task.SingleTask):
 
             # Perform inverse discrete fourier transform in y-direction
             # and inverse fast fourier transform in x-direction
-            bfm_y[:] = np.dot(weight[lfi] * vis[lfi], pa)
-            sb_y[:] = np.dot(weight[lfi], pa)
+            bfm_y[:] = np.matmul(weight[lfi] * vis[lfi], pa)
+            sb_y[:] = np.matmul(weight[lfi], pa)
             if self.single_beam:
                 # Only need the 0th term if the irfft, equivalent to adding in EW direction
                 bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
