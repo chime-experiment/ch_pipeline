@@ -191,7 +191,6 @@ class RingMapMaker(task.SingleTask):
         # Autos get double-counted at the end
         weight[..., 0, 0] *= 0.5
 
-
         # Normalize the weighting function
         # Multiply by 2 here to count negative baselines
         norm = 2 * np.sum(weight, axis=(-2, -1))
@@ -266,10 +265,14 @@ class RingMapMaker(task.SingleTask):
             # by combining positive and negative baselines (which are in the other index)
             xpol_ind = [1, 2]
             rmm[:, xpol_ind, lfi] = (
-                bfm[xpol_ind[0]] + bfm[xpol_ind[1]].conj()
-            ).view("(2,)float").transpose(1, 3, 0, 2)
+                (bfm[xpol_ind[0]] + bfm[xpol_ind[1]].conj())
+                .view("(2,)float")
+                .transpose(1, 3, 0, 2)
+            )
             rmb[:, xpol_ind, lfi] = (
-                sb[xpol_ind[0]] + sb[xpol_ind[1]].conj()
-            ).view("(2,)float").transpose(1, 3, 0, 2)
+                (sb[xpol_ind[0]] + sb[xpol_ind[1]].conj())
+                .view("(2,)float")
+                .transpose(1, 3, 0, 2)
+            )
 
         return rm
