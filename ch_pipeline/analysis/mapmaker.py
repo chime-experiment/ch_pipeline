@@ -142,7 +142,7 @@ class RingMapMaker(task.SingleTask):
         nfeed = int(np.round(max_ysep / min_ysep)) + 1
         nvis_1d = 2 * nfeed - 1
         ncyl = np.max(xind) + 1
-        nbeam = 1 if self.single_beam else 2 * ncyl - 1
+        nbeam = 1 if self.single_beam else int(2 * ncyl - 1)
 
         # Define polarisation axis
         pol = np.array(["XX", "reXY", "imXY", "YY"])
