@@ -172,12 +172,12 @@ class TransitGrouper(task.SingleTask):
         # Save list of filenames
         filenames = [ts.attrs['filename'] for ts in self.tstreams]
 
-        dt = ts.time[1] - ts.time[0]
+        dt = self.tstreams[0].time[1] - self.tstreams[0].time[0]
         if dt <= 0:
             self.log.warning("Time steps are not positive definite: dt={:.3f}".format(dt)
                              + " Skipping.")
             ts = None
-        elif stop_ind - start_ind > int(self.min_span / 360. * SIDEREAL_DAY_SEC / dt):
+        if stop_ind - start_ind > int(self.min_span / 360. * SIDEREAL_DAY_SEC / dt):
             if len(self.tstreams) > 1:
                 # Concatenate timestreams
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
