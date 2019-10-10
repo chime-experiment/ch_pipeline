@@ -6,6 +6,7 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 # === End Python 2/3 compatibility
 
 import re
+import yaml
 
 # TODO: Python 3 workaround
 try:
@@ -14,11 +15,26 @@ except ImportError:
     from pathlib2 import Path
 
 
+DEFAULT_SCRIPT = """
+cluster:
+  name: {jobname}
+
+  directory: {dir}
+  temp_directory: {tempdir}
+
+  venv: {venv}
+"""
+
+
 class ProcessingType(object):
     """Baseclass for a pipeline processing type."""
 
     # Must be set externally before using
     root_path = None
+
+    # Defined in sub-classses
+    default_params = {}
+    default_script = DEFAULT_SCRIPT
 
     def __init__(self, revision, create=False):
 
@@ -32,20 +48,69 @@ class ProcessingType(object):
         self._load()
 
     def _create(self):
+        """Save default parameters and pipeline config for this revision."""
+
+        # Write default configuration into directory
+        with (self.revconfig_path).open("w") as fh:
+            dump = yaml.safe_dump(
+                self.default_params, encoding="utf-8", allow_unicode=True
+            )
+            fh.write(str(dump))  # TODO: Python 3 - str needed
+        with (self.jobtemplate_path).open("w") as fh:
+            fh.write(self.default_script)
+
+        # Ensure working directory is created
+        _ = self.workdir_path
+
+        # Subclass hook
+        self._create_hook()
+
+    def _create_hook(self):
         """Implement to add custom behaviour when a revision is created."""
         pass
 
     def _load(self):
+        """Load default parameters and pipeline config for this revision."""
+
+        # Load config from file
+        with (self.revconfig_path).open() as fc:
+            self._revparams = yaml.safe_load(fc)
+
+        # Load the jobscript
+        with (self.jobtemplate_path).open() as fp:
+            self._jobconfig = fp.read()
+
+        # Subclass hook
+        self._load_hook()
+
+    def _load_hook(self):
         """Implement to add custom behaviour when a revision is loaded."""
         pass
 
     def job_script(self, tag):
         """The slurm job script to queue up."""
-        return None
 
-    def pipeline_script(self):
-        """The slurm jobscript to queue up."""
-        raise NotImplementedError("""Must be implemented in derived type.""")
+        jobparams = dict(self._revparams)
+        jobparams.update(
+            {
+                "jobname": self.job_name(tag),
+                "dir": str(self.base_path / tag),
+                "tempdir": str(self.workdir_path / tag),
+            }
+        )
+
+        venv = find_venv()
+
+        if venv:
+            jobparams.update({"venv": venv})
+
+        jobparams = self._finalise_jobparams(tag, jobparams)
+
+        return self._jobconfig.format(**jobparams)
+
+    def _finalise_jobparams(self, tag, jobparams):
+        """Implement to edit job params based on the given tag before they are submitted."""
+        return jobparams
 
     def ls(self):
         """Find all matching data.
@@ -166,18 +231,53 @@ class ProcessingType(object):
 
         return base_path
 
+    @property
+    def workdir_path(self):
+        """Path to the working directory."""
+        workdir_path = self.base_path / "working"
+        workdir_path.mkdir(exist_ok=True)
+
+        return workdir_path
+
+    @property
+    def revconfig_path(self):
+        """Path to default config for this revision."""
+        config_path = self.base_path / "config"
+        config_path.mkdir(exist_ok=True)
+
+        return config_path / "revconfig.yaml"
+
+    @property
+    def jobtemplate_path(self):
+        """Path to template pipeline job config for this revision."""
+        config_path = self.base_path / "config"
+        config_path.mkdir(exist_ok=True)
+
+        return config_path / "jobtemplate.yaml"
+
     def available(self):
         """Return the list of tags that we can generate given current data.
 
         This can (and should) include tags that have already been processed
-        if the prerequites are still available.
+        if the prerequites are still available, but will exclude any tags
+        currently present in the working directory.
 
         Returns
         -------
         tags : list of strings
             A list of all the tags that could be generated.
         """
-        pass
+        tags = self._available_tags()
+
+        # Filter out entries that already exist in the working directory
+        working_tags = [path.name for path in self.workdir_path.glob("*")]
+        tags = [tag for tag in tags if tag not in working_tags]
+
+        return tags
+
+    def _available_tags(self):
+        """Return the list of tags available for processing."""
+        return []
 
     @classmethod
     def latest(cls):
@@ -220,6 +320,19 @@ class ProcessingType(object):
         pending = set(self.available()).difference(self.ls(), waiting, running)
 
         return sorted(list(pending))
+
+
+def find_venv():
+    """Get the path of the current virtual environment
+
+    Returns
+    -------
+    path : str
+        Path to the venv, or `None` if we are not in a virtual environment.
+    """
+    import os
+
+    return os.environ.get("VIRTUAL_ENV", None)
 
 
 def queue_job(script, submit=True):
