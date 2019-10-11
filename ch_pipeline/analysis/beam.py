@@ -472,8 +472,8 @@ class HolographyTransitFit(task.SingleTask):
         # Set bounds of fit to twice FWHM
         local_slice = slice(transit.beam.local_offset,
                             transit.beam.local_offset + transit.beam.local_shape[0])
-        fit_bnd = (self.nfwhm * SPEED_LIGHT / transit.freq[local_slice] /
-                   CHIME_CYL_W / 1.95 / 2 / np.pi * 360.)
+        fit_bnd = (0.5 * self.nfwhm * SPEED_LIGHT / transit.freq[local_slice] /
+                   CHIME_CYL_W * 1.21 / 2 / np.pi * 360.)
 
         # Collapse polarization axis to use function from ch_util
         tmp_shape = (transit.beam.shape[0], transit.beam.shape[1]*transit.beam.shape[2],
@@ -491,7 +491,7 @@ class HolographyTransitFit(task.SingleTask):
             transit.beam[:].reshape(tmp_shape),
             np.sqrt(tools.invert_no_zero(transit.weight[:].reshape(tmp_shape))),
             flagged,
-            fwhm=np.repeat((fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.shape[2], axis=1)
+            fwhm=np.repeat((2 * fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.shape[2], axis=1)
         )
 
         # Pack into container
