@@ -103,10 +103,17 @@ def item():
 
 
 @type.command("list")
-def type_list():
+@click.option(
+    "-a",
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Also list types for which there is no data.",
+)
+def type_list(show_all):
     """List known processing types."""
 
-    for type_ in base.ProcessingType.ls_type():
+    for type_ in base.ProcessingType.ls_type(existing=(not show_all)):
         click.echo(type_)
 
 
