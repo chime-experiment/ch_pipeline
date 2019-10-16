@@ -39,6 +39,7 @@ class PRev(click.ParamType):
     name = "processing revision"
 
     def convert(self, value, param, ctx):
+        """Parses `value` as {type}:{revision}."""
 
         r = value.split(":")
 
@@ -160,7 +161,8 @@ def item_list(revision, long, human):
 @item.command()
 @click.argument("revision", type=PREV)
 def pending(revision):
-    """List items that do not exist within REVISION but can be generated."""
+    """List items that do not exist within REVISION
+    (given as type:revision) but can be generated."""
     pending = revision.pending()
     for tag in pending:
         click.echo(tag)
@@ -179,7 +181,7 @@ def pending(revision):
     "--submit/--no-submit", default=True, help="Submit the jobs to the queue (or not)"
 )
 def generate(revision, number, submit):
-    """Submit pending jobs for REVISION."""
+    """Submit pending jobs for REVISION (given as type:revision)."""
     revision.generate(max=number, submit=submit)
 
 
