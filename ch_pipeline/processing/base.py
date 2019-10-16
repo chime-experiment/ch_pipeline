@@ -483,14 +483,10 @@ def slurm_jobs(user=None):
 def all_subclasses(cls):
     """Recursively find all subclasses of cls."""
 
-    subclasses = []
+    subclasses = cls.__subclasses__()
 
-    stack = [cls]
-    while stack:
-        cls = stack.pop()
-
-        for c in cls.__subclasses__():
-            subclasses.append(c)
-            stack.append(c)
+    if subclasses != []:
+        for subcls in subclasses:
+            subclasses += all_subclasses(subcls)
 
     return subclasses
