@@ -7,6 +7,8 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
 import re
 import yaml
+from subprocess import check_call
+import tempfile
 
 # TODO: Python 3 workaround
 try:
@@ -26,8 +28,9 @@ cluster:
 """
 
 VERSION_SCRIPT = """
+import yaml
 modules = {}
-fname = {}
+fname = "{}"
 versions = dict()
 for k in modules:
     versions[k] = None
@@ -35,12 +38,13 @@ for k in modules:
         module = __import__(k)
     except ImportError:
         print("Could not import {{}}. Skipping version tag.".format(k))
+        continue
     try:
         versions[k] = module.__version__
     except AttributeError:
         print("Could not find a version for {{}}.".format(k))
 
-with open(fname, 'w+') as fh:
+with open(fname, 'w') as fh:
     yaml.dump(versions, fh)
 
 """
@@ -55,6 +59,9 @@ class ProcessingType(object):
     # Defined in sub-classses
     default_params = {}
     default_script = DEFAULT_SCRIPT
+
+    # Modules to save version of alongside processed data
+    _versioned_modules = ["caput", "ch_util", "ch_pipeline", "draco", "driftscan"]
 
     def __init__(self, revision, create=False):
 
@@ -79,8 +86,9 @@ class ProcessingType(object):
         with (self.jobtemplate_path).open("w") as fh:
             fh.write(self.default_script)
 
-        # Ensure working directory is created
+        # Ensure working directory and venv paths are created
         _ = self.workdir_path
+        _ = self.venv_path
 
         # Subclass hook
         self._create_hook()
@@ -119,12 +127,13 @@ class ProcessingType(object):
             }
         )
 
-        venv = find_venv()
-
-        if venv:
-            jobparams.update({"venv": venv})
-
         jobparams = self._finalise_jobparams(tag, jobparams)
+
+        if not (self.venv_path / "bin/activate").exists():
+            raise ValueError(
+                "Couldn't find a virtualenv script in {}.".format(self.venv_path)
+            )
+        jobparams.update({"venv": self.venv_path})
 
         return self._jobconfig.format(**jobparams)
 
@@ -275,6 +284,14 @@ class ProcessingType(object):
 
         return config_path / "jobtemplate.yaml"
 
+    @property
+    def venv_path(self):
+        """Path to virtual environment for this revision."""
+        venv_path = self.base_path / "venv"
+        venv_path.mkdir(exist_ok=True)
+
+        return venv_path
+
     def available(self):
         """Return the list of tags that we can generate given current data.
 
@@ -332,6 +349,7 @@ class ProcessingType(object):
 
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
+            self._record_versions(self.base_path / tag / "versions.yaml")
 
     def pending(self):
         """Jobs available to run."""
@@ -340,6 +358,14 @@ class ProcessingType(object):
         pending = set(self.available()).difference(self.ls(), waiting, running)
 
         return sorted(list(pending))
+
+    def _record_versions(self, fname):
+        with tempfile.NamedTemporaryFile("w+") as fh:
+            fh.write(VERSION_SCRIPT.format(list(self._versioned_modules), fname))
+            fh.flush()
+
+            cmd = [str(self.venv_path / "bin/python"), fh.name]
+            check_call(cmd)
 
 
 def find_venv():
