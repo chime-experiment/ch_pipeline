@@ -125,7 +125,13 @@ def create(type_):
     """Create a new revision of TYPE."""
 
     rev = type_.create_rev()
-    click.echo(rev.revision)
+    click.echo("Created {}".format(rev.revision))
+    click.echo(
+        (
+            "You must create a virtual environment in {} "
+            "before you can run any jobs."
+        ).format(rev.venv_path)
+    )
 
 
 @item.command("list")

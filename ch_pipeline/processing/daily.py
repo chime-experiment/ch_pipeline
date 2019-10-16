@@ -163,6 +163,7 @@ pipeline:
         output_root: "delayspectrum_"
 """
 
+
 class DailyProcessing(base.ProcessingType):
     """
     """

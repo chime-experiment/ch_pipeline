@@ -7,6 +7,8 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
 import re
 import yaml
+from subprocess import check_call
+import tempfile
 
 # TODO: Python 3 workaround
 try:
@@ -59,8 +61,9 @@ class ProcessingType(object):
         with (self.jobtemplate_path).open("w") as fh:
             fh.write(self.default_script)
 
-        # Ensure working directory is created
+        # Ensure working directory and venv paths are created
         _ = self.workdir_path
+        _ = self.venv_path
 
         # Subclass hook
         self._create_hook()
@@ -99,12 +102,13 @@ class ProcessingType(object):
             }
         )
 
-        venv = find_venv()
-
-        if venv:
-            jobparams.update({"venv": venv})
-
         jobparams = self._finalise_jobparams(tag, jobparams)
+
+        if not (self.venv_path / "bin/activate").exists():
+            raise ValueError(
+                "Couldn't find a virtualenv script in {}.".format(self.venv_path)
+            )
+        jobparams.update({"venv": self.venv_path})
 
         return self._jobconfig.format(**jobparams)
 
@@ -254,6 +258,14 @@ class ProcessingType(object):
         config_path.mkdir(exist_ok=True)
 
         return config_path / "jobtemplate.yaml"
+
+    @property
+    def venv_path(self):
+        """Path to virtual environment for this revision."""
+        venv_path = self.base_path / "venv"
+        venv_path.mkdir(exist_ok=True)
+
+        return venv_path
 
     def available(self):
         """Return the list of tags that we can generate given current data.
