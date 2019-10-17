@@ -7,6 +7,7 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
 import re
 import yaml
+import os
 from subprocess import check_call
 import tempfile
 
@@ -49,6 +50,10 @@ with open(fname, 'w') as fh:
 
 """
 
+DESC_HEAD = """# Revision `{}` of type `{}`
+Please describe the purpose/changes of this revision here.
+"""
+
 
 class ProcessingType(object):
     """Baseclass for a pipeline processing type."""
@@ -89,6 +94,12 @@ class ProcessingType(object):
         # Ensure working directory and venv paths are created
         _ = self.workdir_path
         _ = self.venv_path
+
+        # Open description file in editor
+        desc_path = self.base_path / "description.md"
+        with desc_path.open("w") as fh:
+            fh.write(DESC_HEAD.format(self.revision, self.type_name))
+        os.system(r"${EDITOR:-vi} " + str(desc_path))
 
         # Subclass hook
         self._create_hook()
