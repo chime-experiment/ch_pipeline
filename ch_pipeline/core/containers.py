@@ -440,42 +440,42 @@ class SourceModel(ContainerBase):
     multiple (possibly extended) sources.
     """
 
-    _axes = ('freq', 'pol', 'time', 'param', 'source')
+    _axes = ("freq", "pol", "time", "param", "source")
 
     _dataset_spec = {
-        'amplitude': {
-            'axes': ['freq', 'pol', 'time', 'source'],
-            'dtype': np.complex64,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "amplitude": {
+            "axes": ["freq", "pol", "time", "source"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'coeff': {
-            'axes': ['freq', 'pol', 'param'],
-            'dtype': np.complex64,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "coeff": {
+            "axes": ["freq", "pol", "param"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'source_index': {
-            'axes': ['param'],
-            'dtype': np.int,
-            'initialise': False,
-            'distributed': False,
-        }
+        "source_index": {
+            "axes": ["param"],
+            "dtype": np.int,
+            "initialise": False,
+            "distributed": False,
+        },
     }
 
     @property
     def amplitude(self):
-        return self.datasets['amplitude']
+        return self.datasets["amplitude"]
 
     @property
     def coeff(self):
-        return self.datasets['coeff']
+        return self.datasets["coeff"]
 
     @property
     def source_index(self):
-        return self.datasets['source_index']
+        return self.datasets["source_index"]
 
 
 class SunTransit(ContainerBase):
