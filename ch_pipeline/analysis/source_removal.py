@@ -1,4 +1,4 @@
-"""Tasks for removing sources.
+"""Tasks for removing bright sources from the data.
 
 .. currentmodule:: ch_pipeline.analysis.source_removal
 
@@ -193,8 +193,8 @@ def solve_multiple_times(vis, weight, source_model):
 
     Returns
     -------
-    coeff : np.ndarray[ntime, nparam]
-        Best-fit coefficients of the model for each time.
+    coeff : np.ndarray[nparam,]
+        Best-fit coefficients of the model.
     """
     nbaseline, ntime, nparam = source_model.shape
 
@@ -481,7 +481,7 @@ class SubtractSources(task.SingleTask):
     """Subtract a source model from the visibilities."""
 
     def setup(self, tel):
-        """Set up the source model.
+        """Extract inputmap from the telescope instance provided.
 
         Parameters
         ----------
@@ -491,7 +491,7 @@ class SubtractSources(task.SingleTask):
         self.inputmap = telescope.feeds
 
     def process(self, data, model):
-        """Subtract the source model provided from the visibilities.
+        """Subtract a source model from the visibilities.
 
         Parameters
         ----------
