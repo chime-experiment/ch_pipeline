@@ -423,16 +423,14 @@ class MakeHolographyBeam(task.SingleTask):
         prod_groups_cox = [pg.copy() for pg in prod_groups_sorted]
         conj_cox = [pg.copy() for pg in conj]
         input_pol = np.array(
-            [ipt.pol if isinstance(ipt, (tools.CHIMEAntenna, tools.HolographyAntenna))
+            [ipt.pol if (tools.is_array(ipt) or tools.is_holographic(ipt))
              else inputmap[input_26m[0]].pol for ipt in inputmap]
         )
         for i, pg in enumerate(prod_groups_sorted):
             group_prod = prod[pg]
             # Determine co/cross in each prod group
-            cp = input_pol[group_prod['input_a']] == inputmap[input_26m[i]].pol
-            if np.any(conj[i]):
-                cp[conj[i]] = (input_pol[group_prod['input_b'][conj[i]]] ==
-                               inputmap[input_26m[i]].pol)
+            cp = (input_pol[np.where(conj[i], group_prod['input_b'], group_prod['input_a'])] ==
+                  inputmap[input_26m[i]].pol)
             xp = np.logical_not(cp)
             copol.append(cp)
             xpol.append(xp)
