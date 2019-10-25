@@ -223,6 +223,21 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
+class LoadCorrDataFilesFromParams(LoadCorrDataFiles):
+    """Wrapper for LoadCorrDataFiles that get files from config parameters.
+
+    Attributes
+    ----------
+    files : list
+        List of fiels to load.
+    """
+
+    files = config.Property(proptype=list)
+
+    def setup(self):
+        super().setup(self.files)
+
+
 class LoadSetupFile(pipeline.TaskBase):
     """Loads a file from disk into a memh5 container
     during setup.
