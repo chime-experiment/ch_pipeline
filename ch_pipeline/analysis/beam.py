@@ -467,7 +467,7 @@ class HolographyTransitFit(task.SingleTask):
                 Fit parameters.
         """
 
-        transit.beam.redistribute('freq')
+        transit.redistribute('freq')
 
         # Set bounds of fit to twice FWHM
         local_slice = slice(transit.beam.local_offset,
@@ -476,11 +476,11 @@ class HolographyTransitFit(task.SingleTask):
                    CHIME_CYL_W * 1.21 / 2 / np.pi * 360.)
 
         # Collapse polarization axis to use function from ch_util
-        tmp_shape = (transit.beam.shape[0], transit.beam.shape[1]*transit.beam.shape[2],
-                     transit.beam.shape[3])
+        tmp_shape = (transit.beam.local_shape[0], transit.beam.local_shape[1]*transit.beam.local_shape[2],
+                     transit.beam.local_shape[3])
 
         # Flag missing data and outside bounds
-        flagged = (transit.weight[:] != 0.).reshape(tmp_shape)
+        flagged = np.reshape(transit.weight[:] != 0., tmp_shape)
         flagged = np.logical_and(
             flagged, (np.abs(transit.pix['phi']) < fit_bnd[:, np.newaxis])[:, np.newaxis, :]
         )
@@ -488,18 +488,19 @@ class HolographyTransitFit(task.SingleTask):
         # Perform fit
         res = fit_point_source_transit(
             transit.pix['phi'],
-            transit.beam[:].reshape(tmp_shape),
-            np.sqrt(tools.invert_no_zero(transit.weight[:].reshape(tmp_shape))),
+            np.reshape(transit.beam[:], tmp_shape),
+            np.sqrt(tools.invert_no_zero(np.reshape(transit.weight[:], tmp_shape))),
             flagged,
-            fwhm=np.repeat((2 * fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.shape[2], axis=1)
+            fwhm=np.repeat((2 * fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.local_shape[1] *
+                           transit.beam.local_shape[2], axis=1)
         )
 
         # Pack into container
         param_labels = ['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope',
                         'phase_quad', 'phase_cube', 'phase_quart', 'phase_quint']
         fit = HolographyTransitFitParams(
-            parameter=res[0].reshape(transit.beam.shape[:-1]),
-            parameter_cov=res[1].reshape(transit.beam.shape[:-1]),
+            parameter=np.reshape(res[0], transit.beam.local_shape[:-1]),
+            parameter_cov=np.reshape(res[1], transit.beam.local_shape[:-1]),
             param=param_labels, axes_from=transit
         )
 
