@@ -437,7 +437,7 @@ class HolographyTransitFitParams(ContainerBase):
             kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept',
                                         'phase_slope', 'phase_quad', 'phase_cube', 
                                         'phase_quart', 'phase_quint'])
-        super(TransitFitParams, self).__init__(**kwargs)
+        super(HolographyTransitFitParams, self).__init__(**kwargs)
 
     @property
     def parameter(self):

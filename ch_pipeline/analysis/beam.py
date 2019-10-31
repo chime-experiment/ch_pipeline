@@ -499,8 +499,10 @@ class HolographyTransitFit(task.SingleTask):
         param_labels = ['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope',
                         'phase_quad', 'phase_cube', 'phase_quart', 'phase_quint']
         fit = HolographyTransitFitParams(
-            parameter=np.reshape(res[0], transit.beam.local_shape[:-1]),
-            parameter_cov=np.reshape(res[1], transit.beam.local_shape[:-1]),
+            parameter=np.reshape(res[0], (transit.beam.local_shape[0], transit.beam.local_shape[1], 
+                transit_beam.local_shape[2], 9)),
+            parameter_cov=np.reshape(res[1], (transit.beam.local_shape[0], transit.beam.local_shape[1], 
+                transit_beam.local_shape[2], 9, 9)),
             param=param_labels, axes_from=transit
         )
 
