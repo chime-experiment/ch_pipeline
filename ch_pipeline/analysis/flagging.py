@@ -431,7 +431,7 @@ class MonitorCorrInput(task.SingleTask):
                 cm.full_check()
             except (RuntimeError, ValueError) as error:
                 # No sources available for this csd
-                print ("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
+                print("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
                 continue
 
             # Accumulate flags over multiple days
