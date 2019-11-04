@@ -566,8 +566,12 @@ class EigenCalibration(task.SingleTask):
         to the median value over feeds of a given polarisation.
     neigen : int
         Number of eigenvalues to include in the orthogonalization.
+    max_hour_angle : float
+        The maximum hour angle in degrees to consider in the analysis.
+        Hour angles between [window * max_hour_angle, max_hour_angle] will
+        be used for the determination of the off source eigenvalue.
     window : float
-        Fraction of the maximum hour angle considered on source.
+        Fraction of the maximum hour angle considered still on source.
     dyn_rng_threshold : float
         Ratio of the second largest eigenvalue on source to the largest eigenvalue
         off source below which frequencies and times will be considered contaminated
@@ -582,6 +586,7 @@ class EigenCalibration(task.SingleTask):
     phase_ref = config.Property(proptype=list, default=[1152, 1408])
     med_phase_ref = config.Property(proptype=bool, default=False)
     neigen = config.Property(proptype=int, default=2)
+    max_hour_angle = config.Property(proptype=float, default=10.0)
     window = config.Property(proptype=float, default=0.75)
     dyn_rng_threshold = config.Property(proptype=float, default=3.0)
     telescope_rotation = config.Property(proptype=float, default=-0.088)
@@ -638,8 +643,9 @@ class EigenCalibration(task.SingleTask):
         ha = ((ha + 180.0) % 360.0) - 180.0
         ha = np.radians(ha)
 
-        window = self.window * np.max(np.abs(ha))
-        off_source = np.abs(ha) > window
+        max_ha_off_source = np.minimum(np.max(np.abs(ha)), np.radians(self.max_hour_angle))
+        min_ha_off_source = self.window * max_ha_off_source
+        off_source = (np.abs(ha) >= min_ha_off_source) & (np.abs(ha) <= max_ha_off_source)
 
         itrans = np.argmin(np.abs(ha))
 
@@ -652,6 +658,12 @@ class EigenCalibration(task.SingleTask):
         erms = data.datasets['erms'][:].view(np.ndarray)
         vis = data.datasets['vis'][:].view(np.ndarray)
         weight = data.flags['vis_weight'][:].view(np.ndarray)
+
+        # Check for negative autocorrelations (bug observed in older data)
+        negative_auto = vis.real < 0.0
+        if np.any(negative_auto):
+            vis[negative_auto] = 0.0 + 0.0J
+            weight[negative_auto] = 0.0
 
         # Find inputs that were not included in the eigenvalue decomposition
         eps = 10.0 * np.finfo(evec.dtype).eps
@@ -670,6 +682,11 @@ class EigenCalibration(task.SingleTask):
             if not input_flags[ref]:
                 ValueError("Requested phase reference (%d) "
                            "was not included in decomposition." % ref)
+
+        # Update input_flags to include feeds not present in database
+        for idf, inp in enumerate(inputmap):
+            if not tools.is_chime(inp):
+                input_flags[idf] = False
 
         # Determine x and y pol index
         xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
@@ -696,6 +713,12 @@ class EigenCalibration(task.SingleTask):
         dist = tools.get_feed_positions(inputmap)
         for pp, feeds in enumerate(pol):
             dist[feeds, :] -= dist[self.phase_ref[pp], np.newaxis, :]
+
+        # Check for feeds that do not have a valid distance (feedpos are set to nan)
+        no_distance = np.flatnonzero(np.any(np.isnan(dist), axis=1))
+        if (no_distance.size > 0) and np.any(input_flags[no_distance]):
+            raise RuntimeError("Do not have positions for feeds: %s" %
+                               str(no_distance[input_flags[no_distance]]))
 
         # Determine the number of eigenvalues to include in the orthogonalization
         neigen = min(max(npol, self.neigen), neigen)
@@ -1352,7 +1375,7 @@ class SiderealCalibration(task.SingleTask):
         sstream : containers.SiderealStream
             Rigidized sidereal timestream to calibrate.
         inputmap : list of :class:`CorrInput`s
-            A list of describing the inputs as they are in the file.
+            List describing the inputs as they are in the file.
         inputmask : containers.CorrInputMask
             Mask indicating which correlator inputs to use in the
             eigenvalue decomposition.
