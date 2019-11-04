@@ -68,14 +68,14 @@ from caput import mpiutil, pipeline, config
 from ch_util import tools, ephemeris
 from draco.core import task
 
-_DEFAULT_NODE_SPOOF = {'cedar': '/project/rpp-krs/chime/chime_online/'}
+_DEFAULT_NODE_SPOOF = {"cedar": "/project/rpp-krs/chime/chime_online/"}
 
 
 def _force_list(val):
     """Ensure configuration property is a list."""
     if val is None:
         return []
-    elif hasattr(val, '__iter__'):
+    elif hasattr(val, "__iter__"):
         return val
     else:
         return [val]
@@ -131,7 +131,7 @@ class QueryDatabase(pipeline.TaskBase):
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
-    instrument = config.Property(proptype=str, default='chimestack')
+    instrument = config.Property(proptype=str, default="chimestack")
     source_26m = config.Property(proptype=str, default=None)
 
     start_time = config.Property(default=None)
@@ -177,7 +177,7 @@ class QueryDatabase(pipeline.TaskBase):
 
             layout.connect_database()
 
-            f = di.Finder(node_spoof = self.node_spoof)
+            f = di.Finder(node_spoof=self.node_spoof)
 
             # should be redundant if an instrument has been specified
             f.only_corr()
@@ -192,8 +192,10 @@ class QueryDatabase(pipeline.TaskBase):
 
             if self.start_RA and self.end_RA:
                 f.include_RA_interval(self.start_RA, self.end_RA)
-            elif (self.start_RA or self.start_RA):
-                    print('WARNING: one but not both of start_RA and end_RA are set. Ignoring both.')
+            elif self.start_RA or self.start_RA:
+                print(
+                    "WARNING: one but not both of start_RA and end_RA are set. Ignoring both."
+                )
 
             f.filter_acqs(di.ArchiveInst.name == self.instrument)
 
@@ -201,36 +203,50 @@ class QueryDatabase(pipeline.TaskBase):
                 f.exclude_daytime()
 
             if self.exclude_sun:
-                f.exclude_sun(time_delta=self.exclude_sun_time_delta,
-                              time_delta_rise_set=self.exclude_sun_time_delta_rise_set)
+                f.exclude_sun(
+                    time_delta=self.exclude_sun_time_delta,
+                    time_delta_rise_set=self.exclude_sun_time_delta_rise_set,
+                )
 
             if self.include_transits:
                 time_delta = self.include_transits_time_delta
                 ntime_delta = len(time_delta)
                 if (ntime_delta > 1) and (ntime_delta < len(self.include_transits)):
-                    raise ValueError("Must specify `time_delta` for each source in "\
-                                     "`include_transits` or provide single value for all sources.")
+                    raise ValueError(
+                        "Must specify `time_delta` for each source in "
+                        "`include_transits` or provide single value for all sources."
+                    )
                 for ss, src in enumerate(self.include_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
-                    bdy = ephemeris.source_dictionary[src] if isinstance(src, basestring) else src
+                    bdy = (
+                        ephemeris.source_dictionary[src]
+                        if isinstance(src, basestring)
+                        else src
+                    )
                     f.include_transits(bdy, time_delta=tdelta)
 
             if self.exclude_transits:
                 time_delta = self.exclude_transits_time_delta
                 ntime_delta = len(time_delta)
                 if (ntime_delta > 1) and (ntime_delta < len(self.exclude_transits)):
-                    raise ValueError("Must specify `time_delta` for each source in "\
-                                     "`exclude_transits` or provide single value for all sources.")
+                    raise ValueError(
+                        "Must specify `time_delta` for each source in "
+                        "`exclude_transits` or provide single value for all sources."
+                    )
                 for ss, src in enumerate(self.exclude_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
-                    bdy = ephemeris.source_dictionary[src] if isinstance(src, basestring) else src
+                    bdy = (
+                        ephemeris.source_dictionary[src]
+                        if isinstance(src, basestring)
+                        else src
+                    )
                     f.exclude_transits(bdy, time_delta=tdelta)
 
             if self.source_26m:
                 f.include_26m_obs(self.source_26m)
 
             results = f.get_results()
-            files = [ fname for result in results for fname in result[0] ]
+            files = [fname for result in results for fname in result[0]]
             files.sort()
 
         files = mpiutil.world.bcast(files, root=0)
@@ -255,6 +271,7 @@ class QueryRun(pipeline.TaskBase):
     node_spoof : str, optional
         Node spoof argument. See documentation of :class:`ch_util.data_index.Finder`.
     """
+
     run_name = config.Property(proptype=str)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
@@ -276,19 +293,31 @@ class QueryRun(pipeline.TaskBase):
 
             layout.connect_database()
 
-            cat_run = layout.global_flag_category.select().where(layout.global_flag_category.name == 'run').get()
+            cat_run = (
+                layout.global_flag_category.select()
+                .where(layout.global_flag_category.name == "run")
+                .get()
+            )
 
             # Find run in database
-            run_query = layout.global_flag.select().where(layout.global_flag.category == cat_run,
-                                                          layout.global_flag.name == self.run_name)
+            run_query = layout.global_flag.select().where(
+                layout.global_flag.category == cat_run,
+                layout.global_flag.name == self.run_name,
+            )
 
             # Make sure we only have flags with active events
-            run_query = run_query.join(layout.graph_obj).join(layout.event).where(layout.event.active)
+            run_query = (
+                run_query.join(layout.graph_obj)
+                .join(layout.event)
+                .where(layout.event.active)
+            )
 
             if run_query.count() == 0:
-                raise RuntimeError('Run %s not found in database' % self.run_name)
+                raise RuntimeError("Run %s not found in database" % self.run_name)
             elif run_query.count() > 1:
-                raise RuntimeError('Multiple global flags found in database for run %s' % self.run_name)
+                raise RuntimeError(
+                    "Multiple global flags found in database for run %s" % self.run_name
+                )
 
             run = run_query.get()
 
@@ -298,7 +327,7 @@ class QueryRun(pipeline.TaskBase):
 
             # Fetch the instrument
             if run.inst is None:
-                raise RuntimeError('Instrument is not specified in database.')
+                raise RuntimeError("Instrument is not specified in database.")
             inst_obj = run.inst
 
             # Create a finder object limited to the relevant time
@@ -317,7 +346,7 @@ class QueryRun(pipeline.TaskBase):
 
             # Pull out the results and extract all the files
             results = fi.get_results()
-            files = [ fname for result in results for fname in result[0] ]
+            files = [fname for result in results for fname in result[0]]
             files.sort()
 
         files = mpiutil.world.bcast(files, root=0)
@@ -346,8 +375,8 @@ class QueryDataspecFile(pipeline.TaskBase):
         Root of archive to add to file paths.
     """
 
-    dataset_file = config.Property(proptype=str, default='')
-    dataset_name = config.Property(proptype=str, default='')
+    dataset_file = config.Property(proptype=str, default="")
+    dataset_name = config.Property(proptype=str, default="")
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
     def setup(self):
@@ -362,38 +391,40 @@ class QueryDataspecFile(pipeline.TaskBase):
         import yaml
 
         # Set to default datasets file
-        if self.dataset_file == '':
-            self.dataset_file = os.path.dirname(__file__) + '/data/datasets.yaml'
+        if self.dataset_file == "":
+            self.dataset_file = os.path.dirname(__file__) + "/data/datasets.yaml"
 
         # Check existense and read yaml datasets file
         if not os.path.exists(self.dataset_file):
             raise Exception("Dataset file not found.")
 
-        with open(self.dataset_file, 'r') as f:
+        with open(self.dataset_file, "r") as f:
             dconf = yaml.safe_load(f)
 
-        if 'datasets' not in dconf:
+        if "datasets" not in dconf:
             raise Exception("No datasets.")
 
-        dsets = dconf['datasets']
+        dsets = dconf["datasets"]
 
         # Find the correct dataset
         dspec = None
         for ds in dsets:
-            if ds['name'] == self.dataset_name:
+            if ds["name"] == self.dataset_name:
                 dspec = ds
                 break
 
         # Raise exception if it's not found
         if dspec is None:
-            raise Exception("Dataset %s not found in %s." % (self.dataset_name, self.dataset_file))
+            raise Exception(
+                "Dataset %s not found in %s." % (self.dataset_name, self.dataset_file)
+            )
 
-        if ('instrument' not in dspec) or ('timerange' not in dspec):
+        if ("instrument" not in dspec) or ("timerange" not in dspec):
             raise Exception("Invalid dataset.")
 
         # Add archive root if exists
         if self.node_spoof is not None:
-            dspec['node_spoof'] = self.node_spoof
+            dspec["node_spoof"] = self.node_spoof
 
         files = files_from_spec(dspec, node_spoof=self.node_spoof)
 
@@ -426,12 +457,11 @@ class QueryDataspec(pipeline.TaskBase):
             List of files to load
         """
 
-        dspec = { 'instrument': self.instrument,
-                  'timerange': self.timerange }
+        dspec = {"instrument": self.instrument, "timerange": self.timerange}
 
         # Add archive root if exists
         if self.node_spoof is not None:
-            dspec['node_spoof'] = self.node_spoof
+            dspec["node_spoof"] = self.node_spoof
 
         files = files_from_spec(dspec, node_spoof=self.node_spoof)
 
@@ -465,7 +495,7 @@ class QueryAcquisitions(task.MPILoggedTask):
     """
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
-    instrument = config.Property(proptype=str, default='chimestack')
+    instrument = config.Property(proptype=str, default="chimestack")
     start_time = config.Property(default=None)
     end_time = config.Property(default=None)
     accept_all_global_flags = config.Property(proptype=bool, default=False)
@@ -495,7 +525,7 @@ class QueryAcquisitions(task.MPILoggedTask):
 
             layout.connect_database()
 
-            finder = di.Finder(node_spoof = self.node_spoof)
+            finder = di.Finder(node_spoof=self.node_spoof)
             finder.only_corr()
             if self.accept_all_global_flags:
                 finder.accept_all_global_flags()
@@ -517,13 +547,18 @@ class QueryAcquisitions(task.MPILoggedTask):
                     files.append(filelist)
 
                 else:
-                    group_size = _choose_group_size(nfiles, self.max_num_files,
-                                                    max(1, int(0.10 * self.max_num_files)))
+                    group_size = _choose_group_size(
+                        nfiles,
+                        self.max_num_files,
+                        max(1, int(0.10 * self.max_num_files)),
+                    )
 
                     bnd = list(range((nfiles % group_size) // 2, nfiles, group_size))
                     bnd[0], bnd[-1] = 0, nfiles
 
-                    files += [filelist[bnd[ii]:bnd[ii+1]] for ii in range(len(bnd)-1)]
+                    files += [
+                        filelist[bnd[ii] : bnd[ii + 1]] for ii in range(len(bnd) - 1)
+                    ]
 
         # Broadcast the files to the other nodes
         files = self.comm.bcast(files, root=0)
@@ -573,7 +608,7 @@ class QueryInputs(pipeline.TaskBase):
             time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
 
-            inputs = tools.reorder_correlator_inputs(ts.index_map['input'], inputs)
+            inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)
@@ -597,8 +632,8 @@ def finder_from_spec(spec, node_spoof=None):
     fi : data_index.Finder
     """
 
-    instrument = spec['instrument']
-    timerange = spec['timerange']
+    instrument = spec["instrument"]
+    timerange = spec["timerange"]
 
     fi = None
     if mpiutil.rank0:
@@ -606,19 +641,21 @@ def finder_from_spec(spec, node_spoof=None):
         from ch_util import data_index as di
 
         # Get instrument
-        inst_obj = di.ArchiveInst.select().where(di.ArchiveInst.name == instrument).get()
+        inst_obj = (
+            di.ArchiveInst.select().where(di.ArchiveInst.name == instrument).get()
+        )
 
         # Ensure timerange is a list
         if not isinstance(timerange, list):
             timerange = [timerange]
 
         # Find the earliest and latest times
-        earliest = min([ tr['start'] for tr in timerange ])
-        latest = max([ tr['end'] for tr in timerange ])
+        earliest = min([tr["start"] for tr in timerange])
+        latest = max([tr["end"] for tr in timerange])
 
         # Set the archive_root
-        if node_spoof is None and 'node_spoof' in spec:
-            node_spoof = spec['node_spoof']
+        if node_spoof is None and "node_spoof" in spec:
+            node_spoof = spec["node_spoof"]
 
         # Create a finder object limited to the relevant time
         fi = di.Finder(node_spoof=node_spoof)
@@ -628,7 +665,7 @@ def finder_from_spec(spec, node_spoof=None):
 
         # Add in all the time ranges
         for ti in timerange:
-            fi.include_time_interval(ti['start'], ti['end'])
+            fi.include_time_interval(ti["start"], ti["end"])
 
         # Only include the required instrument
         fi.filter_acqs(di.ArchiveAcq.inst == inst_obj)
@@ -659,7 +696,7 @@ def files_from_spec(spec, node_spoof=None):
 
         # Pull out the results and extract all the files
         results = fi.get_results()
-        files = [ fname for result in results for fname in result[0] ]
+        files = [fname for result in results for fname in result[0]]
         files.sort()
 
     files = mpiutil.world.bcast(files, root=0)

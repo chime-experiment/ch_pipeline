@@ -62,12 +62,15 @@ def _extract_diagonal(utmat, axis=1):
         Diagonal of the array.
     """
     # Estimate nside from the array shape
-    nside = int((2 * utmat.shape[axis])**0.5)
+    nside = int((2 * utmat.shape[axis]) ** 0.5)
 
     # Check that this nside is correct
     if utmat.shape[axis] != (nside * (nside + 1) / 2):
-        msg = ('Array length (%i) of axis %i does not correspond upper triangle\
-                of square matrix' % (utmat.shape[axis], axis))
+        msg = (
+            "Array length (%i) of axis %i does not correspond upper triangle\
+                of square matrix"
+            % (utmat.shape[axis], axis)
+        )
         raise RuntimeError(msg)
 
     # Find indices of the diagonal
@@ -115,7 +118,7 @@ def solve_gain(data, feeds=None, norm=None):
     data = data[:].view(np.ndarray)
 
     # Calcuate the number of feeds in the data matrix
-    tfeed = int((2 * data.shape[1])**0.5)
+    tfeed = int((2 * data.shape[1]) ** 0.5)
 
     # If not set, create the list of included feeds (i.e. all feeds)
     feeds = np.array(feeds) if feeds is not None else np.arange(tfeed)
@@ -128,13 +131,15 @@ def solve_gain(data, feeds=None, norm=None):
 
     # Set up normalisation matrix
     if norm is None:
-        norm = (_extract_diagonal(data, axis=1).real)**0.5
+        norm = (_extract_diagonal(data, axis=1).real) ** 0.5
         norm = tools.invert_no_zero(norm)
         norm = norm[:, feeds]
 
     elif norm.shape != gain.shape:
-        ValueError("Input normalization matrix has shape %s, should have shape %s." %
-                   (norm.shape, gain.shape))
+        ValueError(
+            "Input normalization matrix has shape %s, should have shape %s."
+            % (norm.shape, gain.shape)
+        )
 
     # Pre-generate the array of inverted norms
     inv_norm = tools.invert_no_zero(norm)
@@ -151,7 +156,9 @@ def solve_gain(data, feeds=None, norm=None):
                 continue
 
             # Unpack visibility and normalisation array into square matrix
-            _fast_tools._unpack_product_array_fast(data[fi, :, ti].copy(), cd, feeds, tfeed)
+            _fast_tools._unpack_product_array_fast(
+                data[fi, :, ti].copy(), cd, feeds, tfeed
+            )
 
             # Apply weighting
             w = norm[fi, :, ti]
@@ -166,13 +173,17 @@ def solve_gain(data, feeds=None, norm=None):
 
             # Construct gain solutions
             if evals[-1] > 0:
-                sign0 = (1.0 - 2.0 * (evecs[0, -1].real < 0.0))
-                gain[fi, :, ti] = sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1]**0.5
+                sign0 = 1.0 - 2.0 * (evecs[0, -1].real < 0.0)
+                gain[fi, :, ti] = (
+                    sign0 * inv_norm[fi, :, ti] * evecs[:, -1] * evals[-1] ** 0.5
+                )
 
-                gain_error[fi, :, ti] = (inv_norm[fi, :, ti] *
-                                         1.4826 * np.median(np.abs(evals[:-1] -
-                                                                   np.median(evals[:-1]))) /
-                                         evals[-1]**0.5)
+                gain_error[fi, :, ti] = (
+                    inv_norm[fi, :, ti]
+                    * 1.4826
+                    * np.median(np.abs(evals[:-1] - np.median(evals[:-1])))
+                    / evals[-1] ** 0.5
+                )
 
                 evalue[fi, :, ti] = evals
 
@@ -207,7 +218,9 @@ def interp_gains(trans_times, gain_mat, times, axis=-1):
     -------
     Array of interpolated gains
     """
-    f = interpolate.interp1d(trans_times, gain_mat, kind='linear', axis=axis, bounds_error=False)
+    f = interpolate.interp1d(
+        trans_times, gain_mat, kind="linear", axis=axis, bounds_error=False
+    )
 
     gains = f(times)
     gains[..., times < trans_times[0]] = gain_mat[..., 0, np.newaxis]
@@ -229,8 +242,13 @@ def _adiff(ts, dt):
     if dt is None:
         return ts
 
-    return ts - 0.5 * (np.mean(ts[..., :dt], axis=-1) +
-                       np.mean(ts[..., -dt:], axis=-1))[..., np.newaxis]
+    return (
+        ts
+        - 0.5
+        * (np.mean(ts[..., :dt], axis=-1) + np.mean(ts[..., -dt:], axis=-1))[
+            ..., np.newaxis
+        ]
+    )
 
 
 def _contiguous_flag(flag, centre=None):
@@ -288,10 +306,11 @@ class NoiseSourceFold(task.SingleTask):
         if (self.period is None) or (not self.phase):
             ni_params = None
         else:
-            ni_params = {'ni_period': self.period, 'ni_on_bins': self.phase}
+            ni_params = {"ni_period": self.period, "ni_on_bins": self.phase}
 
-        folded_ts = ni_utils.process_synced_data(ts, ni_params=ni_params,
-                                                 only_off=self.only_off)
+        folded_ts = ni_utils.process_synced_data(
+            ts, ni_params=ni_params, only_off=self.only_off
+        )
 
         return folded_ts
 
@@ -356,7 +375,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
 
         # Ensure that we are distributed over frequency
 
-        ts.redistribute('freq')
+        ts.redistribute("freq")
 
         # Create noise injection data object from input timestream
         nidata = ni_utils.ni_data(ts, self.nchannels, self.ch_ref, self.fbin_ref)
@@ -389,13 +408,19 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         dr = mpiarray.MPIArray.wrap(dr, axis=0, comm=ts.comm)
 
         # Create NoiseInjTimeStream
-        cts = containers.TimeStream(timestamp, ts.freq, vis.global_shape[1],
-                                    comm=vis.comm, copy_attrs=ts, gain=True)
+        cts = containers.TimeStream(
+            timestamp,
+            ts.freq,
+            vis.global_shape[1],
+            comm=vis.comm,
+            copy_attrs=ts,
+            gain=True,
+        )
 
         cts.vis[:] = vis
         cts.gain[:] = gain
         cts.gain_dr[:] = dr
-        cts.common['input'] = ts.input
+        cts.common["input"] = ts.input
 
         cts.redistribute(0)
 
@@ -411,7 +436,7 @@ class GatedNoiseCalibration(task.SingleTask):
         Specify what to use to normalise the matrix.
     """
 
-    norm = config.Property(proptype=str, default='off')
+    norm = config.Property(proptype=str, default="off")
 
     def process(self, ts, inputmap):
         """Find gains from noise injection data and apply them to visibilities.
@@ -430,32 +455,34 @@ class GatedNoiseCalibration(task.SingleTask):
             respective timestamps.
         """
         # Ensure that we are distributed over frequency
-        ts.redistribute('freq')
+        ts.redistribute("freq")
 
         # Figure out which input channel is the noise source (used as gain reference)
         noise_channel = tools.get_noise_channel(inputmap)
 
         # Get the norm matrix
-        if self.norm == 'gated':
-            norm_array = _extract_diagonal(ts.datasets['gated_vis0'][:])**0.5
+        if self.norm == "gated":
+            norm_array = _extract_diagonal(ts.datasets["gated_vis0"][:]) ** 0.5
             norm_array = tools.invert_no_zero(norm_array)
-        elif self.norm == 'off':
-            norm_array = _extract_diagonal(ts.vis[:])**0.5
+        elif self.norm == "off":
+            norm_array = _extract_diagonal(ts.vis[:]) ** 0.5
             norm_array = tools.invert_no_zero(norm_array)
 
             # Extract the points with zero weight (these will get zero norm)
-            w = (_extract_diagonal(ts.weight[:]) > 0)
+            w = _extract_diagonal(ts.weight[:]) > 0
             w[:, noise_channel] = True  # Make sure we keep the noise channel though!
 
             norm_array *= w
 
-        elif self.norm == 'none':
-            norm_array = np.ones([ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8)
+        elif self.norm == "none":
+            norm_array = np.ones(
+                [ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8
+            )
         else:
-            raise RuntimeError('Value of norm not recognised.')
+            raise RuntimeError("Value of norm not recognised.")
 
         # Take a view now to avoid some MPI issues
-        gate_view = ts.datasets['gated_vis0'][:].view(np.ndarray)
+        gate_view = ts.datasets["gated_vis0"][:].view(np.ndarray)
         norm_view = norm_array[:].view(np.ndarray)
 
         # Find gains with the eigenvalue method
@@ -468,7 +495,7 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Create container from gains
         gain_data = containers.GainData(axes_from=ts)
-        gain_data.add_dataset('weight')
+        gain_data.add_dataset("weight")
 
         # Copy data into container
         gain_data.gain[:] = gain
@@ -499,8 +526,11 @@ class DetermineSourceTransit(task.SingleTask):
     def setup(self):
         """Set list of sources, sorted by flux in descending order."""
         self.source_list = reversed(
-            sorted(self.source_list or ephemeris.source_dictionary.keys(),
-            key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq)))
+            sorted(
+                self.source_list or ephemeris.source_dictionary.keys(),
+                key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
+            )
+        )
 
     def process(self, sstream):
         """Add attributes to container describing source transit contained within.
@@ -517,10 +547,10 @@ class DetermineSourceTransit(task.SingleTask):
             `transit_time` attributes.
         """
         # Determine the time covered by input container
-        if 'time' in sstream.index_map:
+        if "time" in sstream.index_map:
             timestamp = sstream.time
         else:
-            lsd = sstream.attrs.get('lsd', sstream.attrs.get('csd'))
+            lsd = sstream.attrs.get("lsd", sstream.attrs.get("csd"))
             timestamp = ephemeris.csd_to_unix(lsd + sstream.ra / 360.0)
 
         # Loop over sources and check if there is a transit within time range
@@ -528,13 +558,16 @@ class DetermineSourceTransit(task.SingleTask):
         # and break from the loop.
         contains_transit = False
         for src in self.source_list:
-            transit_time = ephemeris.transit_times(ephemeris.source_dictionary[src],
-                                                   timestamp[0], timestamp[-1])
+            transit_time = ephemeris.transit_times(
+                ephemeris.source_dictionary[src], timestamp[0], timestamp[-1]
+            )
             if transit_time.size > 0:
-                self.log.info("Data stream contains %s transit on LSD %d." %
-                              (src, ephemeris.csd(transit_time[0])))
-                sstream.attrs['source_name'] = src
-                sstream.attrs['transit_time'] = transit_time[0]
+                self.log.info(
+                    "Data stream contains %s transit on LSD %d."
+                    % (src, ephemeris.csd(transit_time[0]))
+                )
+                sstream.attrs["source_name"] = src
+                sstream.attrs["transit_time"] = transit_time[0]
                 contains_transit = True
                 break
 
@@ -610,10 +643,10 @@ class EigenCalibration(task.SingleTask):
         from mpi4py import MPI
 
         # Ensure that we are distributed over frequency
-        data.redistribute('freq')
+        data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, neigen, ninput, ntime = data.datasets['evec'].local_shape
+        nfreq, neigen, ninput, ntime = data.datasets["evec"].local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -622,20 +655,26 @@ class EigenCalibration(task.SingleTask):
         freq = data.freq[sfreq:efreq]
 
         # Determine source name.  If not provided as config property, then check data attributes.
-        source_name = self.source or data.attrs.get('source_name', None)
+        source_name = self.source or data.attrs.get("source_name", None)
         if source_name is None:
-            raise ValueError("The source name must be specified as a configuration property " \
-                             "or added to input container attributes by an earlier task.")
+            raise ValueError(
+                "The source name must be specified as a configuration property "
+                "or added to input container attributes by an earlier task."
+            )
 
         # Compute flux of source
         source_obj = fluxcat.FluxCatalog[source_name]
-        inv_rt_flux_density = tools.invert_no_zero(np.sqrt(source_obj.predict_flux(freq)))
+        inv_rt_flux_density = tools.invert_no_zero(
+            np.sqrt(source_obj.predict_flux(freq))
+        )
 
         # Determine source coordinates
         ttrans = ephemeris.transit_times(source_obj.skyfield, data.time[0])[0]
         csd = int(np.floor(ephemeris.unix_to_csd(ttrans)))
 
-        src_ra, src_dec = ephemeris.object_coords(source_obj.skyfield, date=ttrans, deg=True)
+        src_ra, src_dec = ephemeris.object_coords(
+            source_obj.skyfield, date=ttrans, deg=True
+        )
 
         ra = ephemeris.lsa(data.time)
 
@@ -643,9 +682,13 @@ class EigenCalibration(task.SingleTask):
         ha = ((ha + 180.0) % 360.0) - 180.0
         ha = np.radians(ha)
 
-        max_ha_off_source = np.minimum(np.max(np.abs(ha)), np.radians(self.max_hour_angle))
+        max_ha_off_source = np.minimum(
+            np.max(np.abs(ha)), np.radians(self.max_hour_angle)
+        )
         min_ha_off_source = self.window * max_ha_off_source
-        off_source = (np.abs(ha) >= min_ha_off_source) & (np.abs(ha) <= max_ha_off_source)
+        off_source = (np.abs(ha) >= min_ha_off_source) & (
+            np.abs(ha) <= max_ha_off_source
+        )
 
         itrans = np.argmin(np.abs(ha))
 
@@ -653,35 +696,39 @@ class EigenCalibration(task.SingleTask):
         lat = np.radians(ephemeris.CHIMELATITUDE)
 
         # Dereference datasets
-        evec = data.datasets['evec'][:].view(np.ndarray)
-        evalue = data.datasets['eval'][:].view(np.ndarray)
-        erms = data.datasets['erms'][:].view(np.ndarray)
-        vis = data.datasets['vis'][:].view(np.ndarray)
-        weight = data.flags['vis_weight'][:].view(np.ndarray)
+        evec = data.datasets["evec"][:].view(np.ndarray)
+        evalue = data.datasets["eval"][:].view(np.ndarray)
+        erms = data.datasets["erms"][:].view(np.ndarray)
+        vis = data.datasets["vis"][:].view(np.ndarray)
+        weight = data.flags["vis_weight"][:].view(np.ndarray)
 
         # Check for negative autocorrelations (bug observed in older data)
         negative_auto = vis.real < 0.0
         if np.any(negative_auto):
-            vis[negative_auto] = 0.0 + 0.0J
+            vis[negative_auto] = 0.0 + 0.0j
             weight[negative_auto] = 0.0
 
         # Find inputs that were not included in the eigenvalue decomposition
         eps = 10.0 * np.finfo(evec.dtype).eps
-        evec_all_zero = np.all(np.abs(evec[:, 0]) < eps,  axis=(0, 2))
+        evec_all_zero = np.all(np.abs(evec[:, 0]) < eps, axis=(0, 2))
 
         input_flags = np.zeros(ninput, dtype=np.bool)
         for ii in range(ninput):
-            input_flags[ii] = np.logical_not(mpiutil.allreduce(evec_all_zero[ii],
-                                                               op=MPI.LAND, comm=data.comm))
+            input_flags[ii] = np.logical_not(
+                mpiutil.allreduce(evec_all_zero[ii], op=MPI.LAND, comm=data.comm)
+            )
 
-        self.log.info("%d inputs missing from eigenvalue decomposition." %
-                      np.sum(~input_flags))
+        self.log.info(
+            "%d inputs missing from eigenvalue decomposition." % np.sum(~input_flags)
+        )
 
         # Check that we have data for the phase reference
         for ref in self.phase_ref:
             if not input_flags[ref]:
-                ValueError("Requested phase reference (%d) "
-                           "was not included in decomposition." % ref)
+                ValueError(
+                    "Requested phase reference (%d) "
+                    "was not included in decomposition." % ref
+                )
 
         # Update input_flags to include feeds not present in database
         for idf, inp in enumerate(inputmap):
@@ -689,24 +736,36 @@ class EigenCalibration(task.SingleTask):
                 input_flags[idf] = False
 
         # Determine x and y pol index
-        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
-                           tools.is_array_x(inp)])
-        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
-                           tools.is_array_y(inp)])
+        xfeeds = np.array(
+            [
+                idf
+                for idf, inp in enumerate(inputmap)
+                if input_flags[idf] and tools.is_array_x(inp)
+            ]
+        )
+        yfeeds = np.array(
+            [
+                idf
+                for idf, inp in enumerate(inputmap)
+                if input_flags[idf] and tools.is_array_y(inp)
+            ]
+        )
 
         nfeed = xfeeds.size + yfeeds.size
 
-        pol = [yfeeds,  xfeeds]
-        polstr = ['Y', 'X']
+        pol = [yfeeds, xfeeds]
+        polstr = ["Y", "X"]
         npol = len(pol)
 
-        phase_ref_by_pol = [pol[pp].tolist().index(self.phase_ref[pp]) for pp in range(npol)]
+        phase_ref_by_pol = [
+            pol[pp].tolist().index(self.phase_ref[pp]) for pp in range(npol)
+        ]
 
         # Create new product map for the output container that has `input_b` set to
         # the phase reference feed.  Necessary to apply the timing correction later.
         prod = np.copy(data.prod)
         for pp, feeds in enumerate(pol):
-            prod['input_b'][feeds] = self.phase_ref[pp]
+            prod["input_b"][feeds] = self.phase_ref[pp]
 
         # Compute distances
         tools.change_chime_location(rotation=self.telescope_rotation)
@@ -717,8 +776,10 @@ class EigenCalibration(task.SingleTask):
         # Check for feeds that do not have a valid distance (feedpos are set to nan)
         no_distance = np.flatnonzero(np.any(np.isnan(dist), axis=1))
         if (no_distance.size > 0) and np.any(input_flags[no_distance]):
-            raise RuntimeError("Do not have positions for feeds: %s" %
-                               str(no_distance[input_flags[no_distance]]))
+            raise RuntimeError(
+                "Do not have positions for feeds: %s"
+                % str(no_distance[input_flags[no_distance]])
+            )
 
         # Determine the number of eigenvalues to include in the orthogonalization
         neigen = min(max(npol, self.neigen), neigen)
@@ -732,7 +793,9 @@ class EigenCalibration(task.SingleTask):
         not_rfi = ~rfi.frequency_mask(freq)
         not_rfi = not_rfi[:, np.newaxis]
 
-        self.log.info("Using a dynamic range threshold of %0.2f." % self.dyn_rng_threshold)
+        self.log.info(
+            "Using a dynamic range threshold of %0.2f." % self.dyn_rng_threshold
+        )
         dyn_flag = dyn > self.dyn_rng_threshold
 
         converged = erms > 0.0
@@ -752,17 +815,23 @@ class EigenCalibration(task.SingleTask):
             ValueError("Reference feed %d is incorrect." % self.eigen_ref)
 
         # Create output container
-        response = containers.SiderealStream(ra=ra, prod=prod, stack=None,
-                                             attrs_from=data, axes_from=data,
-                                             distributed=data.distributed, comm=data.comm)
+        response = containers.SiderealStream(
+            ra=ra,
+            prod=prod,
+            stack=None,
+            attrs_from=data,
+            axes_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
+        )
 
         response.input_flags[:] = input_flags[:, np.newaxis]
 
         # Create attributes identifying the transit
-        response.attrs['source_name'] = source_name
-        response.attrs['transit_time'] = ttrans
-        response.attrs['lsd'] = csd
-        response.attrs['tag'] = '%s_lsd_%d' % (source_name.lower(), csd)
+        response.attrs["source_name"] = source_name
+        response.attrs["transit_time"] = ttrans
+        response.attrs["lsd"] = csd
+        response.attrs["tag"] = "%s_lsd_%d" % (source_name.lower(), csd)
 
         # Add an attribute that indicates if the transit occured during the daytime
         is_daytime = 0
@@ -772,7 +841,7 @@ class EigenCalibration(task.SingleTask):
             if (ttrans >= sr) and (ttrans <= ss):
                 is_daytime = 1
                 break
-        response.attrs['daytime_transit'] = is_daytime
+        response.attrs["daytime_transit"] = is_daytime
 
         # Dereference the output datasets
         out_vis = response.vis[:]
@@ -791,19 +860,23 @@ class EigenCalibration(task.SingleTask):
                 ww = weight[ff, feeds, :]
 
                 # Normalize by eigenvalue and correct for pi phase flips in process.
-                resp = (sign0[ff, :, np.newaxis, :] * evec[ff, 0:neigen, :, :] *
-                        np.sqrt(evalue[ff, 0:neigen, np.newaxis, :]))
+                resp = (
+                    sign0[ff, :, np.newaxis, :]
+                    * evec[ff, 0:neigen, :, :]
+                    * np.sqrt(evalue[ff, 0:neigen, np.newaxis, :])
+                )
 
                 # Rotate to single-pol response
                 # Move time to first axis for the matrix multiplication
-                invL = tools.invert_no_zero(np.rollaxis(evalue[ff, 0:neigen, np.newaxis, :],
-                                                        -1, 0))
+                invL = tools.invert_no_zero(
+                    np.rollaxis(evalue[ff, 0:neigen, np.newaxis, :], -1, 0)
+                )
                 UT = np.rollaxis(resp, -1, 0)
                 U = np.swapaxes(UT, -1, -2)
 
                 mu, vp = np.linalg.eigh(np.matmul(UT.conj(), P * U))
 
-                rsign0 = (1.0 - 2.0 * (vp[:, 0, np.newaxis, :].real < 0.0))
+                rsign0 = 1.0 - 2.0 * (vp[:, 0, np.newaxis, :].real < 0.0)
 
                 resp = mu[:, np.newaxis, :] * np.matmul(U, rsign0 * vp * invL)
 
@@ -812,21 +885,35 @@ class EigenCalibration(task.SingleTask):
                 resp = resp[:, feeds, -1].T
 
                 # Compute error on response
-                dataflg = (flag[ff, np.newaxis, :] & (np.abs(resp) > 0.0) &
-                           (ww > 0.0) & np.isfinite(ww)).astype(np.float32)
+                dataflg = (
+                    flag[ff, np.newaxis, :]
+                    & (np.abs(resp) > 0.0)
+                    & (ww > 0.0)
+                    & np.isfinite(ww)
+                ).astype(np.float32)
 
-                resp_err = (dataflg * base_err[ff, :, :] * np.sqrt(vis[ff, feeds, :].real) *
-                            tools.invert_no_zero(np.sqrt(mu[np.newaxis, :, -1])))
+                resp_err = (
+                    dataflg
+                    * base_err[ff, :, :]
+                    * np.sqrt(vis[ff, feeds, :].real)
+                    * tools.invert_no_zero(np.sqrt(mu[np.newaxis, :, -1]))
+                )
 
                 # Reference to specific input
-                resp *= np.exp(-1.0J * np.angle(resp[phase_ref_by_pol[pp], np.newaxis, :]))
+                resp *= np.exp(
+                    -1.0j * np.angle(resp[phase_ref_by_pol[pp], np.newaxis, :])
+                )
 
                 # Fringestop
                 lmbda = speed_of_light * 1e-6 / freq[ff]
 
-                resp *= tools.fringestop_phase(ha[np.newaxis, :], lat, src_dec,
-                                               dist[feeds, 0, np.newaxis] / lmbda,
-                                               dist[feeds, 1, np.newaxis] / lmbda)
+                resp *= tools.fringestop_phase(
+                    ha[np.newaxis, :],
+                    lat,
+                    src_dec,
+                    dist[feeds, 0, np.newaxis] / lmbda,
+                    dist[feeds, 1, np.newaxis] / lmbda,
+                )
 
                 # Normalize by source flux
                 resp *= inv_rt_flux_density[ff]
@@ -835,12 +922,14 @@ class EigenCalibration(task.SingleTask):
                 # If requested, reference phase to the median value
                 if self.med_phase_ref:
                     phi0 = np.angle(resp[:, itrans, np.newaxis])
-                    resp *= np.exp(-1.0J * phi0)
-                    resp *= np.exp(-1.0J * np.median(np.angle(resp), axis=0, keepdims=True))
-                    resp *= np.exp(1.0J * phi0)
+                    resp *= np.exp(-1.0j * phi0)
+                    resp *= np.exp(
+                        -1.0j * np.median(np.angle(resp), axis=0, keepdims=True)
+                    )
+                    resp *= np.exp(1.0j * phi0)
 
                 out_vis[ff, feeds, :] = resp
-                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err**2)
+                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err ** 2)
 
         return response
 
@@ -884,15 +973,21 @@ class TransitFit(task.SingleTask):
         Must be less than `nsigma`.  Relevant if `poly = True`.
     """
 
-    model = config.enum(['gauss_amp_poly_phase', 'poly_log_amp_poly_phase'],
-                        default='gauss_amp_poly_phase')
-    nsigma = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.60)
+    model = config.enum(
+        ["gauss_amp_poly_phase", "poly_log_amp_poly_phase"],
+        default="gauss_amp_poly_phase",
+    )
+    nsigma = config.Property(
+        proptype=(lambda x: x if x is None else float(x)), default=0.60
+    )
     absolute_sigma = config.Property(proptype=bool, default=False)
-    poly_type = config.Property(proptype=str, default='standard')
+    poly_type = config.Property(proptype=str, default="standard")
     poly_deg_amp = config.Property(proptype=int, default=5)
     poly_deg_phi = config.Property(proptype=int, default=5)
     niter = config.Property(proptype=int, default=5)
-    moving_window = config.Property(proptype=(lambda x: x if x is None else float(x)), default=0.30)
+    moving_window = config.Property(
+        proptype=(lambda x: x if x is None else float(x)), default=0.30
+    )
 
     def process(self, response, inputmap):
         """Fit model to the point source response for each feed and frequency.
@@ -915,22 +1010,30 @@ class TransitFit(task.SingleTask):
 
         if self.model == "gauss_amp_poly_phase":
             ModelClass = cal_utils.FitGaussAmpPolyPhase
-            model_kwargs = {"poly_type": self.poly_type,
-                            "poly_deg_phi": self.poly_deg_phi}
+            model_kwargs = {
+                "poly_type": self.poly_type,
+                "poly_deg_phi": self.poly_deg_phi,
+            }
 
         elif self.model == "poly_log_amp_poly_phase":
             ModelClass = cal_utils.FitPolyLogAmpPolyPhase
-            model_kwargs = {"poly_type": self.poly_type,
-                            "poly_deg_amp": self.poly_deg_amp,
-                            "poly_deg_phi": self.poly_deg_phi}
-            fit_kwargs.update({"niter": self.niter, "moving_window": self.moving_window})
+            model_kwargs = {
+                "poly_type": self.poly_type,
+                "poly_deg_amp": self.poly_deg_amp,
+                "poly_deg_phi": self.poly_deg_phi,
+            }
+            fit_kwargs.update(
+                {"niter": self.niter, "moving_window": self.moving_window}
+            )
 
         else:
-            raise ValueError("Do not recognize model %s.  Options are %s and %s." %
-                             (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase"))
+            raise ValueError(
+                "Do not recognize model %s.  Options are %s and %s."
+                % (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase")
+            )
 
         # Ensure that we are distributed over frequency
-        response.redistribute('freq')
+        response.redistribute("freq")
 
         # Determine local dimensions
         nfreq, ninput, nra = response.vis.local_shape
@@ -942,8 +1045,8 @@ class TransitFit(task.SingleTask):
         freq = response.freq[sfreq:efreq]
 
         # Calculate the hour angle using the source and transit time saved to attributes
-        source_obj = ephemeris.source_dictionary[response.attrs['source_name']]
-        ttrans = response.attrs['transit_time']
+        source_obj = ephemeris.source_dictionary[response.attrs["source_name"]]
+        ttrans = response.attrs["transit_time"]
 
         src_ra, src_dec = ephemeris.object_coords(source_obj, date=ttrans, deg=True)
 
@@ -953,17 +1056,28 @@ class TransitFit(task.SingleTask):
         # Determine the fit window
         input_flags = np.any(response.input_flags[:], axis=-1)
 
-        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
-                           tools.is_array_x(inp)])
-        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if input_flags[idf] and
-                           tools.is_array_y(inp)])
+        xfeeds = np.array(
+            [
+                idf
+                for idf, inp in enumerate(inputmap)
+                if input_flags[idf] and tools.is_array_x(inp)
+            ]
+        )
+        yfeeds = np.array(
+            [
+                idf
+                for idf, inp in enumerate(inputmap)
+                if input_flags[idf] and tools.is_array_y(inp)
+            ]
+        )
 
-        pol = {'X': xfeeds, 'Y': yfeeds}
+        pol = {"X": xfeeds, "Y": yfeeds}
 
         sigma = np.zeros((nfreq, ninput), dtype=np.float32)
         for pstr, feed in pol.items():
-            sigma[:, feed] = cal_utils.guess_fwhm(freq, pol=pstr, dec=np.radians(src_dec),
-                                                  sigma=True, voltage=True)[:, np.newaxis]
+            sigma[:, feed] = cal_utils.guess_fwhm(
+                freq, pol=pstr, dec=np.radians(src_dec), sigma=True, voltage=True
+            )[:, np.newaxis]
 
         # Dereference datasets
         vis = response.vis[:].view(np.ndarray)
@@ -972,8 +1086,10 @@ class TransitFit(task.SingleTask):
 
         # Flag data that is outside the fit window set by nsigma config parameter
         if self.nsigma is not None:
-            err *= (np.abs(ha[np.newaxis, np.newaxis, :]) <=
-                    (self.nsigma * sigma[:, :, np.newaxis])).astype(err.dtype)
+            err *= (
+                np.abs(ha[np.newaxis, np.newaxis, :])
+                <= (self.nsigma * sigma[:, :, np.newaxis])
+            ).astype(err.dtype)
 
         # Instantiate the model fitter
         model = ModelClass(**model_kwargs)
@@ -982,19 +1098,23 @@ class TransitFit(task.SingleTask):
         model.fit(ha, vis, err, width=sigma, **fit_kwargs)
 
         # Create an output container
-        fit = containers.TransitFitParams(param=model.parameter_names,
-                                          component=model.component,
-                                          axes_from=response, attrs_from=response,
-                                          distributed=response.distributed,
-                                          comm=response.comm)
+        fit = containers.TransitFitParams(
+            param=model.parameter_names,
+            component=model.component,
+            axes_from=response,
+            attrs_from=response,
+            distributed=response.distributed,
+            comm=response.comm,
+        )
 
-        fit.add_dataset('chisq')
-        fit.add_dataset('ndof')
+        fit.add_dataset("chisq")
+        fit.add_dataset("ndof")
 
         # Transfer fit information to container attributes
-        fit.attrs['model_kwargs'] = json.dumps(model.model_kwargs)
-        fit.attrs['model_class'] = '.'.join([getattr(ModelClass, key)
-                                             for key in ['__module__', '__name__']])
+        fit.attrs["model_kwargs"] = json.dumps(model.model_kwargs)
+        fit.attrs["model_class"] = ".".join(
+            [getattr(ModelClass, key) for key in ["__module__", "__name__"]]
+        )
 
         # Save datasets
         fit.parameter[:] = model.param[:]
@@ -1019,7 +1139,7 @@ class GainFromTransitFit(task.SingleTask):
         Use confidence level 1 - alpha for the uncertainty on the gain.
     """
 
-    evaluate = config.enum(['transit', 'peak'], default='transit')
+    evaluate = config.enum(["transit", "peak"], default="transit")
     chisq_per_dof_threshold = config.Property(proptype=float, default=20.0)
     alpha = config.Property(proptype=float, default=0.32)
 
@@ -1041,19 +1161,19 @@ class GainFromTransitFit(task.SingleTask):
         from pydoc import locate
 
         # Distribute over frequency
-        fit.redistribute('freq')
+        fit.redistribute("freq")
 
         nfreq, ninput, _ = fit.parameter.local_shape
 
         # Import the function for evaluating the model and keyword arguments
-        ModelClass = locate(fit.attrs['model_class'])
-        model_kwargs = json.loads(fit.attrs['model_kwargs'])
+        ModelClass = locate(fit.attrs["model_class"])
+        model_kwargs = json.loads(fit.attrs["model_kwargs"])
 
         # Create output container
-        out = containers.StaticGainData(axes_from=fit, attrs_from=fit,
-                                        distributed=fit.distributed,
-                                        comm=fit.comm)
-        out.add_dataset('weight')
+        out = containers.StaticGainData(
+            axes_from=fit, attrs_from=fit, distributed=fit.distributed, comm=fit.comm
+        )
+        out.add_dataset("weight")
 
         # Dereference datasets
         param = fit.parameter[:].view(np.ndarray)
@@ -1067,14 +1187,15 @@ class GainFromTransitFit(task.SingleTask):
         weight = out.weight[:]
 
         # Instantiate the model object
-        model = ModelClass(param=param, param_cov=param_cov,
-                           chisq=chisq, ndof=ndof, **model_kwargs)
+        model = ModelClass(
+            param=param, param_cov=param_cov, chisq=chisq, ndof=ndof, **model_kwargs
+        )
 
         # Suppress numpy floating errors
-        with np.errstate(all='ignore'):
+        with np.errstate(all="ignore"):
 
             # Determine hour angle of evaluation
-            if self.evaluate == 'peak':
+            if self.evaluate == "peak":
                 ha = model.peak()
                 elementwise = True
             else:
@@ -1088,16 +1209,19 @@ class GainFromTransitFit(task.SingleTask):
 
             # Use convention that you multiply by gain to calibrate
             gain[:] = tools.invert_no_zero(g)
-            weight[:] = tools.invert_no_zero(np.abs(gerr)**2) * np.abs(g)**4
+            weight[:] = tools.invert_no_zero(np.abs(gerr) ** 2) * np.abs(g) ** 4
 
             # Can occassionally get Infs when evaluating fits to anomalous data.
             # Replace with zeros. Also zero data where the chi-squared per
             # degree of freedom is greater than threshold.
-            not_valid = ~(np.isfinite(gain) & np.isfinite(weight) &
-                          np.all(chisq_per_dof <= self.chisq_per_dof_threshold, axis=-1))
+            not_valid = ~(
+                np.isfinite(gain)
+                & np.isfinite(weight)
+                & np.all(chisq_per_dof <= self.chisq_per_dof_threshold, axis=-1)
+            )
 
             if np.any(not_valid):
-                gain[not_valid] = 0.0 + 0.0J
+                gain[not_valid] = 0.0 + 0.0j
                 weight[not_valid] = 0.0
 
         return out
@@ -1147,7 +1271,7 @@ class FlagAmplitude(task.SingleTask):
     window_med_outlier = config.Property(proptype=int, default=24)
     threshold_good_freq = config.Property(proptype=float, default=0.70)
     threshold_good_input = config.Property(proptype=float, default=0.80)
-    valid_gains_frac_good_freq =  config.Property(proptype=float, default=0.0)
+    valid_gains_frac_good_freq = config.Property(proptype=float, default=0.0)
 
     def process(self, gain, inputmap):
         """Set weight to zero for feeds and frequencies with outlier gain amplitude.
@@ -1167,7 +1291,7 @@ class FlagAmplitude(task.SingleTask):
         from mpi4py import MPI
 
         # Distribute over frequency
-        gain.redistribute('freq')
+        gain.redistribute("freq")
 
         nfreq, ninput = gain.gain.local_shape
 
@@ -1179,17 +1303,21 @@ class FlagAmplitude(task.SingleTask):
         amp = np.abs(gain.gain[:].view(np.ndarray))
 
         # Determine x and y pol index
-        xfeeds = np.array([idf for idf, inp in enumerate(inputmap) if tools.is_array_x(inp)])
-        yfeeds = np.array([idf for idf, inp in enumerate(inputmap) if tools.is_array_y(inp)])
+        xfeeds = np.array(
+            [idf for idf, inp in enumerate(inputmap) if tools.is_array_x(inp)]
+        )
+        yfeeds = np.array(
+            [idf for idf, inp in enumerate(inputmap) if tools.is_array_y(inp)]
+        )
         pol = [yfeeds, xfeeds]
-        polstr = ['Y', 'X']
+        polstr = ["Y", "X"]
 
         # Hard cutoffs on the amplitude
         med_amp = np.median(amp[flag])
         min_amp = med_amp * self.min_amp_scale_factor
         max_amp = med_amp * self.max_amp_scale_factor
 
-        flag &= ((amp >= min_amp) & (amp <= max_amp))
+        flag &= (amp >= min_amp) & (amp <= max_amp)
 
         # Flag outliers in amplitude for each frequency
         for pp, feeds in enumerate(pol):
@@ -1204,15 +1332,21 @@ class FlagAmplitude(task.SingleTask):
                 if np.any(this_flag):
 
                     med, slow, shigh = cal_utils.estimate_directional_scale(
-                                            amp[ff, feeds[this_flag]])
+                        amp[ff, feeds[this_flag]]
+                    )
                     lower = med - self.nsigma_outlier * slow
                     upper = med + self.nsigma_outlier * shigh
 
-                    flag[ff, feeds] &= ((amp[ff, feeds] >= lower) & (amp[ff, feeds] <= upper))
+                    flag[ff, feeds] &= (amp[ff, feeds] >= lower) & (
+                        amp[ff, feeds] <= upper
+                    )
 
                     med_amp_by_pol[ff] = med
-                    sig_amp_by_pol[ff] = (0.5 * (shigh - slow) /
-                                          np.sqrt(np.sum(this_flag, dtype=np.float32)))
+                    sig_amp_by_pol[ff] = (
+                        0.5
+                        * (shigh - slow)
+                        / np.sqrt(np.sum(this_flag, dtype=np.float32))
+                    )
 
             # Flag frequencies that are outliers with respect to local median
             if self.nsigma_med_outlier:
@@ -1223,8 +1357,13 @@ class FlagAmplitude(task.SingleTask):
                 else:
                     full_med_amp_by_pol = None
 
-                mpiutil.gather_local(full_med_amp_by_pol, med_amp_by_pol, (sfreq,),
-                                     root=0, comm=gain.comm)
+                mpiutil.gather_local(
+                    full_med_amp_by_pol,
+                    med_amp_by_pol,
+                    (sfreq,),
+                    root=0,
+                    comm=gain.comm,
+                )
 
                 # Flag outlier frequencies on rank 0
                 not_outlier = None
@@ -1232,12 +1371,17 @@ class FlagAmplitude(task.SingleTask):
 
                     med_flag = full_med_amp_by_pol > 0.0
 
-                    not_outlier = cal_utils.flag_outliers(full_med_amp_by_pol, med_flag,
-                                                          window=self.window_med_outlier,
-                                                          nsigma=self.nsigma_med_outlier)
+                    not_outlier = cal_utils.flag_outliers(
+                        full_med_amp_by_pol,
+                        med_flag,
+                        window=self.window_med_outlier,
+                        nsigma=self.nsigma_med_outlier,
+                    )
 
-                    self.log.info("Pol %s:  %d frequencies are outliers." %
-                                  (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int)))
+                    self.log.info(
+                        "Pol %s:  %d frequencies are outliers."
+                        % (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int))
+                    )
 
                 # Broadcast outlier frequencies to other ranks
                 not_outlier = gain.comm.bcast(not_outlier, root=0)
@@ -1246,8 +1390,9 @@ class FlagAmplitude(task.SingleTask):
                 flag[:, feeds] &= not_outlier[sfreq:efreq, np.newaxis]
 
         # Determine bad frequencies
-        flag_freq = ((np.sum(flag, axis=1, dtype=np.float32) / float(ninput)) >
-                     self.threshold_good_freq)
+        flag_freq = (
+            np.sum(flag, axis=1, dtype=np.float32) / float(ninput)
+        ) > self.threshold_good_freq
 
         good_freq = list(sfreq + np.flatnonzero(flag_freq))
         good_freq = np.array(mpiutil.allreduce(good_freq, op=MPI.SUM, comm=gain.comm))
@@ -1259,16 +1404,19 @@ class FlagAmplitude(task.SingleTask):
         # If fraction of good frequencies is less than threshold, stop and return None
         frac_good_freq = good_freq.size / float(gain.freq.size)
         if frac_good_freq < self.valid_gains_frac_good_freq:
-            self.log.info("Only %0.1f%% of frequencies remain after flagging amplitude.  Will " \
-                          "not process this sidereal day further." % (100.0 * frac_good_freq,))
+            self.log.info(
+                "Only %0.1f%% of frequencies remain after flagging amplitude.  Will "
+                "not process this sidereal day further." % (100.0 * frac_good_freq,)
+            )
             return None
 
         # Determine bad inputs
         flag = mpiarray.MPIArray.wrap(flag, axis=0, comm=gain.comm)
         flag = flag.redistribute(1)
 
-        fraction_good = (np.sum(flag[good_freq, :], axis=0, dtype=np.float32) *
-                         tools.invert_no_zero(float(good_freq.size)))
+        fraction_good = np.sum(
+            flag[good_freq, :], axis=0, dtype=np.float32
+        ) * tools.invert_no_zero(float(good_freq.size))
         flag_input = fraction_good > self.threshold_good_input
 
         good_input = list(flag.local_offset[1] + np.flatnonzero(flag_input))
@@ -1316,7 +1464,7 @@ class InterpolateGainOverFrequency(task.SingleTask):
             updated to reflect the uncertainty on the interpolation.
         """
         # Redistribute over input
-        gain.redistribute('input')
+        gain.redistribute("input")
 
         # Deference datasets
         g = gain.gain[:].view(np.ndarray)
@@ -1326,15 +1474,16 @@ class InterpolateGainOverFrequency(task.SingleTask):
         flag = w > 0.0
 
         # Interpolate the gain at non-flagged frequencies to the flagged frequencies
-        ginterp, winterp = cal_utils.interpolate_gain_quiet(gain.freq[:], g, w, flag=flag,
-                                                            length_scale=self.interp_scale)
+        ginterp, winterp = cal_utils.interpolate_gain_quiet(
+            gain.freq[:], g, w, flag=flag, length_scale=self.interp_scale
+        )
 
         # Replace the gain and weight datasets with the interpolated arrays
         # Note that the gain and weight for non-flagged frequencies have not changed
         gain.gain[:] = ginterp
         gain.weight[:] = winterp
 
-        gain.redistribute('freq')
+        gain.redistribute("freq")
 
         return gain
 
@@ -1362,7 +1511,7 @@ class SiderealCalibration(task.SingleTask):
         Default is 3.
     """
 
-    source = config.Property(proptype=str, default='CygA')
+    source = config.Property(proptype=str, default="CygA")
     model_fit = config.Property(proptype=bool, default=False)
     use_peak = config.Property(proptype=bool, default=False)
     threshold = config.Property(proptype=float, default=3.0)
@@ -1388,7 +1537,7 @@ class SiderealCalibration(task.SingleTask):
             (model_fit is False).
         """
         # Ensure that we are distributed over frequency
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Find the local frequencies
         nfreq = sstream.vis.local_shape[0]
@@ -1396,7 +1545,7 @@ class SiderealCalibration(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Get the local frequency axis
-        freq = sstream.freq['centre'][sfreq:efreq]
+        freq = sstream.freq["centre"][sfreq:efreq]
 
         # Fetch source
         source = ephemeris.source_dictionary[self.source]
@@ -1409,7 +1558,9 @@ class SiderealCalibration(task.SingleTask):
 
         # Fetch the transit into this visibility array
         # Cut out a snippet of the timestream
-        slice_width_deg = 3.0 * cal_utils.guess_fwhm(400.0, pol='X', dec=source._dec, sigma=True)
+        slice_width_deg = 3.0 * cal_utils.guess_fwhm(
+            400.0, pol="X", dec=source._dec, sigma=True
+        )
         slice_width = int(slice_width_deg / np.median(np.abs(np.diff(sstream.ra))))
         slice_centre = slice_width
         st, et = idx - slice_width, idx + slice_width + 1
@@ -1421,17 +1572,29 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets["input_mask"][:]]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and
-                           tools.is_chime_x(inp)])
-        yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if (idx in good_input) and
-                           tools.is_chime_y(inp)])
+        xfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if (idx in good_input) and tools.is_chime_x(inp)
+            ]
+        )
+        yfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if (idx in good_input) and tools.is_chime_y(inp)
+            ]
+        )
 
         if mpiutil.rank0:
-            print("Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)." %
-                  (len(good_input), nfeed, len(xfeeds), len(yfeeds)))
+            print (
+                "Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)."
+                % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
+            )
 
         # Extract the diagonal (to be used for weighting)
         # prior to differencing on-source and off-source
@@ -1443,17 +1606,21 @@ class SiderealCalibration(task.SingleTask):
         vis_slice = _adiff(vis_slice, diff)
 
         # Fringestop the data
-        vis_slice = tools.fringestop_pathfinder(vis_slice, ra_slice, freq, inputmap, source)
+        vis_slice = tools.fringestop_pathfinder(
+            vis_slice, ra_slice, freq, inputmap, source
+        )
 
         # Create arrays to hold point source response
         resp = np.zeros([nfreq, nfeed, nra], np.complex128)
         resp_err = np.zeros([nfreq, nfeed, nra], np.float64)
 
         # Solve for the point source response of each set of polarisations
-        evalue_x, resp[:, xfeeds, :], resp_err[:, xfeeds, :] = solve_gain(vis_slice, feeds=xfeeds,
-                                                                          norm=norm[:, xfeeds])
-        evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(vis_slice, feeds=yfeeds,
-                                                                          norm=norm[:, yfeeds])
+        evalue_x, resp[:, xfeeds, :], resp_err[:, xfeeds, :] = solve_gain(
+            vis_slice, feeds=xfeeds, norm=norm[:, xfeeds]
+        )
+        evalue_y, resp[:, yfeeds, :], resp_err[:, yfeeds, :] = solve_gain(
+            vis_slice, feeds=yfeeds, norm=norm[:, yfeeds]
+        )
 
         # Extract flux density of the source
         rt_flux_density = np.sqrt(fluxcat.FluxCatalog[self.source].predict_flux(freq))
@@ -1465,8 +1632,8 @@ class SiderealCalibration(task.SingleTask):
         resp_err /= rt_flux_density[:, np.newaxis, np.newaxis]
 
         # Define units
-        unit_in = sstream.vis.attrs.get('units', 'rt-correlator-units')
-        unit_out = 'rt-Jy'
+        unit_in = sstream.vis.attrs.get("units", "rt-correlator-units")
+        unit_out = "rt-Jy"
 
         # Construct the final gain array from the point source response at transit
         gain = resp[:, :, slice_centre]
@@ -1482,28 +1649,37 @@ class SiderealCalibration(task.SingleTask):
             # Only fit ra values above the specified dynamic range threshold
             # that are contiguous about the expected peak position.
             fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
-            fit_flag[:, xfeeds, :] = _contiguous_flag(dr_x > self.threshold,
-                                                     centre=slice_centre)[:, np.newaxis, :]
-            fit_flag[:, yfeeds, :] = _contiguous_flag(dr_y > self.threshold,
-                                                     centre=slice_centre)[:, np.newaxis, :]
+            fit_flag[:, xfeeds, :] = _contiguous_flag(
+                dr_x > self.threshold, centre=slice_centre
+            )[:, np.newaxis, :]
+            fit_flag[:, yfeeds, :] = _contiguous_flag(
+                dr_y > self.threshold, centre=slice_centre
+            )[:, np.newaxis, :]
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra_slice, resp, resp_err,
-                                                                  flag=fit_flag)
+            param, param_cov = cal_utils.fit_point_source_transit(
+                ra_slice, resp, resp_err, flag=fit_flag
+            )
 
             # Overwrite the initial gain estimates for frequencies/feeds
             # where the model fit was successful
             if self.use_peak:
-                gain = np.where(np.isnan(param[:, :, 0]), gain,
-                                param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])))
+                gain = np.where(
+                    np.isnan(param[:, :, 0]),
+                    gain,
+                    param[:, :, 0] * np.exp(1.0j * np.deg2rad(param[:, :, -2])),
+                )
             else:
                 for index in np.ndindex(nfreq, nfeed):
                     if np.all(np.isfinite(param[index])):
-                        gain[index] = cal_utils.model_point_source_transit(peak_ra, *param[index])
+                        gain[index] = cal_utils.model_point_source_transit(
+                            peak_ra, *param[index]
+                        )
 
             # Create container to hold results of fit
-            gain_data = containers.PointSourceTransit(ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds,
-                                                      axes_from=sstream)
+            gain_data = containers.PointSourceTransit(
+                ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream
+            )
 
             gain_data.evalue_x[:] = evalue_x
             gain_data.evalue_y[:] = evalue_y
@@ -1514,8 +1690,8 @@ class SiderealCalibration(task.SingleTask):
             gain_data.parameter_cov[:] = param_cov
 
             # Update units
-            gain_data.response.attrs['units'] = unit_in + ' / ' + unit_out
-            gain_data.response_error.attrs['units'] = unit_in + ' / ' + unit_out
+            gain_data.response.attrs["units"] = unit_in + " / " + unit_out
+            gain_data.response_error.attrs["units"] = unit_in + " / " + unit_out
 
         else:
 
@@ -1527,18 +1703,18 @@ class SiderealCalibration(task.SingleTask):
 
         # Copy to container all quantities that are common to both
         # StaticGainData and PointSourceTransit containers
-        gain_data.add_dataset('weight')
+        gain_data.add_dataset("weight")
 
         gain_data.gain[:] = gain
         gain_data.weight[:] = dr
 
         # Update units and unit conversion
-        gain_data.gain.attrs['units'] = unit_in + ' / ' + unit_out
-        gain_data.gain.attrs['converts_units_to'] = 'Jy'
+        gain_data.gain.attrs["units"] = unit_in + " / " + unit_out
+        gain_data.gain.attrs["converts_units_to"] = "Jy"
 
         # Add attribute with the name of the point source
         # that was used for calibration
-        gain_data.attrs['source'] = self.source
+        gain_data.attrs["source"] = self.source
 
         # Return gain data
         return gain_data

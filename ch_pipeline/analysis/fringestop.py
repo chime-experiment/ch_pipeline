@@ -66,16 +66,15 @@ class FringeStop(task.SingleTask):
             Returns the same timestream object but fringestopped
         """
 
-        tstream.redistribute('freq')
+        tstream.redistribute("freq")
 
         start_freq = tstream.vis.local_offset[0]
         nfreq = tstream.vis.local_shape[0]
         end_freq = start_freq + nfreq
         freq = tstream.freq[start_freq:end_freq]
-        prod_map = tstream.index_map['prod'][tstream.index_map['stack']['prod']]
+        prod_map = tstream.index_map["prod"][tstream.index_map["stack"]["prod"]]
         src = ephemeris.source_dictionary[self.source]
-        feeds = [inputmap[tstream.input[i][0]]
-                 for i in range(len(tstream.input))]
+        feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
 
         fs_vis = tools.fringestop_time(
             tstream.vis,
@@ -83,7 +82,8 @@ class FringeStop(task.SingleTask):
             freq=freq,
             feeds=feeds,
             src=src,
-            prod_map=prod_map)
+            prod_map=prod_map,
+        )
 
         if self.overwrite:
             tstream.vis[:] = fs_vis

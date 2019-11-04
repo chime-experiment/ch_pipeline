@@ -105,20 +105,23 @@ class RFIFilter(task.SingleTask):
             frequencies and time samples.
         """
         # Redistribute across frequency
-        data.redistribute('freq')
+        data.redistribute("freq")
 
         # Construct RFI mask
-        auto_index, auto, ndev = rfi.number_deviations(data, apply_static_mask=self.apply_static_mask,
-                                                             freq_width=self.freq_width,
-                                                             time_width=self.time_width,
-                                                             flag1d=self.flag1d,
-                                                             rolling=self.rolling,
-                                                             stack=self.stack,
-                                                             normalize=self.normalize)
+        auto_index, auto, ndev = rfi.number_deviations(
+            data,
+            apply_static_mask=self.apply_static_mask,
+            freq_width=self.freq_width,
+            time_width=self.time_width,
+            flag1d=self.flag1d,
+            rolling=self.rolling,
+            stack=self.stack,
+            normalize=self.normalize,
+        )
 
         # Reorder output based on input chan_id
-        minput = data.index_map['input'][auto_index]
-        isort = np.argsort(minput['chan_id'])
+        minput = data.index_map["input"][auto_index]
+        isort = np.argsort(minput["chan_id"])
 
         minput = minput[isort]
         auto = auto[:, isort, :]
@@ -135,11 +138,11 @@ class RFIFilter(task.SingleTask):
         # Create container to hold output
         out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
         if self.keep_ndev:
-            out.add_dataset('ndev')
+            out.add_dataset("ndev")
         if self.keep_auto:
-            out.add_dataset('auto')
+            out.add_dataset("auto")
 
-        out.redistribute('freq')
+        out.redistribute("freq")
 
         # Save mask to output container
         out.mask[:] = mask
@@ -186,11 +189,13 @@ class ChannelFlagger(task.SingleTask):
         """
 
         # Redistribute over the frequency direction
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         # Find the indices for frequencies in this timestream nearest
         # to the given physical frequencies
-        freq_ind = [np.argmin(np.abs(timestream.freq - freq)) for freq in self.test_freq]
+        freq_ind = [
+            np.argmin(np.abs(timestream.freq - freq)) for freq in self.test_freq
+        ]
 
         # Create a global channel weight (channels are bad by default)
         chan_mask = np.zeros(timestream.ninput, dtype=np.int)
@@ -209,12 +214,22 @@ class ChannelFlagger(task.SingleTask):
             if fi >= sf and fi < ef:
 
                 # Run good channels code and unpack arguments
-                res = data_quality.good_channels(timestream, test_freq=fi, inputs=inputmap, verbose=False)
+                res = data_quality.good_channels(
+                    timestream, test_freq=fi, inputs=inputmap, verbose=False
+                )
                 good_gains, good_noise, good_fit, test_channels = res
 
-                print ("Frequency %i bad channels: blank %i; gains %i; noise %i; fit %i %s" %
-                       ( fi, np.sum(chan_mask == 0), np.sum(good_gains == 0), np.sum(good_noise == 0),
-                         np.sum(good_fit == 0), '[ignored]' if self.ignore_fit else ''))
+                print (
+                    "Frequency %i bad channels: blank %i; gains %i; noise %i; fit %i %s"
+                    % (
+                        fi,
+                        np.sum(chan_mask == 0),
+                        np.sum(good_gains == 0),
+                        np.sum(good_noise == 0),
+                        np.sum(good_fit == 0),
+                        "[ignored]" if self.ignore_fit else "",
+                    )
+                )
 
                 if good_noise is None:
                     good_noise = np.ones_like(test_channels)
@@ -231,7 +246,9 @@ class ChannelFlagger(task.SingleTask):
 
         # Gather the channel flags from all nodes, and combine into a
         # single flag (checking that all tests pass)
-        chan_mask_all = np.zeros((timestream.comm.size, timestream.ninput), dtype=np.int)
+        chan_mask_all = np.zeros(
+            (timestream.comm.size, timestream.ninput), dtype=np.int
+        )
         timestream.comm.Allgather(chan_mask, chan_mask_all)
         chan_mask = np.prod(chan_mask_all, axis=0)
 
@@ -292,11 +309,12 @@ class MonitorCorrInput(task.SingleTask):
             days = np.unique(np.floor(se_csd).astype(np.int))
 
             # Determine the relevant files for each day
-            filemap = [ (day, _days_in_csd(day, se_csd, extra=0.005)) for day in days ]
+            filemap = [(day, _days_in_csd(day, se_csd, extra=0.005)) for day in days]
 
             # Determine the time range for each day
-            timemap = [(day, ephemeris.csd_to_unix(np.array([day, day + 1])))
-                       for day in days]
+            timemap = [
+                (day, ephemeris.csd_to_unix(np.array([day, day + 1]))) for day in days
+            ]
 
             # Extract the frequency and inputs for the first day
             data_r = andata.Reader(self.files[filemap[0][1]])
@@ -313,14 +331,32 @@ class MonitorCorrInput(task.SingleTask):
                 data_r = andata.Reader(self.files[fmap[1]])
 
                 if len(data_r.input) != ninput:
-                    ValueError("Differing number of corr inputs for csd %d and csd %d." % (fmap[0], filemap[0][0]))
-                elif np.sum(data_r.input['correlator_input'] != input_map['correlator_input']) > 0:
-                    ValueError("Different corr inputs for csd %d and csd %d." % (fmap[0], filemap[0][0]))
+                    ValueError(
+                        "Differing number of corr inputs for csd %d and csd %d."
+                        % (fmap[0], filemap[0][0])
+                    )
+                elif (
+                    np.sum(
+                        data_r.input["correlator_input"]
+                        != input_map["correlator_input"]
+                    )
+                    > 0
+                ):
+                    ValueError(
+                        "Different corr inputs for csd %d and csd %d."
+                        % (fmap[0], filemap[0][0])
+                    )
 
                 if len(data_r.freq) != nfreq:
-                    ValueError("Differing number of frequencies for csd %d and csd %d." % (fmap[0], filemap[0][0]))
-                elif np.sum(data_r.freq['centre'] != freq['centre']) > 0:
-                    ValueError("Different frequencies for csd %d and csd %d." % (fmap[0], filemap[0][0]))
+                    ValueError(
+                        "Differing number of frequencies for csd %d and csd %d."
+                        % (fmap[0], filemap[0][0])
+                    )
+                elif np.sum(data_r.freq["centre"] != freq["centre"]) > 0:
+                    ValueError(
+                        "Different frequencies for csd %d and csd %d."
+                        % (fmap[0], filemap[0][0])
+                    )
 
         # Broadcast results to all processes
         self.timemap = mpiutil.world.bcast(timemap, root=0)
@@ -384,7 +420,7 @@ class MonitorCorrInput(task.SingleTask):
                 cm.full_check()
             except (RuntimeError, ValueError) as error:
                 # No sources available for this csd
-                print("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
+                print ("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
                 continue
 
             # Accumulate flags over multiple days
@@ -395,8 +431,9 @@ class MonitorCorrInput(task.SingleTask):
             if self.save:
 
                 # Create a container to hold the results
-                input_mon = containers.CorrInputMonitor(freq=self.freq, input=self.input_map,
-                                                        distributed=False)
+                input_mon = containers.CorrInputMonitor(
+                    freq=self.freq, input=self.input_map, distributed=False
+                )
 
                 # Place the results in the container
                 input_mon.input_mask[:] = cm.good_ipts
@@ -404,24 +441,24 @@ class MonitorCorrInput(task.SingleTask):
                 input_mon.freq_mask[:] = cm.good_freqs
                 input_mon.freq_powered[:] = cm.gpu_node_flag
 
-                if hasattr(cm, 'postns'):
-                    input_mon.add_dataset('position')
+                if hasattr(cm, "postns"):
+                    input_mon.add_dataset("position")
                     input_mon.position[:] = cm.postns
 
-                if hasattr(cm, 'expostns'):
-                    input_mon.add_dataset('expected_position')
+                if hasattr(cm, "expostns"):
+                    input_mon.add_dataset("expected_position")
                     input_mon.expected_position[:] = cm.expostns
 
                 if cm.source1 is not None:
-                    input_mon.attrs['source1'] = cm.source1.name
+                    input_mon.attrs["source1"] = cm.source1.name
 
                 if cm.source2 is not None:
-                    input_mon.attrs['source2'] = cm.source2.name
+                    input_mon.attrs["source2"] = cm.source2.name
 
                 # Construct tag from csd
-                tag = 'csd_%d' % csd
-                input_mon.attrs['tag'] = tag
-                input_mon.attrs['csd'] = csd
+                tag = "csd_%d" % csd
+                input_mon.attrs["tag"] = tag
+                input_mon.attrs["csd"] = csd
 
                 # Save results to disk
                 self._save_output(input_mon)
@@ -445,23 +482,30 @@ class MonitorCorrInput(task.SingleTask):
 
             for ii, day in enumerate(dindex):
                 other_days = np.delete(dindex, ii)
-                n_uniq_bad[day] = np.sum(~input_mask_all[day, :] & np.all(input_mask_all[other_days, :], axis=0))
+                n_uniq_bad[day] = np.sum(
+                    ~input_mask_all[day, :]
+                    & np.all(input_mask_all[other_days, :], axis=0)
+                )
 
-            good_day_flag_all *= (n_uniq_bad <= self.n_cut)
+            good_day_flag_all *= n_uniq_bad <= self.n_cut
 
             if not np.any(good_day_flag_all):
-                ValueError("Significant number of new correlator inputs flagged bad each day.")
+                ValueError(
+                    "Significant number of new correlator inputs flagged bad each day."
+                )
 
         # Write csd flag to file
         if self.save:
 
             # Create container
-            csd_flag = containers.SiderealDayFlag(csd=np.array([ tmap[0] for tmap in self.timemap ]))
+            csd_flag = containers.SiderealDayFlag(
+                csd=np.array([tmap[0] for tmap in self.timemap])
+            )
 
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag_all
 
-            csd_flag.attrs['tag'] = 'flag_csd'
+            csd_flag.attrs["tag"] = "flag_csd"
 
             # Write output to hdf5 file
             self._save_output(csd_flag)
@@ -475,7 +519,7 @@ class MonitorCorrInput(task.SingleTask):
         # Place the results for the entire pass in a container
         input_mon.input_mask[:] = input_mask
 
-        input_mon.attrs['tag'] = 'for_pass'
+        input_mon.attrs["tag"] = "for_pass"
 
         # Ensure we stop on next iteration
         self.ndays = 0
@@ -521,11 +565,15 @@ class TestCorrInput(task.SingleTask):
         """
 
         # Gives names to the tests that will be run
-        self.test = np.array(['is_chime', 'not_known_bad', 'digital_gain', 'radiometer', 'sky_fit'])
+        self.test = np.array(
+            ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
+        )
         self.ntest = len(self.test)
 
         # Determine what tests we will use
-        self.use_test = ~np.array([False, False, self.ignore_gains, self.ignore_noise, self.ignore_fit])
+        self.use_test = ~np.array(
+            [False, False, self.ignore_gains, self.ignore_noise, self.ignore_fit]
+        )
 
     def process(self, timestream, inputmap):
         """Find good inputs using timestream.
@@ -545,17 +593,19 @@ class TestCorrInput(task.SingleTask):
         """
 
         # Redistribute over the frequency direction
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         # Extract the frequency map
-        freqmap = timestream.index_map['freq'][:]
+        freqmap = timestream.index_map["freq"][:]
 
         # Find the indices for frequencies in this timestream nearest
         # to the requested test frequencies.
         if self.test_freq is None:
             freq_ind = np.arange(len(freqmap), dtype=np.int)
         else:
-            freq_ind = [np.argmin(np.abs(freqmap['centre'] - freq)) for freq in self.test_freq]
+            freq_ind = [
+                np.argmin(np.abs(freqmap["centre"] - freq)) for freq in self.test_freq
+            ]
 
         # Calculate start and end frequencies
         nfreq = timestream.vis.local_shape[0]
@@ -582,12 +632,14 @@ class TestCorrInput(task.SingleTask):
 
                 # Check if vis_weight is zero for this frequency,
                 # which would imply a bad GPU node.
-                if 'vis_weight' in timestream.flags:
+                if "vis_weight" in timestream.flags:
                     if not np.any(timestream.weight[fi_dist]):
                         continue
 
                 # Run good channels code and unpack arguments
-                res = data_quality.good_channels(timestream, test_freq=fi_dist, inputs=inputmap, verbose=False)
+                res = data_quality.good_channels(
+                    timestream, test_freq=fi_dist, inputs=inputmap, verbose=False
+                )
                 good_gains, good_noise, good_fit, test_inputs = res
 
                 # Save the results to local array
@@ -603,14 +655,23 @@ class TestCorrInput(task.SingleTask):
                 is_test_freq[fi_local] = True
 
                 # Print results for this frequency
-                print ("Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
-                       fi_dist, timestream.ninput - len(test_inputs),
-                       np.sum(good_gains == 0) if good_gains is not None else 'failed', ' [ignored]' if self.ignore_gains else '',
-                       np.sum(good_noise == 0) if good_noise is not None else 'failed', ' [ignored]' if self.ignore_noise else '',
-                       np.sum(good_fit == 0) if good_fit is not None else 'failed', ' [ignored]' if self.ignore_fit else ''))
+                print (
+                    "Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
+                        fi_dist,
+                        timestream.ninput - len(test_inputs),
+                        np.sum(good_gains == 0) if good_gains is not None else "failed",
+                        " [ignored]" if self.ignore_gains else "",
+                        np.sum(good_noise == 0) if good_noise is not None else "failed",
+                        " [ignored]" if self.ignore_noise else "",
+                        np.sum(good_fit == 0) if good_fit is not None else "failed",
+                        " [ignored]" if self.ignore_fit else "",
+                    )
+                )
 
         # Gather the input flags from all nodes
-        passed_test_all = np.zeros((timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int)
+        passed_test_all = np.zeros(
+            (timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int
+        )
         is_test_freq_all = np.zeros(timestream.comm.size, dtype=np.bool)
 
         timestream.comm.Allgather(passed_test, passed_test_all)
@@ -621,19 +682,22 @@ class TestCorrInput(task.SingleTask):
         freqmap = freqmap[is_test_freq_all]
 
         # Average over frequencies
-        input_mask_all = (np.sum(passed_test_all, axis=0) / float(passed_test_all.shape[0])) >= self.threshold
+        input_mask_all = (
+            np.sum(passed_test_all, axis=0) / float(passed_test_all.shape[0])
+        ) >= self.threshold
 
         # Take the product along the test direction to determine good inputs for each frequency
         input_mask = np.prod(input_mask_all[:, self.use_test], axis=-1)
 
         # Create container to hold results
-        corr_input_test = containers.CorrInputTest(freq=freqmap, test=self.test,
-                                                   axes_from=timestream, attrs_from=timestream)
+        corr_input_test = containers.CorrInputTest(
+            freq=freqmap, test=self.test, axes_from=timestream, attrs_from=timestream
+        )
 
         # Save flags to container, return container
         corr_input_test.input_mask[:] = input_mask
 
-        corr_input_test.add_dataset('passed_test')
+        corr_input_test.add_dataset("passed_test")
         corr_input_test.passed_test[:] = passed_test_all
 
         return corr_input_test
@@ -678,7 +742,7 @@ class AccumulateCorrInputMask(task.SingleTask):
             self.input = corr_input_mask.input[:]
 
         self._accumulated_input_mask.append(corr_input_mask.input_mask[:])
-        self._csd.append(corr_input_mask.attrs['csd'])
+        self._csd.append(corr_input_mask.attrs["csd"])
 
     def process_finish(self):
         """ Determine good days as those where the fraction
@@ -705,12 +769,17 @@ class AccumulateCorrInputMask(task.SingleTask):
 
             for ii, day in enumerate(dindex):
                 other_days = np.delete(dindex, ii)
-                n_uniq_bad[day] = np.sum(~input_mask_all[day, :] & np.all(input_mask_all[other_days, :], axis=0))
+                n_uniq_bad[day] = np.sum(
+                    ~input_mask_all[day, :]
+                    & np.all(input_mask_all[other_days, :], axis=0)
+                )
 
-            good_day_flag *= (n_uniq_bad <= self.n_cut)
+            good_day_flag *= n_uniq_bad <= self.n_cut
 
             if not np.any(good_day_flag):
-                ValueError("Significant number of new correlator inputs flagged bad each day.")
+                ValueError(
+                    "Significant number of new correlator inputs flagged bad each day."
+                )
 
         # Write csd flag to file
         if self.save:
@@ -721,7 +790,7 @@ class AccumulateCorrInputMask(task.SingleTask):
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag
 
-            csd_flag.attrs['tag'] = 'flag_csd'
+            csd_flag.attrs["tag"] = "flag_csd"
 
             # Write output to hdf5 file
             self._save_output(csd_flag)
@@ -732,7 +801,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         # Create container to hold results
         corr_input_mask = containers.CorrInputMask(input=self.input)
 
-        corr_input_mask.attrs['tag'] = 'for_pass'
+        corr_input_mask.attrs["tag"] = "for_pass"
 
         # Save input_mask to container, return container
         corr_input_mask.input_mask[:] = input_mask
@@ -759,15 +828,17 @@ class ApplyCorrInputMask(task.SingleTask):
         """
 
         # Make sure containers are distributed across frequency
-        timestream.redistribute('freq')
-        cmask.redistribute('freq')
+        timestream.redistribute("freq")
+        cmask.redistribute("freq")
 
         # Create a slice that will expand the mask to
         # the same dimensions as the weight array
-        waxis = timestream.weight.attrs['axis']
+        waxis = timestream.weight.attrs["axis"]
         slc = [slice(None)] * len(waxis)
         for ww, name in enumerate(waxis):
-            if (name not in ['stack', 'prod']) and (name not in cmask.mask.attrs['axis']):
+            if (name not in ["stack", "prod"]) and (
+                name not in cmask.mask.attrs["axis"]
+            ):
                 slc[ww] = None
 
         # Extract input mask and weight array
@@ -779,10 +850,10 @@ class ApplyCorrInputMask(task.SingleTask):
 
         # Determine mapping between inputs in the mask
         # and inputs in the timestream
-        mask_input = cmask.index_map['input'][:]
+        mask_input = cmask.index_map["input"][:]
         nminput = mask_input.size
 
-        tstream_input = timestream.index_map['input'][:]
+        tstream_input = timestream.index_map["input"][:]
         ntinput = tstream_input.size
 
         if nminput == 1:
@@ -800,12 +871,17 @@ class ApplyCorrInputMask(task.SingleTask):
                 # that cylinder/polarisation.  However, we may want to make this more robust
                 # and explicit by passing a telescope object or list of correlator inputs
                 # and determining the cylinder/polarisation mapping from that.
-                iexpand = np.digitize(np.arange(ntinput), np.append(mask_input['chan_id'], ntinput)) - 1
+                iexpand = (
+                    np.digitize(
+                        np.arange(ntinput), np.append(mask_input["chan_id"], ntinput)
+                    )
+                    - 1
+                )
 
                 mask = mask[:, iexpand]
 
             # Use apply_gain function to apply mask based on product map
-            prod = timestream.index_map['prod'][timestream.index_map['stack']['prod']]
+            prod = timestream.index_map["prod"][timestream.index_map["stack"]["prod"]]
             tools.apply_gain(weight, mask, out=weight, prod_map=prod)
 
         # Return timestream
@@ -842,10 +918,10 @@ class ApplySiderealDayFlag(task.SingleTask):
         """
 
         # Fetch the csd from the timestream attributes
-        if 'lsd' in timestream.attrs:
-            this_csd = timestream.attrs['lsd']
-        elif 'csd' in timestream.attrs:
-            this_csd = timestream.attrs['csd']
+        if "lsd" in timestream.attrs:
+            this_csd = timestream.attrs["lsd"]
+        elif "csd" in timestream.attrs:
+            this_csd = timestream.attrs["csd"]
         else:
             this_csd = None
 
@@ -855,12 +931,15 @@ class ApplySiderealDayFlag(task.SingleTask):
             output = timestream
 
             if this_csd is None:
-                msg = ("Warning: input timestream does not have 'csd'/'lsd' attribute.  " +
-                       "Will continue pipeline processing.")
+                msg = (
+                    "Warning: input timestream does not have 'csd'/'lsd' attribute.  "
+                    + "Will continue pipeline processing."
+                )
             else:
-                msg = (("Warning: status of CSD %d not given in %s.  " +
-                        "Will continue pipeline processing.") %
-                       (this_csd, self.file_name))
+                msg = (
+                    "Warning: status of CSD %d not given in %s.  "
+                    + "Will continue pipeline processing."
+                ) % (this_csd, self.file_name)
 
         else:
 
@@ -870,13 +949,15 @@ class ApplySiderealDayFlag(task.SingleTask):
             if this_flag:
                 output = timestream
 
-                msg = (("CSD %d flagged good.  " +
-                        "Will continue pipeline processing.") % this_csd)
+                msg = (
+                    "CSD %d flagged good.  " + "Will continue pipeline processing."
+                ) % this_csd
             else:
                 output = None
 
-                msg = (("CSD %d flagged bad.  " +
-                        "Will halt pipeline processing.") % this_csd)
+                msg = (
+                    "CSD %d flagged bad.  " + "Will halt pipeline processing."
+                ) % this_csd
 
         # Print whether or not we will continue processing this csd
         self.log.info(msg)
@@ -903,7 +984,7 @@ class NanToNum(task.SingleTask):
         """
 
         # Make sure we are distributed over frequency
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         # Loop over frequencies to reduce memory usage
         for lfi, fi in timestream.vis[:].enumerate(0):
@@ -912,16 +993,22 @@ class NanToNum(task.SingleTask):
             flag = ~np.isfinite(timestream.vis[fi])
             if np.any(flag):
                 timestream.vis[fi][flag] = 0.0
-                timestream.weight[fi][flag] = 0.0  # Also set weights to zero so we don't trust values
-                self.log.info("%d visibilities are non finite for frequency=%i (%.2f %%)" %
-                              (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size))
+                timestream.weight[fi][
+                    flag
+                ] = 0.0  # Also set weights to zero so we don't trust values
+                self.log.info(
+                    "%d visibilities are non finite for frequency=%i (%.2f %%)"
+                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                )
 
             # Set non-finite values of the weight equal to zero
             flag = ~np.isfinite(timestream.weight[fi])
             if np.any(flag):
                 timestream.weight[fi][flag] = 0
-                self.log.info("%d weights are non finite for frequency=%i (%.2f %%)" %
-                              (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size))
+                self.log.info(
+                    "%d weights are non finite for frequency=%i (%.2f %%)"
+                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                )
 
         return timestream
 
@@ -949,7 +1036,7 @@ class RadiometerWeight(task.SingleTask):
         from calibration import _extract_diagonal as diag
 
         # Redistribute over the frequency direction
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         if isinstance(timestream, andata.CorrData):
 
@@ -957,30 +1044,36 @@ class RadiometerWeight(task.SingleTask):
                 print "Converting weights to effective number of samples."
 
             # Extract number of samples per integration period
-            max_nsamples = timestream.attrs['gpu.gpu_intergration_period'][0]
+            max_nsamples = timestream.attrs["gpu.gpu_intergration_period"][0]
 
             # Extract the maximum possible value of vis_weight
-            max_vis_weight = np.iinfo(timestream.flags['vis_weight'].dtype).max
+            max_vis_weight = np.iinfo(timestream.flags["vis_weight"].dtype).max
 
             # Calculate the scaling factor that converts from vis_weight value
             # to number of samples
             vw_to_nsamp = max_nsamples / float(max_vis_weight)
 
             # Scale vis_weight by the effective number of samples
-            vis_weight = timestream.flags['vis_weight'][:].astype(np.float32) * vw_to_nsamp
+            vis_weight = (
+                timestream.flags["vis_weight"][:].astype(np.float32) * vw_to_nsamp
+            )
 
             # Recast vis_weight as float32
             # Wrap to produce MPIArray
-            vis_weight = mpiarray.MPIArray.wrap(vis_weight, axis=0, comm=timestream.comm)
+            vis_weight = mpiarray.MPIArray.wrap(
+                vis_weight, axis=0, comm=timestream.comm
+            )
 
             # Extract attributes
-            vis_weight_attrs = memh5.attrs2dict(timestream.flags['vis_weight'].attrs)
+            vis_weight_attrs = memh5.attrs2dict(timestream.flags["vis_weight"].attrs)
 
             # Delete current uint8 dataset
-            timestream['flags'].__delitem__('vis_weight')
+            timestream["flags"].__delitem__("vis_weight")
 
             # Create new float32 dataset
-            vis_weight_dataset = timestream.create_flag('vis_weight', data=vis_weight, distributed=True)
+            vis_weight_dataset = timestream.create_flag(
+                "vis_weight", data=vis_weight, distributed=True
+            )
 
             # Copy attributes
             memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
@@ -1000,7 +1093,7 @@ class RadiometerWeight(task.SingleTask):
             tools.apply_gain(timestream.weight[:], inv_Trec, out=timestream.weight[:])
 
         else:
-            raise RuntimeError('Format of `timestream` argument is unknown.')
+            raise RuntimeError("Format of `timestream` argument is unknown.")
 
         # Return timestream with updated weights
         return timestream
@@ -1038,14 +1131,20 @@ class BadNodeFlagger(task.SingleTask):
         """
 
         # Redistribute over frequency
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         # Determine local frequencies
         sf = timestream.vis.local_offset[0]
         ef = sf + timestream.vis.local_shape[0]
 
         # Extract autocorrelation indices
-        auto_pi = np.array([ ii for (ii, pp) in enumerate(timestream.index_map['prod']) if pp[0] == pp[1] ])
+        auto_pi = np.array(
+            [
+                ii
+                for (ii, pp) in enumerate(timestream.index_map["prod"])
+                if pp[0] == pp[1]
+            ]
+        )
 
         # Create bad node flag by checking for frequencies/time samples where
         # the autocorrelations are all zero
@@ -1060,7 +1159,9 @@ class BadNodeFlagger(task.SingleTask):
 
         # Set up map from frequency to node
         basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-        nodelist = np.array([ np.argmin(np.abs(ff - basefreq)) % 16 for ff in timestream.freq ])
+        nodelist = np.array(
+            [np.argmin(np.abs(ff - basefreq)) % 16 for ff in timestream.freq]
+        )
 
         # Manually flag frequencies corresponding to specific GPU nodes
         for node in self.nodes:
@@ -1068,15 +1169,19 @@ class BadNodeFlagger(task.SingleTask):
                 if nind >= sf and nind < ef:
                     timestream.weight[nind] = 0
 
-                    print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
+                    print "Rank %d is flagging node %d, freq %d." % (
+                        mpiutil.rank,
+                        node,
+                        nind,
+                    )
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
-        this_acq = timestream.attrs.get('acquisition_name', None)
+        this_acq = timestream.attrs.get("acquisition_name", None)
         if this_acq in self.nodes_by_acq:
 
             # Grab list of nodes from input dictionary
             nodes_to_flag = self.nodes_by_acq[this_acq]
-            if not hasattr(nodes_to_flag, '__iter__'):
+            if not hasattr(nodes_to_flag, "__iter__"):
                 nodes_to_flag = [nodes_to_flag]
 
             # Loop over nodes and perform flagging
@@ -1085,7 +1190,11 @@ class BadNodeFlagger(task.SingleTask):
                     if nind >= sf and nind < ef:
                         timestream.weight[nind] = 0
 
-                        print "Rank %d is flagging node %d, freq %d." % (mpiutil.rank, node, nind)
+                        print "Rank %d is flagging node %d, freq %d." % (
+                            mpiutil.rank,
+                            node,
+                            nind,
+                        )
 
         # Return timestream with bad nodes flagged
         return timestream
@@ -1108,7 +1217,7 @@ def daytime_flag(time):
     rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
         ss = ephemeris.solar_setting(rr)[0]
-        flag |= ((time >= rr) & (time <= ss))
+        flag |= (time >= rr) & (time <= ss)
 
     return flag
 
@@ -1147,7 +1256,11 @@ def solar_transit_flag(time, nsig=5.0):
     # as +/- nsig sigma, where sigma denotes the width of the
     # primary beam.  We use the lowest frequency and E polarisation,
     # since this is the most conservative (largest sigma).
-    window_sec = nsig * cal_utils.guess_fwhm(400.0, pol='X', dec=np.median(dec), sigma=True) * deg_to_sec
+    window_sec = (
+        nsig
+        * cal_utils.guess_fwhm(400.0, pol="X", dec=np.median(dec), sigma=True)
+        * deg_to_sec
+    )
 
     # Sun transit
     transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)
@@ -1163,7 +1276,7 @@ def solar_transit_flag(time, nsig=5.0):
         # Flag +/- window_sec around peak location
         begin = mid - window_sec
         end = mid + window_sec
-        flag |= ((time >= begin) & (time <= end))
+        flag |= (time >= begin) & (time <= end)
 
     return flag
 
@@ -1246,10 +1359,10 @@ class DayMask(task.SingleTask):
             flag_function = daytime_flag
 
         # Redistribute over frequency
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Get flag that indicates day times (RAs)
-        if hasattr(sstream, 'time'):
+        if hasattr(sstream, "time"):
             time = sstream.time
             flag = flag_function(time)
 
@@ -1257,10 +1370,12 @@ class DayMask(task.SingleTask):
 
         else:
             # Fetch either the LSD or CSD attribute
-            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-            ra = sstream.index_map['ra'][:]
+            csd = (
+                sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+            )
+            ra = sstream.index_map["ra"][:]
 
-            if hasattr(csd, '__iter__'):
+            if hasattr(csd, "__iter__"):
                 flag = np.zeros(len(ra), dtype=np.bool)
                 for cc in csd:
                     flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
@@ -1272,7 +1387,7 @@ class DayMask(task.SingleTask):
         # If requested, estimate and subtract the mean level
         if self.remove_average and not np.all(flag):
             if mpiutil.rank0:
-                print("Subtracting mean visibility.")
+                print ("Subtracting mean visibility.")
             sstream.vis[:] -= np.mean(sstream.vis[..., ~flag], axis=-1)[..., np.newaxis]
 
         # Apply the mask
@@ -1283,11 +1398,11 @@ class DayMask(task.SingleTask):
                 flag = taper_mask(flag, ntaper, outer=self.outer_taper)
 
             # Apply the mask to the weights
-            sstream.weight[:] *= (1.0 - flag)
+            sstream.weight[:] *= 1.0 - flag
 
             # If requested, apply the mask to the data
             if self.zero_data:
-                sstream.vis[:] *= (1.0 - flag)
+                sstream.vis[:] *= 1.0 - flag
 
         # Return masked sidereal stream
         return sstream
@@ -1333,7 +1448,7 @@ class MaskRA(task.SingleTask):
             Masked sidereal stream.
         """
 
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         ra_shift = (sstream.ra[:] - self.start) % 360.0
         end_shift = (self.end - self.start) % 360.0
@@ -1342,20 +1457,27 @@ class MaskRA(task.SingleTask):
         mask_bool = ra_shift > end_shift
 
         # Put in the transition at the start of the day
-        mask = np.where(ra_shift < self.width,
-                        0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
-                        mask_bool)
+        mask = np.where(
+            ra_shift < self.width,
+            0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
+            mask_bool,
+        )
 
         # Put the transition at the end of the day
-        mask = np.where(np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
-                        0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
-                        mask)
+        mask = np.where(
+            np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
+            0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
+            mask,
+        )
 
         if self.remove_average:
             # Estimate the mean level from unmasked data
             import scipy.stats
 
-            nanvis = sstream.vis[:] * np.where(mask_bool, 1.0, np.nan)[np.newaxis, np.newaxis, :]
+            nanvis = (
+                sstream.vis[:]
+                * np.where(mask_bool, 1.0, np.nan)[np.newaxis, np.newaxis, :]
+            )
             average = scipy.stats.nanmedian(nanvis, axis=-1)[:, :, np.newaxis]
             sstream.vis[:] -= average
 
@@ -1364,7 +1486,7 @@ class MaskRA(task.SingleTask):
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask**2
+        sstream.weight[:] *= mask ** 2
 
         return sstream
 
@@ -1414,7 +1536,7 @@ class MaskCHIMEData(task.SingleTask):
 
         tel = self.telescope
 
-        for pi, (fi, fj) in enumerate(mmodes.index_map['prod']):
+        for pi, (fi, fj) in enumerate(mmodes.index_map["prod"]):
 
             oi, oj = tel.feeds[fi], tel.feeds[fj]
 
@@ -1450,28 +1572,30 @@ class MaskCHIMEMisc(task.SingleTask):
 
     def process(self, ss):
 
-        ss.redistribute('prod')
+        ss.redistribute("prod")
 
         # Mask out the 10 MHz lines
         if self.mask_clock:
 
             # Identify the frequency bins that contain the 10 MHz clock line
-            m10 = np.abs(((ss.freq['centre'] + 5) % 10.0) - 5.0) > 0.5 * ss.freq['width']
+            m10 = (
+                np.abs(((ss.freq["centre"] + 5) % 10.0) - 5.0) > 0.5 * ss.freq["width"]
+            )
 
             ss.weight[:] *= m10[:, np.newaxis, np.newaxis]
 
         if self.mask_nodes is not None:
 
-            node_index = ((800.0 - ss.freq['centre']) / 400.0 * 1024) % 16
+            node_index = ((800.0 - ss.freq["centre"]) / 400.0 * 1024) % 16
 
             for ni in self.mask_nodes:
 
-                node_mask = (node_index != ni)
+                node_mask = node_index != ni
                 ss.weight[:] *= node_mask[:, np.newaxis, np.newaxis]
 
         if self.mask_freq is not None:
 
-            fmask = np.ones_like(ss.freq['centre'])
+            fmask = np.ones_like(ss.freq["centre"])
             fmask[self.mask_freq] = 0.0
 
             ss.weight[:] *= fmask[:, np.newaxis, np.newaxis]
@@ -1488,7 +1612,7 @@ class DataFlagger(task.SingleTask):
         List of DataFlagType names to apply. Defaults to 'all'
     """
 
-    flag_type = config.Property(proptype=list, default=['all'])
+    flag_type = config.Property(proptype=list, default=["all"])
 
     def setup(self):
         """Query the database for flags of the requested types."""
@@ -1501,21 +1625,23 @@ class DataFlagger(task.SingleTask):
             possible_flags = []
             for ft in flag_types:
                 possible_flags.append(ft.name)
-                if ft.name in self.flag_type or 'all' in self.flag_type:
-                    self.log.info('Querying for %s Flags' % ft.name)
+                if ft.name in self.flag_type or "all" in self.flag_type:
+                    self.log.info("Querying for %s Flags" % ft.name)
                     new_flags = di.DataFlag.select().where(di.DataFlag.type == ft)
                     flags[ft.name] = list(new_flags)
 
             # Check that user-proved flag names are valid
             for flag_name in self.flag_type:
-                if flag_name != 'all' and flag_name not in possible_flags:
-                    self.log.warning('Warning: Unrecognized Flag %s' % flag_name)
+                if flag_name != "all" and flag_name not in possible_flags:
+                    self.log.warning("Warning: Unrecognized Flag %s" % flag_name)
 
         # Share flags with other nodes
         flags = self.comm.bcast(flags, root=0)
 
         # Save flags to class attribute
-        self.log.info('Found %d Flags in Total.' % sum([len(flg) for flg in flags.values()]))
+        self.log.info(
+            "Found %d Flags in Total." % sum([len(flg) for flg in flags.values()])
+        )
         self.flags = flags
 
     def process(self, timestream):
@@ -1534,27 +1660,28 @@ class DataFlagger(task.SingleTask):
             Returns the same timestream object with a modified weight dataset.
         """
         # Redistribute over the frequency direction
-        timestream.redistribute('freq')
+        timestream.redistribute("freq")
 
         # Determine whether timestream is stacked data
-        stacked = (len(timestream.index_map['prod']) >
-                   len(timestream.index_map['stack']['prod']))
+        stacked = len(timestream.index_map["prod"]) > len(
+            timestream.index_map["stack"]["prod"]
+        )
 
         # If not stacked, determine which inputs are in the timestream.
         # If stacked, assume flags apply to all products.
         if not stacked:
-            inputs = timestream.index_map['input']['chan_id'][:]
+            inputs = timestream.index_map["input"]["chan_id"][:]
             ninputs = len(inputs)
         else:
             ninputs = 1
 
         # Get time axis or convert RA axis
-        if 'ra' in timestream.index_map:
-            ra = timestream.index_map['ra'][:]
-            if 'lsd' in timestream.attrs:
-                csd = timestream.attrs['lsd']
+        if "ra" in timestream.index_map:
+            ra = timestream.index_map["ra"][:]
+            if "lsd" in timestream.attrs:
+                csd = timestream.attrs["lsd"]
             else:
-                csd = timestream.attrs['csd']
+                csd = timestream.attrs["csd"]
             time = ephemeris.csd_to_unix(csd + ra / 360.0)
         else:
             time = timestream.time
@@ -1581,12 +1708,20 @@ class DataFlagger(task.SingleTask):
                 time_idx = (time >= flag.start_time) & (time <= flag.finish_time)
                 if np.any(time_idx):
                     # Print info to log about why the data is being flagged
-                    msg = ('%d (of %d) samples flagged by a %s DataFlag covering %s to %s.' %
-                           (np.sum(time_idx), time_idx.size, flag_type,
-                            ephemeris.unix_to_datetime(flag.start_time).strftime("%Y%m%dT%H%M%SZ"),
-                            ephemeris.unix_to_datetime(flag.finish_time).strftime("%Y%m%dT%H%M%SZ")
-                            )
-                           )
+                    msg = (
+                        "%d (of %d) samples flagged by a %s DataFlag covering %s to %s."
+                        % (
+                            np.sum(time_idx),
+                            time_idx.size,
+                            flag_type,
+                            ephemeris.unix_to_datetime(flag.start_time).strftime(
+                                "%Y%m%dT%H%M%SZ"
+                            ),
+                            ephemeris.unix_to_datetime(flag.finish_time).strftime(
+                                "%Y%m%dT%H%M%SZ"
+                            ),
+                        )
+                    )
                     self.log.info(msg)
 
                     # Refine the mask based on any frequency or input selection
@@ -1594,12 +1729,17 @@ class DataFlagger(task.SingleTask):
                     if flag.freq is not None:
                         # `and` with flagged local frequencies
                         # By default, all frequencies are flagged
-                        flag_mask = flag_mask & flag.freq_mask[local_bin, np.newaxis, np.newaxis]
+                        flag_mask = (
+                            flag_mask
+                            & flag.freq_mask[local_bin, np.newaxis, np.newaxis]
+                        )
 
                     if flag.inputs is not None and not stacked:
                         # `and` with flagged inputs
                         # By default, all inputs are flagged
-                        flag_mask = flag_mask & flag.input_mask[np.newaxis, inputs, np.newaxis]
+                        flag_mask = (
+                            flag_mask & flag.input_mask[np.newaxis, inputs, np.newaxis]
+                        )
 
                     # set weight=0 where flag=1
                     weight_mask = weight_mask & np.logical_not(flag_mask)
@@ -1612,10 +1752,14 @@ class DataFlagger(task.SingleTask):
             weight *= weight_mask
         else:
             # Use apply_gain function to apply mask based on product map
-            products = timestream.index_map['prod'][timestream.index_map['stack']['prod']]
+            products = timestream.index_map["prod"][
+                timestream.index_map["stack"]["prod"]
+            ]
             tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
 
-        self.log.info('%0.2f percent of data was flagged as bad.' %
-                       (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),))
+        self.log.info(
+            "%0.2f percent of data was flagged as bad."
+            % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
+        )
 
         return timestream
