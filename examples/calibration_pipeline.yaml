@@ -29,7 +29,7 @@ period_parameters:
     end_time:    &end_time '20190304T130000'
     csd_start:   &csd_start 1700
     csd_end:     &csd_end 2200
-    timing_file: &timing_file "/scratch/ssiegel/timing/v1/not_referenced/201812*_chimetiming_delay.h5"
+    timing_file: &timing_file "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5"
 
 
 pipeline:
