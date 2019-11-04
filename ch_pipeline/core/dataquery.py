@@ -61,14 +61,21 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
 
 import os
 
-from caput import mpiutil, pipeline, config
-from ch_util import tools, ephemeris
+from caput import mpiutil, config, pipeline
 from draco.core import task
+from ch_util import tools, ephemeris
 
-_DEFAULT_NODE_SPOOF = {"cedar": "/project/rpp-krs/chime/chime_online/"}
+
+_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
 
 
 def _force_list(val):
@@ -81,7 +88,7 @@ def _force_list(val):
         return [val]
 
 
-class QueryDatabase(pipeline.TaskBase):
+class QueryDatabase(task.MPILoggedTask):
     """Find files from specified database queries.
 
     This routine will query the database as specified in the runtime
@@ -90,12 +97,14 @@ class QueryDatabase(pipeline.TaskBase):
     Attributes
     ----------
     node_spoof : dictionary
-        (default: {'cedar': '/project/rpp-krs/chime/chime_online/'} )
+        (default: {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'} )
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
         can be in any format ensure_unix will support, including eg
             20190116T150323 and 2019-1-16 08:03:23 -7
+    start_csd, end_csd : float
+        Start and end CSDs. Only used if `start_time` is not set.
     instrument : string (default: 'chimestack')
         data set to use
     source_26m : string (default: None)
@@ -136,6 +145,9 @@ class QueryDatabase(pipeline.TaskBase):
 
     start_time = config.Property(default=None)
     end_time = config.Property(default=None)
+
+    start_csd = config.Property(proptype=float, default=None)
+    end_csd = config.Property(proptype=float, default=None)
 
     exclude_daytime = config.Property(proptype=bool, default=False)
 
@@ -185,16 +197,27 @@ class QueryDatabase(pipeline.TaskBase):
             if self.accept_all_global_flags:
                 f.accept_all_global_flags()
 
+            # Use start and end times if set, or try and use the start and end CSDs
+            if self.start_time:
+                st, et = self.start_time, self.end_time
+            elif self.start_csd:
+                st = ephemeris.csd_to_unix(self.start_csd)
+                et = (
+                    ephemeris.csd_to_unix(self.end_csd)
+                    if self.end_csd is not None
+                    else None
+                )
+
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
             # f.include_time_interval(self.start_time, self.end_time)
-            f.set_time_range(self.start_time, self.end_time)
+            f.set_time_range(st, et)
 
             if self.start_RA and self.end_RA:
                 f.include_RA_interval(self.start_RA, self.end_RA)
             elif self.start_RA or self.start_RA:
-                print(
-                    "WARNING: one but not both of start_RA and end_RA are set. Ignoring both."
+                self.log.warning(
+                    "One but not both of start_RA and end_RA " "are set. Ignoring both."
                 )
 
             f.filter_acqs(di.ArchiveInst.name == self.instrument)
@@ -257,7 +280,7 @@ class QueryDatabase(pipeline.TaskBase):
         return files
 
 
-class QueryRun(pipeline.TaskBase):
+class QueryRun(task.MPILoggedTask):
     """Find the files belonging to a specific `run`.
 
     This routine will query the database for the global flag corresponding to
@@ -357,7 +380,7 @@ class QueryRun(pipeline.TaskBase):
         return files
 
 
-class QueryDataspecFile(pipeline.TaskBase):
+class QueryDataspecFile(task.MPILoggedTask):
     """Find the available files given a dataspec from a file.
 
     .. deprecated:: pass1
@@ -431,7 +454,7 @@ class QueryDataspecFile(pipeline.TaskBase):
         return files
 
 
-class QueryDataspec(pipeline.TaskBase):
+class QueryDataspec(task.MPILoggedTask):
     """Find the available files given a dataspec in the config file.
 
     Attributes
@@ -582,7 +605,7 @@ class QueryAcquisitions(task.MPILoggedTask):
         return files
 
 
-class QueryInputs(pipeline.TaskBase):
+class QueryInputs(task.MPILoggedTask):
     """From a dataspec describing the data create a list of objects describing
     the inputs in the files.
     """

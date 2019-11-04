@@ -11,6 +11,13 @@ Tasks
     ApplyTimingCorrection
     ConstructTimingCorrection
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
+
 
 import os
 
@@ -47,11 +54,13 @@ class ApplyTimingCorrection(task.SingleTask):
 
         Parameters
         ----------
-        tcorr : ch_util.timing.TimingCorrection
+        tcorr : ch_util.timing.TimingCorrection or list of
             Timing correction that is relevant for the range of time being processed.
             Note that the timing correction must *already* be referenced with respect
             to the times that were used to calibrate if processing stacked data.
         """
+        if not isinstance(tcorr, list):
+            tcorr = [tcorr]
         self.tcorr = tcorr
 
     def process(self, tstream):
@@ -88,6 +97,19 @@ class ApplyTimingCorrection(task.SingleTask):
         # If requested, extract the input flags
         input_flags = tstream.input_flags[:] if self.use_input_flags else None
 
+        # Find the right timing correction
+        for tcorr in self.tcorr:
+            if timestamp[0] >= tcorr.time[0] and timestamp[-1] <= tcorr.time[-1]:
+                break
+        else:
+            raise RuntimeError(
+                "Could not find timing correction file covering "
+                "range of timestream data (%s to %s)"
+                % tuple(ephemeris.unix_to_datetime([timestamp[0], timestamp[-1]]))
+            )
+
+        self.log.info("Using correction file %s" % tcorr.attrs["tag"])
+
         # If requested, reference the timing correct with respect to source transit time
         if self.refer_to_transit:
             # First check for transit_time attribute in file
@@ -115,12 +137,12 @@ class ApplyTimingCorrection(task.SingleTask):
                 )
             )
 
-            self.tcorr.set_global_reference_time(
+            tcorr.set_global_reference_time(
                 ttrans, window=self.transit_window, interpolate=True, interp="linear"
             )
 
         # Apply the timing correction
-        self.tcorr.apply_timing_correction(
+        tcorr.apply_timing_correction(
             tstream, time=timestamp, freq=freq, input_flags=input_flags, copy=False
         )
 

@@ -34,6 +34,12 @@ Tasks
 
     MonkeyPatchContainers
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
 
 import numpy as np
 
@@ -662,14 +668,14 @@ class RingMap(ContainerBase):
 
     _dataset_spec = {
         "map": {
-            "axes": ["freq", "pol", "ra", "beam", "el"],
+            "axes": ["beam", "pol", "freq", "ra", "el"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "dirty_beam": {
-            "axes": ["freq", "pol", "ra", "beam", "el"],
+            "axes": ["beam", "pol", "freq", "ra", "el"],
             "dtype": np.float64,
             "initialise": False,
             "distributed": True,

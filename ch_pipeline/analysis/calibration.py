@@ -24,6 +24,13 @@ Tasks
     InterpolateGainOverFrequency
     SiderealCalibration
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
+
 import json
 
 import numpy as np
@@ -65,7 +72,7 @@ def _extract_diagonal(utmat, axis=1):
     nside = int((2 * utmat.shape[axis]) ** 0.5)
 
     # Check that this nside is correct
-    if utmat.shape[axis] != (nside * (nside + 1) / 2):
+    if utmat.shape[axis] != (nside * (nside + 1) // 2):
         msg = (
             "Array length (%i) of axis %i does not correspond upper triangle\
                 of square matrix"
@@ -351,7 +358,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
         """
         self.ch_ref = tools.get_noise_channel(inputmap)
         if mpiutil.rank0:
-            print "Using input=%i as noise channel" % self.ch_ref
+            print("Using input=%i as noise channel" % self.ch_ref)
 
     def next(self, ts):
         """Find gains from noise injection data and apply them to visibilities.
@@ -1591,7 +1598,7 @@ class SiderealCalibration(task.SingleTask):
         )
 
         if mpiutil.rank0:
-            print (
+            print(
                 "Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)."
                 % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
             )

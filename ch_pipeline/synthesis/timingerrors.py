@@ -8,6 +8,13 @@ Tasks
 
     TimingErrors
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
+
 
 import numpy as np
 
@@ -139,7 +146,7 @@ class TimingErrors(gain.BaseGains):
             gain_phase = np.zeros((lfreq, ninput, ntime), dtype=complex)
             # Since we have 2 cylinders populate half of them with a delay)
             # TODO: generalize this for 3 or even 4 cylinders in the future.
-            gain_phase[:, ninput / self.ncyl :, :] = (
+            gain_phase[:, ninput // self.ncyl :, :] = (
                 2.0
                 * np.pi
                 * freq[sfreq:efreq, np.newaxis, np.newaxis]
@@ -157,7 +164,7 @@ class TimingErrors(gain.BaseGains):
             nchannel = self.nchannel
             ninput = self.ninput_global
             # Number of channels on a board
-            nboards = ninput / nchannel
+            nboards = ninput // nchannel
 
             # Generates as many random delay errors as there are iceboards
             if self.comm.rank == 0:

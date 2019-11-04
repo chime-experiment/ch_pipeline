@@ -25,11 +25,22 @@ Tasks
     NanToNum
     RadiometerWeight
     BadNodeFlagger
-    DayMask
+    MaskDay
+    MaskSource
+    MaskSun
+    MaskMoon
+    MaskRA
     MaskData
     MaskCHIMEData
     DataFlagger
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
@@ -219,7 +230,7 @@ class ChannelFlagger(task.SingleTask):
                 )
                 good_gains, good_noise, good_fit, test_channels = res
 
-                print (
+                print(
                     "Frequency %i bad channels: blank %i; gains %i; noise %i; fit %i %s"
                     % (
                         fi,
@@ -291,7 +302,7 @@ class MonitorCorrInput(task.SingleTask):
             List of filenames to monitor good correlator inputs.
         """
 
-        from sidereal import get_times, _days_in_csd
+        from .sidereal import get_times, _days_in_csd
 
         self.files = np.array(files)
 
@@ -410,7 +421,7 @@ class MonitorCorrInput(task.SingleTask):
             csd, time_range = self.timemap[i_dist]
 
             # Print status
-            print "Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd)
+            print("Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd))
 
             # Create an instance of chan_monitor for this day
             cm = chan_monitor.ChanMonitor(*time_range)
@@ -655,7 +666,7 @@ class TestCorrInput(task.SingleTask):
                 is_test_freq[fi_local] = True
 
                 # Print results for this frequency
-                print (
+                print(
                     "Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
                         fi_dist,
                         timestream.ninput - len(test_inputs),
@@ -1033,7 +1044,7 @@ class RadiometerWeight(task.SingleTask):
         timestream : andata.CorrData
         """
 
-        from calibration import _extract_diagonal as diag
+        from .calibration import _extract_diagonal as diag
 
         # Redistribute over the frequency direction
         timestream.redistribute("freq")
@@ -1041,7 +1052,7 @@ class RadiometerWeight(task.SingleTask):
         if isinstance(timestream, andata.CorrData):
 
             if mpiutil.rank0:
-                print "Converting weights to effective number of samples."
+                print("Converting weights to effective number of samples.")
 
             # Extract number of samples per integration period
             max_nsamples = timestream.attrs["gpu.gpu_intergration_period"][0]
@@ -1081,7 +1092,9 @@ class RadiometerWeight(task.SingleTask):
         elif isinstance(timestream, containers.SiderealStream):
 
             if mpiutil.rank0:
-                print "Scaling weights by outer product of inverse receiver temperature."
+                print(
+                    "Scaling weights by outer product of inverse receiver temperature."
+                )
 
             # Extract the autocorrelation
             Trec = diag(timestream.vis).real
@@ -1169,10 +1182,9 @@ class BadNodeFlagger(task.SingleTask):
                 if nind >= sf and nind < ef:
                     timestream.weight[nind] = 0
 
-                    print "Rank %d is flagging node %d, freq %d." % (
-                        mpiutil.rank,
-                        node,
-                        nind,
+                    print(
+                        "Rank %d is flagging node %d, freq %d."
+                        % (mpiutil.rank, node, nind)
                     )
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
@@ -1190,10 +1202,9 @@ class BadNodeFlagger(task.SingleTask):
                     if nind >= sf and nind < ef:
                         timestream.weight[nind] = 0
 
-                        print "Rank %d is flagging node %d, freq %d." % (
-                            mpiutil.rank,
-                            node,
-                            nind,
+                        print(
+                            "Rank %d is flagging node %d, freq %d."
+                            % (mpiutil.rank, node, nind)
                         )
 
         # Return timestream with bad nodes flagged
@@ -1201,19 +1212,21 @@ class BadNodeFlagger(task.SingleTask):
 
 
 def daytime_flag(time):
-    """ Return a flag that indicates if the input times
-    occur during the day.
+    """Return a flag that indicates if times occur during the day.
 
     Parameters
     ----------
-    time : float (UNIX time)
+    time : np.ndarray[ntime,]
+        Unix timestamps.
 
     Returns
     -------
-    flag : np.ndarray, dtype=np.bool
+    flag : np.ndarray[ntime,]
+        Boolean flag that is True if the time occured during the day and False otherwise.
     """
+    time = np.atleast_1d(time)
+    flag = np.zeros(time.size, dtype=np.bool)
 
-    flag = np.zeros(len(time), dtype=np.bool)
     rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
         ss = ephemeris.solar_setting(rr)[0]
@@ -1222,62 +1235,61 @@ def daytime_flag(time):
     return flag
 
 
-def solar_transit_flag(time, nsig=5.0):
-    """ Return a flag that indicates if the input times
-    occur near sun transit.
+def transit_flag(body, time, nsigma=2.0):
+    """Return a flag that indicates if times occured near transit of a celestial body.
 
     Parameters
     ----------
-    time : float (UNIX time)
+    body : skyfield.starlib.Star
+        Skyfield representation of a celestial body.
+    time : np.ndarray[ntime,]
+        Unix timestamps.
+    nsigma : float
+        Number of sigma to flag on either side of transit.
 
     Returns
     -------
-    flag : np.ndarray, dtype=np.bool
+    flag : np.ndarray[ntime,]
+        Boolean flag that is True if the times occur within nsigma of transit
+        and False otherwise.
     """
-
-    import ephem
-
-    deg_to_sec = 3600.0 * ephemeris.SIDEREAL_S / 15.0
+    time = np.atleast_1d(time)
+    obs = ephemeris._get_chime()
 
     # Create boolean flag
-    flag = np.zeros(len(time), dtype=np.bool)
+    flag = np.zeros(time.size, dtype=np.bool)
 
-    # Get position of sun at every time sample
-    ra, dec = [], []
-    obs, sun = ephemeris._get_chime(), ephem.Sun()
-    for tt in time:
-        obs.date = ephemeris.unix_to_ephem_time(tt)
-        sun.compute(obs)
-
-        ra.append(sun.ra)
-        dec.append(sun.dec)
-
-    # Estimate the amount of time the sun is in the primary beam
-    # as +/- nsig sigma, where sigma denotes the width of the
-    # primary beam.  We use the lowest frequency and E polarisation,
-    # since this is the most conservative (largest sigma).
-    window_sec = (
-        nsig
-        * cal_utils.guess_fwhm(400.0, pol="X", dec=np.median(dec), sigma=True)
-        * deg_to_sec
+    # Find transit times
+    transit_times = ephemeris.transit_times(
+        body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0
     )
 
-    # Sun transit
-    transit_times = ephemeris.solar_transit(time[0] - window_sec, time[-1] + window_sec)
-    for mid in transit_times:
+    # Loop over transit times
+    for ttrans in transit_times:
 
-        # Update peak location based on rotation of cylinder
-        obs.date = ephemeris.unix_to_ephem_time(mid)
-        sun.compute(obs)
+        # Compute source coordinates
+        obs.date = ttrans
+        alt, az = obs.altaz(body)
+        ra, dec = obs.cirs_radec(body)
 
-        peak_ra = ephemeris.peak_RA(sun, deg=True)
-        mid += (peak_ra - np.degrees(sun.ra)) * deg_to_sec
+        # Make sure body is above horizon
+        if alt > 0.0:
 
-        # Flag +/- window_sec around peak location
-        begin = mid - window_sec
-        end = mid + window_sec
-        flag |= (time >= begin) & (time <= end)
+            # Estimate the amount of time the body is in the primary beam
+            # as +/- nsigma sigma, where sigma denotes the width of the
+            # primary beam.  We use the lowest frequency and E-W (or X) polarisation,
+            # since this is the most conservative (largest sigma).
+            window_deg = nsigma * cal_utils.guess_fwhm(
+                400.0, pol="X", dec=dec.radians, sigma=True
+            )
+            window_sec = window_deg * 240.0 * ephemeris.SIDEREAL_S
 
+            # Flag +/- window_sec around transit time
+            begin = ttrans - window_sec
+            end = ttrans + window_sec
+            flag |= (time >= begin) & (time <= end)
+
+    # Return boolean flag indicating times near transit
     return flag
 
 
@@ -1308,93 +1320,85 @@ def taper_mask(mask, nwidth, outer=False):
     return tapered_mask
 
 
-class DayMask(task.SingleTask):
+class MaskDay(task.SingleTask):
     """Mask out the daytime data.
+
+    This task can also act as a base class for applying an arbitrary
+    mask to the data based on time.  This is achieved by redefining
+    the `_flag` method.
 
     Attributes
     ----------
     zero_data : bool, optional
         Zero the data in addition to modifying the noise weights
-        (default is False).
-    remove_average : bool, optional
-        Estimate and remove the mean level from each visibilty. This estimate
-        does not use data from the masked region. (default is False)
-    only_sun : bool, optional
-        If only_sun is True, then a window of time around sun transit is flagged as bad.
-        If only_sun is False, then all day time data is flagged as bad.  (default is False)
     taper_width : float, optional
-        Width (in degrees) of the taper applied to the mask.  Creates a smooth transition from
-        masked to unmasked regions using a cosine function.  Default is 0.0 (no taper).
+        Width (in seconds) of the taper applied to the mask.  Creates a smooth transition from
+        masked to unmasked regions using a cosine function.  Set to 0.0 for no taper (default).
     outer_taper : bool, optional
         If outer_taper is True, then the taper occurs in the unmasked region.
         If outer_taper is False, then the taper occurs in the masked region.
-        Default is True.
-
     """
 
     zero_data = config.Property(proptype=bool, default=False)
-    remove_average = config.Property(proptype=bool, default=False)
-    only_sun = config.Property(proptype=bool, default=False)
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
 
     def process(self, sstream):
-        """Apply a day time mask.
+        """Set the weight to zero during day time.
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
+        sstream : containers.SiderealStream or equivalent
             Unmasked sidereal stack.
 
         Returns
         -------
-        mstream : containers.SiderealStream
+        mstream : containers.SiderealStream or equivalent
             Masked sidereal stream.
         """
-
-        # Determine the flagging function to use
-        if self.only_sun:
-            flag_function = solar_transit_flag
-        else:
-            flag_function = daytime_flag
-
         # Redistribute over frequency
         sstream.redistribute("freq")
 
         # Get flag that indicates day times (RAs)
-        if hasattr(sstream, "time"):
-            time = sstream.time
-            flag = flag_function(time)
-
+        if "time" in sstream.index_map:
+            time = sstream.time[:]
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(time))))
 
+            flag = self._flag(time)
+
         else:
-            # Fetch either the LSD or CSD attribute
+            # Fetch either the LSD or CSD attribute.  In the case of a SidrealStack,
+            # there will be multiple LSDs and the flag will be the logical OR of the
+            # flag from each individual LSD.
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            ra = sstream.index_map["ra"][:]
+            if not hasattr(csd, "__iter__"):
+                csd = [csd]
 
-            if hasattr(csd, "__iter__"):
-                flag = np.zeros(len(ra), dtype=np.bool)
-                for cc in csd:
-                    flag |= flag_function(ephemeris.csd_to_unix(cc + ra / 360.0))
-            else:
-                flag = flag_function(ephemeris.csd_to_unix(csd + ra / 360.0))
+            ra = sstream.ra[:]
+            ntaper = int(
+                self.taper_width
+                / (np.abs(np.median(np.diff(ra))) * 240.0 * ephemeris.SIDEREAL_S)
+            )
 
-            ntaper = int(self.taper_width / np.abs(np.median(np.diff(ra))))
+            flag = np.zeros(ra.size, dtype=np.bool)
+            for cc in csd:
+                time = ephemeris.csd_to_unix(cc + ra / 360.0)
+                flag |= self._flag(time)
 
-        # If requested, estimate and subtract the mean level
-        if self.remove_average and not np.all(flag):
-            if mpiutil.rank0:
-                print ("Subtracting mean visibility.")
-            sstream.vis[:] -= np.mean(sstream.vis[..., ~flag], axis=-1)[..., np.newaxis]
+        # Log how much data were masking
+        self.log.info(
+            "%0.2f percent of data will be masked."
+            % (100.0 * np.sum(flag) / float(flag.size),)
+        )
 
         # Apply the mask
         if np.any(flag):
 
             # If requested, apply taper.
             if ntaper > 0:
+                self.log.info("Applying taper over %d time samples." % ntaper)
                 flag = taper_mask(flag, ntaper, outer=self.outer_taper)
 
             # Apply the mask to the weights
@@ -1406,6 +1410,70 @@ class DayMask(task.SingleTask):
 
         # Return masked sidereal stream
         return sstream
+
+    def _flag(self, time):
+        return daytime_flag(time)
+
+
+# Alias DayMask to MaskDay for backwards compatibility
+DayMask = MaskDay
+
+
+class MaskSource(MaskDay):
+    """Mask out data near source transits.
+
+    Attributes
+    ----------
+    source : str or list of str
+        Name of the source(s) in the same format as `ephemeris.source_dictionary`.
+    nsigma : float
+        Mask this number of sigma on either side of source transit.
+        Here sigma is the exepected width of the primary beam for
+        an E-W polarisation antenna at 400 MHz as defined by the
+        `ch_util.cal_utils.guess_fwhm` function.
+    """
+
+    source = config.Property(default=None)
+    nsigma = config.Property(proptype=float, default=2.0)
+
+    def setup(self):
+        """Save the skyfield bodies representing the sources to the `body` attribute."""
+        if self.source is None:
+            raise ValueError(
+                "Must specify name of the source to mask as config property."
+            )
+        elif isinstance(self.source, list):
+            source = self.source
+        else:
+            source = [self.source]
+
+        self.body = [ephemeris.source_dictionary[src] for src in source]
+
+    def _flag(self, time):
+
+        flag = np.zeros(time.size, dtype=np.bool)
+        for body in self.body:
+            flag |= transit_flag(body, time, nsigma=self.nsigma)
+
+        return flag
+
+
+class MaskSun(MaskSource):
+    """Mask out data near solar transit."""
+
+    def setup(self):
+        """Save the skyfield body for the sun."""
+        planets = ephemeris.skyfield_wrapper.load("de421.bsp")
+        self.body = [planets["sun"]]
+
+
+class MaskMoon(MaskSource):
+    """Mask out data near lunar transit."""
+
+    def setup(self):
+        """Save the skyfield body for the moon."""
+        planets = ephemeris.skyfield_wrapper.load("de421.bsp")
+        self.body = [planets["moon"]]
 
 
 class MaskRA(task.SingleTask):

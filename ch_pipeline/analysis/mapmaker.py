@@ -15,6 +15,13 @@ Tasks
 
     RingMapMaker
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
+
 import numpy as np
 import scipy.constants
 
@@ -265,8 +272,8 @@ class RingMapMaker(task.SingleTask):
                 )
                 sb = np.fft.irfft(np.dot(weight[lfi], pa), nbeam, axis=2) * nbeam
 
-            # Save to container
-            rmm[lfi] = bfm
-            rmb[lfi] = sb
+            # Save to container (shifting to the final axis ordering)
+            rmm[:, :, lfi] = bfm.transpose(2, 0, 1, 3)
+            rmb[:, :, lfi] = sb.transpose(2, 0, 1, 3)
 
         return rm
