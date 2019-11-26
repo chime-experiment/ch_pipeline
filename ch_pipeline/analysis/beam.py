@@ -470,17 +470,17 @@ class HolographyTransitFit(task.SingleTask):
         transit.redistribute('freq')
 
         # Set bounds of fit to twice FWHM
-        local_slice = slice(transit.beam.local_offset,
-                            transit.beam.local_offset + transit.beam.local_shape[0])
+        local_slice = slice(transit.beam.local_offset[0],
+                            transit.beam.local_offset[0] + transit.beam.local_shape[0])
         fit_bnd = (0.5 * self.nfwhm * SPEED_LIGHT / transit.freq[local_slice] /
                    CHIME_CYL_W * 1.21 / 2 / np.pi * 360.)
 
         # Collapse polarization axis to use function from ch_util
-        tmp_shape = (transit.beam.local_shape[0], transit.beam.local_shape[1]*transit.beam.local_shape[2],
+        tmp_shape = (transit.beam.local_shape[0], transit.beam.local_shape[1] * transit.beam.local_shape[2],
                      transit.beam.local_shape[3])
 
         # Flag missing data and outside bounds
-        flagged = np.reshape(transit.weight[:] != 0., tmp_shape)
+        flagged = np.reshape((transit.weight[:] != 0.), tmp_shape)
         flagged = np.logical_and(
             flagged, (np.abs(transit.pix['phi']) < fit_bnd[:, np.newaxis])[:, np.newaxis, :]
         )
@@ -526,16 +526,14 @@ class DetermineHolographyGainsFromFits(task.SingleTask):
         gain = HolographyTransitGain(axes_from=fits)
         phase_intercept = np.radians(fits.parameter[..., list(fits.param).index('phase_intercept')])
         peak_amplitude = fits.parameter[..., list(fits.param).index('peak_amplitude')]
+        peak_amplitude = np.where(np.isfinite(peak_amplitude), peak_amplitude, 0)
         gain.gain[:] = (np.exp(-1j * phase_intercept) *
                         tools.invert_no_zero(peak_amplitude))
-
-        gain.gain[np.isfinite(peak_amplitude) == 0] = 0
 
         return gain
 
 
 class ApplyHolographyGains(task.SingleTask):
-
     """Apply gains to a holography transit
 
     Parameters
