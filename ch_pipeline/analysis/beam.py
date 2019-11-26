@@ -587,19 +587,19 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs['observation_ids'] = [transit.attrs['observation_id']]
             self.stack.attrs['dec'] = transit.attrs['dec']
             self.stack.attrs['source_name'] = transit.attrs['source_name']
-            self.stack.attrs['source_ra'] = transit.attrs['source_ra']
+            self.stack.attrs['icrs_ra'] = transit.attrs['icrs_ra']
 
             # Copy data for first transit
             self.stack.beam[:] = transit.beam[:]
-            self.stack.weight[:] = np.abs(transit.beam[:])**2
+            self.stack.weight[:] = np.abs(transit.beam[:]) ** 2
             self.noise_var = tools.invert_no_zero(transit.weight[:])
             self.norm = np.where(transit.weight[:] == 0., 0., 1.)
         else:
             if transit.beam.shape != self.stack.beam.shape:
                 self.log.error("Transit has different shape than stack: {}, {}".format(
                     transit.beam.shape, self.stack.beam.shape
-                    ) + " Skipping."
-                )
+                ) + " Skipping."
+                               )
                 return None
 
             self.stack.attrs['filenames'].append(transit.attrs['filename'])
@@ -608,21 +608,21 @@ class TransitStacker(task.SingleTask):
             # Accumulate transit data
             flag = (transit.weight[:] > 0.0).astype(np.float32)
             self.stack.beam += flag * transit.beam[:]
-            self.stack.weight += flag * np.abs(transit.beam[:])**2
+            self.stack.weight += flag * np.abs(transit.beam[:]) ** 2
             self.noise_var += flag * tools.invert_no_zero(transit.weight[:])
             self.norm += flag
 
         return None
 
-    def finish(self):
+    def process_finish(self):
         # Divide by norm to get average transit
         inv_norm = tools.invert_no_zero(self.norm)
-        self.stack.beam *= inv_norm
+        self.stack.beam[:] *= inv_norm
 
         # Add noise variance and variance between transits
         self.stack.weight[:] = tools.invert_no_zero(
-            self.noise_var * inv_norm**2 +
-            (self.stack.weight[:] * inv_norm - np.abs(self.stack.beam[:])**2)
+            self.noise_var * inv_norm ** 2 +
+            (self.stack.weight[:] * inv_norm - np.abs(self.stack.beam[:]) ** 2)
         )
 
         return self.stack
