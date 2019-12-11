@@ -109,7 +109,8 @@ class QueryDatabase(pipeline.TaskBase):
         be set to True
     exclude_data_flag_types: list of string
         Reject time intervals that overlap with DataFlags of these types.
-
+    return_intervals : bool (default: False)
+        Return the full interval from the Finder. Otherwise only a list of file names.
     """
 
     return_intervals = config.Property(proptype=bool, default=False)
