@@ -66,7 +66,8 @@ class ProcessingType(object):
     default_script = DEFAULT_SCRIPT
 
     # Modules to save version of alongside processed data
-    _versioned_modules = ["caput", "ch_util", "ch_pipeline", "draco", "driftscan"]
+    # To be defined in subclasses (e.g. ['ch_util', 'ch_pipeline', ...])
+    _versioned_modules = []
 
     def __init__(self, revision, create=False):
 

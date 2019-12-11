@@ -171,6 +171,8 @@ class DailyProcessing(base.ProcessingType):
     type_name = "daily"
     tag_pattern = r"\d+"
 
+    _versioned_modules = ["caput", "ch_util", "ch_pipeline", "draco", "driftscan"]
+
     # Parameters of the job processing
     default_params = {
         # Time range(s) to process
@@ -246,6 +248,8 @@ class TestDailyProcessing(DailyProcessing):
     """
 
     type_name = "test_daily"
+
+    _versioned_modules = ["caput", "ch_util", "ch_pipeline", "draco", "driftscan"]
 
     # Override params above
     default_params = DailyProcessing.default_params.copy()
