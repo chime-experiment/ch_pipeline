@@ -31,8 +31,8 @@ from ch_util import data_index as di
 from os import path
 import yaml
 
-from skyfield.constants import ANGVEL
-SIDEREAL_DAY_SEC = 2 * np.pi / ANGVEL
+from caput.time import STELLAR_S
+SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 
 
 class TransitGrouper(task.SingleTask):
