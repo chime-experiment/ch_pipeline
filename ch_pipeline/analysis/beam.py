@@ -332,14 +332,14 @@ class TransitRegridder(Regridder):
         ni *= grid_mask
 
         # Wrap to produce MPIArray
-        if mpiutil.size > 1:
+        if data.distributed:
             new_vis = mpiarray.MPIArray.wrap(new_vis, axis=data.vis.distributed_axis)
             ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
 
         # Create new container for output
         ra_grid = (new_grid + ra) % 360.
         new_data = SiderealStream(axes_from=data, attrs_from=data,
-                                  ra=ra_grid)
+                                  ra=ra_grid, comm=data.comm)
         new_data.redistribute('freq')
         new_data.vis[:] = new_vis
         new_data.weight[:] = ni
@@ -517,7 +517,9 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         obs_id = output.attrs.get('observation_id', None)
         files = output.attrs.get('archivefiles', None)
 
-        if mpiutil.rank0:
+        if output.distributed and output.comm.rank != 0:
+            pass
+        else:
             # Add entry in database
             # TODO: check for duplicates ?
             append_product(self.db_fname, outfile, self.product_type, config=None,
