@@ -36,19 +36,19 @@ SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 
 
 class TransitGrouper(task.SingleTask):
-    """ Group transits from a sequence of TimeStream objects.
+    """Group transits from a sequence of TimeStream objects.
 
-        Attributes
-        ----------
-        ha_span: float
-            Span in degrees surrounding transit.
-        min_span: float
-            Minimum span (deg) of a transit to accept.
-        source: str
-            Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
-        db_source: str
-            Name of the transiting source as listed in holography database.
-            This is a hack until a better solution is implemented.
+    Attributes
+    ----------
+    ha_span: float
+        Span in degrees surrounding transit.
+    min_span: float
+        Minimum span (deg) of a transit to accept.
+    source: str
+        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+    db_source: str
+        Name of the transiting source as listed in holography database.
+        This is a hack until a better solution is implemented.
     """
 
     ha_span = config.Property(proptype=float, default=180.)
@@ -88,7 +88,7 @@ class TransitGrouper(task.SingleTask):
         mpiutil.barrier()
 
     def process(self, tstream):
-        """ Take in a timestream and accumulate, group into whole transits.
+        """Take in a timestream and accumulate, group into whole transits.
 
         Parameters
         ----------
@@ -137,18 +137,19 @@ class TransitGrouper(task.SingleTask):
         return final_ts
 
     def process_finish(self):
-        """ Return the current transit before finishing.
+        """Return the current transit before finishing.
 
-            Returns
-            -------
-            ts: TimeStream
-                Last (possibly incomplete) transit.
+        Returns
+        -------
+        ts: TimeStream
+            Last (possibly incomplete) transit.
         """
         return self._finalize_transit()
 
     def append(self, ts):
-        """ Append a timestream to the buffer list.
-            This will strip eigenvector datasets if they are present.
+        """Append a timestream to the buffer list.
+
+        This will strip eigenvector datasets if they are present.
         """
         for dname in ['evec', 'eval', 'erms']:
             if dname in ts.datasets.keys():
@@ -157,6 +158,7 @@ class TransitGrouper(task.SingleTask):
         self.tstreams.append(ts)
 
     def _finalize_transit(self):
+        """Concatenate grouped time streams for the currrent transit."""
 
         # Find where transit starts and ends
         if len(self.tstreams) == 0:
@@ -202,6 +204,10 @@ class TransitGrouper(task.SingleTask):
         return ts
 
     def _transit_bounds(self):
+        """Find the start and end times of this transit.
+
+        Compares the desired HA span to the start and end times of the observation
+        recorded in the database. Also gets the observation ID."""
 
         # subtract half a day from start time to ensure we don't get following day
         self.start_t = self.cur_transit - self.ha_span / 360. / 2. * SIDEREAL_DAY_SEC
@@ -223,20 +229,20 @@ class TransitGrouper(task.SingleTask):
 
 
 class TransitRegridder(Regridder):
-    """ Interpolate TimeStream transits onto a regular grid in hour angle.
+    """Interpolate TimeStream transits onto a regular grid in hour angle.
 
-        Attributes
-        ----------
-        samples : int
-            Number of samples to interpolate onto.
-        ha_span: float
-            Span in degrees surrounding transit.
-        lanczos_width : int
-            Width of the Lanczos interpolation kernel.
-        snr_cov: float
-            Ratio of signal covariance to noise covariance (used for Wiener filter).
-        source: str
-            Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+    Attributes
+    ----------
+    samples : int
+        Number of samples to interpolate onto.
+    ha_span: float
+        Span in degrees surrounding transit.
+    lanczos_width : int
+        Width of the Lanczos interpolation kernel.
+    snr_cov: float
+        Ratio of signal covariance to noise covariance (used for Wiener filter).
+    source: str
+        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
     """
 
     samples = config.Property(proptype=int, default=1024)
@@ -344,16 +350,17 @@ class TransitRegridder(Regridder):
 
 
 class MakeHolographyBeam(task.SingleTask):
-    """ Repackage a holography transit into a beam container.
-        The visibilities will be grouped according to their respective 26 m
-        input (along the `pol` axis, labelled by the 26 m polarisation of that input).
+    """Repackage a holography transit into a beam container.
 
-        The form of the beam dataset is A_{i} = < E_{i} * E_{26m}^{*} >, i.e. the 26m
-        input is the conjugate part of the visbility.
+    The visibilities will be grouped according to their respective 26 m
+    input (along the `pol` axis, labelled by the 26 m polarisation of that input).
+
+    The form of the beam dataset is A_{i} = < E_{i} * E_{26m}^{*} >, i.e. the 26m
+    input is the conjugate part of the visbility.
     """
 
     def process(self, data, inputmap):
-        """ Package a holography transit into a beam container.
+        """Package a holography transit into a beam container.
 
         Parameters
         ----------
@@ -477,22 +484,22 @@ class MakeHolographyBeam(task.SingleTask):
 
 
 class RegisterHolographyProcessed(RegisterProcessedFiles):
-    """ Register a processed (fringestopped, regridded) holography transit in
-        the processed data database (at the moment this is a YAML file,
-        specified by the 'db_fname' config parameter).
+    """Register a processed (fringestopped, regridded) holography transit in
+    the processed data database (at the moment this is a YAML file,
+    specified by the 'db_fname' config parameter).
 
-        Saves the transit to with the prefix specified in the  'output_root'
-        config parameter.
+    Saves the transit to with the prefix specified in the  'output_root'
+    config parameter.
     """
 
     def process(self, output):
-        """ Register and save a processed transit.
+        """Register and save a processed transit.
 
-            Parameters
-            ----------
-            output: TrackBeam
-                The transit to be saved. Should include attributes
-                'observation_id' and 'archivefiles.
+        Parameters
+        ----------
+        output: TrackBeam
+            The transit to be saved. Should include attributes
+            'observation_id' and 'archivefiles.
         """
 
         # Create a tag for the output file name
@@ -521,17 +528,17 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
-    """ Filter holography transit DataIntervals produced by `io.QueryDatabase`
-        to exclude those that have already been registered in the database
-        (in the file specified by config parameter 'db_fname').
+    """Filter holography transit DataIntervals produced by `io.QueryDatabase`
+    to exclude those that have already been registered in the database
+    (in the file specified by config parameter 'db_fname').
     """
 
     db_fname = config.Property(proptype=str)
     source = config.Property(proptype=str)
 
     def setup(self):
-        """ Read processed transits from database ('db_fname' parameter) and
-            and load list of observations from holography database.
+        """Read processed transits from database ('db_fname' parameter) and
+        and load list of observations from holography database.
         """
 
         # Read database of processed transits
@@ -545,17 +552,17 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         mpiutil.barrier()
 
     def next(self, intervals):
-        """ Filter files and time intervals to exclude those already processed.
+        """Filter files and time intervals to exclude those already processed.
 
-            Parameters
-            ----------
-            intervals: list of ch_util.data_index.DataInterval
-                List intervals to filter.
+        Parameters
+        ----------
+        intervals: list of ch_util.data_index.DataInterval
+            List intervals to filter.
 
-            Returns
-            -------
-            files: list of str
-                List of files to be processed.
+        Returns
+        -------
+        files: list of str
+            List of files to be processed.
         """
 
         self.log.info("Starting next for task %s" % self.__class__.__name__)
@@ -588,18 +595,18 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
 
 def wrap_observer(obs):
-    """ Wrap a `ch_util.ephemeris.chime_observer()` with the
-        `ch_util.ephemeris.SkyfieldObserverWrapper` class.
+    """Wrap a `ch_util.ephemeris.chime_observer()` with the
+    `ch_util.ephemeris.SkyfieldObserverWrapper` class.
 
-        Parameters
-        ----------
-        obs: caput.time.Observer
-            CHIME observer.
+    Parameters
+    ----------
+    obs: caput.time.Observer
+        CHIME observer.
 
-        Returns
-        -------
-        obs: ch_util.ephemeris.SkyfieldObserverWrapper
-            Wrapped observer.
+    Returns
+    -------
+    obs: ch_util.ephemeris.SkyfieldObserverWrapper
+        Wrapped observer.
     """
     return ephem.SkyfieldObserverWrapper(
             lon=obs.longitude,
@@ -610,19 +617,19 @@ def wrap_observer(obs):
 
 
 def unwrap_lha(lsa, src_ra):
-    """ Convert LSA into HA for a source's RA. Ensures HA is monotonically increasing.
+    """Convert LSA into HA for a source's RA. Ensures HA is monotonically increasing.
 
-        Parameters
-        ----------
-        lsa: array
-            Local sidereal angle.
-        src_ra: float
-            The RA of the source.
+    Parameters
+    ----------
+    lsa: array
+        Local sidereal angle.
+    src_ra: float
+        The RA of the source.
 
-        Returns
-        -------
-        ha: array
-            Hour angle.
+    Returns
+    -------
+    ha: array
+        Hour angle.
     """
     # ensure monotonic
     start_lsa = lsa[0]
@@ -635,18 +642,18 @@ def unwrap_lha(lsa, src_ra):
 
 
 def get_holography_obs(src):
-    """ Query database for list of all holography observations for the given
-        source.
+    """Query database for list of all holography observations for the given
+    source.
 
-        Parameters
-        ----------
-        src: str
-            Source name.
+    Parameters
+    ----------
+    src: str
+        Source name.
 
-        Returns
-        -------
-        db_obs: list of ch_util.data_index.HolographyObservation
-            Observations of this source.
+    Returns
+    -------
+    db_obs: list of ch_util.data_index.HolographyObservation
+        Observations of this source.
     """
     di.connect_database()
     db_src = di.HolographySource.get(di.HolographySource.name == src)
@@ -657,13 +664,13 @@ def get_holography_obs(src):
 
 
 def get_proc_transits(db_fname):
-    """ Read processed holography transits from the processed database
-        YAML file.
+    """Read processed holography transits from the processed database
+    YAML file.
 
-        Parameters
-        ----------
-        db_fname: str
-            Path to YAML database file.
+    Parameters
+    ----------
+    db_fname: str
+        Path to YAML database file.
     """
 
     with open(db_fname, 'r') as fh:
