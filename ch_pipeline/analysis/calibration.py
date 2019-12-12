@@ -996,6 +996,34 @@ class TransitFit(task.SingleTask):
         proptype=(lambda x: x if x is None else float(x)), default=0.30
     )
 
+    def setup(self):
+        """Define model to fit to transit."""
+        self.fit_kwargs = {"absolute_sigma": self.absolute_sigma}
+
+        if self.model == "gauss_amp_poly_phase":
+            self.ModelClass = cal_utils.FitGaussAmpPolyPhase
+            self.model_kwargs = {
+                "poly_type": self.poly_type,
+                "poly_deg_phi": self.poly_deg_phi,
+            }
+
+        elif self.model == "poly_log_amp_poly_phase":
+            self.ModelClass = cal_utils.FitPolyLogAmpPolyPhase
+            self.model_kwargs = {
+                "poly_type": self.poly_type,
+                "poly_deg_amp": self.poly_deg_amp,
+                "poly_deg_phi": self.poly_deg_phi,
+            }
+            self.fit_kwargs.update(
+                {"niter": self.niter, "moving_window": self.moving_window}
+            )
+
+        else:
+            raise ValueError(
+                "Do not recognize model %s.  Options are %s and %s."
+                % (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase")
+            )
+
     def process(self, response, inputmap):
         """Fit model to the point source response for each feed and frequency.
 
@@ -1012,33 +1040,6 @@ class TransitFit(task.SingleTask):
         fit : containers.TransitFitParams
             Parameters of the model fit and their covariance.
         """
-        # Define the model
-        fit_kwargs = {"absolute_sigma": self.absolute_sigma}
-
-        if self.model == "gauss_amp_poly_phase":
-            ModelClass = cal_utils.FitGaussAmpPolyPhase
-            model_kwargs = {
-                "poly_type": self.poly_type,
-                "poly_deg_phi": self.poly_deg_phi,
-            }
-
-        elif self.model == "poly_log_amp_poly_phase":
-            ModelClass = cal_utils.FitPolyLogAmpPolyPhase
-            model_kwargs = {
-                "poly_type": self.poly_type,
-                "poly_deg_amp": self.poly_deg_amp,
-                "poly_deg_phi": self.poly_deg_phi,
-            }
-            fit_kwargs.update(
-                {"niter": self.niter, "moving_window": self.moving_window}
-            )
-
-        else:
-            raise ValueError(
-                "Do not recognize model %s.  Options are %s and %s."
-                % (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase")
-            )
-
         # Ensure that we are distributed over frequency
         response.redistribute("freq")
 
@@ -1099,10 +1100,10 @@ class TransitFit(task.SingleTask):
             ).astype(err.dtype)
 
         # Instantiate the model fitter
-        model = ModelClass(**model_kwargs)
+        model = self.ModelClass(**self.model_kwargs)
 
         # Fit the model
-        model.fit(ha, vis, err, width=sigma, **fit_kwargs)
+        model.fit(ha, vis, err, width=sigma, **self.fit_kwargs)
 
         # Create an output container
         fit = containers.TransitFitParams(
@@ -1120,7 +1121,7 @@ class TransitFit(task.SingleTask):
         # Transfer fit information to container attributes
         fit.attrs["model_kwargs"] = json.dumps(model.model_kwargs)
         fit.attrs["model_class"] = ".".join(
-            [getattr(ModelClass, key) for key in ["__module__", "__name__"]]
+            [getattr(self.ModelClass, key) for key in ["__module__", "__name__"]]
         )
 
         # Save datasets
