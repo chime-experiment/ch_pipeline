@@ -136,6 +136,9 @@ class LoadCorrDataFiles(task.SingleTask):
     channel_index : list
         List of frequency channel indices.
         Given third priority.
+    datasets : list
+        List of datasets to load.  Defaults to all
+        available datasets.
     only_autos : bool
         Only load the autocorrelations.
     """
@@ -147,6 +150,8 @@ class LoadCorrDataFiles(task.SingleTask):
     freq_physical = config.Property(proptype=list, default=[])
     channel_range = config.Property(proptype=list, default=[])
     channel_index = config.Property(proptype=list, default=[])
+
+    datasets = config.Property(default=None)
 
     only_autos = config.Property(proptype=bool, default=False)
 
@@ -206,7 +211,11 @@ class LoadCorrDataFiles(task.SingleTask):
             )
 
         # Load file
-        if isinstance(self.freq_sel, slice) and prod_sel is None:
+        if (
+            isinstance(self.freq_sel, slice)
+            and (prod_sel is None)
+            and (self.datasets is None)
+        ):
             self.log.info(
                 "Reading file %i of %i. (%s) [fast io]",
                 self._file_ptr,
@@ -225,6 +234,7 @@ class LoadCorrDataFiles(task.SingleTask):
             )
             ts = andata.CorrData.from_acq_h5(
                 file_,
+                datasets=self.datasets,
                 distributed=True,
                 comm=self.comm,
                 freq_sel=self.freq_sel,

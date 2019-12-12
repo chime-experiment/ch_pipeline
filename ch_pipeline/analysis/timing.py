@@ -40,10 +40,14 @@ class ApplyTimingCorrection(task.SingleTask):
         Reference the timing correction to the time of source transit.
         Useful for applying the timing correction to holography data that has
         already been calibrated to have zero phase at transit.
+    transit_window: float
+        Reference the timing correction to the median value over a window (in seconds)
+        around the time of source transit.
     """
 
     use_input_flags = config.Property(proptype=bool, default=False)
     refer_to_transit = config.Property(proptype=bool, default=False)
+    transit_window = config.Property(proptype=float, default=0.0)
 
     def setup(self, tcorr):
         """Set the timing correction to use.
@@ -133,7 +137,9 @@ class ApplyTimingCorrection(task.SingleTask):
                 )
             )
 
-            tcorr.set_global_reference_time(ttrans, interpolate=True, interp="linear")
+            tcorr.set_global_reference_time(
+                ttrans, window=self.transit_window, interpolate=True, interp="linear"
+            )
 
         # Apply the timing correction
         tcorr.apply_timing_correction(
@@ -260,6 +266,10 @@ class ConstructTimingCorrection(task.SingleTask):
             distributed=self.comm.size > 1,
             comm=self.comm,
             **self.kwargs
+        )
+
+        self.log.info(
+            "Finished processing %d files from %s." % (len(filelist), self.current_acq)
         )
 
         # Save the static phase and amplitude to be used on subsequent iterations
