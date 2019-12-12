@@ -145,7 +145,9 @@ class ProcessingType(object):
 
         # Add version tracking script to config
         version_fname = self.workdir_path / tag / "versions.yaml"
-        jobparams["run_before"] = VERSION_SCRIPT.format(list(self._versioned_modules), version_fname)
+        jobparams["run_before"] = VERSION_SCRIPT.format(
+            list(self._versioned_modules), version_fname
+        )
 
         # Call subclass hook
         jobparams = self._finalise_jobparams(tag, jobparams)
