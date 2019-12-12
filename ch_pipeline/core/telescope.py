@@ -69,6 +69,10 @@ class CHIME(telescope.PolarisedTelescope):
     input_sel : list, optional
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
+    y_pol : boolean
+        Include y-pol feeds. Default is True.
+    x_pol : boolean
+        Include x-pol feeds. Default is True.
     """
 
     # Configure which feeds and layout to use
@@ -87,13 +91,19 @@ class CHIME(telescope.PolarisedTelescope):
     channel_range = config.Property(proptype=list, default=[])
     channel_index = config.Property(proptype=list, default=[])
 
+    # Account for rotation
+    rot_angle = config.Property(proptype=float, default=0.0)
+
     # Input selection
     input_sel = config.Property(proptype=list, default=None)
+
+    # polarization selection
+    y_pol = config.Property(proptype=bool, default=True)
+    x_pol = config.Property(proptype=bool, default=True)
 
     # Fix base properties
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
-
 
     auto_correlations = True
 
@@ -204,7 +214,7 @@ class CHIME(telescope.PolarisedTelescope):
         if self.correlator=='pathfinder':
             return tools._PF_ROT
         else:
-            return 0.0
+            return self.rot_angle
 
     def calculate_frequencies(self):
         """Override default version to give support for specifying by frequency
@@ -247,6 +257,12 @@ class CHIME(telescope.PolarisedTelescope):
         else:
             feeds = [self._feeds[fi] for fi in self.input_sel]
 
+        # select only y- or only x- polarized feeds
+        if not self.y_pol:
+            feeds = [feeds[fi] for fi in range(len(feeds)) if tools.is_array_x(feeds[fi])]
+        if not self.x_pol:
+            feeds = [feeds[fi] for fi in range(len(feeds)) if tools.is_array_y(feeds[fi])]
+
         return feeds
 
     @property
@@ -274,7 +290,7 @@ class CHIME(telescope.PolarisedTelescope):
             The positions in the telescope plane of the receivers. Packed as
             [[u1, v1], [u2, v2], ...].
         """
-
+        tools.change_chime_location(rotation=-0.088)
         # Fetch cylinder relative positions
         pos = tools.get_feed_positions(self.feeds)
 
@@ -329,6 +345,14 @@ class CHIME(telescope.PolarisedTelescope):
     #
     # === Setup the primary beams ===
     #
+
+    def solid_angle(self, feed, freq):
+
+        primary_beam = self.beam(feed, freq)
+        beam_mag = np.sqrt(abs(primary_beam[:,0])**2 + abs(primary_beam[:,1])**2)
+        spix = 4*np.pi/len(beam_mag)
+
+        return np.sum(beam*spix)
 
     def beam(self, feed, freq):
         """Primary beam implementation for the CHIME/Pathfinder.
@@ -520,7 +544,6 @@ class CHIMEExternalBeamAmplitude(CHIME):
         
         beam_nside = healpy.npix2nside(np.load(self.primary_beamy_filename).shape[0])
         telescope.TransitTelescope._init_trans(self, beam_nside)
-        print self._nside
         
         feed_obj = self.feeds[feed]
 
@@ -549,6 +572,54 @@ class CHIMEExternalBeamAmplitude(CHIME):
         else:
             raise RuntimeError("Given polarisation (feed.pol=%s) not supported." % feed_obj.pol)
 
+class CHIMEExternalBeamAmp(CHIME):
+    """Model telescope for the CHIME.
+
+    This class uses an external beam model. It reads in maps in the form np.ndarray[npoints],
+    representing beam amplitudes for each (x,y) polarization. Assumes single frequency.
+    """
+
+    primary_beamx_filename = config.Property(
+        proptype=str,
+        default='/home/pboubel/scratch/holo_beam_maps/beam_magnitude_cel_holoTauA_'
+    )
+
+    primary_beamy_filename = config.Property(
+        proptype=str,
+        default='/home/pboubel/scratch/holo_beam_maps/beam_magnitude_cel_holoTauA_'
+    )
+
+    def beam(self, feed, freq):
+        # Fetch beam parameters out of config database.
+        fname = self.primary_beamy_filename+str(self.channel_index[freq])+'.npy'
+
+        beam_nside = healpy.npix2nside(np.load(fname).shape[0])
+        telescope.TransitTelescope._init_trans(self, beam_nside)
+
+        feed_obj = self.feeds[feed]
+
+        # Check that feed exists and is a CHIME cylinder antenna
+        if feed_obj is None:
+            raise ValueError("Craziness. The requested feed doesn't seem to exist.")
+
+        if not tools.is_array(feed_obj):
+            raise ValueError('Requested feed is not a CHIME antenna.')
+
+        # Get the beam rotation parameters.
+        yaw = -self.rotation_angle
+        pitch = 0.0
+        roll = 0.0
+
+        rot = np.radians([yaw, pitch, roll])
+
+        # We can only support feeds angled parallel or perp to the cylinder
+        # axis. Check for these and throw exception for anything else.
+        if tools.is_array_y(feed_obj):
+            return cylbeam.beam_y_ext(fname, self._angpos, self.zenith, rot=rot)
+        elif tools.is_array_x(feed_obj):
+            return cylbeam.beam_x_ext(fname, self._angpos, self.zenith, rot=rot)
+        else:
+            raise RuntimeError("Given polarisation (feed.pol=%s) not supported." % feed_obj.pol)
 
 def _nearest_freq(tel_freq, map_freq, freq_id):
 
