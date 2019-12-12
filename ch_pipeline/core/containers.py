@@ -21,6 +21,7 @@ Containers
     CorrInputMonitor
     SiderealDayFlag
     PointSourceTransit
+    SourceModel
     SunTransit
     RingMap
     Photometry
@@ -430,6 +431,51 @@ class PointSourceTransit(StaticGainData):
     @property
     def param_cov2(self):
         return self.index_map["param_cov2"]
+
+
+class SourceModel(ContainerBase):
+    """Container for holding model for visiblities.
+
+    Model consists of the sum of the signal from
+    multiple (possibly extended) sources.
+    """
+
+    _axes = ("freq", "pol", "time", "param", "source")
+
+    _dataset_spec = {
+        "amplitude": {
+            "axes": ["freq", "pol", "time", "source"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "coeff": {
+            "axes": ["freq", "pol", "param"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "source_index": {
+            "axes": ["param"],
+            "dtype": np.int,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def coeff(self):
+        return self.datasets["coeff"]
+
+    @property
+    def source_index(self):
+        return self.datasets["source_index"]
 
 
 class SunTransit(ContainerBase):
