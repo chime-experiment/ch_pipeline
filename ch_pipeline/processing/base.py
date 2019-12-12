@@ -26,27 +26,31 @@ cluster:
   temp_directory: {tempdir}
 
   venv: {venv}
+
+# Script that will be run before the task, on job allocation
+# Required for the version tracking
+# Note the indenting should not be changed
+run_before: |
+  {run_before}
 """
 
-VERSION_SCRIPT = """
-import yaml
-modules = {}
-fname = "{}"
-versions = dict()
-for k in modules:
-    versions[k] = None
-    try:
-        module = __import__(k)
-    except ImportError:
-        print("Could not import {{}}. Skipping version tag.".format(k))
-        continue
-    try:
-        versions[k] = module.__version__
-    except AttributeError:
-        print("Could not find a version for {{}}.".format(k))
-
-with open(fname, 'w') as fh:
-    yaml.dump(versions, fh)
+VERSION_SCRIPT = """import yaml
+  modules = {}
+  fname = "{}"
+  versions = dict()
+  for k in modules:
+      versions[k] = None
+      try:
+          module = __import__(k)
+      except ImportError:
+          print("Could not import {{}}. Skipping version tag.".format(k))
+          continue
+      try:
+          versions[k] = module.__version__
+      except AttributeError:
+          print("Could not find a version for {{}}.".format(k))
+  with open(fname, 'w') as fh:
+      yaml.dump(versions, fh)
 
 """
 
@@ -139,6 +143,11 @@ class ProcessingType(object):
             }
         )
 
+        # Add version tracking script to config
+        version_fname = self.workdir_path / tag / "versions.yaml"
+        jobparams["run_before"] = VERSION_SCRIPT.format(list(self._versioned_modules), version_fname)
+
+        # Call subclass hook
         jobparams = self._finalise_jobparams(tag, jobparams)
 
         if not (self.venv_path / "bin/activate").exists():
@@ -361,7 +370,6 @@ class ProcessingType(object):
 
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
-            self._record_versions(self.base_path / tag / "versions.yaml")
 
     def pending(self):
         """Jobs available to run."""
@@ -370,14 +378,6 @@ class ProcessingType(object):
         pending = set(self.available()).difference(self.ls(), waiting, running)
 
         return sorted(list(pending))
-
-    def _record_versions(self, fname):
-        with tempfile.NamedTemporaryFile("w+") as fh:
-            fh.write(VERSION_SCRIPT.format(list(self._versioned_modules), fname))
-            fh.flush()
-
-            cmd = [str(self.venv_path / "bin/python"), fh.name]
-            check_call(cmd)
 
 
 def find_venv():

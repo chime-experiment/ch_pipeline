@@ -27,6 +27,12 @@ cluster:
 
   venv: {venv}
 
+# Script that will be run before the task, on job allocation
+# Required for the version tracking
+# Note the indenting should not be changed
+run_before: |
+  {run_before}
+
 # Pipeline task configuration
 pipeline:
   tasks:
