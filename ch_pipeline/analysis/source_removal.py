@@ -319,6 +319,7 @@ class SolveSources(task.SingleTask):
         # Calculate time
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
@@ -532,6 +533,7 @@ class SubtractSources(task.SingleTask):
         # Calculate time
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
