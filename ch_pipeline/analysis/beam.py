@@ -9,6 +9,10 @@
         TransitGrouper
         TransitRegridder
         MakeHolographyBeam
+        HolographyTransitFit
+        DetermineHolographyGainsFromFits
+        ApplyHolographyGains
+        TransitStacker
 """
 
 import numpy as np
@@ -23,11 +27,11 @@ from draco.util import tools
 
 from ..core.processed_db import RegisterProcessedFiles, append_product, get_proc_transits
 from ..core.containers import HolographyTransitFitParams, HolographyTransitGain
+from .calibration import TransitFit, GainFromTransitFit
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout
 from ch_util import data_index as di
-from ch_util.cal_utils import fit_point_source_transit
 
 from os import path
 
@@ -447,90 +451,106 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         return None
 
 
-class HolographyTransitFit(task.SingleTask):
-    """ Fit a gaussian to a transit.
+class HolographyTransitFit(TransitFit):
+    """Fit a model to the transit.
+
+    Attributes
+    ----------
+    model : str
+        Name of the model to fit.  One of 'gauss_amp_poly_phase' or
+        'poly_log_amp_poly_phase'.
+    nsigma : float
+        Number of standard deviations away from transit to fit.
+    absolute_sigma : bool
+        Set to True if the errors provided are absolute.  Set to False if
+        the errors provided are relative, in which case the parameter covariance
+        will be scaled by the chi-squared per degree-of-freedom.
+    poly_type : str
+        Type of polynomial.  Either 'standard', 'hermite', or 'chebychev'.
+    poly_deg_amp : int
+        Degree of the polynomial to fit to amplitude.
+        Relevant if `poly = True`.
+    poly_deg_phi : int
+        Degree of the polynomial to fit to phase.
+        Relevant if `poly = True`.
+    niter : int
+        Number of times to update the errors using model amplitude.
+        Relevant if `poly = True`.
+    moving_window : int
+        Number of standard deviations away from peak to fit.
+        The peak location is updated with each iteration.
+        Must be less than `nsigma`.  Relevant if `poly = True`.
     """
 
-    nfwhm = config.Property(proptype=int, default=2)
-
     def process(self, transit):
-        """ Perform the gaussian fit.
+        """ Perform the fit.
 
-            Parameters
-            ----------
-            transit: TrackBeam
-                Transit to be fit to.
+        Parameters
+        ----------
+        transit: TrackBeam
+            Transit to be fit.
 
-            Returns
-            -------
-            fit: HolographyTransitFitParams
-                Fit parameters.
+        Returns
+        -------
+        fit: TransitFitParams
+            Fit parameters.
         """
-
         transit.redistribute('freq')
 
-        # Set bounds of fit to twice FWHM
+        # Set initial estimate of beam sigma
         local_slice = slice(transit.beam.local_offset[0],
                             transit.beam.local_offset[0] + transit.beam.local_shape[0])
-        fit_bnd = (0.5 * self.nfwhm * SPEED_LIGHT / transit.freq[local_slice] /
-                   CHIME_CYL_W * 1.21 / 2 / np.pi * 360.)
+        sigma = (0.7 * SPEED_LIGHT / (CHIME_CYL_W *  transit.freq[local_slice])) * (360.0 / np.pi)
+        sigma = sigma[:, np.newaxis] * np.ones((1, transit.beam.local_shape[2]), dtype=sigma.dtype)
 
-        # Collapse polarization axis to use function from ch_util
-        tmp_shape = (transit.beam.local_shape[0], transit.beam.local_shape[1] * transit.beam.local_shape[2],
-                     transit.beam.local_shape[3])
+        # Find index into pol axis that yields copolar products
+        copolar = list(transit.index_map['pol']).index('copolar')
 
-        # Flag missing data and outside bounds
-        flagged = np.reshape((transit.weight[:] != 0.), tmp_shape)
-        flagged = np.logical_and(
-            flagged, (np.abs(transit.pix['phi']) < fit_bnd[:, np.newaxis])[:, np.newaxis, :]
-        )
+        # Dereference datasets
+        ha = transit.pix['phi'][:]
 
-        # Perform fit
-        res = fit_point_source_transit(
-            transit.pix['phi'],
-            np.reshape(transit.beam[:], tmp_shape),
-            np.sqrt(tools.invert_no_zero(np.reshape(transit.weight[:], tmp_shape))),
-            flagged,
-            fwhm=np.repeat((2 * fit_bnd / self.nfwhm)[:, np.newaxis], transit.beam.local_shape[1] *
-                           transit.beam.local_shape[2], axis=1)
-        )
+        vis = transit.beam[:, copolar, :, :].view(np.ndarray)
+        err = np.sqrt(tools.invert_no_zero(response.weight[:, copolar, :, :].view(np.ndarray)))
+
+        # Flag data that is outside the fit window set by nsigma config parameter
+        if self.nsigma is not None:
+            err *= (
+                np.abs(ha[np.newaxis, np.newaxis, :])
+                <= (self.nsigma * sigma[:, :, np.newaxis])
+            ).astype(err.dtype)
+
+        # Instantiate the model fitter
+        model = self.ModelClass(**self.model_kwargs)
+
+        # Fit the model
+        model.fit(ha, vis, err, width=sigma, **self.fit_kwargs)
 
         # Pack into container
-        param_labels = ['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept', 'phase_slope',
-                        'phase_quad', 'phase_cube', 'phase_quart', 'phase_quint']
-        fit = HolographyTransitFitParams(
-            parameter=np.reshape(res[0], (transit.beam.local_shape[0], transit.beam.local_shape[1], 
-                transit_beam.local_shape[2], 9)),
-            parameter_cov=np.reshape(res[1], (transit.beam.local_shape[0], transit.beam.local_shape[1], 
-                transit_beam.local_shape[2], 9, 9)),
-            param=param_labels, axes_from=transit
+        fit = TransitFitParams(param=model.parameter_names, component=model.component,
+                               axes_from=transit, attrs_from=transit,
+                               distributed=transit.distributed, comm=transit.comm)
+
+        fit.add_dataset("chisq")
+        fit.add_dataset("ndof")
+
+        fit.redistribute('freq')
+
+        # Transfer fit information to container attributes
+        fit.attrs["model_kwargs"] = json.dumps(model.model_kwargs)
+        fit.attrs["model_class"] = ".".join(
+            [getattr(self.ModelClass, key) for key in ["__module__", "__name__"]]
         )
+
+        # Save datasets
+        fit.parameter[:] = model.param[:]
+        fit.parameter_cov[:] = model.param_cov[:]
+        fit.chisq[:] = model.chisq[:]
+        fit.ndof[:] = model.ndof[:]
 
         return fit
 
 
-class DetermineHolographyGainsFromFits(task.SingleTask):
-    """Determine holography gains of a transit from Gaussian fits to
-    the transit.
-    """
-
-    def process(self, fits):
-        """Use transit phase and 1/peak amplitude as the gain, peak normalizing
-        the transit.
-
-        Parameters
-        ----------
-        fits: TransitFitParams
-        """
-
-        gain = HolographyTransitGain(axes_from=fits)
-        phase_intercept = np.radians(fits.parameter[..., list(fits.param).index('phase_intercept')])
-        peak_amplitude = fits.parameter[..., list(fits.param).index('peak_amplitude')]
-        peak_amplitude = np.where(np.isfinite(peak_amplitude), peak_amplitude, 0)
-        gain.gain[:] = (np.exp(-1j * phase_intercept) *
-                        tools.invert_no_zero(peak_amplitude))
-
-        return gain
+DetermineHolographyGainsFromFits = GainFromTransitFit
 
 
 class ApplyHolographyGains(task.SingleTask):
@@ -563,8 +583,8 @@ class ApplyHolographyGains(task.SingleTask):
             track['beam'] = track_in['beam'][:]
             track['weight'] = track_in['weight'][:]
 
-        track['beam'][:] *= gain.gain[:][..., np.newaxis]
-        track['weight'][:] *= tools.invert_no_zero((np.abs(gain.gain[:]) ** 2)[:][..., np.newaxis])
+        track['beam'][:] *= gain.gain[:][:, np.newaxis, :, np.newaxis]
+        track['weight'][:] *= tools.invert_no_zero(np.abs(gain.gain[:]) ** 2)[:, np.newaxis, :, np.newaxis]
 
         return track
 
