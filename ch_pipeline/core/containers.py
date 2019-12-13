@@ -557,88 +557,98 @@ class HolographyTransitFitParams(ContainerBase):
     """ Container for fit parameters to holography transits.
     """
 
-    _axes = ('freq', 'pol', 'input', 'param')
+    _axes = ("freq", "pol", "input", "param")
 
     _dataset_spec = {
-        'parameter': {
-            'axes': ['freq', 'pol', 'input', 'param'],
-            'dtype': np.float64,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "parameter": {
+            "axes": ["freq", "pol", "input", "param"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'parameter_cov': {
-            'axes': ['freq', 'pol', 'input', 'param', 'param'],
-            'dtype': np.float64,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
-        }
+        "parameter_cov": {
+            "axes": ["freq", "pol", "input", "param", "param"],
+            "dtype": np.float64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
     }
 
     def __init__(self, *args, **kwargs):
-        if 'param' not in kwargs:
-            kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm', 'phase_intercept',
-                                        'phase_slope', 'phase_quad', 'phase_cube', 
-                                        'phase_quart', 'phase_quint'])
+        if "param" not in kwargs:
+            kwargs["param"] = np.array(
+                [
+                    "peak_amplitude",
+                    "centroid",
+                    "fwhm",
+                    "phase_intercept",
+                    "phase_slope",
+                    "phase_quad",
+                    "phase_cube",
+                    "phase_quart",
+                    "phase_quint",
+                ]
+            )
         super(HolographyTransitFitParams, self).__init__(**kwargs)
 
     @property
     def parameter(self):
-        return self.datasets['parameter']
+        return self.datasets["parameter"]
 
     @property
     def parameter_cov(self):
-        return self.datasets['parameter_cov']
+        return self.datasets["parameter_cov"]
 
     @property
     def freq(self):
-        return self.index_map['freq']['centre']
+        return self.index_map["freq"]["centre"]
 
     @property
     def pol(self):
-        return self.index_map['pol']
+        return self.index_map["pol"]
 
     @property
     def input(self):
-        return self.index_map['input']
+        return self.index_map["input"]
 
     @property
     def param(self):
-        return self.index_map['param']
+        return self.index_map["param"]
 
 
 class HolographyTransitGain(ContainerBase):
     """Basic container for gains to be applied to regridded holography transits.
     """
 
-    _axes = ('freq', 'pol', 'input')
+    _axes = ("freq", "pol", "input")
 
     _dataset_spec = {
-        'gain': {
-            'axes': ['freq', 'pol', 'input'],
-            'dtype': np.complex128,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "gain": {
+            "axes": ["freq", "pol", "input"],
+            "dtype": np.complex128,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
     }
 
     @property
     def gain(self):
-        return self.datasets['gain']
+        return self.datasets["gain"]
 
     @property
     def freq(self):
-        return self.index_map['freq']['centre']
+        return self.index_map["freq"]["centre"]
 
     @property
     def input(self):
-        return self.index_map['input']
+        return self.index_map["input"]
 
     @property
     def pol(self):
-        return self.index_map['pol']
+        return self.index_map["pol"]
 
 
 class SunTransit(ContainerBase):

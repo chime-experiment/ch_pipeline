@@ -242,7 +242,7 @@ class LoadCorrDataFiles(task.SingleTask):
             )
 
         # Store file name
-        ts.attrs['filename'] = file_
+        ts.attrs["filename"] = file_
 
         # Use a simple incrementing string as the tag
         if "tag" not in ts.attrs:
