@@ -362,6 +362,27 @@ class CHIME(telescope.PolarisedTelescope):
             ]
             return np.array(beamclass)
 
+    @property
+    def polarisation(self):
+        """
+        Polarisation map.
+
+        Returns
+        -------
+        pol : np.ndarray
+            One-dimensional array with the polarization for each feed ('X' or 'Y').
+        """
+
+        def _pol(f):
+            if tools.is_array(f):
+                if tools.is_array_x(f):  # feed is X polarisation
+                    return "X"
+                else:  # feed is Y polarisation
+                    return "Y"
+            return "N"
+
+        return np.asarray([_pol(f) for f in self.feeds], dtype=np.str)
+
     #
     # === Setup the primary beams ===
     #
