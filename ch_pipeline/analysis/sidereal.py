@@ -239,15 +239,18 @@ class SiderealMean(task.SingleTask):
     inverse_variance : bool
         Use inverse variance weights.  If this is False, then use uniform
         weighting of timesamples where the `weight` dataset is greater than zero.
-    apply_mask : bool
-        Mask out daytime data and (optionally) the transit of bright sources
-        prior to calculating the mean(median). Note that timestamps where the
-        weight dataset is equal to zero will be excluded from the calculation regardless.
+    mask_day : bool
+        Mask out daytime data prior to calculating the mean(median).
+        Note that timestamps where the weight dataset is equal to zero will be excluded
+        from the calculation regardless.
+    mask_ra : list of two element lists
+        Only use data within these ranges of right ascension (in degrees) to calculate
+        the mean(median).
     mask_sources : bool
         Mask out the transit of bright sources prior to calculating the mean(median).
-        Only relevant if `apply_mask` is True.  The set of sources that are masked
-        is determined by the `flux_threshold` and `dec_threshold` parameters, with
-        values of 400 Jy and 5 deg masking out the big 4 (CygA, CasA, TauA, VirA).
+        The set of sources that are masked is determined by the `flux_threshold` and
+        `dec_threshold` parameters, with values of 400 Jy and 5 deg masking out
+        the big 4 (CygA, CasA, TauA, VirA).
     flux_threshold : float
         Only mask sources with flux above this threshold in Jansky.
     dec_threshold : float
@@ -261,9 +264,9 @@ class SiderealMean(task.SingleTask):
 
     median = config.Property(proptype=bool, default=False)
     inverse_variance = config.Property(proptype=bool, default=False)
-    apply_mask = config.Property(proptype=bool, default=False)
-
-    mask_sources = config.Property(proptype=bool, default=True)
+    mask_day = config.Property(proptype=bool, default=False)
+    mask_ra = config.Property(proptype=list, default=[])
+    mask_sources = config.Property(proptype=bool, default=False)
     flux_threshold = config.Property(proptype=float, default=400.0)
     dec_threshold = config.Property(proptype=bool, default=5.0)
     nsigma = config.Property(proptype=float, default=2.0)
@@ -275,7 +278,7 @@ class SiderealMean(task.SingleTask):
         self._name_of_statistic = "median" if self.median else "mean"
 
         self.body = []
-        if self.apply_mask and self.mask_sources:
+        if self.mask_sources:
             for src, body in ephemeris.source_dictionary.items():
                 if (
                     fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
@@ -327,19 +330,29 @@ class SiderealMean(task.SingleTask):
         else:
             raise RuntimeError("Format of `sstream` argument is unknown.")
 
-        # If requested, determine "quiet" region of sky
-        if self.apply_mask:
-
-            # In the case of a SiderealStack, there will be multiple LSDs and the
-            # mask will be the logical AND of the mask from each individual LSDs.
+        # If requested, determine "quiet" region of sky.
+        # In the case of a SiderealStack, there will be multiple LSDs and the
+        # mask will be the logical AND of the mask from each individual LSDs.
+        if self.mask_day:
             for dd, time_dd in timestamp.items():
-
                 # Mask daytime data
                 flag_quiet &= ~daytime_flag(time_dd)
 
+        if self.mask_sources:
+            for dd, time_dd in timestamp.items():
                 # Mask data near bright source transits
                 for body in self.body:
                     flag_quiet &= ~transit_flag(body, time_dd, nsigma=self.nsigma)
+
+        if self.mask_ra:
+            # Only use data within user specified ranges of RA
+            mask_ra = np.zeros(ra.size, dtype=np.bool)
+            for ra_range in self.mask_ra:
+                self.log.info(
+                    "Using data between RA = [%0.2f, %0.2f] deg" % tuple(ra_range)
+                )
+                mask_ra |= (ra >= ra_range[0]) & (ra <= ra_range[1])
+            flag_quiet &= mask_ra
 
         # Create output container
         newra = np.mean(ra[flag_quiet], keepdims=True)
@@ -442,6 +455,11 @@ class ChangeSiderealMean(task.SingleTask):
             sstream.vis[:] += mustream.vis[:].view(np.ndarray) * not_auto
         else:
             sstream.vis[:] -= mustream.vis[:].view(np.ndarray) * not_auto
+
+        # Set weights to zero if there was no mean
+        sstream.weight[:] *= (mustream.weight[:].view(np.ndarray) > 0.0).astype(
+            sstream.weight.dtype
+        )
 
         # Return sidereal stream with modified offset
         return sstream
