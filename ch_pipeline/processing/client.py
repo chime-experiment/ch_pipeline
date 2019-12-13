@@ -77,7 +77,7 @@ PREV = PRev()
     "--root",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
     default="/project/rpp-krs/chime/chime_processed/",  # TODO: put elsewhere
-    help="Set the root directory to save processed data."
+    help="Set the root directory to save processed data.",
 )
 def cli(root):
     """CHIME pipeline processing."""
@@ -162,8 +162,9 @@ def pending(revision):
     default=10,
     help="The maximum number of jobs to be submitted.",
 )
-@click.option('--submit/--no-submit', default=True,
-              help="Submit the jobs to the queue (or not)")
+@click.option(
+    "--submit/--no-submit", default=True, help="Submit the jobs to the queue (or not)"
+)
 def generate(revision, number, submit):
     """Submit pending jobs for REVISION."""
     revision.generate(max=number, submit=submit)
@@ -198,7 +199,7 @@ def dirstats(path):
     return num_files, total_size
 
 
-def humansize(num, suffix='', precision=1, width=5):
+def humansize(num, suffix="", precision=1, width=5):
     """Human readable file size.
 
     Parameters
@@ -211,13 +212,14 @@ def humansize(num, suffix='', precision=1, width=5):
     size : str
         The size as a human readable string.
     """
-    for unit in ['B','K','M','G','T','P']:
+    for unit in ["B", "K", "M", "G", "T", "P"]:
         if abs(num) < 1024.0:
             break
         num /= 1024.0
 
-    return "{:{width}.{precision}f}{}{}".format(num, unit, suffix, width=width,
-                                                precision=precision)
+    return "{:{width}.{precision}f}{}{}".format(
+        num, unit, suffix, width=width, precision=precision
+    )
 
 
 if __name__ == "__main__":
