@@ -40,12 +40,20 @@ Several tasks accept groups of files as arguments. These are specified in the YA
     single_group:
         files: ['file1.h5', 'file2.h5']
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
+# === End Python 2/3 compatibility
+
+
+import re
 import os.path
 import gc
 import numpy as np
 
-from caput import pipeline, mpiutil, memh5
+from caput import pipeline, memh5
 from caput import config
 
 from ch_util import andata
@@ -66,7 +74,7 @@ def _list_of_filelists(files):
         elif isinstance(filelist, list):
             pass
         else:
-            raise Exception('Must be list or glob pattern.')
+            raise Exception("Must be list or glob pattern.")
         f2.append(filelist)
 
     return f2
@@ -81,7 +89,7 @@ def _list_or_glob(files):
     elif isinstance(files, list):
         pass
     else:
-        raise RuntimeError('Must be list or glob pattern.')
+        raise RuntimeError("Must be list or glob pattern.")
 
     return files
 
@@ -98,17 +106,17 @@ def _list_of_filegroups(groups):
     # through glob
     for gi, group in enumerate(groups):
 
-        files = group['files']
+        files = group["files"]
 
-        if 'tag' not in group:
-            group['tag'] = 'group_%i' % gi
+        if "tag" not in group:
+            group["tag"] = "group_%i" % gi
 
         flist = []
 
         for fname in files:
             flist += glob.glob(fname)
 
-        group['files'] = flist
+        group["files"] = flist
 
     return groups
 
@@ -128,6 +136,9 @@ class LoadCorrDataFiles(task.SingleTask):
     channel_index : list
         List of frequency channel indices.
         Given third priority.
+    datasets : list
+        List of datasets to load.  Defaults to all
+        available datasets.
     only_autos : bool
         Only load the autocorrelations.
     """
@@ -140,6 +151,8 @@ class LoadCorrDataFiles(task.SingleTask):
     channel_range = config.Property(proptype=list, default=[])
     channel_index = config.Property(proptype=list, default=[])
 
+    datasets = config.Property(default=None)
+
     only_autos = config.Property(proptype=bool, default=False)
 
     def setup(self, files):
@@ -150,24 +163,25 @@ class LoadCorrDataFiles(task.SingleTask):
         files : list
         """
         if not isinstance(files, (list, tuple)):
-            raise RuntimeError('Argument must be list of files.')
+            raise RuntimeError("Argument must be list of files.")
 
         self.files = files
 
         # Set up frequency selection.
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self.freq_sel = sorted(set([ np.argmin(np.abs(basefreq - freq))
-                                         for freq in self.freq_physical ]))
+            self.freq_sel = sorted(
+                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+            )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = range(*self.channel_range)
+            self.freq_sel = slice(*self.channel_range)
 
         elif self.channel_index:
             self.freq_sel = self.channel_index
 
         else:
-            self.freq_sel = None
+            self.freq_sel = slice(None)
 
     def process(self):
         """Load in each sidereal day.
@@ -192,27 +206,59 @@ class LoadCorrDataFiles(task.SingleTask):
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
-            prod_sel = np.array([ ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1] ])
+            prod_sel = np.array(
+                [ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1]]
+            )
 
         # Load file
-        self.log.info("Reading file %i of %i. (%s)", self._file_ptr, len(self.files), file_)
-
-        ts = andata.CorrData.from_acq_h5(file_, distributed=True,
-                                         freq_sel=self.freq_sel, prod_sel=prod_sel)
+        if (
+            isinstance(self.freq_sel, slice)
+            and (prod_sel is None)
+            and (self.datasets is None)
+        ):
+            self.log.info(
+                "Reading file %i of %i. (%s) [fast io]",
+                self._file_ptr,
+                len(self.files),
+                file_,
+            )
+            ts = andata.CorrData.from_acq_h5_fast(
+                file_, freq_sel=self.freq_sel, comm=self.comm
+            )
+        else:
+            self.log.info(
+                "Reading file %i of %i. (%s) [slow io]",
+                self._file_ptr,
+                len(self.files),
+                file_,
+            )
+            ts = andata.CorrData.from_acq_h5(
+                file_,
+                datasets=self.datasets,
+                distributed=True,
+                comm=self.comm,
+                freq_sel=self.freq_sel,
+                prod_sel=prod_sel,
+            )
 
         # Store file name
         ts.attrs['filename'] = file_
 
         # Use a simple incrementing string as the tag
-        if 'tag' not in ts.attrs:
-            tag = 'file%03i' % self._file_ptr
-            ts.attrs['tag'] = tag
+        if "tag" not in ts.attrs:
+            tag = "file%03i" % self._file_ptr
+            ts.attrs["tag"] = tag
 
         # Add a weight dataset if needed
-        if 'vis_weight' not in ts.flags:
-            weight_dset = ts.create_flag('vis_weight', shape=ts.vis.shape, dtype=np.uint8,
-                                         distributed=True, distributed_axis=0)
-            weight_dset.attrs['axis'] = ts.vis.attrs['axis']
+        if "vis_weight" not in ts.flags:
+            weight_dset = ts.create_flag(
+                "vis_weight",
+                shape=ts.vis.shape,
+                dtype=np.uint8,
+                distributed=True,
+                distributed_axis=0,
+            )
+            weight_dset.attrs["axis"] = ts.vis.attrs["axis"]
 
             # Set weight to maximum value (255), unless the vis value is
             # zero which presumably came from missing data. NOTE: this may have
@@ -223,9 +269,8 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadSetupFile(pipeline.TaskBase):
-    """Loads a file from disk into a memh5 container
-    during setup.
+class LoadSetupFile(task.MPILoggedTask):
+    """Loads a file from disk into a memh5 container during setup.
 
     Attributes
     ----------
@@ -242,27 +287,22 @@ class LoadSetupFile(pipeline.TaskBase):
         -------
         cont : subclass of `memh5.BasicCont`
         """
-
-        from caput import memh5
-
-        cont = None
-
         # Check that the file exists
         if not os.path.exists(self.filename):
-            raise RuntimeError('File does not exist: %s' % self.filename)
+            raise RuntimeError("File does not exist: %s" % self.filename)
 
         self.log.info("Loading file: %s", self.filename)
 
-        if mpiutil.rank0:
-
-            # Load into container
+        # Load into container
+        cont = None
+        if self.comm.rank == 0:
             cont = memh5.BasicCont.from_file(self.filename, distributed=False)
 
         # Broadcast to other nodes
-        cont = mpiutil.world.bcast(cont, root=0)
+        cont = self.comm.bcast(cont, root=0)
 
         # Make sure all nodes have container before return
-        mpiutil.world.Barrier()
+        self.comm.Barrier()
 
         # Return container
         return cont
@@ -315,11 +355,13 @@ class LoadFileFromTag(task.SingleTask):
 
             # Check that the file exists
             if not os.path.exists(filename):
-                raise RuntimeError('File does not exist: %s' % filename)
+                raise RuntimeError("File does not exist: %s" % filename)
 
             self.log.info("Loading file: %s", filename)
 
-            self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
+            self.outcont = memh5.BasicCont.from_file(
+                filename, distributed=self.distributed
+            )
 
         else:
 
@@ -342,15 +384,136 @@ class LoadFileFromTag(task.SingleTask):
 
         if not self.only_prefix:
 
-            filename = self.prefix + incont.attrs['tag'] + '.h5'
+            filename = self.prefix + incont.attrs["tag"] + ".h5"
 
             # Check that the file exists
             if not os.path.exists(filename):
-                raise RuntimeError('File does not exist: %s' % filename)
+                raise RuntimeError("File does not exist: %s" % filename)
 
             self.log.info("Loading file: %s", filename)
 
             # Load into container
-            self.outcont = memh5.BasicCont.from_file(filename, distributed=self.distributed)
+            self.outcont = memh5.BasicCont.from_file(
+                filename, distributed=self.distributed
+            )
 
         return self.outcont
+
+
+class FilterExisting(task.MPILoggedTask):
+    """Filter out files from any list that have already been processed.
+
+    Each file is found in the database and is compared against given
+    criteria to see if has already been processed.
+
+    Attributes
+    ----------
+    regex_csd : str
+        A regular expression to find processed CSDs. Compared to filenames
+        in the current directory.
+    min_files_csd : int
+        The minimum number of files on a CSD for it to be processed.
+    """
+
+    existing_csd_regex = config.Property(proptype=str, default=None)
+    skip_csd = config.Property(proptype=list, default=[])
+    min_files_in_csd = config.Property(proptype=int, default=6)
+
+    def __init__(self):
+
+        super(FilterExisting, self).__init__()
+
+        self.csd_list = []
+        self.corr_files = {}
+
+        if mpiutil.rank0:
+            # Look for CSDs in the current directory
+            import glob
+
+            files = glob.glob("*")
+            if self.existing_csd_regex:
+                for file_ in files:
+                    mo = re.search(self.existing_csd_regex, file_)
+                    if mo is not None:
+                        self.csd_list.append(int(mo.group(1)))
+
+            # Search the database to get the start and end times of all correlation files
+            from ch_util import data_index as di
+            from ch_util import ephemeris
+
+            di.connect_database()
+            query = (
+                di.ArchiveFile.select(
+                    di.ArchiveAcq.name,
+                    di.ArchiveFile.name,
+                    di.CorrFileInfo.start_time,
+                    di.CorrFileInfo.finish_time,
+                )
+                .join(di.ArchiveAcq)
+                .switch(di.ArchiveFile)
+                .join(di.CorrFileInfo)
+            )
+
+            for acq, fname, start, finish in query.tuples():
+
+                if start is None or finish is None:
+                    continue
+
+                start_csd = ephemeris.csd(start)
+                finish_csd = ephemeris.csd(finish)
+
+                name = os.path.join(acq, fname)
+                self.corr_files[name] = (start_csd, finish_csd)
+
+            self.log.debug("Skipping existing CSDs %s", repr(self.csd_list))
+
+        # Broadcast results to other ranks
+        self.corr_files = mpiutil.world.bcast(self.corr_files, root=0)
+        self.csd_list = mpiutil.world.bcast(self.csd_list, root=0)
+
+    def next(self, files):
+        """Filter the incoming file lists."""
+
+        csd_list = {}
+
+        for path in files:
+
+            acq, fname = path.split("/")[-2:]
+            name = os.path.join(acq, fname)
+
+            # Always include non corr files
+            if name not in self.corr_files:
+                self.log.debug("Non time stream file encountered %s.", name)
+                continue
+
+            # Figure out which CSD the file starts and ends on
+            start, end = [int(t) for t in self.corr_files[name]]
+
+            # Add this file to the set of files for the relevant days
+            csd_list.setdefault(start, set()).add(path)
+            csd_list.setdefault(end, set()).add(path)
+
+        new_files = set()
+
+        for csd, csd_files in sorted(csd_list.items()):
+
+            if csd in self.csd_list:
+                self.log.debug("Skipping existing CSD=%i, files: %s", csd, csd_files)
+                continue
+
+            if csd in self.skip_csd:
+                self.log.debug("Skipping specified CSD=%i, files: %s", csd, csd_files)
+                continue
+
+            if len(csd_files) < self.min_files_in_csd:
+                self.log.debug("Skipping CSD=%i with too few files: %s", csd, csd_files)
+                continue
+
+            # Great, we passed the cut, add to the final set
+            new_files.update(csd_files)
+
+        self.log.debug(
+            "Input list %i files, after filtering %i files.", len(files), len(new_files)
+        )
+
+        return sorted(list(new_files))

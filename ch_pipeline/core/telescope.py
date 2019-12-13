@@ -17,6 +17,12 @@ Classes
 
     CHIME
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
 
 import numpy as np
 import h5py
@@ -69,6 +75,17 @@ class CHIME(telescope.PolarisedTelescope):
     input_sel : list, optional
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
+    baseline_masking_type : string, optional
+        Select a subset of baselines.
+        `total_length` selects baselines according to their total length. Need to
+        specifiy `minlength` and `maxlength` properties (defined in baseclass).
+        `individual_length` selects baselines according to their seperation
+        in the North-South (specify `minlength_ns` and `maxlength_ns`) or
+        the East-West (specify `minlength_ew` and `maxlength_ew`).
+    minlength_ns, maxlength_ns : scalar
+        Minimum and maximum North-South baseline lengths to include (in metres)
+    minlength_ew, maxlength_ew:
+        Minimum and maximum East-West baseline lengths to include (in metres)
     """
 
     # Configure which feeds and layout to use
@@ -77,8 +94,9 @@ class CHIME(telescope.PolarisedTelescope):
     skip_non_chime = config.Property(proptype=bool, default=False)
 
     # Redundancy settings
-    stack_type = config.enum(['redundant', 'redundant_cyl', 'unique'],
-                                 default='redundant')
+    stack_type = config.enum(
+        ["redundant", "redundant_cyl", "unique"], default="redundant"
+    )
 
     # Configure frequency properties
     use_pathfinder_freq = config.Property(proptype=bool, default=True)
@@ -90,6 +108,15 @@ class CHIME(telescope.PolarisedTelescope):
     # Input selection
     input_sel = config.Property(proptype=list, default=None)
 
+    # Baseline masking options
+    baseline_masking_type = config.enum(
+        ["total_length", "individual_length"], default="individual_length"
+    )
+    minlength_ew = config.Property(proptype=float, default=0.0)
+    maxlength_ew = config.Property(proptype=float, default=1.0e7)
+    minlength_ns = config.Property(proptype=float, default=0.0)
+    maxlength_ns = config.Property(proptype=float, default=1.0e7)
+
     # Auto-correlations setting (overriding default in baseclass)
     auto_correlations = config.Property(proptype=bool, default=True)
 
@@ -97,7 +124,7 @@ class CHIME(telescope.PolarisedTelescope):
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
 
-    _pickle_keys = ['_feeds']
+    _pickle_keys = ["_feeds"]
 
     #
     # === Initialisation routines ===
@@ -170,7 +197,7 @@ class CHIME(telescope.PolarisedTelescope):
         # configuring from YAML.
 
         if self.layout is not None:
-            print "Loading layout: %s" % str(self.layout)
+            print("Loading layout: %s" % str(self.layout))
             self._load_layout()
 
     #
@@ -201,7 +228,7 @@ class CHIME(telescope.PolarisedTelescope):
     # Set non-zero rotation angle for pathfinder
     @property
     def rotation_angle(self):
-        if self.correlator=='pathfinder':
+        if self.correlator == "pathfinder":
             return tools._PF_ROT
         else:
             return 0.0
@@ -216,13 +243,17 @@ class CHIME(telescope.PolarisedTelescope):
 
             # Bin the channels together
             if len(basefreq) % self.channel_bin != 0:
-                raise Exception("Channel binning must exactly divide the total number of channels")
+                raise Exception(
+                    "Channel binning must exactly divide the total number of channels"
+                )
 
             basefreq = basefreq.reshape(-1, self.channel_bin).mean(axis=-1)
 
             # If requested, select subset of frequencies.
             if self.freq_physical:
-                basefreq = basefreq[ [ np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical ] ]
+                basefreq = basefreq[
+                    [np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical]
+                ]
 
             elif self.channel_range and (len(self.channel_range) <= 3):
                 basefreq = basefreq[slice(*self.channel_range)]
@@ -255,10 +286,13 @@ class CHIME(telescope.PolarisedTelescope):
         for generating synthetic datasets.
         """
         # Extract lists of channel ID and serial numbers
-        channels, feed_sn = zip(*[(feed.id, feed.input_sn) for feed in self.feeds])
+        channels, feed_sn = list(
+            zip(*[(feed.id, feed.input_sn) for feed in self.feeds])
+        )
 
         # Create an input index map and return it.
         from ch_util import andata
+
         return andata._generate_input_map(feed_sn, channels)
 
     _pos = None
@@ -307,25 +341,24 @@ class CHIME(telescope.PolarisedTelescope):
 
         def _feedclass(f, redundant_cyl=False):
             if tools.is_array(f):
-                if tools.is_array_x(f): # feed is X polarisation
+                if tools.is_array_x(f):  # feed is X polarisation
                     pol = 0
-                else: # feed is Y polarisation
+                else:  # feed is Y polarisation
                     pol = 1
 
                 if redundant_cyl:
-                    return 2*f.cyl + pol
+                    return 2 * f.cyl + pol
                 else:
                     return pol
             return -1
 
-        if self.stack_type == 'redundant':
+        if self.stack_type == "redundant":
             return np.array([_feedclass(f) for f in self.feeds])
-        elif self.stack_type == 'redundant_cyl':
+        elif self.stack_type == "redundant_cyl":
             return np.array([_feedclass(f, redundant_cyl=True) for f in self.feeds])
         else:
             beamclass = [
-                fi if tools.is_array(feed) else -1
-                for fi, feed in enumerate(self.feeds)
+                fi if tools.is_array(feed) else -1 for fi, feed in enumerate(self.feeds)
             ]
             return np.array(beamclass)
 
@@ -350,7 +383,7 @@ class CHIME(telescope.PolarisedTelescope):
             raise ValueError("Craziness. The requested feed doesn't seem to exist.")
 
         if not tools.is_array(feed_obj):
-            raise ValueError('Requested feed is not a CHIME antenna.')
+            raise ValueError("Requested feed is not a CHIME antenna.")
 
         # Get the beam rotation parameters.
         yaw = -self.rotation_angle
@@ -362,15 +395,27 @@ class CHIME(telescope.PolarisedTelescope):
         # We can only support feeds angled parallel or perp to the cylinder
         # axis. Check for these and throw exception for anything else.
         if tools.is_array_y(feed_obj):
-            return cylbeam.beam_y(self._angpos, self.zenith,
-                                  self.cylinder_width / self.wavelengths[freq],
-                                  self.fwhm_e, self.fwhm_h, rot=rot)
+            return cylbeam.beam_y(
+                self._angpos,
+                self.zenith,
+                self.cylinder_width / self.wavelengths[freq],
+                self.fwhm_e,
+                self.fwhm_h,
+                rot=rot,
+            )
         elif tools.is_array_x(feed_obj):
-            return cylbeam.beam_x(self._angpos, self.zenith,
-                                  self.cylinder_width / self.wavelengths[freq],
-                                  self.fwhm_e, self.fwhm_h, rot=rot)
+            return cylbeam.beam_x(
+                self._angpos,
+                self.zenith,
+                self.cylinder_width / self.wavelengths[freq],
+                self.fwhm_e,
+                self.fwhm_h,
+                rot=rot,
+            )
         else:
-            raise RuntimeError("Given polarisation (feed.pol=%s) not supported." % feed_obj.pol)
+            raise RuntimeError(
+                "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
+            )
 
     #
     # === Override methods determining the feed pairs we should calculate ===
@@ -392,10 +437,10 @@ class CHIME(telescope.PolarisedTelescope):
         # # np.argsort to get the indices
 
         # Create array of keys to sort
-        dt = np.dtype('i4,i4')
+        dt = np.dtype("i4,i4")
         sort_arr = np.zeros(ci.size, dtype=dt)
-        sort_arr['f0'] = ci
-        sort_arr['f1'] = cj
+        sort_arr["f0"] = ci
+        sort_arr["f1"] = cj
 
         # Get map which sorts
         sort_ind = np.argsort(sort_arr)
@@ -414,8 +459,45 @@ class CHIME(telescope.PolarisedTelescope):
     def _make_ew(self):
         # # Reimplemented to make sure entries we always pick the upper
         # # triangle (and do not reorder to make EW baselines)
-        if self.stack_type != 'unique':
+        if self.stack_type != "unique":
             super(CHIME, self)._make_ew()
+
+    def _unique_baselines(self):
+        # Reimplement unique baselines in order to mask out either according to total
+        # baseline length or maximum North-South and East-West baseline seperation.
+
+        from drift.core import telescope
+
+        # Construct array of indices
+        fshape = [self.nfeed, self.nfeed]
+        f_ind = np.indices(fshape)
+
+        # Construct array of baseline separations
+        bl1 = self.feedpositions[f_ind[0]] - self.feedpositions[f_ind[1]]
+        bl2 = np.around(bl1[..., 0] + 1.0j * bl1[..., 1], self._bl_tol)
+
+        # Construct array of baseline lengths
+        blen = np.sum(bl1 ** 2, axis=-1) ** 0.5
+
+        if self.baseline_masking_type == "total_length":
+            # Create mask of included baselines
+            mask = np.logical_and(blen >= self.minlength, blen <= self.maxlength)
+        else:
+            mask_ew = np.logical_and(
+                abs(bl1[..., 0]) >= self.minlength_ew,
+                abs(bl1[..., 0]) <= self.maxlength_ew,
+            )
+            mask_ns = np.logical_and(
+                abs(bl1[..., 1]) >= self.minlength_ns,
+                abs(bl1[..., 1]) <= self.maxlength_ns,
+            )
+            mask = np.logical_and(mask_ew, mask_ns)
+
+        # Remove the auto correlated baselines between all polarisations
+        if not self.auto_correlations:
+            mask = np.logical_and(blen > 0.0, mask)
+
+        return telescope._remap_keyarray(bl2, mask), mask
 
     def _unique_beams(self):
         # Override to mask out any feed where the beamclass is less than zero.
@@ -426,7 +508,7 @@ class CHIME(telescope.PolarisedTelescope):
 
         # Construct a mask including only the feeds where the beam class is
         # greater than zero
-        bc_mask = (self.beamclass >= 0)
+        bc_mask = self.beamclass >= 0
         bc_mask = np.logical_and(bc_mask[:, np.newaxis], bc_mask[np.newaxis, :])
 
         beam_mask = np.logical_and(beam_mask, bc_mask)
@@ -442,12 +524,12 @@ class CHIMEExternalBeam(CHIME):
 
     primary_beamx_filename = config.Property(
         proptype=str,
-        default='/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5'
+        default="/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5",
     )
 
     primary_beamy_filename = config.Property(
         proptype=str,
-        default='/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5'
+        default="/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5",
     )
 
     def beam(self, feed, freq_id):
@@ -468,18 +550,16 @@ class CHIMEExternalBeam(CHIME):
             fname = self.primary_beamy_filename
 
         else:
-            raise ValueError("Polarisation not supported by this feed",
-                             feed_obj)
+            raise ValueError("Polarisation not supported by this feed", feed_obj)
         try:
-            print "Attempting to read beam file from disk..."
-            with h5py.File(fname, 'r') as f:
-                map_freq = f['freq'][:]
+            print("Attempting to read beam file from disk...")
+            with h5py.File(fname, "r") as f:
+                map_freq = f["freq"][:]
                 freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
-                beam_map = f['beam'][freq_sel, :]
+                beam_map = f["beam"][freq_sel, :]
 
         except IOError:
-            raise IOError("Could not load beams from disk [path: %s]."
-                          % fname)
+            raise IOError("Could not load beams from disk [path: %s]." % fname)
 
         if len(freq_sel) == 1:
             return beam_map
@@ -492,8 +572,8 @@ class CHIMEExternalBeam(CHIME):
             alpha = (freq_high - freq_int) / (freq_high - freq_low)
             beta = (freq_int - freq_low) / (freq_high - freq_low)
 
-            map_t = beam_map['Et'][0] * alpha + beam_map['Et'][1] * beta
-            map_p = beam_map['Ep'][0] * alpha + beam_map['Ep'][1] * beta
+            map_t = beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
+            map_p = beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
 
             map_out = np.empty((npix, 2), dtype=np.complex128)
             map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)

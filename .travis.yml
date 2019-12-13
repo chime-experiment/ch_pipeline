@@ -1,0 +1,33 @@
+language: python
+os: linux
+sudo: required
+dist: xenial
+
+python:
+    - 3.7
+notifications:
+    email: false
+addons:
+    ssh_known_hosts:
+        - bitbucket.org
+
+before_install:
+    - pip install future # nedded for caput setup
+    - pip install Cython # needed for cora setup
+
+install:
+    - pip install -r .requirements-travis.txt
+    - pip install .
+
+script:
+    # Run black on all .py files in all subfolders
+    - black --check .
+
+    # TODO:
+    # Run pydocstyle on all .py files
+    # - find . -name \*.py -exec pydocstyle --convention=numpy --add-ignore=D105,D202 {} +
+
+    # Build docs
+    - cd doc
+    - make html
+    - cd ..
