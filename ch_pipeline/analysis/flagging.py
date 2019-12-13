@@ -1604,26 +1604,30 @@ class MaskCHIMEData(task.SingleTask):
 
         tel = self.telescope
 
-        for pi, (fi, fj) in enumerate(mmodes.index_map["prod"]):
+        mmodes.redistribute("m")
+
+        mw = mmodes.weight[:]
+
+        for pi, (fi, fj) in enumerate(mmodes.prodstack):
 
             oi, oj = tel.feeds[fi], tel.feeds[fj]
 
             # Check if baseline is intra-cylinder
             if not self.intra_cylinder and (oi.cyl == oj.cyl):
-                mmodes.weight[..., pi] = 0.0
+                mw[..., pi] = 0.0
 
             # Check all the polarisation states
             is_xx = tools.is_array_x(oi) and tools.is_array_x(oj)
             is_yy = tools.is_array_y(oi) and tools.is_array_y(oj)
 
             if not self.xx_pol and is_xx:
-                mmodes.weight[..., pi] = 0.0
+                mw[..., pi] = 0.0
 
             if not self.yy_pol and is_yy:
-                mmodes.weight[..., pi] = 0.0
+                mw[..., pi] = 0.0
 
             if not self.cross_pol and not (is_xx or is_yy):
-                mmodes.weight[..., pi] = 0.0
+                mw[..., pi] = 0.0
 
         return mmodes
 
