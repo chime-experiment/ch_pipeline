@@ -150,6 +150,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             print("Starting read of CSD:%i [%i files]" % (csd, len(fmap)))
 
         # Set up product selection
+        # NOTE: this probably doesn't work with stacked data
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(dfiles)
