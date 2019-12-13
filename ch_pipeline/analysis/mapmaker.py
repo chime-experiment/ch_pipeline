@@ -114,12 +114,12 @@ class RingMapMaker(task.SingleTask):
         nra = ra.size
 
         # Construct mapping from vis array to unpacked 2D grid
-        nprod = sstream.prod.shape[0]
+        nprod = sstream.prodstack.shape[0]
         pind = np.zeros(nprod, dtype=np.int)
         xind = np.zeros(nprod, dtype=np.int)
         ysep = np.zeros(nprod, dtype=np.float)
 
-        for pp, (ii, jj) in enumerate(sstream.prod):
+        for pp, (ii, jj) in enumerate(sstream.prodstack):
 
             if self.telescope.feedconj[ii, jj]:
                 ii, jj = jj, ii
