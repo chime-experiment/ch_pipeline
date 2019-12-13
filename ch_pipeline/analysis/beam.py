@@ -30,7 +30,6 @@ from ..core.processed_db import (
     append_product,
     get_proc_transits,
 )
-from ..core.containers import HolographyTransitFitParams, HolographyTransitGain
 from .calibration import TransitFit, GainFromTransitFit
 
 from ch_util import ephemeris as ephem
