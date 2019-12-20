@@ -319,6 +319,7 @@ class SolveSources(task.SingleTask):
         # Calculate time
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
@@ -394,6 +395,7 @@ class SolveSources(task.SingleTask):
                 freq, distance, timestamp, self.bodies, **self.extended_source_kwargs
             )
 
+            out.add_dataset("amplitude")
             out.add_dataset("coeff")
 
             out.add_dataset("source_index")
@@ -403,6 +405,7 @@ class SolveSources(task.SingleTask):
             out.attrs["source_model_kwargs"] = json.dumps(self.extended_source_kwargs)
 
         else:
+            out.add_dataset("amplitude")
             out.attrs["source_model_kwargs"] = json.dumps(self.point_source_kwargs)
 
         # Dereference datasets
@@ -532,6 +535,7 @@ class SubtractSources(task.SingleTask):
         # Calculate time
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
@@ -597,6 +601,314 @@ class SubtractSources(task.SingleTask):
                     amp[:, pp, np.newaxis, :, :] * source_model[:, this_pol, :, :],
                     axis=-1,
                 )
+
+            vis[:, this_pol, :] -= mdl
+
+        return data
+
+
+class AccumulateBeam(task.SingleTask):
+    """Accumulate the stacked beam for each source."""
+
+    def setup(self):
+
+        self.beam_stack = {}
+
+    def process(self, beam_stack):
+
+        self.beam_stack[beam_stack.attrs['source_name']] = beam_stack
+
+        return None
+
+    def process_finish(self):
+
+        return self.beam_stack
+
+
+class SolveSourcesWithBeam(SolveSources):
+
+    def setup(self, tel):
+        """Set up the source model.
+
+        Parameters
+        ----------
+        tel : analysis.telescope.CHIMETelescope
+        """
+        telescope = io.get_telescope(tel)
+        self.inputmap = telescope.feeds
+
+        self.bodies = [
+            ephemeris.source_dictionary[src]
+            if src in ephemeris.source_dictionary
+            else ephemeris.skyfield_wrapper.ephemeris[src]
+            for src in self.sources
+        ]
+
+        self.nsources = len(self.sources)
+
+        # Set up kwargs for various source models
+        self.source_kwargs = {
+            "degree_x": self.degree_x,
+            "degree_y": self.degree_y,
+            "scale_x": self.extent,
+            "scale_y": self.extent,
+            "min_altitude": self.min_altitude,
+        }
+
+    def process(self, data, beams):
+        """Fit source model to visibilities.
+
+        Parameters
+        ----------
+        data : andata.CorrData, core.containers.SiderealStream, or equivalent
+
+        Returns
+        -------
+        out : core.containers.SourceModel
+            Best-fit parameters of the source model.
+        """
+        # Distribute over frequencies
+        data.redistribute("freq")
+
+        # Determine local dimensions
+        nfreq, nstack, ntime = data.vis.local_shape
+
+        # Find the local frequencies
+        sfreq = data.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        freq = data.freq[sfreq:efreq]
+
+        # Calculate time
+        if "ra" in data.index_map:
+            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
+            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+        elif "time" in data.index_map:
+            timestamp = data.time
+        else:
+            raise RuntimeError("Unable to extract time from input container.")
+
+        # Redefine stack axis so that it only contains chime antennas
+        stack_new, stack_flag = tools.redefine_stack_index_map(
+            self.inputmap,
+            data.index_map["prod"],
+            data.index_map["stack"],
+            data.reverse_map["stack"],
+        )
+
+        prod_new = data.index_map["prod"][stack_new["prod"]]
+
+        # Swap the product pair order for conjugated stack indices
+        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        if cj.size > 0:
+            prod_new["input_a"][cj], prod_new["input_b"][cj] = (
+                prod_new["input_b"][cj],
+                prod_new["input_a"][cj],
+            )
+
+        # Calculate baseline distances
+        tools.change_chime_location(rotation=self.telescope_rotation)
+        feedpos = tools.get_feed_positions(self.inputmap).T
+        distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
+        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        tools.change_chime_location(default=True)
+
+        # Flag out short baselines
+        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        baseline_weight = (sep > self.min_distance).astype(np.float32)
+
+        # Calculate polarisation products, determine unique values
+        feedpol = tools.get_feed_polarisations(self.inputmap)
+        pol = np.array(
+            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
+        )
+
+        upol = np.unique(pol)
+        npol = len(upol)
+
+        # Determine parameter names
+        param_name = []
+        for ss, src in enumerate(self.sources):
+            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1)
+            for ii in range(npar):
+                param_name.append(
+                    "%s_2d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
+                )
+        param_name = np.array(param_name)
+
+        # Create output container
+        out = containers.SourceModel(
+            pol=upol,
+            time=timestamp,
+            source=np.array(self.sources),
+            param=param_name,
+            axes_from=data,
+            attrs_from=data,
+        )
+
+        # Determine extended source model
+        source_model, sedge = model_extended_sources(
+            freq, distance, timestamp, self.bodies, **self.source_kwargs
+        )
+
+        out.add_dataset("coeff")
+
+        out.add_dataset("source_index")
+        for ss in range(self.nsources):
+            out.source_index[sedge[ss] : sedge[ss + 1]] = ss
+
+        out.attrs["source_model_kwargs"] = json.dumps(self.source_kwargs)
+
+        # Multipy source model by the effective beam
+        for ss, src in enumerate(self.sources):
+            this_beam = beams[src].vis[:].view(np.ndarray) * (beams[src].weight[:].view(np.ndarray) > 0.0).astype(np.float32)
+            source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
+
+        # Dereference datasets
+        all_vis = data.vis[:].view(np.ndarray)
+        all_weight = data.weight[:].view(np.ndarray)
+
+        out.redistribute("freq")
+        out_coeff = out.coeff[:].view(np.ndarray)
+
+        # Loop over polarisations
+        for pp, upp in enumerate(upol):
+
+            this_pol = np.flatnonzero(pol == upp)
+
+            # Loop over frequencies
+            for ff in range(nfreq):
+
+                # Extract datasets for this polarisation and frequency
+                vis = all_vis[ff, this_pol, :]
+                weight = (
+                    all_weight[ff, this_pol, :] * baseline_weight[this_pol, np.newaxis]
+                )
+                model = source_model[ff, this_pol, :, :]
+
+                out_coeff[ff, pp, :] = solve_multiple_times(vis, weight, model)
+
+        # Save a few attributes necessary to interpret the data
+        out.attrs["min_distance"] = self.min_distance
+        out.attrs["telescope_rotation"] = self.telescope_rotation
+
+        return out
+
+
+class SubtractSourcesWithBeam(task.SingleTask):
+    """Subtract a source model from the visibilities."""
+
+    def setup(self, tel):
+        """Extract inputmap from the telescope instance provided.
+
+        Parameters
+        ----------
+        tel : analysis.telescope.CHIMETelescope
+        """
+        telescope = io.get_telescope(tel)
+        self.inputmap = telescope.feeds
+
+    def process(self, data, model, beams):
+        """Subtract a source model from the visibilities.
+
+        Parameters
+        ----------
+        data : andata.CorrData, core.containers.SiderealStream, or equivalent
+
+        model : core.containers.SourceModel
+            Best-fit parameters of the source model.
+
+        Returns
+        -------
+        data : andata.CorrData, core.containers.SiderealStream, or equivalent
+        """
+        # Extract various arguments describing the model from the attributes of the model container
+        sources = model.index_map["source"]
+        telescope_rotation = model.attrs["telescope_rotation"]
+        source_model_kwargs = json.loads(model.attrs["source_model_kwargs"])
+
+        bodies = [
+            ephemeris.source_dictionary[src]
+            if src in ephemeris.source_dictionary
+            else ephemeris.skyfield_wrapper.ephemeris[src]
+            for src in sources
+        ]
+
+        # Distribute over frequencies
+        data.redistribute("freq")
+        model.redistribute("freq")
+
+        # Determine local dimensions
+        nfreq, nstack, ntime = data.vis.local_shape
+
+        # Find the local frequencies
+        sfreq = data.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        freq = data.freq[sfreq:efreq]
+
+        # Calculate time
+        if "ra" in data.index_map:
+            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            csd = np.fix(np.mean(csd))
+            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+        elif "time" in data.index_map:
+            timestamp = data.time
+        else:
+            raise RuntimeError("Unable to extract time from input container.")
+
+        # Redefine stack axis so that it only contains chime antennas
+        stack_new, stack_flag = tools.redefine_stack_index_map(
+            self.inputmap,
+            data.index_map["prod"],
+            data.index_map["stack"],
+            data.reverse_map["stack"],
+        )
+
+        prod_new = data.index_map["prod"][stack_new["prod"]]
+
+        # Swap the product pair order for conjugated stack indices
+        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        if cj.size > 0:
+            prod_new["input_a"][cj], prod_new["input_b"][cj] = (
+                prod_new["input_b"][cj],
+                prod_new["input_a"][cj],
+            )
+
+        # Calculate baseline distances
+        tools.change_chime_location(rotation=telescope_rotation)
+        feedpos = tools.get_feed_positions(self.inputmap).T
+        distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
+        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        tools.change_chime_location(default=True)
+
+        # Calculate polarisation products, determine unique values
+        feedpol = tools.get_feed_polarisations(self.inputmap)
+        pol = np.array(
+            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
+        )
+
+        # Calculate source model
+        source_model, sedge = model_extended_sources(
+            freq, distance, timestamp, bodies, **source_model_kwargs
+        )
+
+        # Multipy source model by the effective beam
+        for ss, src in enumerate(sources):
+            this_beam = beams[src].vis[:].view(np.ndarray) * (beams[src].weight[:].view(np.ndarray) > 0.0).astype(np.float32)
+            source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
+
+        # Dereference dataset
+        vis = data.vis[:].view(np.ndarray)
+        coeff = model.coeff[:].view(np.ndarray)
+
+        # Subtract source model
+        for pp, upp in enumerate(model.index_map["pol"]):
+
+            this_pol = np.flatnonzero(pol == upp)
+
+            mdl = np.sum(coeff[:, pp, np.newaxis, np.newaxis, :] * source_model[:, this_pol, :, :], axis=-1)
 
             vis[:, this_pol, :] -= mdl
 
