@@ -64,6 +64,9 @@ def model_extended_sources(
     degree_y : nsource element list
         The degree of the polynomial used to model the extend emission
         of each source in the S-N direction.
+    degree_t : nsource element list
+        The degree of the polynomial used to model time-dependent,
+        common-mode variations in the gain.
 
     Returns
     -------
@@ -74,19 +77,23 @@ def model_extended_sources(
         The model for source `i` is given by the parameters
         between `source_bound[i]` and `source_bound[i+1]`.
     """
+    nsource = len(bodies)
+
     # Parse input parameters
     scale_x = np.radians(np.array(kwargs["scale_x"]) / 60.0)
     scale_y = np.radians(np.array(kwargs["scale_y"]) / 60.0)
+    scale_t = np.array(kwargs.get('scale_t', [0.66] * nsource))
+
     degree_x = np.array(kwargs["degree_x"])
     degree_y = np.array(kwargs["degree_y"])
+    degree_t = np.array(kwargs.get('degree_t', [0] * nsource))
 
-    scale = np.vstack((scale_x, scale_y)).T
-    poly_deg = np.vstack((degree_x, degree_y)).T
+    scale = np.vstack((scale_x, scale_y, scale_t)).T
+    poly_deg = np.vstack((degree_x, degree_y, degree_t)).T
 
     freq = np.atleast_1d(freq)
     timestamp = np.atleast_1d(timestamp)
 
-    nsource = len(bodies)
     nfreq = freq.size
     ntime = timestamp.size
     nbaseline = distance.shape[-1]
@@ -106,7 +113,8 @@ def model_extended_sources(
     # Generate polynomials
     ncoeff_x = degree_x + 1
     ncoeff_y = degree_y + 1
-    ncoeff = ncoeff_x * ncoeff_y
+    ncoeff_t = degree_t + 1
+    ncoeff = ncoeff_x * ncoeff_y * ncoeff_t
     nparam = np.sum(ncoeff)
 
     source_bound = np.concatenate(([0], np.cumsum(ncoeff)))
@@ -115,12 +123,6 @@ def model_extended_sources(
 
     for ss, body in enumerate(bodies):
 
-        aa, bb = source_bound[ss], source_bound[ss + 1]
-
-        H = np.polynomial.hermite.hermvander2d(
-            u * scale[ss, 0], v * scale[ss, 1], poly_deg[ss]
-        )
-
         # Calculate the source coordinates
         src_ra, src_dec = observer.cirs_radec(body)
         src_alt, src_az = observer.altaz(body)
@@ -128,6 +130,13 @@ def model_extended_sources(
         ha = np.radians(ephemeris.lsa(timestamp)) - src_ra.radians
         dec = src_dec.radians
         weight = src_alt.radians > np.radians(min_altitude)
+
+        # Evaluate polynomial
+        aa, bb = source_bound[ss], source_bound[ss + 1]
+
+        H = np.polynomial.hermite.hermvander3d(
+            u * scale[ss, 0], v * scale[ss, 1], ha * scale[ss, 2], poly_deg[ss]
+        )
 
         # Calculate the fringestop phase
         phi = tools.fringestop_phase(
@@ -246,7 +255,10 @@ class SolveSources(task.SingleTask):
     )
     degree_x = config.Property(proptype=list, default=[0, 0, 0, 0])
     degree_y = config.Property(proptype=list, default=[0, 0, 0, 0])
+    degree_t = config.Property(proptype=list, default=[0, 0, 0, 0])
+
     extent = config.Property(proptype=list, default=[1.0, 4.0, 4.0, 7.0])
+    scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66]])
 
     min_altitude = config.Property(proptype=float, default=10.0)
     min_distance = config.Property(proptype=float, default=20.0)
@@ -276,8 +288,10 @@ class SolveSources(task.SingleTask):
         self.point_source_kwargs = {
             "degree_x": [0] * self.nsources,
             "degree_y": [0] * self.nsources,
+            "degree_t": [0] * self.nsources,
             "scale_x": [1] * self.nsources,
             "scale_y": [1] * self.nsources,
+            "scale_t": [1] * self.nsources,
             "min_altitude": self.min_altitude,
         }
 
@@ -285,8 +299,10 @@ class SolveSources(task.SingleTask):
             self.extended_source_kwargs = {
                 "degree_x": self.degree_x,
                 "degree_y": self.degree_y,
+                "degree_t": self.degree_t,
                 "scale_x": self.extent,
                 "scale_y": self.extent,
+                "scale_t": self.scale_t,
                 "min_altitude": self.min_altitude,
             }
         else:
@@ -367,10 +383,10 @@ class SolveSources(task.SingleTask):
         # Determine parameter names
         param_name = []
         for ss, src in enumerate(self.sources):
-            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1)
+            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1) * (self.degree_t[ss] + 1)
             for ii in range(npar):
                 param_name.append(
-                    "%s_2d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
+                    "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
                 )
         param_name = np.array(param_name)
 
@@ -650,8 +666,10 @@ class SolveSourcesWithBeam(SolveSources):
         self.source_kwargs = {
             "degree_x": self.degree_x,
             "degree_y": self.degree_y,
+            "degree_t": self.degree_t,
             "scale_x": self.extent,
             "scale_y": self.extent,
+            "scale_t": self.scale_t,
             "min_altitude": self.min_altitude,
         }
 
@@ -730,10 +748,10 @@ class SolveSourcesWithBeam(SolveSources):
         # Determine parameter names
         param_name = []
         for ss, src in enumerate(self.sources):
-            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1)
+            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1) * (self.degree_t[ss] + 1)
             for ii in range(npar):
                 param_name.append(
-                    "%s_2d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
+                    "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
                 )
         param_name = np.array(param_name)
 
