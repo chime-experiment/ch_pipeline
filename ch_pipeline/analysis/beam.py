@@ -910,10 +910,10 @@ class HolographyTransitFit(TransitFit):
             [getattr(self.ModelClass, key) for key in ["__module__", "__name__"]]
         )
 
-        # Save datasets
-        fit.parameter[:] = model.param[:]
-        fit.parameter_cov[:] = model.param_cov[:]
-        fit.chisq[:] = model.chisq[:]
+        # Save datasets while removing anomalous data
+        fit.parameter[:] = np.where(np.isfinite(model.param[:]), model.param[:], 0.0)
+        fit.parameter_cov[:] = np.where(np.isfinite(model.param_cov[:]), model.param_cov[:], 0.0)
+        fit.chisq[:] = np.where(np.isfinite(model.chisq[:]), model.chisq, 0.0)
         fit.ndof[:] = model.ndof[:]
 
         return fit
@@ -959,6 +959,9 @@ class ApplyHolographyGains(task.SingleTask):
             :, np.newaxis, :, np.newaxis
         ]
 
+        track["beam"][:] = np.where(np.isfinite(track["beam"][:]), track["beam"][:], 0)
+        track["weight"][:] = np.where(np.isfinite(track["weight"][:]), track["weight"][:], 0)
+
         return track
 
 
@@ -989,8 +992,8 @@ class TransitStacker(task.SingleTask):
                                    distributed=transit.distributed,
                                    comm=transit.comm)
 
-            self.stack.add_dataset("observed_variance")
-            self.stack.add_dataset("number_of_observations")
+            #self.stack.add_dataset("observed_variance")
+            #self.stack.add_dataset("number_of_observations")
             self.stack.redistribute("freq")
 
             self.log.info("Adding %s to stack." % transit.attrs['tag'])
@@ -1015,7 +1018,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] = coeff * transit.beam[:]
             self.stack.weight[:] = (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
-            self.stack.number_of_observations[:] = flag.astype(np.int)
+            #self.stack.number_of_observations[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1047,7 +1050,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] += coeff * transit.beam[:]
             self.stack.weight[:] += (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
-            self.stack.number_of_observations[:] += flag
+            #self.stack.number_of_observations[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance += coeff * transit.beam[:] ** 2
@@ -1066,9 +1069,9 @@ class TransitStacker(task.SingleTask):
 
         # Calculate the covariance between the real and imaginary component
         # from the accumulated variance and psuedo-variance
-        self.stack.observed_variance[0] = 0.5 * (self.variance + self.pseudo_variance.real)
-        self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
-        self.stack.observed_variance[2] = 0.5 * (self.variance - self.pseudo_variance.real)
+        #self.stack.observed_variance[0] = 0.5 * (self.variance + self.pseudo_variance.real)
+        #self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
+        #self.stack.observed_variance[2] = 0.5 * (self.variance - self.pseudo_variance.real)
 
         # Create tag
         time_range = np.percentile(self.stack.attrs["transit_time"], [0, 100])
