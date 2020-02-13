@@ -944,9 +944,6 @@ class HolographyTransitFit(TransitFit):
         return fit
 
 
-DetermineHolographyGainsFromFits = GainFromTransitFit
-
-
 class ApplyHolographyGains(task.SingleTask):
     """Apply gains to a holography transit
 
