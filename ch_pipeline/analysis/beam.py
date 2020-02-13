@@ -393,10 +393,10 @@ class EdgeFlagger(task.SingleTask):
                 imax = imax + 1
 
                 if self.num_begin:
-                    weight[ind][imin:imin+self.num_begin] = 0.0
+                    weight[ind][imin : imin + self.num_begin] = 0.0
 
                 if self.num_end:
-                    weight[ind][imax-self.num_end:imax] = 0.0
+                    weight[ind][imax - self.num_end : imax] = 0.0
 
         return track
 
@@ -440,8 +440,8 @@ class TransitResampler(task.SingleTask):
              The input `beam` re-sampled at the RAs contained in `data`.
         """
         # Distribute over frequencies
-        data.redistribute('freq')
-        beam.redistribute('freq')
+        data.redistribute("freq")
+        beam.redistribute("freq")
 
         # Dereference datasets
         bv = beam.beam[:].view(np.ndarray)
@@ -450,42 +450,47 @@ class TransitResampler(task.SingleTask):
         flag = np.any(bw > 0.0, axis=(0, 1, 2))
 
         # Compute the hour angle of the source
-        if 'ra' in data.index_map:
-            ra = data.index_map['ra'][:]
-        elif 'time' in data.index_map:
+        if "ra" in data.index_map:
+            ra = data.index_map["ra"][:]
+        elif "time" in data.index_map:
             ra = self.sky_obs.unix_to_lsa(data.time)
         else:
             raise RuntimeError("Unable to extract RA from input container.")
 
-        hour_angle = beam.pix['phi'][:]
+        hour_angle = beam.pix["phi"][:]
 
-        new_hour_angle = (((ra - beam.attrs['cirs_ra']) + 180.0) % 360.0) - 180.0
+        new_hour_angle = (((ra - beam.attrs["cirs_ra"]) + 180.0) % 360.0) - 180.0
 
         isort = np.argsort(new_hour_angle)
         new_hour_angle_sorted = new_hour_angle[isort]
 
-        within_range = np.flatnonzero((new_hour_angle_sorted >= np.min(hour_angle[flag])) &
-                                      (new_hour_angle_sorted <= np.max(hour_angle[flag])))
+        within_range = np.flatnonzero(
+            (new_hour_angle_sorted >= np.min(hour_angle[flag]))
+            & (new_hour_angle_sorted <= np.max(hour_angle[flag]))
+        )
 
         if within_range.size < (2 * self.lanczos_width):
             raise RuntimeError("Not enough overlapping samples.")
 
-        slc = slice(np.min(within_range) + self.lanczos_width,
-                    np.max(within_range) - self.lanczos_width + 1)
+        slc = slice(
+            np.min(within_range) + self.lanczos_width,
+            np.max(within_range) - self.lanczos_width + 1,
+        )
 
         # Perform regridding
         new_bv, new_bw = self._resample(hour_angle, bv, bw, new_hour_angle_sorted[slc])
 
         # Create output container
-        new_beam = TrackBeam(phi=new_hour_angle,
-                             theta=np.repeat(np.median(beam.pix['theta'][:]),
-                                          new_hour_angle.size),
-                             axes_from=beam,
-                             attrs_from=beam,
-                             distributed=beam.distributed,
-                             comm=beam.comm)
+        new_beam = TrackBeam(
+            phi=new_hour_angle,
+            theta=np.repeat(np.median(beam.pix["theta"][:]), new_hour_angle.size),
+            axes_from=beam,
+            attrs_from=beam,
+            distributed=beam.distributed,
+            comm=beam.comm,
+        )
 
-        new_beam.redistribute('freq')
+        new_beam.redistribute("freq")
 
         # Save to container
         new_beam.beam[:] = 0.0
@@ -501,7 +506,7 @@ class TransitResampler(task.SingleTask):
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
-        w = tools.invert_no_zero(np.matmul(tools.invert_no_zero(wgrid), lza**2))
+        w = tools.invert_no_zero(np.matmul(tools.invert_no_zero(wgrid), lza ** 2))
 
         return y, w
 
@@ -643,12 +648,12 @@ class ConstructStackedBeam(task.SingleTask):
 
         """
         # Distribute over frequencies
-        data.redistribute('freq')
-        beam.redistribute('freq')
+        data.redistribute("freq")
+        beam.redistribute("freq")
 
         # Grab the stack specifications from the input sidereal stream
-        prod = data.index_map['prod']
-        reverse_stack = data.reverse_map['stack'][:]
+        prod = data.index_map["prod"]
+        reverse_stack = data.reverse_map["stack"][:]
 
         input_flags = data.input_flags[:]
         if not np.any(input_flags):
@@ -657,20 +662,23 @@ class ConstructStackedBeam(task.SingleTask):
         # Create output container
         if isinstance(data, SiderealStream):
             OutputContainer = SiderealStream
-            output_kwargs = {'ra': data.ra[:]}
+            output_kwargs = {"ra": data.ra[:]}
         else:
             OutputContainer = TimeStream
-            output_kwargs = {'time': data.time[:]}
+            output_kwargs = {"time": data.time[:]}
 
-        stacked_beam = OutputContainer(axes_from=data, attrs_from=beam,
-                                       distributed=True, comm=data.comm,
-                                       **output_kwargs)
+        stacked_beam = OutputContainer(
+            axes_from=data,
+            attrs_from=beam,
+            distributed=True,
+            comm=data.comm,
+            **output_kwargs
+        )
 
         stacked_beam.vis[:] = 0.0
         stacked_beam.weight[:] = 0.0
 
-        stacked_beam.attrs['tag'] = '_'.join([beam.attrs['tag'],
-                                              data.attrs['tag']])
+        stacked_beam.attrs["tag"] = "_".join([beam.attrs["tag"], data.attrs["tag"]])
 
         # Dereference datasets
         bv = beam.beam[:].view(np.ndarray)
@@ -679,14 +687,19 @@ class ConstructStackedBeam(task.SingleTask):
         ov = stacked_beam.vis[:]
         ow = stacked_beam.weight[:]
 
-        pol_filter = {'X': 'X', 'Y': 'Y',
-                      'E': 'X', 'S': 'Y',
-                      'co': 'co', 'cross': 'cross'}
+        pol_filter = {
+            "X": "X",
+            "Y": "Y",
+            "E": "X",
+            "S": "Y",
+            "co": "co",
+            "cross": "cross",
+        }
         pol = [pol_filter.get(pp, None) for pp in self.telescope.polarisation]
-        beam_pol = [pol_filter.get(pp, None) for pp in beam.index_map['pol'][:]]
+        beam_pol = [pol_filter.get(pp, None) for pp in beam.index_map["pol"][:]]
 
         # Compute the fractional variance of the beam measurement
-        frac_var = tools.invert_no_zero(bw * np.abs(bv)**2)
+        frac_var = tools.invert_no_zero(bw * np.abs(bv) ** 2)
 
         # Create counter to increment during the stacking.
         # This will be used to normalize at the end.
@@ -706,37 +719,42 @@ class ConstructStackedBeam(task.SingleTask):
 
             cross = bv[:, aa_pol, aa, :] * bv[:, bb_pol, bb, :].conj()
 
-            weight = (input_flags[np.newaxis, aa, :] * input_flags[np.newaxis, bb, :] *
-                      tools.invert_no_zero(np.abs(cross)**2 * (frac_var[:, aa_pol, aa, :] +
-                                                               frac_var[:, bb_pol, bb, :])))
+            weight = (
+                input_flags[np.newaxis, aa, :]
+                * input_flags[np.newaxis, bb, :]
+                * tools.invert_no_zero(
+                    np.abs(cross) ** 2
+                    * (frac_var[:, aa_pol, aa, :] + frac_var[:, bb_pol, bb, :])
+                )
+            )
 
-            if self.weight == 'inverse_variance':
+            if self.weight == "inverse_variance":
                 wss = weight
             else:
                 wss = (weight > 0.0).astype(np.float32)
 
             # Accumulate variances in quadrature.  Save in the weight dataset.
             ov[:, ss, :] += wss * cross
-            ow[:, ss, :] += wss**2 * tools.invert_no_zero(weight)
+            ow[:, ss, :] += wss ** 2 * tools.invert_no_zero(weight)
 
             # Increment counter
             counter[:, ss, :] += wss
 
         # Divide through by counter to get properly weighted visibility average
         ov[:] *= tools.invert_no_zero(counter)
-        ow[:] = counter**2 * tools.invert_no_zero(ow[:])
+        ow[:] = counter ** 2 * tools.invert_no_zero(ow[:])
 
         return stacked_beam
 
     @staticmethod
     def _resolve_pol(pol1, pol2, pol_axis):
 
-        if 'co' in pol_axis:
+        if "co" in pol_axis:
 
             if pol1 == pol2:
-                ipol = pol_axis.index('co')
+                ipol = pol_axis.index("co")
             else:
-                ipol = pol_axis.index('cross')
+                ipol = pol_axis.index("cross")
 
             return ipol, ipol
 
@@ -850,21 +868,23 @@ class HolographyTransitFit(TransitFit):
             transit.beam.local_offset[0] + transit.beam.local_shape[0],
         )
         ninput = transit.beam.local_shape[2]
-        freq = transit.index_map['freq']['centre'][local_slice]
-        sigma = (0.7 * SPEED_LIGHT / (CHIME_CYL_W * freq)) * (
-            360.0 / np.pi
-        )
-        sigma = sigma[:, np.newaxis] * np.ones(
-            (1, ninput), dtype=sigma.dtype
-        )
+        freq = transit.index_map["freq"]["centre"][local_slice]
+        sigma = (0.7 * SPEED_LIGHT / (CHIME_CYL_W * freq)) * (360.0 / np.pi)
+        sigma = sigma[:, np.newaxis] * np.ones((1, ninput), dtype=sigma.dtype)
 
         # Find index into pol axis that yields copolar products
         pol_axis = list(transit.index_map["pol"])
         if "co" in pol_axis:
             copolar_slice = (slice(None), pol_axis.index("co"))
         else:
-            this_pol =  np.array([pol_axis.index('S') if not ((ii // 256) % 2) else pol_axis.index('E')
-                                  for ii in range(ninput)])
+            this_pol = np.array(
+                [
+                    pol_axis.index("S")
+                    if not ((ii // 256) % 2)
+                    else pol_axis.index("E")
+                    for ii in range(ninput)
+                ]
+            )
             copolar_slice = (slice(None), this_pol, np.arange(ninput))
 
         # Dereference datasets
@@ -912,7 +932,9 @@ class HolographyTransitFit(TransitFit):
 
         # Save datasets while removing anomalous data
         fit.parameter[:] = np.where(np.isfinite(model.param[:]), model.param[:], 0.0)
-        fit.parameter_cov[:] = np.where(np.isfinite(model.param_cov[:]), model.param_cov[:], 0.0)
+        fit.parameter_cov[:] = np.where(
+            np.isfinite(model.param_cov[:]), model.param_cov[:], 0.0
+        )
         fit.chisq[:] = np.where(np.isfinite(model.chisq[:]), model.chisq[:], 0.0)
         fit.ndof[:] = model.ndof[:]
 
@@ -948,9 +970,12 @@ class ApplyHolographyGains(task.SingleTask):
         if self.overwrite:
             track = track_in
         else:
-            track = TrackBeam(axes_from=track_in, attrs_from=track_in,
-                              distributed=track_in.distributed,
-                              comm=track_in.comm)
+            track = TrackBeam(
+                axes_from=track_in,
+                attrs_from=track_in,
+                distributed=track_in.distributed,
+                comm=track_in.comm,
+            )
             track["beam"] = track_in["beam"][:]
             track["weight"] = track_in["weight"][:]
 
@@ -960,7 +985,9 @@ class ApplyHolographyGains(task.SingleTask):
         ]
 
         track["beam"][:] = np.where(np.isfinite(track["beam"][:]), track["beam"][:], 0)
-        track["weight"][:] = np.where(np.isfinite(track["weight"][:]), track["weight"][:], 0)
+        track["weight"][:] = np.where(
+            np.isfinite(track["weight"][:]), track["weight"][:], 0
+        )
 
         return track
 
@@ -988,15 +1015,15 @@ class TransitStacker(task.SingleTask):
 
         if self.stack is None:
             self.log.info("Initializing transit stack.")
-            self.stack = TrackBeam(axes_from=transit,
-                                   distributed=transit.distributed,
-                                   comm=transit.comm)
+            self.stack = TrackBeam(
+                axes_from=transit, distributed=transit.distributed, comm=transit.comm
+            )
 
             self.stack.add_dataset("observed_variance")
             self.stack.add_dataset("number_of_observations")
             self.stack.redistribute("freq")
 
-            self.log.info("Adding %s to stack." % transit.attrs['tag'])
+            self.log.info("Adding %s to stack." % transit.attrs["tag"])
 
             # Copy over relevant attributes
             self.stack.attrs["filename"] = [transit.attrs["tag"]]
@@ -1017,7 +1044,9 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] = coeff * transit.beam[:]
-            self.stack.weight[:] = (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
+            self.stack.weight[:] = (coeff ** 2) * tools.invert_no_zero(
+                transit.weight[:]
+            )
             self.stack.number_of_observations[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
@@ -1034,7 +1063,7 @@ class TransitStacker(task.SingleTask):
                 )
                 return None
 
-            self.log.info("Adding %s to stack." % transit.attrs['tag'])
+            self.log.info("Adding %s to stack." % transit.attrs["tag"])
 
             self.stack.attrs["filename"].append(transit.attrs["tag"])
             self.stack.attrs["observation_id"].append(transit.attrs["observation_id"])
@@ -1049,7 +1078,9 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] += coeff * transit.beam[:]
-            self.stack.weight[:] += (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
+            self.stack.weight[:] += (coeff ** 2) * tools.invert_no_zero(
+                transit.weight[:]
+            )
             self.stack.number_of_observations[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
@@ -1062,16 +1093,22 @@ class TransitStacker(task.SingleTask):
         # Divide by norm to get average transit
         inv_norm = tools.invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
-        self.stack.weight[:] = tools.invert_no_zero(self.stack.weight[:]) * self.norm ** 2
+        self.stack.weight[:] = (
+            tools.invert_no_zero(self.stack.weight[:]) * self.norm ** 2
+        )
 
         self.variance = self.variance * inv_norm - np.abs(self.stack.beam[:]) ** 2
         self.pseudo_variance = self.pseudo_variance * inv_norm - self.stack.beam[:] ** 2
 
         # Calculate the covariance between the real and imaginary component
         # from the accumulated variance and psuedo-variance
-        self.stack.observed_variance[0] = 0.5 * (self.variance + self.pseudo_variance.real)
+        self.stack.observed_variance[0] = 0.5 * (
+            self.variance + self.pseudo_variance.real
+        )
         self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
-        self.stack.observed_variance[2] = 0.5 * (self.variance - self.pseudo_variance.real)
+        self.stack.observed_variance[2] = 0.5 * (
+            self.variance - self.pseudo_variance.real
+        )
 
         # Create tag
         time_range = np.percentile(self.stack.attrs["transit_time"], [0, 100])
