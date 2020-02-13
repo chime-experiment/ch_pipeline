@@ -847,6 +847,11 @@ class HolographyTransitFit(TransitFit):
         Must be less than `nsigma`.  Relevant if `poly = True`.
     """
 
+    # Disable NaN checks by default since they can be valid outputs of the fit
+    nan_check = config.Property(default=False, proptype=bool)
+    nan_skip = config.Property(default=False, proptype=bool)
+    nan_dump = config.Property(default=False, proptype=bool)
+
     def process(self, transit):
         """ Perform the fit.
 
@@ -930,12 +935,10 @@ class HolographyTransitFit(TransitFit):
             [getattr(self.ModelClass, key) for key in ["__module__", "__name__"]]
         )
 
-        # Save datasets while removing anomalous data
-        fit.parameter[:] = np.where(np.isfinite(model.param[:]), model.param[:], 0.0)
-        fit.parameter_cov[:] = np.where(
-            np.isfinite(model.param_cov[:]), model.param_cov[:], 0.0
-        )
-        fit.chisq[:] = np.where(np.isfinite(model.chisq[:]), model.chisq[:], 0.0)
+        # Save datasets
+        fit.parameter[:] = model.param[:]
+        fit.parameter_cov[:] = model.param_cov[:]
+        fit.chisq[:] = model.chisq[:]
         fit.ndof[:] = model.ndof[:]
 
         return fit
