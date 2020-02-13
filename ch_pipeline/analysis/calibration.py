@@ -1194,8 +1194,6 @@ class GainFromTransitFit(task.SingleTask):
         gain = out.gain[:]
         weight = out.weight[:]
 
-        weight = np.repeat(weight[:, np.newaxis], ninput, axis=1)
-
         # Instantiate the model object
         model = ModelClass(
             param=param, param_cov=param_cov, chisq=chisq, ndof=ndof, **model_kwargs

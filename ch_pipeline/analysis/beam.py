@@ -383,7 +383,7 @@ class EdgeFlagger(task.SingleTask):
 
         weight = track["weight"][:].view(np.ndarray)
 
-        for ind in np.ndindex(*weight.shape):
+        for ind in np.ndindex(*weight.shape[:-1]):
 
             flag = np.flatnonzero(weight[ind] > 0.0)
 
