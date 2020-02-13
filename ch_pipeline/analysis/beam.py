@@ -992,8 +992,8 @@ class TransitStacker(task.SingleTask):
                                    distributed=transit.distributed,
                                    comm=transit.comm)
 
-            #self.stack.add_dataset("observed_variance")
-            #self.stack.add_dataset("number_of_observations")
+            self.stack.add_dataset("observed_variance")
+            self.stack.add_dataset("number_of_observations")
             self.stack.redistribute("freq")
 
             self.log.info("Adding %s to stack." % transit.attrs['tag'])
@@ -1018,7 +1018,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] = coeff * transit.beam[:]
             self.stack.weight[:] = (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
-            #self.stack.number_of_observations[:] = flag.astype(np.int)
+            self.stack.number_of_observations[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1050,7 +1050,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] += coeff * transit.beam[:]
             self.stack.weight[:] += (coeff ** 2) * tools.invert_no_zero(transit.weight[:])
-            #self.stack.number_of_observations[:] += flag
+            self.stack.number_of_observations[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance += coeff * transit.beam[:] ** 2
@@ -1069,9 +1069,9 @@ class TransitStacker(task.SingleTask):
 
         # Calculate the covariance between the real and imaginary component
         # from the accumulated variance and psuedo-variance
-        #self.stack.observed_variance[0] = 0.5 * (self.variance + self.pseudo_variance.real)
-        #self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
-        #self.stack.observed_variance[2] = 0.5 * (self.variance - self.pseudo_variance.real)
+        self.stack.observed_variance[0] = 0.5 * (self.variance + self.pseudo_variance.real)
+        self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
+        self.stack.observed_variance[2] = 0.5 * (self.variance - self.pseudo_variance.real)
 
         # Create tag
         time_range = np.percentile(self.stack.attrs["transit_time"], [0, 100])
