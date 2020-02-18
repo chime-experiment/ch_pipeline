@@ -51,8 +51,8 @@ from .calibration import TransitFit, GainFromTransitFit
 
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
-SPEED_LIGHT = 299.7  # 10^6 m / s
-CHIME_CYL_W = 20.0  # m
+SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
+CHIME_CYL_W = 22.0  # m
 
 
 class TransitGrouper(task.SingleTask):
