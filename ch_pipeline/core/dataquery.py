@@ -146,7 +146,7 @@ class QueryDatabase(task.MPILoggedTask):
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
-    instrument = config.Property(proptype=str, default='chimestack')
+    instrument = config.Property(proptype=str, default="chimestack")
     source_26m = config.Property(proptype=str, default=None)
 
     start_time = config.Property(default=None)
@@ -281,7 +281,7 @@ class QueryDatabase(task.MPILoggedTask):
 
             results = f.get_results()
             if not self.return_intervals:
-                files = [ fname for result in results for fname in result[0] ]
+                files = [fname for result in results for fname in result[0]]
                 files.sort()
             else:
                 files = results

@@ -32,6 +32,7 @@ from os import path
 import yaml
 
 from caput.time import STELLAR_S
+
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 
 
@@ -51,8 +52,8 @@ class TransitGrouper(task.SingleTask):
         This is a hack until a better solution is implemented.
     """
 
-    ha_span = config.Property(proptype=float, default=180.)
-    min_span = config.Property(proptype=float, default=0.)
+    ha_span = config.Property(proptype=float, default=180.0)
+    min_span = config.Property(proptype=float, default=0.0)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
 
@@ -69,8 +70,10 @@ class TransitGrouper(task.SingleTask):
         try:
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
-            msg = ("Could not find source {} in catalogue. "
-                   "Must use same spelling as in `ch_util.ephemeris`.".format(self.source))
+            msg = (
+                "Could not find source {} in catalogue. "
+                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+            )
             self.log.error(msg)
             raise PipelineConfigError(msg)
         self.cur_transit = None
@@ -110,7 +113,7 @@ class TransitGrouper(task.SingleTask):
         final_ts = None
 
         # check if we jumped to another acquisition
-        if (tstream.time[0] - self.last_time) > 5*(tstream.time[1] - tstream.time[0]):
+        if (tstream.time[0] - self.last_time) > 5 * (tstream.time[1] - tstream.time[0]):
             if self.cur_transit is None:
                 # will be true when we start a new transit
                 pass
@@ -151,7 +154,7 @@ class TransitGrouper(task.SingleTask):
 
         This will strip eigenvector datasets if they are present.
         """
-        for dname in ['evec', 'eval', 'erms']:
+        for dname in ["evec", "eval", "erms"]:
             if dname in ts.datasets.keys():
                 self.log.debug("Stripping dataset {}".format(dname))
                 del ts[dname]
@@ -164,36 +167,41 @@ class TransitGrouper(task.SingleTask):
         if len(self.tstreams) == 0:
             self.log.info("Did not find any transits.")
             return None
-        self.log.debug("Finalising transit for {}...".format(
-            ephem.unix_to_datetime(self.cur_transit))
+        self.log.debug(
+            "Finalising transit for {}...".format(
+                ephem.unix_to_datetime(self.cur_transit)
+            )
         )
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
 
         # Save list of filenames
-        filenames = [ts.attrs['filename'] for ts in self.tstreams]
+        filenames = [ts.attrs["filename"] for ts in self.tstreams]
 
         dt = self.tstreams[0].time[1] - self.tstreams[0].time[0]
         if dt <= 0:
-            self.log.warning("Time steps are not positive definite: dt={:.3f}".format(dt)
-                             + " Skipping.")
+            self.log.warning(
+                "Time steps are not positive definite: dt={:.3f}".format(dt)
+                + " Skipping."
+            )
             ts = None
-        if stop_ind - start_ind > int(self.min_span / 360. * SIDEREAL_DAY_SEC / dt):
+        if stop_ind - start_ind > int(self.min_span / 360.0 * SIDEREAL_DAY_SEC / dt):
             if len(self.tstreams) > 1:
                 # Concatenate timestreams
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = ts[0]
             _, dec = self.sky_obs.radec(self.src)
-            ts.attrs['dec'] = dec._degrees
-            ts.attrs['source_name'] = self.source
-            ts.attrs['transit_time'] = self.cur_transit
-            ts.attrs['observation_id'] = self.obs_id
-            ts.attrs['tag'] = "{}_{}".format(
-                self.source, ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S")
+            ts.attrs["dec"] = dec._degrees
+            ts.attrs["source_name"] = self.source
+            ts.attrs["transit_time"] = self.cur_transit
+            ts.attrs["observation_id"] = self.obs_id
+            ts.attrs["tag"] = "{}_{}".format(
+                self.source,
+                ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
             )
-            ts.attrs['archivefiles'] = filenames
+            ts.attrs["archivefiles"] = filenames
         else:
             self.log.info("Transit too short. Skipping.")
             ts = None
@@ -210,16 +218,21 @@ class TransitGrouper(task.SingleTask):
         recorded in the database. Also gets the observation ID."""
 
         # subtract half a day from start time to ensure we don't get following day
-        self.start_t = self.cur_transit - self.ha_span / 360. / 2. * SIDEREAL_DAY_SEC
-        self.end_t = self.cur_transit + self.ha_span / 360. / 2. * SIDEREAL_DAY_SEC
+        self.start_t = self.cur_transit - self.ha_span / 360.0 / 2.0 * SIDEREAL_DAY_SEC
+        self.end_t = self.cur_transit + self.ha_span / 360.0 / 2.0 * SIDEREAL_DAY_SEC
 
         # get bounds of observation from database
         this_run = [
-            r for r in self.db_runs if r[1][0] < self.cur_transit and r[1][1] > self.cur_transit
+            r
+            for r in self.db_runs
+            if r[1][0] < self.cur_transit and r[1][1] > self.cur_transit
         ]
         if len(this_run) == 0:
-            self.log.warning("Could not find source transit in holography database for {}."
-                             .format(ephem.unix_to_datetime(self.cur_transit)))
+            self.log.warning(
+                "Could not find source transit in holography database for {}.".format(
+                    ephem.unix_to_datetime(self.cur_transit)
+                )
+            )
             # skip this file
             self.cur_transit = None
         else:
@@ -248,7 +261,7 @@ class TransitRegridder(Regridder):
     samples = config.Property(proptype=int, default=1024)
     lanczos_width = config.Property(proptype=int, default=5)
     snr_cov = config.Property(proptype=float, default=1e-8)
-    ha_span = config.Property(proptype=float, default=180.)
+    ha_span = config.Property(proptype=float, default=180.0)
     source = config.Property(proptype=str)
 
     def setup(self, observer=None):
@@ -263,14 +276,16 @@ class TransitRegridder(Regridder):
         self.sky_obs = wrap_observer(self.observer)
 
         # Setup bounds for interpolation grid
-        self.start = - self.ha_span / 2
+        self.start = -self.ha_span / 2
         self.end = self.ha_span / 2
 
         try:
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
-            msg = ("Could not find source {} in catalogue. "
-                   "Must use same spelling as in `ch_util.ephemeris`.".format(self.source))
+            msg = (
+                "Could not find source {} in catalogue. "
+                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+            )
             self.log.error(msg)
             raise PipelineConfigError(msg)
 
@@ -289,7 +304,7 @@ class TransitRegridder(Regridder):
         """
 
         # Redistribute if needed
-        data.redistribute('freq')
+        data.redistribute("freq")
 
         # View of data
         weight = data.weight[:].view(np.ndarray)
@@ -326,8 +341,8 @@ class TransitRegridder(Regridder):
 
         # mask out regions beyond bounds of this transit
         grid_mask = np.ones_like(new_grid)
-        grid_mask[new_grid < lha.min()] = 0.
-        grid_mask[new_grid > lha.max()] = 0.
+        grid_mask[new_grid < lha.min()] = 0.0
+        grid_mask[new_grid > lha.max()] = 0.0
         new_vis *= grid_mask
         ni *= grid_mask
 
@@ -337,14 +352,15 @@ class TransitRegridder(Regridder):
             ni = mpiarray.MPIArray.wrap(ni, axis=data.vis.distributed_axis)
 
         # Create new container for output
-        ra_grid = (new_grid + ra) % 360.
-        new_data = SiderealStream(axes_from=data, attrs_from=data,
-                                  ra=ra_grid, comm=data.comm)
-        new_data.redistribute('freq')
+        ra_grid = (new_grid + ra) % 360.0
+        new_data = SiderealStream(
+            axes_from=data, attrs_from=data, ra=ra_grid, comm=data.comm
+        )
+        new_data.redistribute("freq")
         new_data.vis[:] = new_vis
         new_data.weight[:] = ni
-        new_data.attrs['cirs_ra'] = ra
-        new_data.attrs['icrs_ra'] = ra_icrs
+        new_data.attrs["cirs_ra"] = ra
+        new_data.attrs["icrs_ra"] = ra_icrs
 
         return new_data
 
@@ -377,30 +393,34 @@ class MakeHolographyBeam(task.SingleTask):
         """
 
         # redistribute if needed
-        data.redistribute('freq')
+        data.redistribute("freq")
 
-        prod = data.index_map['prod']
-        inputs = data.index_map['input']
+        prod = data.index_map["prod"]
+        inputs = data.index_map["input"]
 
         # Figure out which inputs are the 26m
-        input_26m = prod['input_a'][np.where(prod['input_a'] == prod['input_b'])[0]]
+        input_26m = prod["input_a"][np.where(prod["input_a"] == prod["input_b"])[0]]
         if len(input_26m) != 2:
-            msg = ("Did not find exactly two 26m inputs in the data.")
+            msg = "Did not find exactly two 26m inputs in the data."
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
 
         # Separate products by 26 m inputs
         prod_groups = []
         for i in input_26m:
-            prod_groups.append(np.where(
-                np.logical_or(prod['input_a'] == i, prod['input_b'] == i)
-            )[0])
+            prod_groups.append(
+                np.where(np.logical_or(prod["input_a"] == i, prod["input_b"] == i))[0]
+            )
 
         # Check we have the expected number of products
-        if prod_groups[0].shape[0] != inputs.shape[0] or prod_groups[1].shape[0] != inputs.shape[0]:
-            msg = ("Products do not separate into two groups with the length of the input map. "
-                   "({:d}, {:d}) != {:d}").format(prod_groups[0].shape[0],
-                                                  prod_groups[1].shape[0], inputs.shape[0])
+        if (
+            prod_groups[0].shape[0] != inputs.shape[0]
+            or prod_groups[1].shape[0] != inputs.shape[0]
+        ):
+            msg = (
+                "Products do not separate into two groups with the length of the input map. "
+                "({:d}, {:d}) != {:d}"
+            ).format(prod_groups[0].shape[0], prod_groups[1].shape[0], inputs.shape[0])
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
 
@@ -409,8 +429,10 @@ class MakeHolographyBeam(task.SingleTask):
         isort = np.argsort(corr_id)
 
         # Create new input axis using id and serial number in database
-        inputs_sorted = np.array([(inputmap[ii].id, inputmap[ii].input_sn) for ii in isort],
-                                 dtype=inputs.dtype)
+        inputs_sorted = np.array(
+            [(inputmap[ii].id, inputmap[ii].input_sn) for ii in isort],
+            dtype=inputs.dtype,
+        )
 
         # Sort the products based on the input id in database and
         # determine which products should be conjugated.
@@ -418,8 +440,10 @@ class MakeHolographyBeam(task.SingleTask):
         prod_groups_sorted = []
         for i, pg in enumerate(prod_groups):
             group_prod = prod[pg]
-            group_conj = group_prod['input_a'] == input_26m[i]
-            group_inputs = np.where(group_conj, group_prod['input_b'], group_prod['input_a'])
+            group_conj = group_prod["input_a"] == input_26m[i]
+            group_inputs = np.where(
+                group_conj, group_prod["input_b"], group_prod["input_a"]
+            )
             group_sort = np.argsort(corr_id[group_inputs])
 
             prod_groups_sorted.append(pg[group_sort])
@@ -430,14 +454,22 @@ class MakeHolographyBeam(task.SingleTask):
         prod_groups_cox = [pg.copy() for pg in prod_groups_sorted]
         conj_cox = [pg.copy() for pg in conj]
         input_pol = np.array(
-            [ipt.pol if (tools.is_array(ipt) or tools.is_holographic(ipt))
-             else inputmap[input_26m[0]].pol for ipt in inputmap]
+            [
+                ipt.pol
+                if (tools.is_array(ipt) or tools.is_holographic(ipt))
+                else inputmap[input_26m[0]].pol
+                for ipt in inputmap
+            ]
         )
         for i, pg in enumerate(prod_groups_sorted):
             group_prod = prod[pg]
             # Determine co/cross in each prod group
-            cp = (input_pol[np.where(conj[i], group_prod['input_b'], group_prod['input_a'])] ==
-                  inputmap[input_26m[i]].pol)
+            cp = (
+                input_pol[
+                    np.where(conj[i], group_prod["input_b"], group_prod["input_a"])
+                ]
+                == inputmap[input_26m[i]].pol
+            )
             xp = np.logical_not(cp)
             copol.append(cp)
             xpol.append(xp)
@@ -447,38 +479,51 @@ class MakeHolographyBeam(task.SingleTask):
             conj_cox[0][cp] = conj[i][cp]
             conj_cox[1][xp] = conj[i][xp]
         # Check for compeleteness
-        consistent = (
-            np.all(copol[0] + copol[1] == np.ones(copol[0].shape)) and
-            np.all(xpol[0] + xpol[1] == np.ones(xpol[0].shape))
+        consistent = np.all(copol[0] + copol[1] == np.ones(copol[0].shape)) and np.all(
+            xpol[0] + xpol[1] == np.ones(xpol[0].shape)
         )
         if not consistent:
-            msg = ("Products do not separate exclusively into co- and cross-polar groups.")
+            msg = (
+                "Products do not separate exclusively into co- and cross-polar groups."
+            )
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
 
         # Make new index map
-        ra = data.attrs['cirs_ra']
+        ra = data.attrs["cirs_ra"]
         phi = unwrap_lha(data.ra[:], ra)
-        if 'dec' not in data.attrs.keys():
-            msg = ("Input stream must have a 'dec' attribute specifying "
-                   "declination of holography source.")
+        if "dec" not in data.attrs.keys():
+            msg = (
+                "Input stream must have a 'dec' attribute specifying "
+                "declination of holography source."
+            )
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
-        theta = np.ones_like(phi) * data.attrs['dec']
-        pol = np.array(['co', 'cross'], dtype='S5')
+        theta = np.ones_like(phi) * data.attrs["dec"]
+        pol = np.array(["co", "cross"], dtype="S5")
 
         # Create new container and fill
-        track = TrackBeam(theta=theta, phi=phi, track_type='drift', coords='celestial',
-                          input=inputs_sorted, pol=pol, freq=data.freq[:], attrs_from=data,
-                          distributed=data.distributed)
+        track = TrackBeam(
+            theta=theta,
+            phi=phi,
+            track_type="drift",
+            coords="celestial",
+            input=inputs_sorted,
+            pol=pol,
+            freq=data.freq[:],
+            attrs_from=data,
+            distributed=data.distributed,
+        )
         for ip in range(len(pol)):
             track.beam[:, ip, :, :] = data.vis[:, prod_groups_cox[ip], :]
             track.weight[:, ip, :, :] = data.weight[:, prod_groups_cox[ip], :]
             if np.any(conj_cox[ip]):
-                track.beam[:, ip, conj_cox[ip], :] = track.beam[:, ip, conj_cox[ip], :].conj()
+                track.beam[:, ip, conj_cox[ip], :] = track.beam[
+                    :, ip, conj_cox[ip], :
+                ].conj()
 
         # Store 26 m inputs
-        track.attrs['26m_inputs'] = [inputs[ii] for ii in input_26m]
+        track.attrs["26m_inputs"] = [inputs[ii] for ii in input_26m]
 
         return track
 
@@ -503,10 +548,10 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
         """
 
         # Create a tag for the output file name
-        tag = output.attrs['tag'] if 'tag' in output.attrs else self._count
+        tag = output.attrs["tag"] if "tag" in output.attrs else self._count
 
         # Construct the filename
-        outfile = self.output_root + str(tag) + '.h5'
+        outfile = self.output_root + str(tag) + ".h5"
 
         # Expand any variables in the path
         outfile = path.expanduser(outfile)
@@ -514,17 +559,24 @@ class RegisterHolographyProcessed(RegisterProcessedFiles):
 
         self.write_output(outfile, output)
 
-        obs_id = output.attrs.get('observation_id', None)
-        files = output.attrs.get('archivefiles', None)
+        obs_id = output.attrs.get("observation_id", None)
+        files = output.attrs.get("archivefiles", None)
 
         if output.distributed and output.comm.rank != 0:
             pass
         else:
             # Add entry in database
             # TODO: check for duplicates ?
-            append_product(self.db_fname, outfile, self.product_type, config=None,
-                           tag=self.tag, git_tags=self.git_tags, holobs_id=obs_id,
-                           archivefiles=files)
+            append_product(
+                self.db_fname,
+                outfile,
+                self.product_type,
+                config=None,
+                tag=self.tag,
+                git_tags=self.git_tags,
+                holobs_id=obs_id,
+                archivefiles=files,
+            )
 
         return None
 
@@ -576,18 +628,25 @@ class FilterHolographyProcessed(task.MPILoggedTask):
             start, end = fi[1]
             # find holography observation that overlaps this set
             this_obs = [
-                o for o in self.hol_obs
-                if (o.start_time >= start and o.start_time <= end) or
-                (o.finish_time >= start and o.finish_time <= end) or
-                (o.start_time <= start and o.finish_time >= end)
+                o
+                for o in self.hol_obs
+                if (o.start_time >= start and o.start_time <= end)
+                or (o.finish_time >= start and o.finish_time <= end)
+                or (o.start_time <= start and o.finish_time >= end)
             ]
 
             if len(this_obs) == 0:
-                self.log.warning("Could not find source transit in holography database for {}."
-                                 .format(ephem.unix_to_datetime(start)))
-            elif this_obs[0].id in [int(t['holobs_id']) for t in self.proc_transits]:
-                self.log.warning("Already processed transit for {}. Skipping."
-                                 .format(ephem.unix_to_datetime(start)))
+                self.log.warning(
+                    "Could not find source transit in holography database for {}.".format(
+                        ephem.unix_to_datetime(start)
+                    )
+                )
+            elif this_obs[0].id in [int(t["holobs_id"]) for t in self.proc_transits]:
+                self.log.warning(
+                    "Already processed transit for {}. Skipping.".format(
+                        ephem.unix_to_datetime(start)
+                    )
+                )
             else:
                 files += fi[0]
 
@@ -611,10 +670,10 @@ def wrap_observer(obs):
         Wrapped observer.
     """
     return ephem.SkyfieldObserverWrapper(
-            lon=obs.longitude,
-            lat=obs.latitude,
-            alt=obs.altitude,
-            lsd_start=obs.lsd_start_day
+        lon=obs.longitude,
+        lat=obs.latitude,
+        alt=obs.altitude,
+        lsd_start=obs.lsd_start_day,
     )
 
 
@@ -636,11 +695,14 @@ def unwrap_lha(lsa, src_ra):
     # ensure monotonic
     start_lsa = lsa[0]
     lsa -= start_lsa
-    lsa[lsa < 0] += 360.
+    lsa[lsa < 0] += 360.0
     lsa += start_lsa
     # subtract source RA
-    return np.where(np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.),
-                    lsa - src_ra, lsa - src_ra + 360.)
+    return np.where(
+        np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.0),
+        lsa - src_ra,
+        lsa - src_ra + 360.0,
+    )
 
 
 def get_holography_obs(src):
@@ -675,10 +737,10 @@ def get_proc_transits(db_fname):
         Path to YAML database file.
     """
 
-    with open(db_fname, 'r') as fh:
+    with open(db_fname, "r") as fh:
         entries = yaml.load(fh)
     entries_filt = []
     for e in entries:
-        if isinstance(e, dict) and 'holobs_id' in e.keys():
+        if isinstance(e, dict) and "holobs_id" in e.keys():
             entries_filt.append(e)
     return entries_filt
