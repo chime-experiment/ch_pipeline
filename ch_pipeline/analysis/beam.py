@@ -20,11 +20,20 @@
         FilterHolographyProcessed
 """
 import json
+import yaml
+from os import path
 
 import numpy as np
+from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
 from caput.pipeline import PipelineConfigError, PipelineRuntimeError
+from caput.time import STELLAR_S
+
+from ch_util import ephemeris as ephem
+from ch_util import tools, layout
+from ch_util import data_index as di
+
 
 from draco.core import task, io
 from draco.util import regrid
@@ -40,14 +49,6 @@ from ..core.processed_db import (
 from ..core.containers import TransitFitParams
 from .calibration import TransitFit, GainFromTransitFit
 
-from ch_util import ephemeris as ephem
-from ch_util import tools, layout
-from ch_util import data_index as di
-
-from os import path
-import yaml
-
-from caput.time import STELLAR_S
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 SPEED_LIGHT = 299.7  # 10^6 m / s
