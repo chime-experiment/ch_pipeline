@@ -23,6 +23,8 @@ Tasks
     FlagAmplitude
     InterpolateGainOverFrequency
     SiderealCalibration
+    CorrectTimeOffset
+    CorrectTelescopeRotation
 """
 # === Start Python 2/3 compatibility
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -45,6 +47,7 @@ from ch_util import ephemeris
 from ch_util import ni_utils
 from ch_util import cal_utils
 from ch_util import fluxcat
+from ch_util import finder
 from ch_util import rfi
 
 from draco.core import task
@@ -1726,3 +1729,280 @@ class SiderealCalibration(task.SingleTask):
 
         # Return gain data
         return gain_data
+
+
+class CalibrationCorrection(task.SingleTask):
+    """Base class for applying multiplicative corrections based on a DataFlag.
+
+    This task is not functional.  It simply defines `setup` and `process`
+    methods that are common to several subclasses.  All subclasses must
+    define the `_get_correction` and `_correction_is_nonzero` methods.
+
+    Parameters
+    ----------
+    rotation : bool
+        Current best estimate of telescope rotation.
+    name_of_flag : str
+        The name of the DataFlag.
+    """
+
+    rotation = config.Property(proptype=float, default=-0.088)
+    name_of_flag = config.Property(proptype=str, default="")
+
+    def setup(self):
+        """Query the database for all DataFlags with name equal to the `name_of_flag` property."""
+        flags = []
+
+        # Query flag database if on 0th node
+        if self.comm.rank == 0:
+            finder.connect_database()
+            flag_types = finder.DataFlagType.select()
+            for ft in flag_types:
+                if ft.name == self.name_of_flag:
+                    ftemp = list(
+                        finder.DataFlag.select().where(finder.DataFlag.type == ft)
+                    )
+                    # Only keep flags that will produce nonzero corrections, as defined by
+                    # the _correction_is_nonzero method
+                    flags += [
+                        flg
+                        for flg in ftemp
+                        if self._correction_is_nonzero(**flg.metadata)
+                    ]
+
+        # Share flags with other nodes
+        flags = self.comm.bcast(flags, root=0)
+
+        # Save flags to class attribute
+        self.log.info("Found %d %s flags in total." % (len(flags), self.name_of_flag))
+        self.flags = flags
+
+    def process(self, sstream, inputmap):
+        """Apply a multiplicative correction to visiblities during range of time covered by flags.
+
+        Parameters
+        ----------
+        sstream : andata.CorrData, containers.SiderealStream, or equivalent
+            Apply a correction to the `vis` dataset in this container.
+        inputmap : list of :class:`CorrInput`
+            List describing the inputs as they are in the file, output from
+            `tools.get_correlator_inputs()`
+
+        Returns
+        ----------
+        sstream_out : same as sstream
+            The input container with the correction applied.
+        """
+        # Determine if there are flags pertinent to this range of time
+        if "ra" in sstream.index_map:
+            ra = sstream.ra
+            csd = (
+                sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+            )
+            if hasattr(csd, "__iter__"):
+                csd = sorted(csd)[len(csd) // 2]
+            timestamp = ephemeris.csd_to_unix(csd + ra / 360.0)
+        else:
+            timestamp = sstream.time
+
+        covered = False
+        for flag in self.flags:
+            if np.any((timestamp >= flag.start_time) & (timestamp <= flag.finish_time)):
+                covered = True
+                break
+
+        # If the flags do not cover this range of time, then do nothing
+        # and return the input container
+        if not covered:
+            return sstream
+
+        # We are covered by the flags, so set up for correction
+        sstream.redistribute("freq")
+
+        # Determine local dimensions
+        nfreq, nstack, ntime = sstream.vis.local_shape
+
+        # Find the local frequencies
+        sfreq = sstream.vis.local_offset[0]
+        efreq = sfreq + nfreq
+
+        freq = sstream.freq[sfreq:efreq]
+
+        # Extract representative products for the stacked visibilities
+        stack_new, stack_flag = tools.redefine_stack_index_map(
+            inputmap, sstream.prod, sstream.stack, sstream.reverse_map["stack"]
+        )
+        do_not_apply = np.flatnonzero(~stack_flag)
+        prod = sstream.prod[stack_new["prod"]].copy()
+
+        # Swap the product pair order for conjugated stack indices
+        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        if cj.size > 0:
+            prod["input_a"][cj], prod["input_b"][cj] = (
+                prod["input_b"][cj],
+                prod["input_a"][cj],
+            )
+
+        # Loop over flags again
+        for flag in self.flags:
+
+            in_range = (timestamp >= flag.start_time) & (timestamp <= flag.finish_time)
+            if np.any(in_range):
+
+                msg = (
+                    "%d (of %d) samples require phase correction according to "
+                    "%s DataFlag covering %s to %s."
+                    % (
+                        np.sum(in_range),
+                        in_range.size,
+                        self.name_of_flag,
+                        ephemeris.unix_to_datetime(flag.start_time).strftime(
+                            "%Y%m%dT%H%M%SZ"
+                        ),
+                        ephemeris.unix_to_datetime(flag.finish_time).strftime(
+                            "%Y%m%dT%H%M%SZ"
+                        ),
+                    )
+                )
+
+                self.log.info(msg)
+
+                correction = self._get_correction(
+                    freq, prod, timestamp[in_range], inputmap, **flag.metadata
+                )
+
+                if do_not_apply.size > 0:
+                    self.log.warning(
+                        "Do not have valid baseline distance for stack indices: %s"
+                        % str(do_not_apply)
+                    )
+                    correction[:, do_not_apply, :] = 1.0 + 0.0j
+
+                sstream.vis[:, :, in_range] *= correction
+
+        # Return input container with phase correction applied
+        return sstream
+
+    def _correction_is_nonzero(self, **kwargs):
+        return True
+
+    def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
+        pass
+
+
+class CorrectTimeOffset(CalibrationCorrection):
+    """Correct stacked visibilities for a different time standard used during calibration.
+
+    Parameters
+    ----------
+    name_of_flag : str
+        The name of the DataFlag that contains the time offset.
+    """
+
+    name_of_flag = config.Property(proptype=str, default="calibration_time_offset")
+
+    def _correction_is_nonzero(self, **kwargs):
+        return kwargs["time_offset"] != 0.0
+
+    def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
+
+        time_offset = kwargs["time_offset"]
+        calibrator = kwargs["calibrator"]
+        self.log.info(
+            "Applying a phase correction for a %0.2f second "
+            "time offset on the calibrator %s." % (time_offset, calibrator)
+        )
+
+        body = ephemeris.source_dictionary[calibrator]
+
+        lat = np.radians(ephemeris.CHIMELATITUDE)
+
+        # Compute feed positions with rotation
+        tools.change_chime_location(rotation=self.rotation)
+        uv = _calculate_uv(freq, prod, inputmap)
+
+        # Return back to default rotation
+        tools.change_chime_location(default=True)
+
+        # Determine location of calibrator
+        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+
+        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+
+        ha = np.radians(ephemeris.lsa(ttrans + time_offset)) - ra
+
+        # Calculate and return the phase correction, which is old offset minus new time offset
+        # since we previously divided the chimestack data by the response to the calibrator.
+        correction = tools.fringestop_phase(ha, lat, dec, *uv) * tools.invert_no_zero(
+            tools.fringestop_phase(0.0, lat, dec, *uv)
+        )
+
+        return correction[:, :, np.newaxis]
+
+
+class CorrectTelescopeRotation(CalibrationCorrection):
+    """Correct stacked visibilities for a different telescope rotation used during calibration.
+
+    Parameters
+    ----------
+    name_of_flag : str
+        The name of the DataFlag that contains the telescope rotation
+        used was during calibration.
+    """
+
+    name_of_flag = config.Property(
+        proptype=str, default="calibration_telescope_rotation"
+    )
+
+    def _correction_is_nonzero(self, **kwargs):
+        return kwargs["rotation"] != self.rotation
+
+    def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
+
+        rotation = kwargs["rotation"]
+        calibrator = kwargs["calibrator"]
+
+        self.log.info(
+            "Applying a phase correction to convert from a telescope rotation "
+            "of %0.3f deg to %0.3f deg for the calibrator %s."
+            % (rotation, self.rotation, calibrator)
+        )
+
+        body = ephemeris.source_dictionary[calibrator]
+
+        lat = np.radians(ephemeris.CHIMELATITUDE)
+
+        # Compute feed positions with old rotation
+        tools.change_chime_location(rotation=rotation)
+        old_uv = _calculate_uv(freq, prod, inputmap)
+
+        # Compute feed positions with current rotation
+        tools.change_chime_location(rotation=self.rotation)
+        current_uv = _calculate_uv(freq, prod, inputmap)
+
+        # Return back to default rotation
+        tools.change_chime_location(default=True)
+
+        # Determine location of calibrator
+        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+
+        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+
+        # Calculate and return the phase correction, which is old positions minus new positions
+        # since we previously divided the chimestack data by the response to the calibrator.
+        correction = tools.fringestop_phase(
+            0.0, lat, dec, *old_uv
+        ) * tools.invert_no_zero(tools.fringestop_phase(0.0, lat, dec, *current_uv))
+
+        return correction[:, :, np.newaxis]
+
+
+def _calculate_uv(freq, prod, inputmap):
+    """Generate baseline distances in wavelengths from the frequency, products, and inputmap."""
+    feedpos = tools.get_feed_positions(inputmap).T
+    dist = feedpos[:, prod["input_a"]] - feedpos[:, prod["input_b"]]
+
+    lmbda = speed_of_light * 1e-6 / freq
+    uv = dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
+
+    return uv

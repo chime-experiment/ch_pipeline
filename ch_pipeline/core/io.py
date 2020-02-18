@@ -203,6 +203,7 @@ class LoadCorrDataFiles(task.SingleTask):
         self._file_ptr += 1
 
         # Set up product selection
+        # NOTE: this probably doesn't work with stacked data
         prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
