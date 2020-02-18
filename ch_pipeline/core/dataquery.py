@@ -15,6 +15,7 @@ Tasks
 .. autosummary::
     :toctree: generated/
 
+    QueryDatabase
     QueryRun
     QueryDataspec
     QueryAcquisitions
@@ -135,8 +136,13 @@ class QueryDatabase(task.MPILoggedTask):
     accept_all_global_flags : bool (default: False)
         Accept all global flags. Due to a bug as of 2019-1-16, this may need to
         be set to True
-
+    exclude_data_flag_types: list of string
+        Reject time intervals that overlap with DataFlags of these types.
+    return_intervals : bool (default: False)
+        Return the full interval from the Finder. Otherwise only a list of file names.
     """
+
+    return_intervals = config.Property(proptype=bool, default=False)
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
@@ -167,6 +173,8 @@ class QueryDatabase(task.MPILoggedTask):
     run_name = config.Property(proptype=str, default=None)
 
     accept_all_global_flags = config.Property(proptype=bool, default=False)
+
+    exclude_data_flag_types = config.Property(proptype=list, default=[])
 
     def setup(self):
         """Query the database and fetch the files
@@ -268,9 +276,16 @@ class QueryDatabase(task.MPILoggedTask):
             if self.source_26m:
                 f.include_26m_obs(self.source_26m)
 
+            if len(self.exclude_data_flag_types) > 0:
+                f.exclude_data_flag_type(self.exclude_data_flag_types)
+
             results = f.get_results()
-            files = [fname for result in results for fname in result[0]]
-            files.sort()
+            if not self.return_intervals:
+                files = [fname for result in results for fname in result[0]]
+                files.sort()
+            else:
+                files = results
+                files.sort(key=lambda x: x[1][0])
 
         files = mpiutil.world.bcast(files, root=0)
 

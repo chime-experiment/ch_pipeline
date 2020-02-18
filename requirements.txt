@@ -4,3 +4,4 @@ cython
 -e git+https://github.com/radiocosmology/cora#egg=cora
 -e git+https://github.com/radiocosmology/driftscan#egg=driftscan
 -e git+https://github.com/radiocosmology/draco#egg=draco
+GitPython
