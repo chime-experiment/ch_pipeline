@@ -1,0 +1,58 @@
+cluster:
+    name:               tcorr
+    directory:          $SCRATCH/timing/
+    venv:               /home/ssiegel/ch_pipeline/venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               tcorr                   # Jobname
+    nodes:              2                       # Number of nodes to run on
+    time:               300                     # Time to run for (in minutes)
+    ompnum:             8                       # Number of OpenMP threads
+    pernode:            4
+    mem:                128000M
+    system:            'cedar'
+    account:           'rpp-krs'
+
+
+pipeline:
+
+    tasks:
+
+        -   type:       ch_pipeline.core.containers.MonkeyPatchContainers
+
+        -   type:       draco.core.task.SetMPILogging
+            params:
+                level_rank0: INFO
+                level_all: WARNING
+
+        -   type:       ch_pipeline.core.dataquery.QueryAcquisitions
+            out:        filelist
+            params:
+                node_spoof:
+                    cedar_archive:  '/project/rpp-krs/chime/chime_archive/'
+                instrument: 'chimetiming'
+                start_time: '20181212T000000'
+                end_time:   '20190305T000000'
+                accept_all_global_flags:    Yes
+                min_num_files:  3
+                max_num_files:  140
+
+        -   type:       ch_pipeline.analysis.timing.ConstructTimingCorrection
+            in:         filelist
+            out:        tcorr
+            params:
+                check_amp: True
+                check_sig: True
+                nsigma: 5.0
+                threshold: 0.50
+                nparam: 2
+                min_freq: 420.0
+                max_freq: 600.0
+                input_sel: [46, 142, 688, 960, 1058, 1166, 1543, 2032]
+                output_suffix: 'chimetiming_delay'
+                save:   Yes
+
+        -   type:       draco.core.task.Delete
+            in:         tcorr
+            out:        del_tcorr
+

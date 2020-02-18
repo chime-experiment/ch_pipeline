@@ -1,0 +1,216 @@
+# Example configuration file for generating gains from the chimecal acquisitions.
+# Peforms the same processing as the calibration broker (real-time pipeline).
+cluster:
+    directory:          $SCRATCH/eigen_cal/cyg_a
+    venv:               /home/ssiegel/ch_pipeline/venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               cyga_winter             # Jobname
+    nodes:              4                       # Number of nodes to run on
+    time:               600                     # Time to run for (in minutes)
+    ompnum:             8                       # Number of OpenMP threads
+    pernode:            4
+    mem:                128000M
+    system:            'cedar'
+    account:           'rpp-krs'
+
+
+# Source specific parameters
+source_parameters:
+
+    source:  &source  'CYG_A'
+    offset:  &offset  29000.0
+    dyn_rng: &dyn_rng 3.0
+    frac_valid: &frac_valid 0.50
+
+# Time period specific parameters
+period_parameters:
+    start_time:  &start_time '20181213T020000'
+    end_time:    &end_time '20190304T130000'
+    csd_start:   &csd_start 1700
+    csd_end:     &csd_end 2200
+    timing_file: &timing_file "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5"
+
+
+pipeline:
+
+    tasks:
+
+        -   type:       ch_pipeline.core.containers.MonkeyPatchContainers
+
+        -   type:       draco.core.task.SetMPILogging
+            params:
+                level_rank0: INFO
+                level_all: WARNING
+
+        -   type:       ch_pipeline.core.dataquery.QueryDatabase
+            out:        qfilelist
+            params:
+                node_spoof:
+                    cedar_archive:  '/project/rpp-krs/chime/chime_archive/'
+                instrument: 'chimecal'
+                start_time: *start_time
+                end_time:   *end_time
+                accept_all_global_flags: No
+                exclude_daytime: No
+                exclude_sun: Yes
+                exclude_sun_time_delta: 5400.0
+                exclude_sun_time_delta_rise_set: 0.0
+                include_transits: *source
+                include_transits_time_delta: 7200.0
+
+        -   type:       ch_pipeline.analysis.sidereal.SiderealFileFilterFromParams
+            requires:   qfilelist
+            out:        sfilelist
+            params:
+                csd_start:  *csd_start
+                csd_end:    *csd_end
+
+        -   type: draco.core.io.LoadFilesFromParams
+            out: tcorr
+            params:
+                files: *timing_file
+                distributed: No
+
+        -   type: draco.core.misc.AccumulateList
+            in: tcorr
+            out: tcorrlist
+
+        -   type: draco.core.misc.WaitUntil
+            requires: tcorrlist
+            in: sfilelist
+            out: filelist
+
+        -   type:       ch_pipeline.core.io.LoadCorrDataFiles
+            requires:   filelist
+            out:        data1
+            params:
+                datasets: ['vis', 'flags/vis_weight', 'flags/inputs', 'erms', 'eval', 'evec']
+
+        -   type:       ch_pipeline.analysis.sidereal.SiderealGrouper
+            in:         data1
+            out:        data2
+            params:
+                min_day_length: 0.005
+                offset: *offset
+
+        -   type:       ch_pipeline.analysis.flagging.RFIFilter
+            in:         data2
+            out:        rfimask
+            params:
+                stack: Yes
+                normalize: Yes
+                flag1d: No
+                rolling: Yes
+                apply_static_mask: Yes
+                keep_auto: Yes
+                keep_ndev: Yes
+                freq_width: 10.0
+                time_width: 420.0
+                threshold_mad: 6.0
+                nan_check: No
+                nan_skip: No
+                nan_dump: No
+                save: Yes
+                output_root:   "rfi_mask_"
+
+        -   type:       ch_pipeline.analysis.flagging.ApplyCorrInputMask
+            in:         [data2, rfimask]
+            out:        data3
+
+        -   type:       ch_pipeline.analysis.calibration.DetermineSourceTransit
+            in:         data3
+            out:        data
+            params:
+                source_list: ['CYG_A', 'CAS_A', 'TAU_A']
+                require_transit: Yes
+
+        -   type:       ch_pipeline.core.dataquery.QueryInputs
+            in:         data
+            out:        inputmap
+
+        -   type:       ch_pipeline.analysis.calibration.EigenCalibration
+            in:         [data, inputmap]
+            out:        resp
+            params:
+                source:    # Empty: uses source name saved to attr by DetermineSourceTransit
+                eigen_ref: 0
+                phase_ref: [1152, 1408]
+                med_phase_ref: No
+                neigen: 2
+                max_hour_angle: 10.0
+                window: 0.75
+                dyn_rng_threshold: *dyn_rng
+                telescope_rotation: -0.088
+                save:   No
+                output_root:   "response_"
+
+        -   type:       ch_pipeline.analysis.timing.ApplyTimingCorrection
+            requires:   tcorrlist
+            in:         resp
+            out:        resp_corr
+            params:
+                use_input_flags:  No
+                refer_to_transit: Yes
+                transit_window: 2400.0
+                save:   No
+                output_root:   "response_tcorr_"
+
+        -   type:       ch_pipeline.analysis.calibration.TransitFit
+            in:         [resp_corr, inputmap]
+            out:        fit
+            params:
+                model: 'poly_log_amp_poly_phase'
+                nsigma: 0.60
+                absolute_sigma: No
+                poly_type: "standard"
+                poly_deg_amp: 5
+                poly_deg_phi: 5
+                niter: 5
+                moving_window: 0.30
+                nan_check: No
+                nan_skip: No
+                nan_dump: No
+                save:   Yes
+                output_root:   "fit_"
+
+        -   type:       ch_pipeline.analysis.calibration.GainFromTransitFit
+            in:         fit
+            out:        gtrans
+            params:
+                evaluate: "transit"
+                chisq_per_dof_threshold: 100.0
+                alpha: 0.32
+                save:   No
+                output_root:   "gain_transit_"
+
+        -   type:       draco.core.task.Delete
+            in:         data
+            out:        del_data
+
+        -   type:       draco.core.task.Delete
+            in:         resp_corr
+            out:        del_resp_corr
+
+        -   type:       ch_pipeline.analysis.calibration.FlagAmplitude
+            in:         [gtrans, inputmap]
+            out:        gflag
+            params:
+                min_amp_scale_factor: 0.05
+                max_amp_scale_factor: 20.0
+                nsigma_outlier: 10.0
+                nsigma_med_outlier: 10.0
+                window_med_outlier: 24
+                threshold_good_freq: 0.70
+                threshold_good_input: 0.80
+                valid_gains_frac_good_freq: *frac_valid
+                save:   Yes
+                output_root:   "gain_transit_flagged_"
+
+        -   type:       ch_pipeline.analysis.calibration.InterpolateGainOverFrequency
+            in:         gflag
+            out:        ginterp
+            params:
+                interp_scale: 30.0
+                save:   Yes
+                output_root:   "gain_transit_interp_"
