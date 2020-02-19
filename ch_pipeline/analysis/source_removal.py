@@ -82,11 +82,11 @@ def model_extended_sources(
     # Parse input parameters
     scale_x = np.radians(np.array(kwargs["scale_x"]) / 60.0)
     scale_y = np.radians(np.array(kwargs["scale_y"]) / 60.0)
-    scale_t = np.array(kwargs.get('scale_t', [0.66] * nsource))
+    scale_t = np.array(kwargs.get("scale_t", [0.66] * nsource))
 
     degree_x = np.array(kwargs["degree_x"])
     degree_y = np.array(kwargs["degree_y"])
-    degree_t = np.array(kwargs.get('degree_t', [0] * nsource))
+    degree_t = np.array(kwargs.get("degree_t", [0] * nsource))
 
     scale = np.vstack((scale_x, scale_y, scale_t)).T
     poly_deg = np.vstack((degree_x, degree_y, degree_t)).T
@@ -383,7 +383,11 @@ class SolveSources(task.SingleTask):
         # Determine parameter names
         param_name = []
         for ss, src in enumerate(self.sources):
-            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1) * (self.degree_t[ss] + 1)
+            npar = (
+                (self.degree_x[ss] + 1)
+                * (self.degree_y[ss] + 1)
+                * (self.degree_t[ss] + 1)
+            )
             for ii in range(npar):
                 param_name.append(
                     "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
@@ -632,7 +636,7 @@ class AccumulateBeam(task.SingleTask):
 
     def process(self, beam_stack):
 
-        self.beam_stack[beam_stack.attrs['source_name']] = beam_stack
+        self.beam_stack[beam_stack.attrs["source_name"]] = beam_stack
 
         return None
 
@@ -642,7 +646,6 @@ class AccumulateBeam(task.SingleTask):
 
 
 class SolveSourcesWithBeam(SolveSources):
-
     def setup(self, tel):
         """Set up the source model.
 
@@ -748,7 +751,11 @@ class SolveSourcesWithBeam(SolveSources):
         # Determine parameter names
         param_name = []
         for ss, src in enumerate(self.sources):
-            npar = (self.degree_x[ss] + 1) * (self.degree_y[ss] + 1) * (self.degree_t[ss] + 1)
+            npar = (
+                (self.degree_x[ss] + 1)
+                * (self.degree_y[ss] + 1)
+                * (self.degree_t[ss] + 1)
+            )
             for ii in range(npar):
                 param_name.append(
                     "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
@@ -780,7 +787,9 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Multipy source model by the effective beam
         for ss, src in enumerate(self.sources):
-            this_beam = beams[src].vis[:].view(np.ndarray) * (beams[src].weight[:].view(np.ndarray) > 0.0).astype(np.float32)
+            this_beam = beams[src].vis[:].view(np.ndarray) * (
+                beams[src].weight[:].view(np.ndarray) > 0.0
+            ).astype(np.float32)
             source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
 
         # Dereference datasets
@@ -914,7 +923,9 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # Multipy source model by the effective beam
         for ss, src in enumerate(sources):
-            this_beam = beams[src].vis[:].view(np.ndarray) * (beams[src].weight[:].view(np.ndarray) > 0.0).astype(np.float32)
+            this_beam = beams[src].vis[:].view(np.ndarray) * (
+                beams[src].weight[:].view(np.ndarray) > 0.0
+            ).astype(np.float32)
             source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
 
         # Dereference dataset
@@ -926,7 +937,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
             this_pol = np.flatnonzero(pol == upp)
 
-            mdl = np.sum(coeff[:, pp, np.newaxis, np.newaxis, :] * source_model[:, this_pol, :, :], axis=-1)
+            mdl = np.sum(
+                coeff[:, pp, np.newaxis, np.newaxis, :]
+                * source_model[:, this_pol, :, :],
+                axis=-1,
+            )
 
             vis[:, this_pol, :] -= mdl
 
