@@ -963,7 +963,7 @@ class HolographyTransitFit(TransitFit):
     nan_dump = config.Property(default=False, proptype=bool)
 
     def process(self, transit):
-        """ Perform the fit.
+        """Perform the fit.
 
         Parameters
         ----------
@@ -1057,7 +1057,7 @@ class HolographyTransitFit(TransitFit):
 class ApplyHolographyGains(task.SingleTask):
     """Apply gains to a holography transit
 
-    Parameters
+    Attributes
     ----------
     overwrite: bool (default: False)
         If True, overwrite the input TrackBeam.
@@ -1075,6 +1075,11 @@ class ApplyHolographyGains(task.SingleTask):
             track['beam'], expecting axes to be freq, pol, input, ha
         gain: np.array
             Gain to apply. Expected axes are freq, pol, and input
+
+        Returns
+        -------
+        track: draco.core.containers.TrackBeam
+            Holography track with gains applied.
         """
 
         if self.overwrite:
@@ -1103,23 +1108,37 @@ class ApplyHolographyGains(task.SingleTask):
 
 
 class TransitStacker(task.SingleTask):
-    """Apply gains to a holography transit
+    """Stack a number of transits together.
 
-    Parameters
+    The weights will be inverted and stacked as variances. The variance
+    between transits is evaluated and recorded in the output container.
+
+    All transits should be on a common grid in hour angle.
+
+    Attributes
     ----------
-    overwrite: bool (default: False)
-        If True, overwrite the input TrackBeam.
+    weight: str (default: uniform)
+        The weighting to use in the stack. One of `uniform` or `inverse_variance`.
     """
 
     weight = config.enum(["uniform", "inverse_variance"], default="uniform")
 
     def setup(self):
+        """Initialise internal variables."""
+
         self.stack = None
         self.variance = None
         self.pseudo_variance = None
         self.norm = None
 
     def process(self, transit):
+        """Add a transit to the stack.
+
+        Parameters
+        ----------
+        transit: draco.core.containers.TrackBeam
+            A holography transit.
+        """
 
         self.log.info("Weight is %s" % self.weight)
 
@@ -1200,6 +1219,15 @@ class TransitStacker(task.SingleTask):
         return None
 
     def process_finish(self):
+        """Normalise the stack and return the result.
+
+        Includes the observed variance between transits within the stack,
+
+        Returns
+        -------
+        stack: draco.core.containers.TrackBeam
+            Stacked transits.
+        """
         # Divide by norm to get average transit
         inv_norm = tools.invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
