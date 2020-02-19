@@ -147,6 +147,7 @@ class QueryDatabase(task.MPILoggedTask):
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
     instrument = config.Property(proptype=str, default="chimestack")
+
     source_26m = config.Property(proptype=str, default=None)
 
     start_time = config.Property(default=None)
