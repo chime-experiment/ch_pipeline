@@ -728,7 +728,7 @@ class RingMap(ContainerBase):
             "distributed_axis": "freq",
         },
         "rms": {
-            "axes": ["freq", "pol", "ra"],
+            "axes": ["pol", "freq", "ra"],
             "dtype": np.float64,
             "initialise": False,
             "distributed": True,
