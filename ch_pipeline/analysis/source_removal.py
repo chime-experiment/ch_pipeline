@@ -258,7 +258,7 @@ class SolveSources(task.SingleTask):
     degree_t = config.Property(proptype=list, default=[0, 0, 0, 0])
 
     extent = config.Property(proptype=list, default=[1.0, 4.0, 4.0, 7.0])
-    scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66]])
+    scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66])
 
     min_altitude = config.Property(proptype=float, default=10.0)
     min_distance = config.Property(proptype=float, default=20.0)
