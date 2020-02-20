@@ -39,12 +39,11 @@ from draco.core import task, io
 from draco.util import regrid
 from draco.analysis.transform import Regridder
 from draco.core.containers import SiderealStream, TimeStream, TrackBeam
-from draco.util import tools
+from draco.util.tools import invert_no_zero
 
 from ..core.processed_db import (
     RegisterProcessedFiles,
     append_product,
-    get_proc_transits,
 )
 from ..core.containers import TransitFitParams
 from .calibration import TransitFit, GainFromTransitFit
@@ -543,7 +542,7 @@ class TransitResampler(task.SingleTask):
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
-        w = tools.invert_no_zero(np.matmul(tools.invert_no_zero(wgrid), lza ** 2))
+        w = invert_no_zero(np.matmul(invert_no_zero(wgrid), lza ** 2))
 
         return y, w
 
@@ -802,7 +801,7 @@ class ConstructStackedBeam(task.SingleTask):
         beam_pol = [pol_filter.get(pp, None) for pp in beam.index_map["pol"][:]]
 
         # Compute the fractional variance of the beam measurement
-        frac_var = tools.invert_no_zero(bw * np.abs(bv) ** 2)
+        frac_var = invert_no_zero(bw * np.abs(bv) ** 2)
 
         # Create counter to increment during the stacking.
         # This will be used to normalize at the end.
@@ -825,7 +824,7 @@ class ConstructStackedBeam(task.SingleTask):
             weight = (
                 input_flags[np.newaxis, aa, :]
                 * input_flags[np.newaxis, bb, :]
-                * tools.invert_no_zero(
+                * invert_no_zero(
                     np.abs(cross) ** 2
                     * (frac_var[:, aa_pol, aa, :] + frac_var[:, bb_pol, bb, :])
                 )
@@ -838,14 +837,14 @@ class ConstructStackedBeam(task.SingleTask):
 
             # Accumulate variances in quadrature.  Save in the weight dataset.
             ov[:, ss, :] += wss * cross
-            ow[:, ss, :] += wss ** 2 * tools.invert_no_zero(weight)
+            ow[:, ss, :] += wss ** 2 * invert_no_zero(weight)
 
             # Increment counter
             counter[:, ss, :] += wss
 
         # Divide through by counter to get properly weighted visibility average
-        ov[:] *= tools.invert_no_zero(counter)
-        ow[:] = counter ** 2 * tools.invert_no_zero(ow[:])
+        ov[:] *= invert_no_zero(counter)
+        ow[:] = counter ** 2 * invert_no_zero(ow[:])
 
         return stacked_beam
 
@@ -983,7 +982,7 @@ class HolographyTransitFit(TransitFit):
             transit.beam.local_offset[0] + transit.beam.local_shape[0],
         )
         ninput = transit.beam.local_shape[2]
-        freq = transit.index_map["freq"]["centre"][local_slice]
+        freq = transit.freq[local_slice]
         sigma = (0.7 * SPEED_LIGHT / (CHIME_CYL_W * freq)) * (360.0 / np.pi)
         sigma = sigma[:, np.newaxis] * np.ones((1, ninput), dtype=sigma.dtype)
 
@@ -1009,7 +1008,7 @@ class HolographyTransitFit(TransitFit):
         vis = vis[copolar_slice]
 
         err = transit.weight[:].view(np.ndarray)
-        err = np.sqrt(tools.invert_no_zero(err[copolar_slice]))
+        err = np.sqrt(invert_no_zero(err[copolar_slice]))
 
         # Flag data that is outside the fit window set by nsigma config parameter
         if self.nsigma is not None:
@@ -1095,7 +1094,7 @@ class ApplyHolographyGains(task.SingleTask):
             track["weight"] = track_in["weight"][:]
 
         track["beam"][:] *= gain.gain[:][:, np.newaxis, :, np.newaxis]
-        track["weight"][:] *= tools.invert_no_zero(np.abs(gain.gain[:]) ** 2)[
+        track["weight"][:] *= invert_no_zero(np.abs(gain.gain[:]) ** 2)[
             :, np.newaxis, :, np.newaxis
         ]
 
@@ -1173,7 +1172,7 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] = coeff * transit.beam[:]
-            self.stack.weight[:] = (coeff ** 2) * tools.invert_no_zero(
+            self.stack.weight[:] = (coeff ** 2) * invert_no_zero(
                 transit.weight[:]
             )
             self.stack.number_of_observations[:] = flag.astype(np.int)
@@ -1207,7 +1206,7 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] += coeff * transit.beam[:]
-            self.stack.weight[:] += (coeff ** 2) * tools.invert_no_zero(
+            self.stack.weight[:] += (coeff ** 2) * invert_no_zero(
                 transit.weight[:]
             )
             self.stack.number_of_observations[:] += flag
@@ -1229,10 +1228,10 @@ class TransitStacker(task.SingleTask):
             Stacked transits.
         """
         # Divide by norm to get average transit
-        inv_norm = tools.invert_no_zero(self.norm)
+        inv_norm = invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
         self.stack.weight[:] = (
-            tools.invert_no_zero(self.stack.weight[:]) * self.norm ** 2
+            invert_no_zero(self.stack.weight[:]) * self.norm ** 2
         )
 
         self.variance = self.variance * inv_norm - np.abs(self.stack.beam[:]) ** 2
