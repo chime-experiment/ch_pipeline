@@ -1273,7 +1273,7 @@ def transit_flag(body, time, nsigma=2.0):
         ra, dec = obs.cirs_radec(body)
 
         # Make sure body is above horizon
-        if alt > 0.0:
+        if alt.radians > 0.0:
 
             # Estimate the amount of time the body is in the primary beam
             # as +/- nsigma sigma, where sigma denotes the width of the
