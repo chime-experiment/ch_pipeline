@@ -632,7 +632,7 @@ class EigenCalibration(task.SingleTask):
     max_hour_angle = config.Property(proptype=float, default=10.0)
     window = config.Property(proptype=float, default=0.75)
     dyn_rng_threshold = config.Property(proptype=float, default=3.0)
-    telescope_rotation = config.Property(proptype=float, default=-0.088)
+    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
 
     def process(self, data, inputmap):
         """Determine feed response from eigendecomposition.
@@ -1740,13 +1740,13 @@ class CalibrationCorrection(task.SingleTask):
 
     Parameters
     ----------
-    rotation : bool
+    rotation : float
         Current best estimate of telescope rotation.
     name_of_flag : str
         The name of the DataFlag.
     """
 
-    rotation = config.Property(proptype=float, default=-0.088)
+    rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
     name_of_flag = config.Property(proptype=str, default="")
 
     def setup(self):
