@@ -225,11 +225,13 @@ class CHIME(telescope.PolarisedTelescope):
     def v_width(self):
         return 1.0
 
-    # Set non-zero rotation angle for pathfinder
+    # Set non-zero rotation angle for pathfinder and chime
     @property
     def rotation_angle(self):
         if self.correlator == "pathfinder":
             return tools._PF_ROT
+        elif self.correlator == "chime":
+            return tools._CHIME_ROT
         else:
             return 0.0
 

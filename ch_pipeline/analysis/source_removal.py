@@ -262,7 +262,7 @@ class SolveSources(task.SingleTask):
 
     min_altitude = config.Property(proptype=float, default=10.0)
     min_distance = config.Property(proptype=float, default=20.0)
-    telescope_rotation = config.Property(proptype=float, default=-0.088)
+    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
     max_iter = config.Property(proptype=int, default=4)
 
     def setup(self, tel):
