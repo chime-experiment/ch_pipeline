@@ -1172,9 +1172,7 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] = coeff * transit.beam[:]
-            self.stack.weight[:] = (coeff ** 2) * invert_no_zero(
-                transit.weight[:]
-            )
+            self.stack.weight[:] = (coeff ** 2) * invert_no_zero(transit.weight[:])
             self.stack.number_of_observations[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
@@ -1206,9 +1204,7 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] += coeff * transit.beam[:]
-            self.stack.weight[:] += (coeff ** 2) * invert_no_zero(
-                transit.weight[:]
-            )
+            self.stack.weight[:] += (coeff ** 2) * invert_no_zero(transit.weight[:])
             self.stack.number_of_observations[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
@@ -1230,9 +1226,7 @@ class TransitStacker(task.SingleTask):
         # Divide by norm to get average transit
         inv_norm = invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
-        self.stack.weight[:] = (
-            invert_no_zero(self.stack.weight[:]) * self.norm ** 2
-        )
+        self.stack.weight[:] = invert_no_zero(self.stack.weight[:]) * self.norm ** 2
 
         self.variance = self.variance * inv_norm - np.abs(self.stack.beam[:]) ** 2
         self.pseudo_variance = self.pseudo_variance * inv_norm - self.stack.beam[:] ** 2
