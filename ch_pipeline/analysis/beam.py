@@ -705,7 +705,7 @@ class MakeHolographyBeam(task.SingleTask):
                 ].conj()
 
         # Store 26 m inputs
-        track.attrs["26m_inputs"] = [inputs[ii] for ii in input_26m]
+        track.attrs["26m_inputs"] = [list(isort).index(ii) for ii in input_26m]
 
         return track
 
