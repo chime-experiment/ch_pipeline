@@ -45,7 +45,7 @@ import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
-from ch_util import data_index as di
+from chimedb import data_index as di
 
 from draco.analysis import flagging as dflagging
 from draco.core import task, io

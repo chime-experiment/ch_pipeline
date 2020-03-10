@@ -73,7 +73,8 @@ import os
 
 from caput import mpiutil, config, pipeline
 from draco.core import task
-from ch_util import tools, ephemeris
+from chimedb import data_index as di
+from ch_util import tools, ephemeris, finder, layout
 
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
@@ -185,9 +186,6 @@ class QueryDatabase(task.MPILoggedTask):
         files : list
             List of files to load
         """
-        from ch_util import layout
-        from ch_util import data_index as di
-
         files = None
 
         # Query the database on rank=0 only, and broadcast to everywhere else
@@ -198,7 +196,7 @@ class QueryDatabase(task.MPILoggedTask):
 
             layout.connect_database()
 
-            f = di.Finder(node_spoof=self.node_spoof)
+            f = finder.Finder(node_spoof=self.node_spoof)
 
             # should be redundant if an instrument has been specified
             f.only_corr()
@@ -308,7 +306,7 @@ class QueryRun(task.MPILoggedTask):
     run_name : str
         Name of the `run` defined in the database.
     node_spoof : str, optional
-        Node spoof argument. See documentation of :class:`ch_util.data_index.Finder`.
+        Node spoof argument. See documentation of :class:`ch_util.finder.Finder`.
     """
 
     run_name = config.Property(proptype=str)
@@ -323,7 +321,7 @@ class QueryRun(task.MPILoggedTask):
             List of files to load
         """
         from ch_util import layout
-        from ch_util import data_index as di
+        from chimedb import data_index as di
 
         files = None
 
@@ -370,7 +368,7 @@ class QueryRun(task.MPILoggedTask):
             inst_obj = run.inst
 
             # Create a finder object limited to the relevant time
-            fi = di.Finder(node_spoof=self.node_spoof)
+            fi = finder.Finder(node_spoof=self.node_spoof)
             fi.only_corr()
 
             # Set the time range that encapsulates all the intervals
@@ -544,7 +542,7 @@ class QueryAcquisitions(task.MPILoggedTask):
     def setup(self):
         """Query the database, fetch the files, and save to attribute."""
         from ch_util import layout
-        from ch_util import data_index as di
+        from chimedb import data_index as di
 
         # Function to break a list of files into groups of roughly the same size
         def _choose_group_size(n, m, accept):
@@ -564,17 +562,17 @@ class QueryAcquisitions(task.MPILoggedTask):
 
             layout.connect_database()
 
-            finder = di.Finder(node_spoof=self.node_spoof)
-            finder.only_corr()
+            fi = finder.Finder(node_spoof=self.node_spoof)
+            fi.only_corr()
             if self.accept_all_global_flags:
-                finder.accept_all_global_flags()
-            finder.set_time_range(self.start_time, self.end_time)
-            finder.filter_acqs(di.ArchiveInst.name == self.instrument)
+                fi.accept_all_global_flags()
+            fi.set_time_range(self.start_time, self.end_time)
+            fi.filter_acqs(di.ArchiveInst.name == self.instrument)
 
             files = []
-            for aa, acq in enumerate(finder.acqs):
+            for aa, acq in enumerate(fi.acqs):
 
-                acq_results = finder.get_results_acq(aa)
+                acq_results = fi.get_results_acq(aa)
 
                 filelist = [ff for acqr in acq_results for ff in acqr[0]]
                 nfiles = len(filelist)
@@ -668,7 +666,7 @@ def finder_from_spec(spec, node_spoof=None):
 
     Returns
     -------
-    fi : data_index.Finder
+    fi : ch_util.finder.Finder
     """
 
     instrument = spec["instrument"]
@@ -676,8 +674,6 @@ def finder_from_spec(spec, node_spoof=None):
 
     fi = None
     if mpiutil.rank0:
-
-        from ch_util import data_index as di
 
         # Get instrument
         inst_obj = (
@@ -697,7 +693,7 @@ def finder_from_spec(spec, node_spoof=None):
             node_spoof = spec["node_spoof"]
 
         # Create a finder object limited to the relevant time
-        fi = di.Finder(node_spoof=node_spoof)
+        fi = finder.Finder(node_spoof=node_spoof)
 
         # Set the time range that encapsulates all the intervals
         fi.set_time_range(earliest, latest)
