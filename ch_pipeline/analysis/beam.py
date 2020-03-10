@@ -31,8 +31,8 @@ from caput.pipeline import PipelineConfigError, PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
-from ch_util import tools, layout
-from ch_util import data_index as di
+from ch_util import tools, layout, holography
+from chimedb import data_index as di
 
 
 from draco.core import task, io
@@ -1281,7 +1281,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
         Parameters
         ----------
-        intervals: list of ch_util.data_index.DataInterval
+        intervals: list of chimedb.data_index.DataInterval
             List intervals to filter.
 
         Returns
@@ -1387,13 +1387,13 @@ def get_holography_obs(src):
 
     Returns
     -------
-    db_obs: list of ch_util.data_index.HolographyObservation
+    db_obs: list of ch_util.holography.HolographyObservation
         Observations of this source.
     """
     di.connect_database()
-    db_src = di.HolographySource.get(di.HolographySource.name == src)
-    db_obs = di.HolographyObservation.select().where(
-        di.HolographyObservation.source == db_src
+    db_src = holography.HolographySource.get(holography.HolographySource.name == src)
+    db_obs = holography.HolographyObservation.select().where(
+        holography.HolographyObservation.source == db_src
     )
     return db_obs
 
