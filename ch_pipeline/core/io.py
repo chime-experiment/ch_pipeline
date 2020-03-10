@@ -440,7 +440,7 @@ class FilterExisting(task.MPILoggedTask):
                         self.csd_list.append(int(mo.group(1)))
 
             # Search the database to get the start and end times of all correlation files
-            from ch_util import data_index as di
+            from chimedb import data_index as di
             from ch_util import ephemeris
 
             di.connect_database()
