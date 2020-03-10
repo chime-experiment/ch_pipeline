@@ -132,15 +132,13 @@ class SolarGrouper(task.SingleTask):
         if self._current_day == day_start:
             self._timestream_list.append(tstream)
 
-        if tstream.vis.comm.rank == 0:
-            print("Adding file into group for date: %i" % day_start)
+        self.log.debug("Adding file into group for date: %i", day_start)
 
         # If this file ends during a later day then we need to process the
         # current list and restart the system
         if self._current_day < day_end:
 
-            if tstream.vis.comm.rank == 0:
-                print("Concatenating files for date: %i" % day_start)
+            self.log.debug("Concatenating files for date: %i", day_start)
 
             # Combine timestreams into a single container for the whole day this
             # could get returned as None if there wasn't enough data
@@ -185,8 +183,7 @@ class SolarGrouper(task.SingleTask):
         if day_length < self.min_span:
             return None
 
-        if self._timestream_list[0].vis.comm.rank == 0:
-            print("Constructing %s [%i files]" % (day, len(self._timestream_list)))
+        self.log.debug("Constructing %s [%i files]", day, len(self._timestream_list))
 
         # Construct the combined timestream
         ts = andata.concatenate(self._timestream_list)
@@ -272,14 +269,11 @@ class SolarCalibration(task.SingleTask):
             time_flag |= (time >= rr) & (time <= ss)
 
         if not np.any(time_flag):
-            if mpiutil.rank0:
-                print(
-                    "No daytime data between %s and %s."
-                    % (
-                        ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
-                        ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
-                    )
-                )
+            self.log.debug(
+                "No daytime data between %s and %s.",
+                ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
+                ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
+            )
             return None
 
         # Convert boolean flag to slices
@@ -326,11 +320,13 @@ class SolarCalibration(task.SingleTask):
             ]
         )
 
-        if mpiutil.rank0:
-            print(
-                "Performing sun calibration with %d/%d good feeds (%d xpol, %d ypol)."
-                % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
-            )
+        self.log.debug(
+            "Performing sun calibration with %d/%d good feeds (%d xpol, %d ypol).",
+            len(good_input),
+            nfeed,
+            len(xfeeds),
+            len(yfeeds),
+        )
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
