@@ -298,16 +298,14 @@ class ChannelFlagger(task.SingleTask):
                 )
                 good_gains, good_noise, good_fit, test_channels = res
 
-                print(
-                    "Frequency %i bad channels: blank %i; gains %i; noise %i; fit %i %s"
-                    % (
-                        fi,
-                        np.sum(chan_mask == 0),
-                        np.sum(good_gains == 0),
-                        np.sum(good_noise == 0),
-                        np.sum(good_fit == 0),
-                        "[ignored]" if self.ignore_fit else "",
-                    )
+                self.log.info(
+                    "Frequency %i bad channels: blank %i; gains %i; noise %i; fit %i %s",
+                    fi,
+                    np.sum(chan_mask == 0),
+                    np.sum(good_gains == 0),
+                    np.sum(good_noise == 0),
+                    np.sum(good_fit == 0),
+                    "[ignored]" if self.ignore_fit else "",
                 )
 
                 if good_noise is None:
@@ -489,7 +487,7 @@ class MonitorCorrInput(task.SingleTask):
             csd, time_range = self.timemap[i_dist]
 
             # Print status
-            print("Rank %d calling channel monitor for csd %d." % (mpiutil.rank, csd))
+            self.log.info("Calling channel monitor for csd %d.", csd)
 
             # Create an instance of chan_monitor for this day
             cm = chan_monitor.ChanMonitor(*time_range)
@@ -499,7 +497,7 @@ class MonitorCorrInput(task.SingleTask):
                 cm.full_check()
             except (RuntimeError, ValueError) as error:
                 # No sources available for this csd
-                print("    Rank %d, csd %d: %s" % (mpiutil.rank, csd, error))
+                self.log.info("    csd %d: %s", csd, error)
                 continue
 
             # Accumulate flags over multiple days
@@ -734,7 +732,7 @@ class TestCorrInput(task.SingleTask):
                 is_test_freq[fi_local] = True
 
                 # Print results for this frequency
-                print(
+                self.log.info(
                     "Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
                         fi_dist,
                         timestream.ninput - len(test_inputs),
@@ -1119,8 +1117,7 @@ class RadiometerWeight(task.SingleTask):
 
         if isinstance(timestream, andata.CorrData):
 
-            if mpiutil.rank0:
-                print("Converting weights to effective number of samples.")
+            self.log.debug("Converting weights to effective number of samples.")
 
             # Extract number of samples per integration period
             max_nsamples = timestream.attrs["gpu.gpu_intergration_period"][0]
@@ -1159,10 +1156,9 @@ class RadiometerWeight(task.SingleTask):
 
         elif isinstance(timestream, containers.SiderealStream):
 
-            if mpiutil.rank0:
-                print(
-                    "Scaling weights by outer product of inverse receiver temperature."
-                )
+            self.log.debug(
+                "Scaling weights by outer product of inverse receiver temperature."
+            )
 
             # Extract the autocorrelation
             Trec = diag(timestream.vis).real
@@ -1250,10 +1246,7 @@ class BadNodeFlagger(task.SingleTask):
                 if nind >= sf and nind < ef:
                     timestream.weight[nind] = 0
 
-                    print(
-                        "Rank %d is flagging node %d, freq %d."
-                        % (mpiutil.rank, node, nind)
-                    )
+                    self.log.info("Flagging node %d, freq %d.", node, nind)
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
         this_acq = timestream.attrs.get("acquisition_name", None)
@@ -1270,9 +1263,8 @@ class BadNodeFlagger(task.SingleTask):
                     if nind >= sf and nind < ef:
                         timestream.weight[nind] = 0
 
-                        print(
-                            "Rank %d is flagging node %d, freq %d."
-                            % (mpiutil.rank, node, nind)
+                        self.log.info(
+                            "Flagging node %d, freq %d.", mpiutil.rank, node, nind
                         )
 
         # Return timestream with bad nodes flagged

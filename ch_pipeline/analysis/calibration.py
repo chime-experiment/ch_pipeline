@@ -325,7 +325,7 @@ class NoiseSourceFold(task.SingleTask):
         return folded_ts
 
 
-class NoiseInjectionCalibration(pipeline.TaskBase):
+class NoiseInjectionCalibration(task.MPILoggedTask):
     """Calibration using noise injection.
 
     Attributes
@@ -360,8 +360,7 @@ class NoiseInjectionCalibration(pipeline.TaskBase):
             Describing the inputs to the correlator.
         """
         self.ch_ref = tools.get_noise_channel(inputmap)
-        if mpiutil.rank0:
-            print("Using input=%i as noise channel" % self.ch_ref)
+        self.log.debug("Using input=%i as noise channel", self.ch_ref)
 
     def next(self, ts):
         """Find gains from noise injection data and apply them to visibilities.
@@ -1601,11 +1600,13 @@ class SiderealCalibration(task.SingleTask):
             ]
         )
 
-        if mpiutil.rank0:
-            print(
-                "Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol)."
-                % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
-            )
+        self.log.info(
+            "Performing sidereal calibration with %d/%d good feeds (%d xpol, %d ypol).",
+            len(good_input),
+            nfeed,
+            len(xfeeds),
+            len(yfeeds),
+        )
 
         # Extract the diagonal (to be used for weighting)
         # prior to differencing on-source and off-source

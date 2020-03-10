@@ -24,6 +24,8 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 
 # === End Python 2/3 compatibility
 
+import logging
+
 import numpy as np
 import h5py
 import healpy
@@ -34,6 +36,10 @@ from drift.core import telescope
 from drift.telescope import cylbeam
 
 from ch_util import ephemeris, tools
+
+
+# Get the logger for the module
+logger = logging.getLogger(__name__)
 
 
 class CHIME(telescope.PolarisedTelescope):
@@ -197,7 +203,7 @@ class CHIME(telescope.PolarisedTelescope):
         # configuring from YAML.
 
         if self.layout is not None:
-            print("Loading layout: %s" % str(self.layout))
+            logger.debug("Loading layout: %s", str(self.layout))
             self._load_layout()
 
     #
@@ -575,7 +581,7 @@ class CHIMEExternalBeam(CHIME):
         else:
             raise ValueError("Polarisation not supported by this feed", feed_obj)
         try:
-            print("Attempting to read beam file from disk...")
+            logger.debug("Attempting to read beam file from disk...")
             with h5py.File(fname, "r") as f:
                 map_freq = f["freq"][:]
                 freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)

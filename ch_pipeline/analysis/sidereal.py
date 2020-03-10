@@ -146,8 +146,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         csd, fmap = self.filemap.pop(0)
         dfiles = sorted([self.files[fi] for fi in fmap])
 
-        if mpiutil.rank0:
-            print("Starting read of CSD:%i [%i files]" % (csd, len(fmap)))
+        self.log.debug("Starting read of CSD:%i [%i files]", csd, len(fmap))
 
         # Set up product selection
         # NOTE: this probably doesn't work with stacked data
