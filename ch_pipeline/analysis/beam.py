@@ -33,6 +33,7 @@ from caput.time import STELLAR_S
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout, holography
 from chimedb import data_index as di
+from chimedb.core import connect as connect_database
 
 
 from draco.core import task, io
@@ -102,7 +103,7 @@ class TransitGrouper(task.SingleTask):
         # Only allowed to query database from rank0
         db_runs = None
         if mpiutil.rank0:
-            di.connect_database()
+            connect_database()
             db_runs = list(get_holography_obs(self.db_source))
             db_runs = [(int(r.id), (r.start_time, r.finish_time)) for r in db_runs]
         self.db_runs = mpiutil.bcast(db_runs, root=0)
@@ -1390,7 +1391,7 @@ def get_holography_obs(src):
     db_obs: list of ch_util.holography.HolographyObservation
         Observations of this source.
     """
-    di.connect_database()
+    connect_database()
     db_src = holography.HolographySource.get(holography.HolographySource.name == src)
     db_obs = holography.HolographyObservation.select().where(
         holography.HolographyObservation.source == db_src

@@ -46,6 +46,7 @@ import numpy as np
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
 from chimedb import data_index as di
+from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
 from draco.core import task, io
@@ -1752,7 +1753,7 @@ class DataFlagger(task.SingleTask):
 
         # Query flag database if on 0th node
         if self.comm.rank == 0:
-            di.connect_database()
+            connect_database()
             flag_types = di.DataFlagType.select()
             possible_flags = []
             for ft in flag_types:
