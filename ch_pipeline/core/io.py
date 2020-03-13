@@ -441,9 +441,10 @@ class FilterExisting(task.MPILoggedTask):
 
             # Search the database to get the start and end times of all correlation files
             from chimedb import data_index as di
+            from chimedb.core import connect
             from ch_util import ephemeris
 
-            di.connect_database()
+            connect()
             query = (
                 di.ArchiveFile.select(
                     di.ArchiveAcq.name,
