@@ -43,11 +43,15 @@ class ApplyTimingCorrection(task.SingleTask):
     transit_window: float
         Reference the timing correction to the median value over a window (in seconds)
         around the time of source transit.
+    pass_if_missing: bool (default False)
+        If a timing correction cannot be found for the time range do not raise an exception
+        and just pass the data on.
     """
 
     use_input_flags = config.Property(proptype=bool, default=False)
     refer_to_transit = config.Property(proptype=bool, default=False)
     transit_window = config.Property(proptype=float, default=0.0)
+    pass_if_missing = config.Property(proptype=bool, default=False)
 
     def setup(self, tcorr):
         """Set the timing correction to use.
@@ -102,11 +106,17 @@ class ApplyTimingCorrection(task.SingleTask):
             if timestamp[0] >= tcorr.time[0] and timestamp[-1] <= tcorr.time[-1]:
                 break
         else:
-            raise RuntimeError(
+            msg = (
                 "Could not find timing correction file covering "
-                "range of timestream data (%s to %s)"
+                "range of timestream data (%s to %s)."
                 % tuple(ephemeris.unix_to_datetime([timestamp[0], timestamp[-1]]))
             )
+
+            if self.pass_if_missing:
+                self.log.warning(msg + " Doing nothing.")
+                return tstream
+
+            raise RuntimeError(msg)
 
         self.log.info("Using correction file %s" % tcorr.attrs["tag"])
 
