@@ -178,7 +178,7 @@ class TransitGrouper(task.SingleTask):
         """Concatenate grouped time streams for the currrent transit."""
 
         # Find where transit starts and ends
-        if len(self.tstreams) == 0:
+        if len(self.tstreams) == 0 or self.cur_transit is None:
             self.log.info("Did not find any transits.")
             return None
         self.log.debug(
@@ -205,7 +205,7 @@ class TransitGrouper(task.SingleTask):
                 # Concatenate timestreams
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
-                ts = ts[0]
+                ts = self.tstreams[0]
             _, dec = self.sky_obs.radec(self.src)
             ts.attrs["dec"] = dec._degrees
             ts.attrs["source_name"] = self.source
@@ -1202,33 +1202,45 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
     Attributes
     ----------
-    processed_dir: str
-        Directory to look in for processed files.
+    processed_dir: str or list of str
+        Directory or list of directories to look in for processed files.
     source: str
         The name of the holography source (as used in the holography database).
     """
 
-    processed_dir = config.Property(proptype=str)
+    processed_dir = config.Property(
+        proptype=lambda x: x if isinstance(x, list) else [x]
+    )
     source = config.Property(proptype=str)
 
     def setup(self):
         """Get a list of existing processed files.
         """
-        # Expand path
-        processed_dir = path.expanduser(self.processed_dir)
-        processed_dir = path.expandvars(processed_dir)
 
         # Find processed transit files
         self.proc_transits = []
-        for fname in listdir(processed_dir):
-            if not path.splitext(fname)[1] == ".h5":
-                continue
-            with ContainerBase.from_file(
-                fname, ondisk=True, distributed=False, mode="r"
-            ) as fh:
-                obs_id = fh.attrs.get("observation_id", None)
-                if obs_id is not None:
-                    self.proc_transits.append(obs_id)
+        for processed_dir in self.processed_dir:
+            self.log.debug(
+                "Looking for processed transits in {}...".format(processed_dir)
+            )
+            # Expand path
+            processed_dir = path.expanduser(processed_dir)
+            processed_dir = path.expandvars(processed_dir)
+
+            try:
+                processed_files = listdir(processed_dir)
+            except FileNotFoundError:
+                processed_files = []
+            for fname in processed_files:
+                if not path.splitext(fname)[1] == ".h5":
+                    continue
+                with ContainerBase.from_file(
+                    fname, ondisk=True, distributed=False, mode="r"
+                ) as fh:
+                    obs_id = fh.attrs.get("observation_id", None)
+                    if obs_id is not None:
+                        self.proc_transits.append(obs_id)
+        self.log.debug("Found {:d} processed transits.".format(len(self.proc_transits)))
 
         # Query database for observations of this source
         hol_obs = None
