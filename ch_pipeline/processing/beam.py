@@ -106,6 +106,7 @@ pipeline:
       out: transits_fs
       params:
         source: *source_name
+        wterm: True
         overwrite: True
 
     - type: ch_pipeline.analysis.beam.TransitRegridder
