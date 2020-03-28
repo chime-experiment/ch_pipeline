@@ -58,6 +58,7 @@ class FringeStop(task.SingleTask):
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
     telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
         """Apply the fringe stop of CHIME data to a given source
@@ -97,6 +98,7 @@ class FringeStop(task.SingleTask):
             feeds=feeds,
             src=src,
             prod_map=prod_map,
+            wterm=self.wterm,
         )
 
         # Return telescope to default rotation
