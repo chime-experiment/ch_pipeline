@@ -67,10 +67,9 @@ freq_params_narrow:
     channel_range:      [200, 202]
     
 freq_params_N2:  
-    channel_range:      [0, 500, 5]
-    #freq_physical:      [758, 612]
+    freq_physical:      [758, 612]
     
 sun_files:
     files:
-                    -   "/mnt/gong/archive/20190415T121533Z_chimestack_corr/00452968_0000.h5"
-                    -   "/mnt/gong/archive/20190415T121533Z_chimestack_corr/00458058_0000.h5"
+                    -   "/mnt/gong/archive/20191220T204152Z_chimestack_corr/02753468_0000.h5"
+                    -   "/mnt/gong/archive/20191220T204152Z_chimestack_corr/02758558_0000.h5"
