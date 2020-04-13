@@ -874,6 +874,8 @@ class SunCalibration(task.SingleTask):
 
         # Change vis_pos for non-CHIME feeds from NaN to 0.0
         vis_pos[(pol_ind == -1), :] = 0.0
+        
+        print np.unique(vis_pos)
 
         # Initialise new container
         newprod = np.array([[0, 0],[0,1],[1,0],[1,1]],
