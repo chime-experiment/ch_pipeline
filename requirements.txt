@@ -1,7 +1,13 @@
 cython
 -e git+https://github.com/radiocosmology/caput#egg=caput
+<<<<<<< HEAD
 -e git+ssh://git@github.com/chime-experiment/ch_util.git#egg=ch_util 
 -e git+https://github.com/radiocosmology/cora#egg=cora 
 -e git+https://github.com/radiocosmology/driftscan#egg=driftscan 
+=======
+-e git+ssh://git@github.com/chime-experiment/ch_util.git#egg=ch_util
+-e git+https://github.com/radiocosmology/cora#egg=cora
+-e git+https://github.com/radiocosmology/driftscan#egg=driftscan
+>>>>>>> master
 -e git+https://github.com/radiocosmology/draco#egg=draco
 GitPython
