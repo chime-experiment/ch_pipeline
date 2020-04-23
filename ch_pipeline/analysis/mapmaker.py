@@ -129,7 +129,10 @@ class RingMapMaker(task.SingleTask):
 
             pind[pp] = 2 * int(fi.pol == "S") + int(fj.pol == "S")
             xind[pp] = np.abs(fi.cyl - fj.cyl)
-            ysep[pp] = fi.pos[1] - fj.pos[1]
+
+            # TODO: don't use this internal property. This can probably wait
+            # until the RingMapMaker gets completely moved into draco
+            ysep[pp] = fi._pos[1] - fj._pos[1]
 
         abs_ysep = np.abs(ysep)
         min_ysep, max_ysep = np.percentile(abs_ysep[abs_ysep > 0.0], [0, 100])
