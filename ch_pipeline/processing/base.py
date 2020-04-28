@@ -60,10 +60,8 @@ class ProcessingType(object):
 
         # Write default configuration into directory
         with (self.revconfig_path).open("w") as fh:
-            dump = yaml.safe_dump(
-                self.default_params, encoding="utf-8", allow_unicode=True
-            )
-            fh.write(str(dump))  # TODO: Python 3 - str needed
+            dump = yaml.safe_dump(self.default_params)
+            fh.write(dump)  # NOTE: This may break on deprecated Python 2
         with (self.jobtemplate_path).open("w") as fh:
             fh.write(self.default_script)
 
