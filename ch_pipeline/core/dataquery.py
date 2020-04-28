@@ -622,7 +622,18 @@ class QueryAcquisitions(task.MPILoggedTask):
 class QueryInputs(task.MPILoggedTask):
     """From a dataspec describing the data create a list of objects describing
     the inputs in the files.
+
+    Attributes
+    ----------
+    cache : bool
+        Only query for the inputs for the first container received. For all
+        subsequent files just return the initial set of inputs. This can help
+        minimise the number of potentially fragile database operations.
     """
+
+    cache = config.Property(proptype=bool, default=False)
+
+    _cached_inputs = None
 
     def next(self, ts):
         """Generate an input description from the timestream passed in.
@@ -637,6 +648,12 @@ class QueryInputs(task.MPILoggedTask):
         inputs : list of :class:`CorrInput`s
             A list of describing the inputs as they are in the file.
         """
+
+        # Fetch from the cache if we can
+        if self.cache and self._cached_inputs:
+            self.log.debug("Using cached inputs.")
+            return self._cached_inputs
+
         inputs = None
 
         if mpiutil.rank0:
@@ -649,6 +666,10 @@ class QueryInputs(task.MPILoggedTask):
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)
+
+        # Save into the cache for the next iteration
+        if self.cache:
+            self._cached_inputs = inputs
 
         # Make sure all nodes have container before return
         mpiutil.world.Barrier()
