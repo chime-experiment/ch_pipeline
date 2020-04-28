@@ -278,9 +278,15 @@ class LoadSetupFile(task.MPILoggedTask):
     ----------
     filename : str
         Path to a saved container.
+    distributed : bool, optional
+        Whether the file should be loaded distributed across ranks.
+    convert_strings : bool, optional
+        Convert strings to unicode when loading.
     """
 
     filename = config.Property(proptype=str)
+    distributed = config.Property(proptype=bool, default=True)
+    convert_strings = config.Property(proptype=bool, default=True)
 
     def setup(self):
         """Load the file into a container.
@@ -296,12 +302,13 @@ class LoadSetupFile(task.MPILoggedTask):
         self.log.info("Loading file: %s", self.filename)
 
         # Load into container
-        cont = None
-        if self.comm.rank == 0:
-            cont = memh5.BasicCont.from_file(self.filename, distributed=False)
-
-        # Broadcast to other nodes
-        cont = self.comm.bcast(cont, root=0)
+        cont = memh5.BasicCont.from_file(
+            self.filename,
+            distributed=self.distributed,
+            comm=self.comm,
+            convert_attribute_strings=self.convert_strings,
+            convert_dataset_strings=self.convert_strings,
+        )
 
         # Make sure all nodes have container before return
         self.comm.Barrier()
