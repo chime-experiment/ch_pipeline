@@ -29,6 +29,27 @@ cluster:
 
 # Pipeline task configuration
 pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - cora
+    - draco
+    - drift
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
   tasks:
     - type: ch_pipeline.core.containers.MonkeyPatchContainers
 
@@ -37,40 +58,83 @@ pipeline:
         level_rank0: DEBUG
         level_all: WARNING
 
+    # Query for all the data for the sidereal day we are processing
     - type: ch_pipeline.core.dataquery.QueryDatabase
       out: filelist
       params:
         start_csd: {csd[0]:.2f}
         end_csd: {csd[1]:.2f}
-
         accept_all_global_flags: true
         node_spoof:
           cedar_archive: "/project/rpp-krs/chime/chime_archive/"
         instrument: chimestack
 
+    # Load the telescope model that we need for several steps
     - type: draco.core.io.LoadProductManager
       out: manager
       params:
         product_directory: "{product_path}"
 
-    - type: ch_pipeline.core.io.LoadSetupFile
+    # Load and accumulate the available timing correction files.
+    - type: draco.core.io.LoadFilesFromParams
       out: tcorr
       params:
-        filename: "{timing_file}"
+        files: "{timing_file}"
+        distributed: false
 
+    - type: draco.core.misc.AccumulateList
+      in: tcorr
+      out: tcorrlist
+
+    # We need to block the loading of the files until all the timing correction files are available
+    - type: draco.core.misc.WaitUntil
+      requires: tcorrlist
+      in: filelist
+      out: filelist2
+
+    # Load the individual data files
     - type: ch_pipeline.core.io.LoadCorrDataFiles
-      requires: filelist
-      out: tstream
+      requires: filelist2
+      out: tstream_orig
       params:
         channel_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # Correct the timing distribution errors
     - type: ch_pipeline.analysis.timing.ApplyTimingCorrection
-      requires: tcorr
-      in: tstream
+      requires: tcorrlist
+      in: tstream_orig
       out: tstream_corr
       params:
-        use_input_flags: Yes
+        use_input_flags: true
 
+    # Get the telescope layout that was active when this data file was recorded
+    - type: ch_pipeline.core.dataquery.QueryInputs
+      in: tstream_corr
+      out: inputmap
+      params:
+        cache: true
+
+    # Correct the miscalibration of the data due to the varying estimates of telescope rotation
+    - type: ch_pipeline.analysis.calibration.CorrectTelescopeRotation
+      in: [tstream_corr, inputmap]
+      out: tstream_rot
+      params:
+        rotation: -0.071
+
+    # Correct an early bug in the interpretation of the timestamps that effected the calibration
+    - type: ch_pipeline.analysis.calibration.CorrectTimeOffset
+      in: [tstream_rot, inputmap]
+      out: tstream
+
+    # Calculate the system sensitivity for this file
+    - type: draco.analysis.sensitivity.ComputeSystemSensitivity
+      requires: manager
+      in: tstream_corr
+      out: sensitivity
+      params:
+        exclude_intracyl: true
+
+    # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
       in: tstream_corr
@@ -78,89 +142,146 @@ pipeline:
       params:
         weight: "natural"
 
+    # Concatenate together all the days timestream information
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
       in: tstream_col
-      out: groupday
+      out: tstream_day
 
-    - type: ch_pipeline.analysis.flagging.RFIFilter
-      in: groupday
+    # Concatenate together all the days sensitivity information and output it
+    # for validation
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: sensitivity
+      out: sensitivity_day
+      params:
+        save: true
+        output_name: "sensitivity_{{tag}}.h5"
+
+    # Calculate the RFI mask from the sensitivity data
+    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
+      in: sensitivity_day
       out: rfimask
       params:
-        stack: Yes
-        flag1d: No
-        rolling: Yes
-        apply_static_mask: Yes
-        keep_auto: Yes
-        keep_ndev: Yes
-        freq_width: 10.0
-        time_width: 420.0
-        threshold_mad: 6.0
-        save: Yes
-        output_root: "rfi_mask_"
-        nan_check: No
+        include_pol: ["XY"]
+        save: true
+        output_name: "rfi_mask_{{tag}}.h5"
+        nan_check: false
 
-    - type: ch_pipeline.analysis.flagging.ApplyCorrInputMask
-      in: [groupday, rfimask]
-      out: groupday_rfi
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream_day, rfimask]
+      out: tstream_day_rfi
 
+    # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
-      in: groupday_rfi
-      out: groupday_smoothweight
+      in: tstream_day_rfi
+      out: tstream_day_smoothweight
 
+    # Regrid the data onto a regular grid in sidereal time
     - type: draco.analysis.sidereal.SiderealRegridder
       requires: manager
-      in: groupday_smoothweight
+      in: tstream_day_smoothweight
       out: sstream
       params:
         samples: 4096
         weight: natural
         save: true
-        output_root: "sstream_col_"
+        output_name: "sstream_{{tag}}.h5"
 
+    - type: draco.analysis.flagging.ThresholdVisWeight
+      in: sstream
+      out: sstream_threshold
+      params:
+          relative_threshold: 0.5
+
+    # Make a map of the full dataset
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream
+      in: sstream_threshold
       out: ringmap
       params:
-        single_beam: Yes
+        single_beam: true
         weight: natural
-        exclude_intracyl: No
-        include_auto: No
-        save: Yes
-        output_root: "ringmap_"
+        exclude_intracyl: false
+        include_auto: false
+        save: true
+        output_name: "ringmap_{{tag}}.h5"
 
+    # Make a map from the inter cylinder baselines. This is less sensitive to
+    # cross talk and emphasis point sources
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream
+      in: sstream_threshold
       out: ringmapint
       params:
-        single_beam: Yes
+        single_beam: true
         weight: natural
-        exclude_intracyl: Yes
-        include_auto: No
-        save: Yes
-        output_root: "ringmap_intercyl_"
+        exclude_intracyl: true
+        include_auto: false
+        save: true
+        output_name: "ringmap_intercyl_{{tag}}.h5"
 
+    # Mask out intercylinder baselines before beam forming to minimise cross
+    # talk. This creates a copy of the input that shares the vis dataset (but
+    # with a distinct weight dataset) to save memory
+    - type: draco.analysis.flagging.MaskBaselines
+      requires: manager
+      in: sstream_threshold
+      out: sstream_inter
+      params:
+        share: vis
+        mask_short_ew: 1.0
+
+    # Load the source catalog (sources > 10 Jy estimate at 600 MHz)
+    - type: draco.core.io.LoadBasicCont
+      out: source_catalog
+      params:
+        files:
+        - "{source_catalog}"
+
+    # Measure the observed fluxes of the bright point sources
+    - type: draco.analysis.beamform.BeamForm
+      requires: [manager, source_catalog]
+      in: sstream_inter
+      out: source_flux
+      params:
+        timetrack: 60.0
+        save: true
+        output_name: "sourceflux_{{tag}}.h5"
+
+    # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
       in: sstream
       out: sstream_mask
 
-    - type: draco.analysis.flagging.RFIMask
+    # Remove ranges of time known to be bad that may effect the delay power
+    # spectrum estimate
+    - type: ch_pipeline.analysis.flagging.DataFlagger
       in: sstream_mask
-      out: sstream_rfi2
+      out: sstream_mask2
       params:
-        stack_ind: 66
+        flag_type:
+          - acjump
+          - bad_calibration_acquisition_restart
+          - bad_calibration_fpga_restart
+          - bad_calibration_gains
+          - decorrelated_cylinder
+          - globalflag
+          - rain1mm
 
+    # Estimate the delay power spectrum of the data. This is a good diagnostic
+    # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_rfi2
+      in: sstream_mask2
       params:
         freq_zero: 800.0
         nfreq: 1025
         nsamp: 40
-        save: Yes
-        output_root: "delayspectrum_"
+        save: true
+        output_name: "delayspectrum_{{tag}}.h5"
+
 """
 
 
@@ -175,24 +296,44 @@ class DailyProcessing(base.ProcessingType):
     default_params = {
         # Time range(s) to process
         "intervals": [
-            # Intervals as defined by Mateus
-            # Pass A (start trimmed for timing sols)
-            {"start": "20181221T000000Z", "end": "20181229T000000Z"},
+            ## Priority days to reprocess
+            # Good ranges from rev_00
+            {"start": "CSD1870", "end": "CSD1875"},
+            {"start": "CSD1973", "end": "CSD1977"},
+            {"start": "CSD2072", "end": "CSD2075"},
+            {"start": "CSD2072", "end": "CSD2075"},
+            # A good looking interval from late 2019 (determined from run
+            # notes, dataflags and data availability)
+            {"start": "CSD2143", "end": "CSD2148"},
+            ## Runs processed for rev_00
+            # October run
+            {"start": "20181011T140000Z", "end": "20181019T220000Z"},
+            # Winter run periods - as defined by Mateus
+            # Pass A (start trimmed for timing solutions)
+            {"start": "20181223T000000Z", "end": "20181229T000000Z"},
             # Pass B
             {"start": "20190111T000000Z", "end": "20190207T000000Z"},
             # Pass C (end trimmed for timing sols)
             {"start": "20190210T000000Z", "end": "20190304T000000Z"},
+            # April run
+            {"start": "20190406T000000Z", "end": "20190418T000000Z"},
+            # July run
+            {"start": "20190713T000000Z", "end": "20190723T000000Z"},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Frequencies to process
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
-        "product_path": "/scratch/jrs65/bt_empty/chime_4cyl_allfreq/",
+        "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
         # File for the timing correction
         "timing_file": (
-            "/scratch/ssiegel/timing/v1/referenced/"
-            + "20181220T235147Z_to_20190304T135948Z_chimetiming_delay.h5"
+            "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
+            "*_chimetiming_delay.h5"
+        ),
+        "source_catalog": (
+            "/project/rpp-krs/chime/chime_processed/catalogs/"
+            "pointsource_cora_600MHz_10Jy.h5"
         ),
         # Job params
         "time": 180,  # How long in minutes?
@@ -255,9 +396,9 @@ class TestDailyProcessing(DailyProcessing):
     default_params = DailyProcessing.default_params.copy()
     default_params.update(
         {
-            "intervals": [{"start": "20181221T000000Z", "end": "20181225T000000Z"}],
-            "freq": [192, 208],
-            "product_path": "/scratch/jrs65/bt_empty/chime_4cyl_10freq/",
+            "intervals": [{"start": "20181224T000000Z", "end": "20181228T000000Z"}],
+            "freq": [400, 416],
+            "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
             "ompnum": 12,  # Number of OpenMP threads
