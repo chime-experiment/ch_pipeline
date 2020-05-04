@@ -191,33 +191,32 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             Mixing array as a function of time. If `True` that sample will be
             filled from the MAD, if `False` use the SumThreshold algorithm.
         """
-
-        sidereal_day = ephemeris.SIDEREAL_S * 24 * 3600
-
-        ntime = len(times)
-        start_csd = ephemeris.unix_to_csd(times[0])
-        start_ra = (start_csd - int(start_csd)) * (2.0 * np.pi)
-        ra_axis = (start_ra + (2.0 * np.pi) / ntime * np.arange(ntime)) % (2.0 * np.pi)
+        # Switch for 4 deg each side of the source
+        beam_window = np.radians(4.0)
+        SIDEREAL_DAY = ephemeris.SIDEREAL_S * 24 * 3600
 
         # Select Sun transit times
         suntt = ephemeris.solar_transit(times[0])  # Sun transit time
-        beam_window = (2.0 * np.pi) / 90.0  # 4 deg in radians for the Sun. Each side.
+
         # Mask the sun for the maximum aparent dec of ~24 deg
         ra_window = beam_window / np.cos(np.deg2rad(24))
-        time_window = ra_window / (2 * np.pi) * sidereal_day
+        time_window = ra_window / (2 * np.pi) * SIDEREAL_DAY
+
         # Time spans where we apply the MAD filter.
-        madtimes = abs(times - suntt) < time_window
+        madtimes = np.abs(times - suntt) < time_window
 
         # Select bright source transit times. Only CasA, CygA and TauA.
         sources = [ephemeris.CasA, ephemeris.CygA, ephemeris.TauA]
 
+        ra_axis = np.radians(ephemeris.lsa(times))
+
+        # Include bright point source transits in MAD times
         for src in sources:
-            src_ra = src.ra.radians
-            src_idx = np.argmin(abs(ra_axis - src_ra))
-            ra_window = beam_window / np.cos(src.dec.radians)
-            time_window = ra_window / (2 * np.pi) * sidereal_day
-            # Include bright point source transit in MAD times
-            madtimes += abs(times - times[src_idx]) < time_window
+            ra = src.ra.radians
+            dec = src.dec.radians
+            ra_window = beam_window / np.cos(dec)
+
+            madtimes |= np.abs(ra_axis - ra) < ra_window
 
         return madtimes
 
