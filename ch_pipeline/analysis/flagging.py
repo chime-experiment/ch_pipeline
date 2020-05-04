@@ -45,7 +45,7 @@ import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
-from chimedb import data_index as di
+from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
@@ -1754,13 +1754,13 @@ class DataFlagger(task.SingleTask):
         # Query flag database if on 0th node
         if self.comm.rank == 0:
             connect_database()
-            flag_types = di.DataFlagType.select()
+            flag_types = df.DataFlagType.select()
             possible_flags = []
             for ft in flag_types:
                 possible_flags.append(ft.name)
                 if ft.name in self.flag_type or "all" in self.flag_type:
                     self.log.info("Querying for %s Flags" % ft.name)
-                    new_flags = di.DataFlag.select().where(di.DataFlag.type == ft)
+                    new_flags = df.DataFlag.select().where(df.DataFlag.type == ft)
                     flags[ft.name] = list(new_flags)
 
             # Check that user-proved flag names are valid
