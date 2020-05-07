@@ -269,12 +269,17 @@ class TestDailyProcessing(DailyProcessing):
 def csds_in_range(start, end):
     """Get the CSDs within a time range.
 
+    The start and end parameters must either be strings of the form "CSD\d+"
+    (i.e. CSD followed by an int), which specifies an exact CSD start, or a
+    form that `ephemeris.ensure_unix` understands.
+
     Parameters
     ----------
-    start : datetime
+    start : str or parseable to datetime
         Start of interval.
-    end : datetime
-        End of interval. If `None` use now.
+    end : str or parseable to datetime
+        End of interval. If `None` use now. Note that for CSD intervals the
+        end is *inclusive* (unlike a `range`).
 
     Returns
     -------
@@ -287,11 +292,17 @@ def csds_in_range(start, end):
     if end is None:
         end = datetime.datetime.utcnow()
 
-    start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
-    end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
+    if start.startswith("CSD"):
+        start_csd = int(start[3:])
+    else:
+        start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
+        start_csd = math.floor(start_csd)
 
-    start_csd = math.floor(start_csd)
-    end_csd = math.ceil(end_csd)
+    if end.startswith("CSD"):
+        end_csd = int(end[3:])
+    else:
+        end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
+        end_csd = math.ceil(end_csd)
 
     csds = [day for day in range(start_csd, end_csd + 1)]
     return csds
