@@ -339,9 +339,10 @@ class ProcessingType(object):
         """Jobs available to run."""
 
         waiting, running = self.queued()
-        pending = set(self.available()).difference(self.ls(), waiting, running)
+        not_pending = set(self.ls()) | set(waiting) | set(running)
+        pending = [job for job in self.available() if job not in not_pending]
 
-        return sorted(list(pending))
+        return pending
 
 
 def find_venv():
