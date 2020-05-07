@@ -223,8 +223,12 @@ class DailyProcessing(base.ProcessingType):
         # - Figure out which sidereal days are covered by this range
 
         csds = []
+
+        # For each interval find and add all CSDs that have not already been added
         for interval in self._intervals:
-            csds += csds_in_range(*interval)
+            csd_i = csds_in_range(*interval)
+            csd_set = set(csds)
+            csds += [csd for csd in csd_i if csd not in csd_set]
 
         tags = ["%i" % csd for csd in csds]
 
