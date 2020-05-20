@@ -24,6 +24,12 @@ Usage
 
 
 """
+# === Start Python 2/3 compatibility
+from __future__ import absolute_import, division, print_function, unicode_literals
+from future.builtins import *  # noqa  pylint: disable=W0401, W0614
+from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
+
+# === End Python 2/3 compatibility
 
 from datetime import datetime
 import numpy as np
@@ -54,7 +60,7 @@ def unix_to_localtime(unix_time):
 
     utc_time = pytz.utc.localize(datetime.utcfromtimestamp(unix_time))
 
-    return utc_time.astimezone(pytz.timezone('Canada/Pacific'))
+    return utc_time.astimezone(pytz.timezone("Canada/Pacific"))
 
 
 def ra_dec_of(body, time):
@@ -115,8 +121,8 @@ class SolarGrouper(task.SingleTask):
         """
 
         # Get the start and end day of the file as an int with format YYYYMMDD
-        day_start = int(unix_to_localtime(tstream.time[0]).strftime('%Y%m%d'))
-        day_end = int(unix_to_localtime(tstream.time[-1]).strftime('%Y%m%d'))
+        day_start = int(unix_to_localtime(tstream.time[0]).strftime("%Y%m%d"))
+        day_end = int(unix_to_localtime(tstream.time[-1]).strftime("%Y%m%d"))
 
         # If current_day is None then this is the first time we've run
         if self._current_day is None:
@@ -126,15 +132,13 @@ class SolarGrouper(task.SingleTask):
         if self._current_day == day_start:
             self._timestream_list.append(tstream)
 
-        if tstream.vis.comm.rank == 0:
-            print "Adding file into group for date: %i" % day_start
+        self.log.debug("Adding file into group for date: %i", day_start)
 
         # If this file ends during a later day then we need to process the
         # current list and restart the system
         if self._current_day < day_end:
 
-            if tstream.vis.comm.rank == 0:
-                print "Concatenating files for date: %i" % day_start
+            self.log.debug("Concatenating files for date: %i", day_start)
 
             # Combine timestreams into a single container for the whole day this
             # could get returned as None if there wasn't enough data
@@ -179,15 +183,14 @@ class SolarGrouper(task.SingleTask):
         if day_length < self.min_span:
             return None
 
-        if self._timestream_list[0].vis.comm.rank == 0:
-            print "Constructing %s [%i files]" % (day, len(self._timestream_list))
+        self.log.debug("Constructing %s [%i files]", day, len(self._timestream_list))
 
         # Construct the combined timestream
         ts = andata.concatenate(self._timestream_list)
 
         # Add attributes for the date and a tag for labelling saved files
-        ts.attrs['tag'] = day
-        ts.attrs['date'] = day
+        ts.attrs["tag"] = day
+        ts.attrs["date"] = day
 
         return ts
 
@@ -232,10 +235,10 @@ class SolarCalibration(task.SingleTask):
 
         from operator import itemgetter
         from itertools import groupby
-        from calibration import _extract_diagonal, solve_gain
+        from .calibration import _extract_diagonal, solve_gain
 
         # Ensure that we are distributed over frequency
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Find the local frequencies
         nfreq = sstream.vis.local_shape[0]
@@ -243,16 +246,18 @@ class SolarCalibration(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Get the local frequency axis
-        freq = sstream.freq['centre'][sfreq:efreq]
+        freq = sstream.freq["centre"][sfreq:efreq]
         wv = 3e2 / freq
 
         # Get times
-        if hasattr(sstream, 'time'):
+        if hasattr(sstream, "time"):
             time = sstream.time
             ra = ephemeris.transit_RA(time)
         else:
-            ra = sstream.index_map['ra'][:]
-            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            ra = sstream.index_map["ra"][:]
+            csd = (
+                sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+            )
             csd = csd + ra / 360.0
             time = ephemeris.csd_to_unix(csd)
 
@@ -261,13 +266,14 @@ class SolarCalibration(task.SingleTask):
         rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
         for rr in rise:
             ss = ephemeris.solar_setting(rr)[0]
-            time_flag |= ((time >= rr) & (time <= ss))
+            time_flag |= (time >= rr) & (time <= ss)
 
         if not np.any(time_flag):
-            if mpiutil.rank0:
-                print("No daytime data between %s and %s." %
-                      (ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
-                       ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M")))
+            self.log.debug(
+                "No daytime data between %s and %s.",
+                ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
+                ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
+            )
             return None
 
         # Convert boolean flag to slices
@@ -275,10 +281,14 @@ class SolarCalibration(task.SingleTask):
 
         time_slice = []
         ntime = 0
-        for key, group in groupby(enumerate(time_index), lambda (index, item): index - item):
-            group = map(itemgetter(1), group)
+        for key, group in groupby(
+            enumerate(time_index), lambda index_item: index_item[0] - index_item[1]
+        ):
+            group = list(map(itemgetter(1), group))
             ngroup = len(group)
-            time_slice.append((slice(group[0], group[-1] + 1), slice(ntime, ntime + ngroup)))
+            time_slice.append(
+                (slice(group[0], group[-1] + 1), slice(ntime, ntime + ngroup))
+            )
             ntime += ngroup
 
         time = np.concatenate([time[slc[0]] for slc in time_slice])
@@ -292,26 +302,46 @@ class SolarCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets['input_mask'][:]]
+        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets["input_mask"][:]]
 
         # Use input map to figure out which are the X and Y feeds
-        xfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_x(inp) and (idx in good_input)])
-        yfeeds = np.array([idx for idx, inp in enumerate(inputmap) if tools.is_chime_y(inp) and (idx in good_input)])
+        xfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if tools.is_chime_x(inp) and (idx in good_input)
+            ]
+        )
+        yfeeds = np.array(
+            [
+                idx
+                for idx, inp in enumerate(inputmap)
+                if tools.is_chime_y(inp) and (idx in good_input)
+            ]
+        )
 
-        if mpiutil.rank0:
-            print("Performing sun calibration with %d/%d good feeds (%d xpol, %d ypol)." %
-                  (len(good_input), nfeed, len(xfeeds), len(yfeeds)))
+        self.log.debug(
+            "Performing sun calibration with %d/%d good feeds (%d xpol, %d ypol).",
+            len(good_input),
+            nfeed,
+            len(xfeeds),
+            len(yfeeds),
+        )
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
+        vis_pos = np.array(
+            [feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map["prod"][:]]
+        )
         vis_pos = np.where(np.isnan(vis_pos), np.zeros_like(vis_pos), vis_pos)
 
         u = (vis_pos[np.newaxis, :, 0] / wv[:, np.newaxis])[:, :, np.newaxis]
         v = (vis_pos[np.newaxis, :, 1] / wv[:, np.newaxis])[:, :, np.newaxis]
 
         # Create container to hold results of fit
-        suntrans = containers.SunTransit(time=time, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream)
+        suntrans = containers.SunTransit(
+            time=time, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream
+        )
         for key in suntrans.datasets.keys():
             suntrans.datasets[key][:] = 0.0
 
@@ -328,16 +358,22 @@ class SolarCalibration(task.SingleTask):
             dec = (sun_pos[slc_out, 1])[np.newaxis, np.newaxis, :]
 
             # Extract the diagonal (to be used for weighting)
-            norm = (_extract_diagonal(vis_slice, axis=1).real)**0.5
+            norm = (_extract_diagonal(vis_slice, axis=1).real) ** 0.5
             norm = tools.invert_no_zero(norm)
 
             # Fringestop
             if self.fringestop:
-                vis_slice *= tools.fringestop_phase(ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v)
+                vis_slice *= tools.fringestop_phase(
+                    ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v
+                )
 
             # Solve for the point source response of each set of polarisations
-            ev_x, resp_x, err_resp_x = solve_gain(vis_slice, feeds=xfeeds, norm=norm[:, xfeeds])
-            ev_y, resp_y, err_resp_y = solve_gain(vis_slice, feeds=yfeeds, norm=norm[:, yfeeds])
+            ev_x, resp_x, err_resp_x = solve_gain(
+                vis_slice, feeds=xfeeds, norm=norm[:, xfeeds]
+            )
+            ev_y, resp_y, err_resp_y = solve_gain(
+                vis_slice, feeds=yfeeds, norm=norm[:, yfeeds]
+            )
 
             # Save to container
             suntrans.evalue_x[..., slc_out] = ev_x
@@ -365,8 +401,12 @@ class SolarCalibration(task.SingleTask):
             dra = np.abs(dra - (dra > np.pi) * 2.0 * np.pi)[np.newaxis, np.newaxis, :]
 
             # Estimate FWHM
-            sig_x = cal_utils.guess_fwhm(freq, pol='X', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
-            sig_y = cal_utils.guess_fwhm(freq, pol='Y', dec=body.dec, sigma=True)[:, np.newaxis, np.newaxis]
+            sig_x = cal_utils.guess_fwhm(freq, pol="X", dec=body.dec, sigma=True)[
+                :, np.newaxis, np.newaxis
+            ]
+            sig_y = cal_utils.guess_fwhm(freq, pol="Y", dec=body.dec, sigma=True)[
+                :, np.newaxis, np.newaxis
+            ]
 
             # Only fit ra values above the specified dynamic range threshold
             fit_flag = np.zeros([nfreq, nfeed, ntime], dtype=np.bool)
@@ -374,26 +414,26 @@ class SolarCalibration(task.SingleTask):
             fit_flag[:, yfeeds, :] = dra < (self.nsig * sig_y)
 
             # Fit model for the complex response of each feed to the point source
-            param, param_cov = cal_utils.fit_point_source_transit(ra, suntrans.response[:],
-                                                                  suntrans.response_error[:],
-                                                                  flag=fit_flag)
+            param, param_cov = cal_utils.fit_point_source_transit(
+                ra, suntrans.response[:], suntrans.response_error[:], flag=fit_flag
+            )
 
             # Save to container
-            suntrans.add_dataset('flag')
+            suntrans.add_dataset("flag")
             suntrans.flag[:] = fit_flag
 
-            suntrans.add_dataset('parameter')
+            suntrans.add_dataset("parameter")
             suntrans.parameter[:] = param
 
-            suntrans.add_dataset('parameter_cov')
+            suntrans.add_dataset("parameter_cov")
             suntrans.parameter_cov[:] = param_cov
 
         # Update attributes
-        units = 'sqrt(' + sstream.vis.attrs.get('units', 'correlator-units') + ')'
-        suntrans.response.attrs['units'] = units
-        suntrans.response_error.attrs['units'] = units
+        units = "sqrt(" + sstream.vis.attrs.get("units", "correlator-units") + ")"
+        suntrans.response.attrs["units"] = units
+        suntrans.response_error.attrs["units"] = units
 
-        suntrans.attrs['source'] = 'Sun'
+        suntrans.attrs["source"] = "Sun"
 
         # Return sun transit
         return suntrans
@@ -422,15 +462,17 @@ class SolarClean(task.SingleTask):
             Sidereal stream with sun removed
         """
 
-        sstream.redistribute('freq')
-        suntrans.redistribute('freq')
+        sstream.redistribute("freq")
+        suntrans.redistribute("freq")
 
         # Determine time mapping
-        if hasattr(sstream, 'time'):
+        if hasattr(sstream, "time"):
             stime = sstream.time[:]
         else:
-            ra = sstream.index_map['ra'][:]
-            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            ra = sstream.index_map["ra"][:]
+            csd = (
+                sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+            )
             stime = ephemeris.csd_to_unix(csd + ra / 360.0)
 
         # Extract gain array
@@ -440,13 +482,13 @@ class SolarClean(task.SingleTask):
         ninput = gain.shape[1]
 
         # Determine product map
-        prod_map = sstream.index_map['prod'][:]
+        prod_map = sstream.index_map["prod"][:]
         nprod = prod_map.size
 
-        if nprod != (ninput * (ninput + 1) / 2):
+        if nprod != (ninput * (ninput + 1) // 2):
             raise Exception("Number of inputs does not match the number of products.")
 
-        feed_list = [ (inputmap[ii], inputmap[jj]) for ii, jj in prod_map]
+        feed_list = [(inputmap[ii], inputmap[jj]) for ii, jj in prod_map]
 
         # Determine polarisation for each visibility
         same_pol = np.zeros(nprod, dtype=np.bool)
@@ -455,7 +497,7 @@ class SolarClean(task.SingleTask):
                 same_pol[pp] = tools.is_chime_y(ii) == tools.is_chime_y(jj)
 
         # Match ra
-        match = np.array([ np.argmin(np.abs(gt - stime)) for gt in gtime ])
+        match = np.array([np.argmin(np.abs(gt - stime)) for gt in gtime])
 
         # Loop over frequencies and products
         for lfi, fi in sstream.vis[:].enumerate(0):
@@ -495,14 +537,14 @@ class SunClean(task.SingleTask):
             Sidereal stack with sun projected out.
         """
 
-        sstream.redistribute('freq')
+        sstream.redistribute("freq")
 
         # Get array of CSDs for each sample
-        ra = sstream.index_map['ra'][:]
-        csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+        ra = sstream.index_map["ra"][:]
+        csd = sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
         csd = csd + ra / 360.0
 
-        nprod = len(sstream.index_map['prod'])
+        nprod = len(sstream.index_map["prod"])
 
         # Get position of sun at every time sample
         times = ephemeris.csd_to_unix(csd)
@@ -515,9 +557,13 @@ class SunClean(task.SingleTask):
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map['prod'][:]])
+        vis_pos = np.array(
+            [feed_pos[ii] - feed_pos[ij] for ii, ij in sstream.index_map["prod"][:]]
+        )
 
-        feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in sstream.index_map['prod'][:]]
+        feed_list = [
+            (inputmap[fi], inputmap[fj]) for fi, fj in sstream.index_map["prod"][:]
+        ]
 
         # Determine polarisation for each visibility
         pol_ind = np.full(len(feed_list), -1, dtype=np.int)
@@ -530,9 +576,9 @@ class SunClean(task.SingleTask):
 
         # Initialise new container
         sscut = sstream.__class__(axes_from=sstream, attrs_from=sstream)
-        sscut.redistribute('freq')
+        sscut.redistribute("freq")
 
-        wv = 3e2 / sstream.index_map['freq']['centre']
+        wv = 3e2 / sstream.index_map["freq"]["centre"]
 
         # Iterate over frequencies and polarisations to null out the sun
         for lfi, fi in sstream.vis[:].enumerate(0):
@@ -554,7 +600,9 @@ class SunClean(task.SingleTask):
                 if el[ri] > 0.0:
 
                     # Calculate the phase that the sun would have using the fringestop routine
-                    sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
+                    sun_vis = tools.fringestop_phase(
+                        ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v
+                    )
 
                     # Calculate the visibility vector for the sun
                     sun_vis = sun_vis.conj()

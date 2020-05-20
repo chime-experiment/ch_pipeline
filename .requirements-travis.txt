@@ -1,7 +1,14 @@
-cython
+# This is from requirements.txt:
 -e git+https://github.com/radiocosmology/caput#egg=caput
--e git+ssh://git@github.com/chime-experiment/ch_util.git#egg=ch_util
 -e git+https://github.com/radiocosmology/cora#egg=cora
 -e git+https://github.com/radiocosmology/driftscan#egg=driftscan
 -e git+https://github.com/radiocosmology/draco#egg=draco
-GitPython
+
+# stub of ch_util
+-e git+https://github.com/chime-experiment/ch_util-stub.git#egg=ch_util
+
+# requirements to run travisCI
+black
+pydocstyle
+sphinx # needed to build docs
+numpydoc

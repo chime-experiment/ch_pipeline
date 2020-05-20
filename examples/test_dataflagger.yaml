@@ -1,0 +1,53 @@
+cluster:
+    directory:          $SCRATCH/chime/pipeline/test/data_flagger
+    venv:               /home/ssiegel/ch_pipeline_master/venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               dataflagger             # Jobname
+    nodes:              2                       # Number of nodes to run on
+    time:               10                      # Time to run for (in minutes)
+    ompnum:             8                       # Number of OpenMP threads
+    pernode:            4
+    mem:                128000M
+    system:            'cedar'
+
+
+pipeline:
+
+    tasks:
+
+        -   type:       ch_pipeline.core.containers.MonkeyPatchContainers
+
+        -   type:       draco.core.task.SetMPILogging
+            params:
+                level_rank0: DEBUG
+                level_all: DEBUG
+
+        -   type:       draco.core.io.FindFiles
+            out:        filelist
+            params:
+                files:
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00000000_0000.h5"
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00040716_0000.h5"
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/01603203_0000.h5"
+
+        -   type:       ch_pipeline.core.io.LoadCorrDataFiles
+            requires:   filelist
+            out:        tstream
+            params:     freq_params
+
+        -   type:       ch_pipeline.analysis.flagging.DataFlagger
+            in:         tstream
+            out:        tstream2
+            params:
+                flag_type:
+                    - "globalflag"
+                    - "bad_calibration_fpga_restart"
+                    - "bad_calibration_acquisition_restart"
+                save:       Yes
+                output_root:   "flagged_vis_"
+
+#=================================== Frequency Selection ===================================
+
+freq_params:
+    channel_range:      [32, 48]
