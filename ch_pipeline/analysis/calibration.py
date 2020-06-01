@@ -1751,12 +1751,13 @@ class ThermalCalibration(task.SingleTask):
         """
         import h5py
         from datetime import datetime
+
         # Load calibration times data
-        self.caltime_file = h5py.File(self.caltime_path, 'r')
+        self.caltime_file = h5py.File(self.caltime_path, "r")
 
         # Load weather temperatures
         self.log.info("Loading weather temperatures")
-        start_time = np.amin(self.caltime_file['tref']) - 10.*3600.
+        start_time = np.amin(self.caltime_file["tref"]) - 10.0 * 3600.0
         start_time = ephemeris.unix_to_datetime(start_time)
         end_time = datetime.now()
         self._load_weather(start_time, end_time)
@@ -1777,8 +1778,8 @@ class ThermalCalibration(task.SingleTask):
         """
         # Frequencies and RA/time
         freq = data.freq[:]
-        if 'ra' in data.index_map.keys():
-            timestamp = self._ra2unix(data.attrs['lsd'], data.ra[:])
+        if "ra" in data.index_map.keys():
+            timestamp = self._ra2unix(data.attrs["lsd"], data.ra[:])
             # Create container
             gain = containers.CommonModeSiderealGainData(axes_from=data)
         else:
@@ -1796,18 +1797,18 @@ class ThermalCalibration(task.SingleTask):
         g = self._reftime2gain(reftime, timestamp, freq)
 
         # Copy data into container
-        gain.redistribute('freq')
+        gain.redistribute("freq")
         lo = gain.gain.local_offset[0]
         ls = gain.gain.local_shape[0]
-        gain.gain[:] = g[lo:lo+ls]
-        #gain.weight[:] = dr
+        gain.gain[:] = g[lo : lo + ls]
+        # gain.weight[:] = dr
 
         return gain
 
     def _ra2unix(self, csd, ra):
         """ csd must be integer """
         ra0tm = ephemeris.csd_to_unix(csd)
-        return ra * (ephemeris.SIDEREAL_S*3600.*24.) / 360. + ra0tm
+        return ra * (ephemeris.SIDEREAL_S * 3600.0 * 24.0) / 360.0 + ra0tm
 
     def _reftime2gain(self, reftime, timestamp, frequency):
         """
@@ -1820,13 +1821,15 @@ class ThermalCalibration(task.SingleTask):
         g = np.ones((nfreq, ntimes), dtype=np.float)
         finitemask = np.isfinite(reftime)
         reftemp = self._interpolate_temperature(
-                self.wtime, self.wtemp, reftime[finitemask])
+            self.wtime, self.wtemp, reftime[finitemask]
+        )
         temp = self._interpolate_temperature(
-                self.wtime, self.wtemp, timestamp[finitemask])
+            self.wtime, self.wtemp, timestamp[finitemask]
+        )
         g[:, finitemask] = self.gaincorr(
-                reftemp[np.newaxis, :], temp[np.newaxis, :],
-                frequency[:, np.newaxis])
-    
+            reftemp[np.newaxis, :], temp[np.newaxis, :], frequency[:, np.newaxis]
+        )
+
         return g
 
     def _interpolate_temperature(self, temptime, tempdata, times):
@@ -1834,7 +1837,7 @@ class ThermalCalibration(task.SingleTask):
         x = times
         xp = temptime
         fp = tempdata
-    
+
         return np.interp(x, xp, fp)
 
     # TODO: Should I move this to ch_util?
@@ -1859,55 +1862,59 @@ class ThermalCalibration(task.SingleTask):
         m = np.polyval(m_params, freq)
 
         if squared:
-            return 1. + 2.* m * (T - T0)
+            return 1.0 + 2.0 * m * (T - T0)
         else:
-            return 1. + m * (T - T0)
+            return 1.0 + m * (T - T0)
 
     def _get_reftime(self, tms, calfl):
         """
         """
         ntms = len(tms)
-        ncalfl = len(calfl['tstart'][:])
+        ncalfl = len(calfl["tstart"][:])
 
         # Len of tms, indices in calfl.
-        last_start_index = np.searchsorted(calfl['tstart'][:], tms, side="right") - 1
+        last_start_index = np.searchsorted(calfl["tstart"][:], tms, side="right") - 1
         # Len of tms, indices in calfl.
-        last_end_index = np.searchsorted(calfl['tend'][:], tms, side="right") - 1
+        last_end_index = np.searchsorted(calfl["tend"][:], tms, side="right") - 1
         # Check for times before first update or after last update.
         too_early = last_start_index < 0
         n_too_early = np.sum(too_early)
         if n_too_early > 0:
-            msg = ("{0} out of {1} time entries have no reference update." + 
-                   "Cannot correct gains for those entries.")
+            msg = (
+                "{0} out of {1} time entries have no reference update."
+                + "Cannot correct gains for those entries."
+            )
             self.log.warning(msg.format(n_too_early, ntms))
         # Fot times after the last update, I cannot be sure the calibration is valid
         # (could be that the cal file is incomplete. To be conservative, raise warning.)
-        too_late = (last_start_index >= (ncalfl-1)) & (last_end_index >= (ncalfl-1))
+        too_late = (last_start_index >= (ncalfl - 1)) & (last_end_index >= (ncalfl - 1))
         n_too_late = np.sum(too_late)
         if n_too_late > 0:
-            msg = ("{0} out of {1} time entries are beyond calibration file time values." + 
-                   "Cannot correct gains for those entries.")
+            msg = (
+                "{0} out of {1} time entries are beyond calibration file time values."
+                + "Cannot correct gains for those entries."
+            )
             self.log.warning(msg.format(n_too_late, ntms))
 
         reftime = np.full(len(tms), np.nan, dtype=np.float)
-        is_restart = calfl['is_restart'][:]
-        tref = calfl['tref'][:]
-        
+        is_restart = calfl["is_restart"][:]
+        tref = calfl["tref"][:]
+
         # Acquisition restart. We load an old gain.
-        acqrestart = (is_restart[last_start_index] == 1)
+        acqrestart = is_restart[last_start_index] == 1
         reftime[acqrestart] = tref[last_start_index][acqrestart]
-        
+
         # FPGA restart. Data not calibrated.
-        fpgarestart = (is_restart[last_start_index] == 2)
+        fpgarestart = is_restart[last_start_index] == 2
         # I think the file has a tref for those.
         # TODO: Should I use them?
         # reftime[fpgarestart] = tref[last_start_index][fpgarestart]
 
         # Define a few booleans
         # This update is a gain update
-        gainupdate = (is_restart[last_start_index] == 0)
+        gainupdate = is_restart[last_start_index] == 0
         # Gain transition (necessarily a gain update I think). Need to interpolate gains.
-        gaintrans = (last_start_index == (last_end_index+1))
+        gaintrans = last_start_index == (last_end_index + 1)
         # Previous update was a restart.
         prev_isrestart = is_restart[last_start_index - 1].astype(bool)
         # This update is in gain transition and previous update was a restart.
@@ -1915,7 +1922,7 @@ class ThermalCalibration(task.SingleTask):
         prev_isrestart = prev_isrestart & gaintrans & gainupdate
         reftime[prev_isrestart] = tref[last_start_index][prev_isrestart]
         # This update is in gain transition and previous update was a gain update.
-        # TODO: To correct interpolated gains I need to know what 
+        # TODO: To correct interpolated gains I need to know what
         # the applied gains were! For now, just correct for the new gain.
         prev_isgain = np.invert(prev_isrestart) & gaintrans & gainupdate
         reftime[prev_isgain] = tref[last_start_index][prev_isgain]
@@ -1933,11 +1940,14 @@ class ThermalCalibration(task.SingleTask):
         """
         """
         from ch_util import data_index
+
         ntime = None
 
         # Can only query the database from one rank.
         if mpiutil.rank == 0:
-            f = data_index.Finder(node_spoof={"cedar_archive": '/project/rpp-krs/chime/chime_archive'})
+            f = data_index.Finder(
+                node_spoof={"cedar_archive": "/project/rpp-krs/chime/chime_archive"}
+            )
             f.only_weather()
             f.set_time_range(start_time, end_time)
             f.accept_all_global_flags()
@@ -1947,7 +1957,7 @@ class ThermalCalibration(task.SingleTask):
             result = results_list[0]
             wdata = result.as_loaded_data()
 
-            self.wtime, self.wtemp = wdata.time[:], wdata['outTemp'][:]
+            self.wtime, self.wtemp = wdata.time[:], wdata["outTemp"][:]
             ntime = len(self.wtime)
 
         # Broadcast the times and temperatures to all ranks.
