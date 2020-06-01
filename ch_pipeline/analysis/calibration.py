@@ -1738,7 +1738,8 @@ class ThermalCalibration(task.SingleTask):
 
     Attributes
     ----------
-    caltime_path : 
+    caltime_path : string
+        Full path to file describing the calibration times.
 
 
     """
@@ -1761,17 +1762,28 @@ class ThermalCalibration(task.SingleTask):
         self._load_weather(start_time, end_time)
 
     def process(self, data):
-        """Determine calibration from a sidereal stream.
+        """Determine calibration from a sidereal stream or time stream.
 
         Parameters
         ----------
+        data : `containers.SiderealStream` or `containers.TimeStream`
+            Data to generate calibration for.
 
         Returns
         -------
+        gain : Either `containers.SiderealGainData` or `containers.GainData`
+            The type depends on the type of `data`.
+
         """
         # Frequencies and RA/time
-        freq = data.index_map['freq']['centre'][:]
-        timestamp = self._ra2unix(data.attrs['lsd'], data.index_map['ra'][:])
+        freq = data.freq[:]
+        if 'ra' in data.index_map.keys():
+            timestamp = self._ra2unix(data.attrs['lsd'], data.ra[:])
+            # Create container
+            gain = containers.CommonModeSiderealGainData(axes_from=data)
+        else:
+            timestamp = data.time[:]
+            gain = containers.CommonModeGainData(axes_from=data)
 
         # Find refference times for each timestamp.
         # This is the time of the transit from which the gains
@@ -1783,26 +1795,14 @@ class ThermalCalibration(task.SingleTask):
         self.log.info("Computing gains corrections")
         g = self._reftime2gain(reftime, timestamp, freq)
 
-        # Ensure data is distributed in something else than RA/time or freq.
-        # That is: 'el' for maps, 'stack' or 'prod' for sstreams.
-        self.log.info("Redistributing data")
-        data.redistribute(['el', 'stack', 'prod'])
+        # Copy data into container
+        gain.redistribute('freq')
+        lo = gain.gain.local_offset[0]
+        ls = gain.gain.local_shape[0]
+        gain.gain[:] = g[lo:lo+ls]
+        #gain.weight[:] = dr
 
-        # Apply gain correction
-        # For now, just assume the following shapes:
-        # For maps: ['freq', 'pol', 'ra', 'beam', 'el']
-        # For sstreams: ['freq', 'stack', 'ra']
-#        freqslice = np.s_[:10]
-        self.log.info("Applying gain correction")
-        if ('vis' in data.keys()):
-            data['vis'][:] *= g[:, np.newaxis, :]
-#            data['vis'][freqslice] *= g[freqslice, np.newaxis, :]
-        else: # ('map' in data.keys())
-            data['map'][:] *= g[:, np.newaxis, :, np.newaxis, np.newaxis]
-#            data['map'][freqslice] *= g[freqslice, np.newaxis, :, np.newaxis, np.newaxis]
-
-        return data
-
+        return gain
 
     def _ra2unix(self, csd, ra):
         """ csd must be integer """
@@ -1825,7 +1825,7 @@ class ThermalCalibration(task.SingleTask):
                 self.wtime, self.wtemp, timestamp[finitemask])
         g[:, finitemask] = self.gaincorr(
                 reftemp[np.newaxis, :], temp[np.newaxis, :],
-                frequency[:, np.newaxis], squared=True)
+                frequency[:, np.newaxis])
     
         return g
 
@@ -1837,8 +1837,8 @@ class ThermalCalibration(task.SingleTask):
     
         return np.interp(x, xp, fp)
 
-    # TODO: Should move this to ch_util!
-    def gaincorr(self, T0, T, freq, squared=False):#, pol):
+    # TODO: Should I move this to ch_util?
+    def gaincorr(self, T0, T, freq, squared=False):
         """
         Parameters
         ----------
@@ -1855,13 +1855,9 @@ class ThermalCalibration(task.SingleTask):
             Gain amplitude corrections. Multiply by data
             to correct it.
         """
-    #     if pol==0:
-    #         m_params = [-4.15588627e-09, 8.27318534e-06, -2.02181757e-03]
-    #     else:
-    #         m_params = [-4.40948632e-09, 8.51834265e-06, -1.99043022e-03]
         m_params = [-4.28268629e-09, 8.39576400e-06, -2.00612389e-03]
         m = np.polyval(m_params, freq)
-        
+
         if squared:
             return 1. + 2.* m * (T - T0)
         else:
@@ -1870,14 +1866,29 @@ class ThermalCalibration(task.SingleTask):
     def _get_reftime(self, tms, calfl):
         """
         """
+        ntms = len(tms)
+        ncalfl = len(calfl['tstart'][:])
+
         # Len of tms, indices in calfl.
-        last_start_index = np.searchsorted(calfl['tstart'][:], tms) - 1
+        last_start_index = np.searchsorted(calfl['tstart'][:], tms, side="right") - 1
         # Len of tms, indices in calfl.
-        last_end_index = np.searchsorted(calfl['tend'][:], tms) - 1
-        # TODO: add test for indices < 0 here.
-    
-        last_start_time = calfl['tstart'][:][last_start_index]
-        
+        last_end_index = np.searchsorted(calfl['tend'][:], tms, side="right") - 1
+        # Check for times before first update or after last update.
+        too_early = last_start_index < 0
+        n_too_early = np.sum(too_early)
+        if n_too_early > 0:
+            msg = ("{0} out of {1} time entries have no reference update." + 
+                   "Cannot correct gains for those entries.")
+            self.log.warning(msg.format(n_too_early, ntms))
+        # Fot times after the last update, I cannot be sure the calibration is valid
+        # (could be that the cal file is incomplete. To be conservative, raise warning.)
+        too_late = (last_start_index >= (ncalfl-1)) & (last_end_index >= (ncalfl-1))
+        n_too_late = np.sum(too_late)
+        if n_too_late > 0:
+            msg = ("{0} out of {1} time entries are beyond calibration file time values." + 
+                   "Cannot correct gains for those entries.")
+            self.log.warning(msg.format(n_too_late, ntms))
+
         reftime = np.full(len(tms), np.nan, dtype=np.float)
         is_restart = calfl['is_restart'][:]
         tref = calfl['tref'][:]
@@ -1891,28 +1902,31 @@ class ThermalCalibration(task.SingleTask):
         # I think the file has a tref for those.
         # TODO: Should I use them?
         # reftime[fpgarestart] = tref[last_start_index][fpgarestart]
-        
-        # Gain transition. Need to interpolate gains.
+
+        # Define a few booleans
+        # This update is a gain update
+        gainupdate = (is_restart[last_start_index] == 0)
+        # Gain transition (necessarily a gain update I think). Need to interpolate gains.
         gaintrans = (last_start_index == (last_end_index+1))
         # Previous update was a restart.
         prev_isrestart = is_restart[last_start_index - 1].astype(bool)
-        # Previous update was a gain update.
-        prev_isgain = np.invert(prev_isrestart)
         # This update is in gain transition and previous update was a restart.
         # Just use new gain, no interpolation.
-        prev_isrestart = prev_isrestart & gaintrans
+        prev_isrestart = prev_isrestart & gaintrans & gainupdate
         reftime[prev_isrestart] = tref[last_start_index][prev_isrestart]
         # This update is in gain transition and previous update was a gain update.
-        # Need to interpolate gains.
         # TODO: To correct interpolated gains I need to know what 
         # the applied gains were! For now, just correct for the new gain.
-        prev_isgain = np.invert(prev_isrestart) & gaintrans
+        prev_isgain = np.invert(prev_isrestart) & gaintrans & gainupdate
         reftime[prev_isgain] = tref[last_start_index][prev_isgain]
-    
+
         # Calibrated range. Gain transition has finished.
-        calrange = (last_start_index == last_end_index)
+        calrange = (last_start_index == last_end_index) & gainupdate
         reftime[calrange] = tref[last_start_index][calrange]
-    
+
+        # For times too early or too late, don't correct gain.
+        reftime[too_early | too_late] = np.nan
+
         return reftime
 
     def _load_weather(self, start_time, end_time):
@@ -1928,9 +1942,8 @@ class ThermalCalibration(task.SingleTask):
             f.set_time_range(start_time, end_time)
             f.accept_all_global_flags()
             results_list = f.get_results()
-            if len(results_list) != 1:
-                msg = 'Cannot deal with multiple weather acquisitions'
-                raise RuntimeError(msg)
+            # For now just assume the first entry is MingunWeather.
+            # TODO: Should move on to using ChimeWeather at some point.
             result = results_list[0]
             wdata = result.as_loaded_data()
 
