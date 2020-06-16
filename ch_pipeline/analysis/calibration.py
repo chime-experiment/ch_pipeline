@@ -1953,11 +1953,15 @@ class ThermalCalibration(task.SingleTask):
             f.set_time_range(start_time, end_time)
             f.accept_all_global_flags()
             results_list = f.get_results()
-            # TODO: Should do something when there is more than one acquisition.
-            result = results_list[0]
-            wdata = result.as_loaded_data()
 
-            self.wtime, self.wtemp = wdata.time[:], wdata.temperature[:]
+            tms, temps = [], []
+            for result in results_list:
+                wdata = result.as_loaded_data()
+                tms.append(wdata.time[:])
+                temps.append(wdata.temperature[:])
+            self.wtime  = np.concatenate(tms)
+            self.wtemp = np.concatenate(temps)
+
             ntime = len(self.wtime)
 
         # Broadcast the times and temperatures to all ranks.
