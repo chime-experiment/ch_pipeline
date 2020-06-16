@@ -25,6 +25,7 @@ Tasks
     SiderealCalibration
     CorrectTimeOffset
     CorrectTelescopeRotation
+    ThermalCalibration
 """
 # === Start Python 2/3 compatibility
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -1948,16 +1949,15 @@ class ThermalCalibration(task.SingleTask):
             f = data_index.Finder(
                 node_spoof={"cedar_archive": "/project/rpp-krs/chime/chime_archive"}
             )
-            f.only_weather()
+            f.only_chime_weather()  # Excludes MingunWeather
             f.set_time_range(start_time, end_time)
             f.accept_all_global_flags()
             results_list = f.get_results()
-            # For now just assume the first entry is MingunWeather.
-            # TODO: Should move on to using ChimeWeather at some point.
+            # TODO: Should do something when there is more than one acquisition.
             result = results_list[0]
             wdata = result.as_loaded_data()
 
-            self.wtime, self.wtemp = wdata.time[:], wdata["outTemp"][:]
+            self.wtime, self.wtemp = wdata.time[:], wdata.temperature[:]
             ntime = len(self.wtime)
 
         # Broadcast the times and temperatures to all ranks.
