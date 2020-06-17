@@ -1959,7 +1959,7 @@ class ThermalCalibration(task.SingleTask):
                 wdata = result.as_loaded_data()
                 tms.append(wdata.time[:])
                 temps.append(wdata.temperature[:])
-            self.wtime  = np.concatenate(tms)
+            self.wtime = np.concatenate(tms)
             self.wtemp = np.concatenate(temps)
 
             ntime = len(self.wtime)
