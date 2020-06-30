@@ -1,0 +1,75 @@
+cluster:
+    name: chimestack
+    directory: /home/dwulf/solar_pipeline
+
+    venv:               /home/dwulf/ch_pipeline/venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               chimestack              # Jobname
+    nodes:              4                       # Number of nodes to run on
+    time:               120                     # Time to run for (in minutes)
+    ompnum:             8                       # Number of OpenMP threads
+    pernode:            4
+    mem:                128000M
+    system:            'cedar'
+
+
+pipeline:
+
+    tasks:
+
+        -   type:       ch_pipeline.core.containers.MonkeyPatchContainers
+
+        -   type:       draco.core.task.SetMPILogging
+            params:
+                level_rank0: DEBUG
+                level_all: WARNING
+
+        -   type:       draco.core.io.FindFiles
+            out:        filelist
+            params:     sun_files
+                
+
+        -   type:       ch_pipeline.core.io.LoadCorrDataFiles
+            requires:   filelist
+            out:        tstream
+            params:     freq_params_N2
+
+        -   type:       ch_pipeline.core.dataquery.QueryInputs
+            in:         tstream
+            out:        inputmap
+
+        -   type:       ch_pipeline.analysis.solar.SolarGrouper
+            in:         tstream
+            out:        groupday
+
+        -   type:       ch_pipeline.analysis.solar.SunCalibration
+            in:         [groupday, inputmap]
+            out:        groupday_sunonly
+            params:
+                save: Yes
+                output_root: "stream_sun_only_"
+                nan_check: No
+
+        #-   type:       ch_pipeline.analysis.solar.SunClean2
+        #    in:         [groupday, groupday_sunonly]
+        #    out:        groupday_nosun
+
+#=================================== Frequency Selection ===================================
+
+freq_params:
+    channel_range:      [32, 48]
+
+freq_params_wide:
+    channel_range:      [160, 240]
+
+freq_params_narrow:
+    channel_range:      [200, 202]
+    
+freq_params_N2:  
+    freq_physical:      [758, 612]
+    
+sun_files:
+    files:
+                    -   "/mnt/gong/archive/20191220T204152Z_chimestack_corr/02753468_0000.h5"
+                    -   "/mnt/gong/archive/20191220T204152Z_chimestack_corr/02758558_0000.h5"
