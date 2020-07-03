@@ -40,7 +40,7 @@ import numpy as np
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
 
-from caput import config, pipeline
+from caput import config, pipeline, memh5
 from caput import mpiarray, mpiutil
 
 from ch_util import tools
@@ -1754,7 +1754,7 @@ class ThermalCalibration(task.SingleTask):
         from datetime import datetime
 
         # Load calibration times data
-        self.caltime_file = h5py.File(self.caltime_path, "r")
+        self.caltime_file = memh5.MemGroup.from_hdf5(self.caltime_path)
 
         # Load weather temperatures
         self.log.info("Loading weather temperatures")
@@ -1808,10 +1808,25 @@ class ThermalCalibration(task.SingleTask):
 
     def _ra2unix(self, csd, ra):
         """ csd must be integer """
-        return = ephemeris.csd_to_unix(csd + ra / 360.0)
+        return ephemeris.csd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime, timestamp, frequency):
         """
+        Parameters
+        ----------
+        timestamp : array of foats
+            Unix time of data points to be calibrated.
+        reftime : array of floats
+            Unix time of same length as `timestamp'. Reference times of transit of the
+            source used to calibrate the data at each time in `times'. 
+        frequency : array of floats
+            Frequencies to obtain the gain corrections for, in MHz. 
+
+        Returns
+        -------
+        g : 2D array of floats of shape (nfreq, ntimes)
+            Per-input gain amplitude corrections. Multiply by data
+            to correct it.
         """
         ntimes = len(timestamp)
         nfreq = len(frequency)
@@ -1866,16 +1881,30 @@ class ThermalCalibration(task.SingleTask):
         else:
             return 1.0 + m * (T - T0)
 
-    def _get_reftime(self, tms, calfl):
+    def _get_reftime(self, times, cal_file):
         """
-        """
-        ntms = len(tms)
-        ncalfl = len(calfl["tstart"][:])
+        Parameters
+        ----------
+        times : array of foats
+            Unix time of data points to be calibrated
+        cal_file : memh5.MemGroup object
+            File which containes the reference times
+            for calibration source transits.
 
-        # Len of tms, indices in calfl.
-        last_start_index = np.searchsorted(calfl["tstart"][:], tms, side="right") - 1
-        # Len of tms, indices in calfl.
-        last_end_index = np.searchsorted(calfl["tend"][:], tms, side="right") - 1
+        Returns
+        -------
+        reftime : array of floats
+            Unix time of same length as `times'. Reference times of transit of the
+            source used to calibrate the data at each time in `times'. Returns `NaN'
+            for times without a reference.
+        """
+        ntimes = len(times)
+        n_cal_file = len(cal_file["tstart"][:])
+
+        # Len of times, indices in cal_file.
+        last_start_index = np.searchsorted(cal_file["tstart"][:], times, side="right") - 1
+        # Len of times, indices in cal_file.
+        last_end_index = np.searchsorted(cal_file["tend"][:], times, side="right") - 1
         # Check for times before first update or after last update.
         too_early = last_start_index < 0
         n_too_early = np.sum(too_early)
@@ -1884,21 +1913,21 @@ class ThermalCalibration(task.SingleTask):
                 "{0} out of {1} time entries have no reference update."
                 + "Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_too_early, ntms))
+            self.log.warning(msg.format(n_too_early, ntimes))
         # Fot times after the last update, I cannot be sure the calibration is valid
         # (could be that the cal file is incomplete. To be conservative, raise warning.)
-        too_late = (last_start_index >= (ncalfl - 1)) & (last_end_index >= (ncalfl - 1))
+        too_late = (last_start_index >= (n_cal_file - 1)) & (last_end_index >= (n_cal_file - 1))
         n_too_late = np.sum(too_late)
         if n_too_late > 0:
             msg = (
                 "{0} out of {1} time entries are beyond calibration file time values."
                 + "Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_too_late, ntms))
+            self.log.warning(msg.format(n_too_late, ntimes))
 
-        reftime = np.full(len(tms), np.nan, dtype=np.float)
-        is_restart = calfl["is_restart"][:]
-        tref = calfl["tref"][:]
+        reftime = np.full(ntimes, np.nan, dtype=np.float)
+        is_restart = cal_file["is_restart"][:]
+        tref = cal_file["tref"][:]
 
         # Acquisition restart. We load an old gain.
         acqrestart = is_restart[last_start_index] == 1
@@ -1953,13 +1982,13 @@ class ThermalCalibration(task.SingleTask):
             f.accept_all_global_flags()
             results_list = f.get_results()
 
-            tms, temps = [], []
+            times, temperatures = [], []
             for result in results_list:
                 wdata = result.as_loaded_data()
-                tms.append(wdata.time[:])
-                temps.append(wdata.temperature[:])
-            self.wtime = np.concatenate(tms)
-            self.wtemp = np.concatenate(temps)
+                times.append(wdata.time[:])
+                temperatures.append(wdata.temperature[:])
+            self.wtime = np.concatenate(times)
+            self.wtemp = np.concatenate(temperatures)
 
             ntime = len(self.wtime)
 
@@ -1969,10 +1998,6 @@ class ThermalCalibration(task.SingleTask):
             self.wtime = np.empty(ntime, dtype=np.float64)
             self.wtemp = np.empty(ntime, dtype=np.float64)
 
-        # For some reason I need to cast as float here.
-        # Bcast chokes when I use np.float64...
-        self.wtime = self.wtime.astype(float)
-        self.wtemp = self.wtemp.astype(float)
         mpiutil.world.Bcast(self.wtime, root=0)
         mpiutil.world.Bcast(self.wtemp, root=0)
 
