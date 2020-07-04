@@ -23,9 +23,9 @@ Tasks
     FlagAmplitude
     InterpolateGainOverFrequency
     SiderealCalibration
+    ThermalCalibration
     CorrectTimeOffset
     CorrectTelescopeRotation
-    ThermalCalibration
 """
 # === Start Python 2/3 compatibility
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -55,6 +55,9 @@ from draco.core import task
 from draco.util import _fast_tools
 
 from ..core import containers
+
+
+_DEFAULT_NODE_SPOOF = {"cedar_archive": "/project/rpp-krs/chime/chime_archive"}
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -1741,11 +1744,15 @@ class ThermalCalibration(task.SingleTask):
     ----------
     caltime_path : string
         Full path to file describing the calibration times.
+    node_spoof : dictionary
+        (default: {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'} )
+        host and directory in which to find data.
 
 
     """
 
     caltime_path = config.Property(proptype=str)
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
     def setup(self):
         """
@@ -1782,26 +1789,31 @@ class ThermalCalibration(task.SingleTask):
         if "ra" in data.index_map.keys():
             timestamp = self._ra2unix(data.attrs["lsd"], data.ra[:])
             # Create container
-            gain = containers.CommonModeSiderealGainData(axes_from=data)
+            gain = containers.CommonModeSiderealGainData(
+                axes_from=data, distributed=True, comm=data.comm
+            )
         else:
             timestamp = data.time[:]
-            gain = containers.CommonModeGainData(axes_from=data)
+            gain = containers.CommonModeGainData(
+                axes_from=data, distributed=True, comm=data.comm
+            )
+        # Redistribute
+        gain.redistribute("freq")
+        lo = gain.gain.local_offset[0]
+        ls = gain.gain.local_shape[0]
 
         # Find refference times for each timestamp.
         # This is the time of the transit from which the gains
         # applied to the data were derived.
         self.log.info("Getting refference times")
-        reftime = self._get_reftime(timestamp, self.caltime_file)
+        reftime_result = self._get_reftime(timestamp, self.caltime_file)
 
         # Compute gain corrections
         self.log.info("Computing gains corrections")
-        g = self._reftime2gain(reftime, timestamp, freq)
+        g = self._reftime2gain(reftime_result, timestamp, freq[lo : lo + ls])
 
         # Copy data into container
-        gain.redistribute("freq")
-        lo = gain.gain.local_offset[0]
-        ls = gain.gain.local_shape[0]
-        gain.gain[:] = g[lo : lo + ls]
+        gain.gain[:] = g[:]
         # gain.weight[:] = dr
 
         return gain
@@ -1810,7 +1822,7 @@ class ThermalCalibration(task.SingleTask):
         """ csd must be integer """
         return ephemeris.csd_to_unix(csd + ra / 360.0)
 
-    def _reftime2gain(self, reftime, timestamp, frequency):
+    def _reftime2gain(self, reftime_result, timestamp, frequency):
         """
         Parameters
         ----------
@@ -1830,56 +1842,73 @@ class ThermalCalibration(task.SingleTask):
         """
         ntimes = len(timestamp)
         nfreq = len(frequency)
-        if not isinstance(frequency, (list, np.ndarray)):
-            frequency = np.array([frequency])
+
+        reftime = reftime_result["reftime"]
+        reftime_prev = reftime_result["reftime_prev"]
+        interp_start = reftime_result["interp_start"]
+        interp_stop = reftime_result["interp_stop"]
+
         # Ones. Don't modify data where there are no gains
         g = np.ones((nfreq, ntimes), dtype=np.float)
-        finitemask = np.isfinite(reftime)
+
+        # Simple gains. No interpolation.
+        direct_gains = np.isfinite(reftime) & (~np.isfinite(reftime_prev))
+        # Gains that need interpolation
+        to_interpolate = np.isfinite(reftime_prev)
+
+        # Gain corrections for direct gains (no interpolation).
+        #######################################################
+        # Reference temperatures
         reftemp = self._interpolate_temperature(
-            self.wtime, self.wtemp, reftime[finitemask]
+            self.wtime, self.wtemp, reftime[direct_gains]
         )
+        # Current temperatures
         temp = self._interpolate_temperature(
-            self.wtime, self.wtemp, timestamp[finitemask]
+            self.wtime, self.wtemp, timestamp[direct_gains]
         )
-        g[:, finitemask] = self.gaincorr(
-            reftemp[np.newaxis, :], temp[np.newaxis, :], frequency[:, np.newaxis]
+        # Gain corrections
+        g[:, direct_gains] = cal_utils.thermal_amplitude(
+            temp[np.newaxis, :] - reftemp[np.newaxis, :], frequency[:, np.newaxis]
+        )
+
+        # Gain corrections for interpolated gains.
+        ##########################################
+        # Reference temperatures
+        reftemp = self._interpolate_temperature(
+            self.wtime, self.wtemp, reftime[to_interpolate]
+        )
+        # Reference temperatures of previous update
+        reftemp_prev = self._interpolate_temperature(
+            self.wtime, self.wtemp, reftime_prev[to_interpolate]
+        )
+        # Current temperatures
+        temp = self._interpolate_temperature(
+            self.wtime, self.wtemp, timestamp[to_interpolate]
+        )
+        # Current gain corrections
+        current_gain = cal_utils.thermal_amplitude(
+            temp[np.newaxis, :] - reftemp[np.newaxis, :], frequency[:, np.newaxis]
+        )
+        # Previous gain corrections
+        previous_gain = cal_utils.thermal_amplitude(
+            temp[np.newaxis, :] - reftemp_prev[np.newaxis, :], frequency[:, np.newaxis]
+        )
+        # Compute interpolation coefficient. Use a Hanning (cos^2) function.
+        # The same that is used for gain interpolation in the real-time pipeline.
+        transition_period = interp_stop[to_interpolate] - interp_start[to_interpolate]
+        time_into_transition = timestamp[to_interpolate] - interp_start[to_interpolate]
+        interpolation_factor = (
+            np.cos(time_into_transition / transition_period * np.pi / 2) ** 2
+        )
+        g[:, to_interpolate] = previous_gain * interpolation_factor + current_gain * (
+            1 - interpolation_factor
         )
 
         return g
 
-    def _interpolate_temperature(self, temptime, tempdata, times):
+    def _interpolate_temperature(self, temperature_time, temperature_data, times):
         # Interpolate temperatures
-        x = times
-        xp = temptime
-        fp = tempdata
-
-        return np.interp(x, xp, fp)
-
-    # TODO: Should I move this to ch_util?
-    def gaincorr(self, T0, T, freq, squared=False):
-        """
-        Parameters
-        ----------
-        freq : float or array of foats
-            Frequencies in MHz
-        squared : bool
-            If true, return 1 + 2*corr. To avoid squaring
-            the gain corrections when applying to visibility
-            data or maps.
-
-        Returns
-        -------
-        g : float or array of floats
-            Gain amplitude corrections. Multiply by data
-            to correct it.
-        """
-        m_params = [-4.28268629e-09, 8.39576400e-06, -2.00612389e-03]
-        m = np.polyval(m_params, freq)
-
-        if squared:
-            return 1.0 + 2.0 * m * (T - T0)
-        else:
-            return 1.0 + m * (T - T0)
+        return np.interp(times, temperature_time, temperature_data)
 
     def _get_reftime(self, times, cal_file):
         """
@@ -1898,13 +1927,19 @@ class ThermalCalibration(task.SingleTask):
             source used to calibrate the data at each time in `times'. Returns `NaN'
             for times without a reference.
         """
+        # Data from calibration file.
+        is_restart = cal_file["is_restart"][:]
+        tref = cal_file["tref"][:]
+        tstart = cal_file["tstart"][:]
+        tend = cal_file["tend"][:]
+        # Length of calibration file and of data points
+        n_cal_file = len(tstart)
         ntimes = len(times)
-        n_cal_file = len(cal_file["tstart"][:])
 
         # Len of times, indices in cal_file.
-        last_start_index = np.searchsorted(cal_file["tstart"][:], times, side="right") - 1
+        last_start_index = np.searchsorted(tstart, times, side="right") - 1
         # Len of times, indices in cal_file.
-        last_end_index = np.searchsorted(cal_file["tend"][:], times, side="right") - 1
+        last_end_index = np.searchsorted(tend, times, side="right") - 1
         # Check for times before first update or after last update.
         too_early = last_start_index < 0
         n_too_early = np.sum(too_early)
@@ -1916,7 +1951,9 @@ class ThermalCalibration(task.SingleTask):
             self.log.warning(msg.format(n_too_early, ntimes))
         # Fot times after the last update, I cannot be sure the calibration is valid
         # (could be that the cal file is incomplete. To be conservative, raise warning.)
-        too_late = (last_start_index >= (n_cal_file - 1)) & (last_end_index >= (n_cal_file - 1))
+        too_late = (last_start_index >= (n_cal_file - 1)) & (
+            last_end_index >= (n_cal_file - 1)
+        )
         n_too_late = np.sum(too_late)
         if n_too_late > 0:
             msg = (
@@ -1925,45 +1962,99 @@ class ThermalCalibration(task.SingleTask):
             )
             self.log.warning(msg.format(n_too_late, ntimes))
 
+        # Array to contain reference times for each entry.
+        # NaN for entries with no reference time.
         reftime = np.full(ntimes, np.nan, dtype=np.float)
-        is_restart = cal_file["is_restart"][:]
-        tref = cal_file["tref"][:]
+        # Array to hold reftimes of previous updates
+        # (for entries that need interpolation).
+        reftime_prev = np.full(ntimes, np.nan, dtype=np.float)
+        # Arrays to hold start and stop times of gain transition
+        # (for entries that need interpolation).
+        interp_start = np.full(ntimes, np.nan, dtype=np.float)
+        interp_stop = np.full(ntimes, np.nan, dtype=np.float)
 
         # Acquisition restart. We load an old gain.
         acqrestart = is_restart[last_start_index] == 1
         reftime[acqrestart] = tref[last_start_index][acqrestart]
 
         # FPGA restart. Data not calibrated.
-        fpgarestart = is_restart[last_start_index] == 2
-        # I think the file has a tref for those.
-        # TODO: Should I use them?
-        # reftime[fpgarestart] = tref[last_start_index][fpgarestart]
+        # There shouldn't be any time points here. Raise a warning if there are.
+        fpga_restart = is_restart[last_start_index] == 2
+        n_fpga_restart = np.sum(fpga_restart)
+        if n_fpga_restart > 0:
+            msg = (
+                "{0} out of {1} time entries are after an FPGA restart but before the "
+                + "next kotekan restart. Cannot correct gains for those entries."
+            )
+            self.log.warning(msg.format(n_fpga_restart, ntimes))
 
-        # Define a few booleans
-        # This update is a gain update
+        # This is a gain update
         gainupdate = is_restart[last_start_index] == 0
-        # Gain transition (necessarily a gain update I think). Need to interpolate gains.
-        gaintrans = last_start_index == (last_end_index + 1)
-        # Previous update was a restart.
-        prev_isrestart = is_restart[last_start_index - 1].astype(bool)
-        # This update is in gain transition and previous update was a restart.
-        # Just use new gain, no interpolation.
-        prev_isrestart = prev_isrestart & gaintrans & gainupdate
-        reftime[prev_isrestart] = tref[last_start_index][prev_isrestart]
-        # This update is in gain transition and previous update was a gain update.
-        # TODO: To correct interpolated gains I need to know what
-        # the applied gains were! For now, just correct for the new gain.
-        prev_isgain = np.invert(prev_isrestart) & gaintrans & gainupdate
-        reftime[prev_isgain] = tref[last_start_index][prev_isgain]
 
-        # Calibrated range. Gain transition has finished.
+        # This is the simplest case. Last update was a gain update and
+        # it is finished. No need to interpolate.
         calrange = (last_start_index == last_end_index) & gainupdate
         reftime[calrange] = tref[last_start_index][calrange]
 
+        # The next cases might need interpolation. Last update was a gain
+        # update and it is *NOT* finished. Update is in transition.
+        gaintrans = last_start_index == (last_end_index + 1)
+
+        # This update is in gain transition and previous update was an
+        # FPGA restart. Just use new gain, no interpolation.
+        prev_is_fpga = is_restart[last_start_index - 1] == 2
+        prev_is_fpga = prev_is_fpga & gaintrans & gainupdate
+        reftime[prev_is_fpga] = tref[last_start_index][prev_is_fpga]
+
+        # The next two cases need interpolation of gain corrections.
+        # It's not possible to correct interpolated gains because the
+        # products have been stacked. Just interpolate the gain
+        # corrections to avoide a sharp transition.
+
+        # This update is in gain transition and previous update was a
+        # Kotekan restart. Need to interpolate gain corrections.
+        prev_is_kotekan = is_restart[last_start_index - 1] == 1
+        to_interpolate = prev_is_kotekan & gaintrans & gainupdate
+
+        # This update is in gain transition and previous update was a
+        # gain update. Need to interpolate.
+        prev_is_gain = is_restart[last_start_index - 1] == 0
+        to_interpolate = to_interpolate | (prev_is_gain & gaintrans & gainupdate)
+
+        # Reference time of this update
+        reftime[to_interpolate] = tref[last_start_index][to_interpolate]
+        # Reference time of previous update
+        reftime_prev[to_interpolate] = tref[last_start_index - 1][to_interpolate]
+        # Start and stop times of gain transition.
+        interp_start[to_interpolate] = tstart[last_start_index][to_interpolate]
+        interp_stop[to_interpolate] = tend[last_start_index][to_interpolate]
+
         # For times too early or too late, don't correct gain.
+        # This might mean we don't correct gains right after the last update
+        # that could in principle be corrected. But there is no way to know
+        # If the calibration file is up-to-date and the last update applies
+        # to all entries that come after it.
         reftime[too_early | too_late] = np.nan
 
-        return reftime
+        # Test for un-identified NaNs
+        known_bad_times = (too_early) | (too_late) | (fpga_restart)
+        n_bad_times = np.sum(~np.isfinite(reftime[~known_bad_times]))
+        if n_bad_times > 0:
+            msg = (
+                "{0} out of {1} time entries don't have a reference calibration time "
+                + "without an identifiable cause. Cannot correct gains for those entries."
+            )
+            self.log.warning(msg.format(n_bad_times, ntimes))
+
+        # Bundle result in dictionary
+        result = {
+            "reftime": reftime,
+            "reftime_prev": reftime_prev,
+            "interp_start": interp_start,
+            "interp_stop": interp_stop,
+        }
+
+        return result
 
     def _load_weather(self, start_time, end_time):
         """
@@ -1974,9 +2065,7 @@ class ThermalCalibration(task.SingleTask):
 
         # Can only query the database from one rank.
         if mpiutil.rank == 0:
-            f = data_index.Finder(
-                node_spoof={"cedar_archive": "/project/rpp-krs/chime/chime_archive"}
-            )
+            f = data_index.Finder(node_spoof=self.node_spoof)
             f.only_chime_weather()  # Excludes MingunWeather
             f.set_time_range(start_time, end_time)
             f.accept_all_global_flags()
