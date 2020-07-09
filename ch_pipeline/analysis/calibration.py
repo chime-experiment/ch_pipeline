@@ -2090,6 +2090,11 @@ class ThermalCalibration(task.SingleTask):
         mpiutil.world.Bcast(self.wtime, root=0)
         mpiutil.world.Bcast(self.wtemp, root=0)
 
+        # Ensure times are increasing. Needed for np.interp().
+        sort_index = np.argsort(self.wtime)
+        self.wtime = self.wtime[sort_index]
+        self.wtemp = self.wtemp[sort_index]
+
 
 class CalibrationCorrection(task.SingleTask):
     """Base class for applying multiplicative corrections based on a DataFlag.
