@@ -34,6 +34,8 @@ class FringeStop(task.SingleTask):
     telescope_rotation : float
         Rotation of the telescope from true north in degrees.  A positive rotation is
         anti-clockwise when looking down at the telescope from the sky.
+    wterm : bool (default False)
+        Include the w term (vertical displacement) in the fringestop phase calculation.
     """
 
     source = config.Property(proptype=str)
@@ -49,8 +51,8 @@ class FringeStop(task.SingleTask):
         tstream : andata.CorrData
             timestream data to be fringestoped
         inputmap : list of :class:`CorrInput`
-            A list of describing the inputs as they are in the file, output from
-            `tools.get_correlator_inputs()`
+            A list describing the inputs as they are in the file, output from
+            `ch_pipeline.core.dataquery.QueryInputs`
 
         Returns
         -------
@@ -69,24 +71,23 @@ class FringeStop(task.SingleTask):
 
         # Rotate the telescope
         tools.change_chime_location(rotation=self.telescope_rotation)
-        feeds = [inputmap[tstream.input[i][0]] for i in range(len(tstream.input))]
 
         # Fringestop
         fs_vis = tools.fringestop_time(
-            tstream.vis,
+            tstream.vis[:],
             times=tstream.time,
             freq=freq,
-            feeds=feeds,
+            feeds=inputmap,
             src=src,
             prod_map=prod_map,
             wterm=self.wterm,
+            inplace=self.overwrite,
         )
 
         # Return telescope to default rotation
         tools.change_chime_location(default=True)
 
         if self.overwrite:
-            tstream.vis[:] = fs_vis
             return tstream
         else:
             tstream_fs = containers.empty_like(tstream)
