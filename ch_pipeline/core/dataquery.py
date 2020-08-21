@@ -590,7 +590,8 @@ class QueryAcquisitions(task.MPILoggedTask):
                         max(1, int(0.10 * self.max_num_files)),
                     )
 
-                    bnd = list(range((nfiles % group_size) // 2, nfiles, group_size))
+                    ngroup, offset = nfiles // group_size, (nfiles % group_size) // 2
+                    bnd = [offset + gg * group_size for gg in range(ngroup + 1)]
                     bnd[0], bnd[-1] = 0, nfiles
 
                     files += [
