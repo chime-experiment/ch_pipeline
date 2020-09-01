@@ -278,8 +278,7 @@ class CHIME(telescope.PolarisedTelescope):
 
     @property
     def feeds(self):
-        """Return a description of the feeds as a list of :class:`tools.CorrInput` instances.
-        """
+        """Return a description of the feeds as a list of :class:`tools.CorrInput` instances."""
 
         if self.input_sel is None:
             feeds = self._feeds

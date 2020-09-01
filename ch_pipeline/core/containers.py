@@ -94,8 +94,7 @@ class RFIMask(ContainerBase):
 
 
 class CorrInputMask(ContainerBase):
-    """Container for holding mask indicating good correlator inputs.
-    """
+    """Container for holding mask indicating good correlator inputs."""
 
     _axes = ("input",)
 
@@ -118,8 +117,7 @@ class CorrInputMask(ContainerBase):
 
 
 class CorrInputTest(ContainerBase):
-    """Container for holding results of tests for good correlator inputs.
-    """
+    """Container for holding results of tests for good correlator inputs."""
 
     _axes = ("freq", "input", "test")
 
@@ -169,8 +167,7 @@ class CorrInputTest(ContainerBase):
 
 
 class CorrInputMonitor(ContainerBase):
-    """Container for holding results of good correlator inputs monitor.
-    """
+    """Container for holding results of good correlator inputs monitor."""
 
     _axes = ("freq", "input", "coord")
 
@@ -259,7 +256,7 @@ class CorrInputMonitor(ContainerBase):
 
 class SiderealDayFlag(ContainerBase):
     """Container for holding flag that indicates
-       good chime sidereal days.
+    good chime sidereal days.
     """
 
     _axes = ("csd",)
@@ -283,8 +280,7 @@ class SiderealDayFlag(ContainerBase):
 
 
 class TransitFitParams(ContainerBase):
-    """Parallel container for holding the results of fitting a model to a point source transit.
-    """
+    """Parallel container for holding the results of fitting a model to a point source transit."""
 
     _axes = ("freq", "input", "param", "component")
 
@@ -554,8 +550,7 @@ class SourceModel(ContainerBase):
 
 
 class SunTransit(ContainerBase):
-    """Parallel container for holding the results of a fit to a point source transit.
-    """
+    """Parallel container for holding the results of a fit to a point source transit."""
 
     _axes = ("freq", "input", "time", "pol_x", "pol_y", "coord", "param")
 
@@ -770,8 +765,7 @@ class RingMap(ContainerBase):
 
 
 class Photometry(ContainerBase):
-    """Parallel container for holding photometry extracted from a map.
-    """
+    """Parallel container for holding photometry extracted from a map."""
 
     _axes = ("freq", "pol", "param", "source")
 
