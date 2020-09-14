@@ -208,6 +208,16 @@ pipeline:
         save: true
         output_name: "ringmap_{{tag}}.h5"
 
+    # Save a single frequency ringmap for daily validation
+    - type: draco.analysis.transform.SelectFreq
+      requires: manager
+      in: ringmap
+      out: ringmap_validation_freqs
+      params:
+        channel_index: [400]
+        save: true
+        output_name: "ringmap_validation_freqs_{{tag}}.h5"
+
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
