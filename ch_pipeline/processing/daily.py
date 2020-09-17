@@ -286,8 +286,7 @@ pipeline:
 
 
 class DailyProcessing(base.ProcessingType):
-    """
-    """
+    """"""
 
     type_name = "daily"
     tag_pattern = r"\d+"

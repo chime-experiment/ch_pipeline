@@ -1214,8 +1214,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
     source = config.Property(proptype=str)
 
     def setup(self):
-        """Get a list of existing processed files.
-        """
+        """Get a list of existing processed files."""
 
         # Find processed transit files
         self.proc_transits = []

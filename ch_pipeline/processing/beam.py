@@ -128,8 +128,7 @@ pipeline:
 
 
 class HolographyFringestop(base.ProcessingType):
-    """
-    """
+    """"""
 
     type_name = "holo_fstop"
     # tag by name of source and processing run
