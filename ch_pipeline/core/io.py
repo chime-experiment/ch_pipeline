@@ -379,7 +379,7 @@ class LoadFileFromTag(task.SingleTask):
         return
 
     def process(self, incont):
-        """ Determine filename from the input container.
+        """Determine filename from the input container.
         Load file into the output container.
 
         Parameters
