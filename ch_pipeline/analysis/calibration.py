@@ -55,9 +55,7 @@ from draco.core import task
 from draco.util import _fast_tools
 
 from ..core import containers
-
-
-_DEFAULT_NODE_SPOOF = {"cedar_archive": "/project/rpp-krs/chime/chime_archive"}
+from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
 
 def _extract_diagonal(utmat, axis=1):
@@ -1736,9 +1734,51 @@ class SiderealCalibration(task.SingleTask):
         return gain_data
 
 
+def find_contiguous_time_ranges(timestamp, dt=3600.0):
+    """Find contiguous ranges within an array of unix timestamps.
+
+    Used by ThermalCalibration to determine the ranges of time
+    to load temperature data.
+
+    Parameters
+    ----------
+    timestamp: np.ndarray[ntime,]
+        Unix timestamps.
+    dt: float
+        Maximum time difference in seconds.
+        If consecutive timestamps are separated
+        by more than 2 * dt, then they will be
+        placed into separate time ranges. Note that
+        each time range will be expanded by dt
+        on either end.
+
+    Returns
+    -------
+    time_ranges: [(start_time, stop_time), ...]
+        List of 2 element tuples, which each tuple
+        containing the start and stop time covering
+        a contiguous range of timestamps.
+    """
+
+    timestamp = np.sort(timestamp)
+
+    start = [timestamp[0] - dt]
+    stop = []
+
+    for tt in range(timestamp.size - 1):
+
+        if (timestamp[tt + 1] - timestamp[tt]) > (2 * dt):
+
+            stop.append(timestamp[tt] + dt)
+            start.append(timestamp[tt + 1] - dt)
+
+    stop.append(timestamp[-1] + dt)
+
+    return list(zip(start, stop))
+
+
 class ThermalCalibration(task.SingleTask):
-    """Use weather temperature information to correct calibration
-       in between point source calibrations.
+    """Use weather temperature to correct calibration in between point source transits.
 
     Attributes
     ----------
@@ -1747,31 +1787,17 @@ class ThermalCalibration(task.SingleTask):
     node_spoof : dictionary
         (default: {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'} )
         host and directory in which to find data.
-
-
     """
 
     caltime_path = config.Property(proptype=str)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
     def setup(self):
-        """
-        """
-        import h5py
-        from datetime import datetime
-
-        # Load calibration times data
+        """Load calibration times."""
         self.caltime_file = memh5.MemGroup.from_hdf5(self.caltime_path)
 
-        # Load weather temperatures
-        self.log.info("Loading weather temperatures")
-        start_time = np.amin(self.caltime_file["tref"]) - 10.0 * 3600.0
-        start_time = ephemeris.unix_to_datetime(start_time)
-        end_time = datetime.now()
-        self._load_weather(start_time, end_time)
-
     def process(self, data):
-        """Determine calibration from a sidereal stream or time stream.
+        """Determine thermal calibration for a sidereal stream or time stream.
 
         Parameters
         ----------
@@ -1830,9 +1856,9 @@ class ThermalCalibration(task.SingleTask):
             Unix time of data points to be calibrated.
         reftime : array of floats
             Unix time of same length as `timestamp'. Reference times of transit of the
-            source used to calibrate the data at each time in `times'. 
+            source used to calibrate the data at each time in `times'.
         frequency : array of floats
-            Frequencies to obtain the gain corrections for, in MHz. 
+            Frequencies to obtain the gain corrections for, in MHz.
 
         Returns
         -------
@@ -1856,16 +1882,19 @@ class ThermalCalibration(task.SingleTask):
         # Gains that need interpolation
         to_interpolate = np.isfinite(reftime_prev)
 
+        # Load weather data for this time range
+        #######################################################
+        trng = find_contiguous_time_ranges(
+            np.concatenate((timestamp, reftime, reftime_prev[to_interpolate]))
+        )
+        wtime, wtemp = self._load_weather(trng)
+
         # Gain corrections for direct gains (no interpolation).
         #######################################################
         # Reference temperatures
-        reftemp = self._interpolate_temperature(
-            self.wtime, self.wtemp, reftime[direct_gains]
-        )
+        reftemp = self._interpolate_temperature(wtime, wtemp, reftime[direct_gains])
         # Current temperatures
-        temp = self._interpolate_temperature(
-            self.wtime, self.wtemp, timestamp[direct_gains]
-        )
+        temp = self._interpolate_temperature(wtime, wtemp, timestamp[direct_gains])
         # Gain corrections
         g[:, direct_gains] = cal_utils.thermal_amplitude(
             temp[np.newaxis, :] - reftemp[np.newaxis, :], frequency[:, np.newaxis]
@@ -1874,17 +1903,13 @@ class ThermalCalibration(task.SingleTask):
         # Gain corrections for interpolated gains.
         ##########################################
         # Reference temperatures
-        reftemp = self._interpolate_temperature(
-            self.wtime, self.wtemp, reftime[to_interpolate]
-        )
+        reftemp = self._interpolate_temperature(wtime, wtemp, reftime[to_interpolate])
         # Reference temperatures of previous update
         reftemp_prev = self._interpolate_temperature(
-            self.wtime, self.wtemp, reftime_prev[to_interpolate]
+            wtime, wtemp, reftime_prev[to_interpolate]
         )
         # Current temperatures
-        temp = self._interpolate_temperature(
-            self.wtime, self.wtemp, timestamp[to_interpolate]
-        )
+        temp = self._interpolate_temperature(wtime, wtemp, timestamp[to_interpolate])
         # Current gain corrections
         current_gain = cal_utils.thermal_amplitude(
             temp[np.newaxis, :] - reftemp[np.newaxis, :], frequency[:, np.newaxis]
@@ -2056,44 +2081,46 @@ class ThermalCalibration(task.SingleTask):
 
         return result
 
-    def _load_weather(self, start_time, end_time):
-        """
-        """
-        from ch_util import data_index
-
+    def _load_weather(self, time_ranges):
+        """Load the chime_weather acquisitions covering the input time ranges."""
         ntime = None
 
         # Can only query the database from one rank.
         if mpiutil.rank == 0:
-            f = data_index.Finder(node_spoof=self.node_spoof)
+
+            f = finder.Finder(node_spoof=self.node_spoof)
             f.only_chime_weather()  # Excludes MingunWeather
-            f.set_time_range(start_time, end_time)
+            for start_time, end_time in time_ranges:
+                f.include_time_interval(start_time, end_time)
             f.accept_all_global_flags()
-            results_list = f.get_results()
 
             times, temperatures = [], []
+            results_list = f.get_results()
             for result in results_list:
                 wdata = result.as_loaded_data()
                 times.append(wdata.time[:])
                 temperatures.append(wdata.temperature[:])
-            self.wtime = np.concatenate(times)
-            self.wtemp = np.concatenate(temperatures)
 
-            ntime = len(self.wtime)
+            wtime = np.concatenate(times)
+            wtemp = np.concatenate(temperatures)
+
+            ntime = len(wtime)
 
         # Broadcast the times and temperatures to all ranks.
         ntime = mpiutil.world.bcast(ntime, root=0)
         if mpiutil.rank != 0:
-            self.wtime = np.empty(ntime, dtype=np.float64)
-            self.wtemp = np.empty(ntime, dtype=np.float64)
+            wtime = np.empty(ntime, dtype=np.float64)
+            wtemp = np.empty(ntime, dtype=np.float64)
 
-        mpiutil.world.Bcast(self.wtime, root=0)
-        mpiutil.world.Bcast(self.wtemp, root=0)
+        mpiutil.world.Bcast(wtime, root=0)
+        mpiutil.world.Bcast(wtemp, root=0)
 
         # Ensure times are increasing. Needed for np.interp().
-        sort_index = np.argsort(self.wtime)
-        self.wtime = self.wtime[sort_index]
-        self.wtemp = self.wtemp[sort_index]
+        sort_index = np.argsort(wtime)
+        wtime = wtime[sort_index]
+        wtemp = wtemp[sort_index]
+
+        return wtime, wtemp
 
 
 class CalibrationCorrection(task.SingleTask):
