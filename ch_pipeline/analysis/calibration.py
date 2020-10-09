@@ -1821,7 +1821,7 @@ class ThermalCalibration(task.SingleTask):
         else:
             timestamp = data.time[:]
             gain = containers.CommonModeGainData(
-                axes_from=data, distributed=True, comm=data.comm
+                time=timestamp, axes_from=data, distributed=True, comm=data.comm
             )
         # Redistribute
         gain.redistribute("freq")
