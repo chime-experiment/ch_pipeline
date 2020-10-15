@@ -2086,7 +2086,7 @@ class ThermalCalibration(task.SingleTask):
         ntime = None
 
         # Can only query the database from one rank.
-        if mpiutil.rank == 0:
+        if self.comm.rank == 0:
 
             f = finder.Finder(node_spoof=self.node_spoof)
             f.only_chime_weather()  # Excludes MingunWeather
@@ -2107,13 +2107,13 @@ class ThermalCalibration(task.SingleTask):
             ntime = len(wtime)
 
         # Broadcast the times and temperatures to all ranks.
-        ntime = mpiutil.world.bcast(ntime, root=0)
-        if mpiutil.rank != 0:
+        ntime = self.comm.bcast(ntime, root=0)
+        if self.comm.rank != 0:
             wtime = np.empty(ntime, dtype=np.float64)
             wtemp = np.empty(ntime, dtype=np.float64)
 
-        mpiutil.world.Bcast(wtime, root=0)
-        mpiutil.world.Bcast(wtemp, root=0)
+        self.comm.Bcast(wtime, root=0)
+        self.comm.Bcast(wtemp, root=0)
 
         # Ensure times are increasing. Needed for np.interp().
         sort_index = np.argsort(wtime)
