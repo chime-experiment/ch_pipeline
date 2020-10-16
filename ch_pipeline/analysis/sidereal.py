@@ -40,7 +40,6 @@ import gc
 import numpy as np
 
 from caput import pipeline, config
-from caput import mpiutil
 from ch_util import andata, ephemeris, tools
 from draco.core import task
 from draco.analysis import sidereal
@@ -97,7 +96,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         self.files = files
 
         filemap = None
-        if mpiutil.rank0:
+        if self.comm.rank == 0:
 
             se_times = get_times(self.files)
             se_csd = ephemeris.csd(se_times)
@@ -112,7 +111,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             filemap = [(day, dmap) for day, dmap in filemap if dmap.size > 1]
             filemap.sort()
 
-        self.filemap = mpiutil.world.bcast(filemap, root=0)
+        self.filemap = self.comm.bcast(filemap, root=0)
 
         # Set up frequency selection.
         if self.freq_physical:
