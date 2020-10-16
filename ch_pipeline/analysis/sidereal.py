@@ -39,7 +39,7 @@ from past.builtins import basestring
 import gc
 import numpy as np
 
-from caput import pipeline, config
+from caput import pipeline, config, weighted_median
 from ch_util import andata, ephemeris, tools
 from draco.core import task
 from draco.analysis import sidereal
@@ -305,7 +305,6 @@ class SiderealMean(task.SingleTask):
             Sidereal stream containing only the mean(median) value.
         """
         from .flagging import daytime_flag, transit_flag
-        import weighted as wq
 
         # Make sure we are distributed over frequency
         sstream.redistribute("freq")
@@ -386,12 +385,14 @@ class SiderealMean(task.SingleTask):
                     vis = all_vis[ff, bb]
                     weight = all_weight[ff, bb]
 
-                    # wq.median will generate warnings and return NaN if the weights are all zero.
+                    # If all the weights are zero, this isn't well defined.
                     # Check for this case and set the mean visibility to 0+0j.
                     if np.any(weight):
-                        mu_vis[ff, bb, 0] = wq.median(
-                            vis.real, weight
-                        ) + 1.0j * wq.median(vis.imag, weight)
+                        mu_vis[ff, bb, 0] = weighted_median.weighted_median(
+                            vis.real.copy(), weight
+                        ) + 1.0j * weighted_median.weighted_median(
+                            vis.imag.copy(), weight
+                        )
                     else:
                         mu_vis[ff, bb, 0] = 0.0 + 0.0j
 
