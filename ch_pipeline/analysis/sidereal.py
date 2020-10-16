@@ -222,6 +222,11 @@ class SiderealRegridder(sidereal.SiderealRegridder):
             Details of the observer, if not set default to CHIME.
         """
 
+        # Down mix requires the baseline distribution to work and so this simple
+        # wrapper around the draco regridder will not work if it is turned on
+        if self.down_mix and observer is None:
+            raise ValueError("A Telescope object must be supplied if down_mix=True.")
+
         # Set up the default Observer
         observer = ephemeris.chime_observer() if observer is None else observer
 
