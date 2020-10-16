@@ -64,7 +64,7 @@ def unix_to_localtime(unix_time):
 
 
 def ra_dec_of(body, time):
-    """ Calculate the coordinates of a celestial
+    """Calculate the coordinates of a celestial
     body at a particular time.
 
     Parameters
@@ -520,8 +520,7 @@ class SolarClean(task.SingleTask):
 
 
 class SunClean(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location.
-    """
+    """Clean the sun from data by projecting out signal from its location."""
 
     def process(self, sstream, inputmap):
         """Clean the sun.

@@ -342,7 +342,7 @@ class ChannelFlagger(task.SingleTask):
 
 
 class MonitorCorrInput(task.SingleTask):
-    """ Monitor good correlator inputs over several sidereal days.
+    """Monitor good correlator inputs over several sidereal days.
 
     Parameters
     ----------
@@ -637,8 +637,8 @@ class TestCorrInput(task.SingleTask):
     known_bad = config.Property(proptype=list, default=[])
 
     def __init__(self):
-        """ Set up variables that gives names to the various test
-            and specify which tests will be applied.
+        """Set up variables that gives names to the various test
+        and specify which tests will be applied.
         """
 
         # Gives names to the tests that will be run
@@ -781,7 +781,7 @@ class TestCorrInput(task.SingleTask):
 
 
 class AccumulateCorrInputMask(task.SingleTask):
-    """ Find good correlator inputs over multiple sidereal days.
+    """Find good correlator inputs over multiple sidereal days.
 
     Parameters
     ----------
@@ -799,16 +799,16 @@ class AccumulateCorrInputMask(task.SingleTask):
     n_cut = config.Property(proptype=int, default=5)
 
     def __init__(self):
-        """ Create empty list.  As we iterate through
-            sidereal days, we will append the corr_input_mask
-            from each day to this list.
+        """Create empty list.  As we iterate through
+        sidereal days, we will append the corr_input_mask
+        from each day to this list.
         """
 
         self._accumulated_input_mask = []
         self._csd = []
 
     def process(self, corr_input_mask):
-        """ Append corr_input_mask to list.
+        """Append corr_input_mask to list.
 
         Parameters
         ----------
@@ -822,7 +822,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         self._csd.append(corr_input_mask.attrs["csd"])
 
     def process_finish(self):
-        """ Determine good days as those where the fraction
+        """Determine good days as those where the fraction
         of good inputs is above some user specified
         threshold.  Then create accumulated input mask
         by taking the product of the input mask for all
@@ -887,8 +887,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 
 class ApplyCorrInputMask(task.SingleTask):
-    """ Apply an input mask to a timestream.
-    """
+    """Apply an input mask to a timestream."""
 
     def process(self, timestream, cmask):
         """Flag out events by giving them zero weight.
@@ -966,21 +965,20 @@ class ApplyCorrInputMask(task.SingleTask):
 
 
 class ApplySiderealDayFlag(task.SingleTask):
-    """ Prevent certain sidereal days from progressing
-        further in the pipeline processing (e.g.,
-        exclude certain sidereal days from the sidereal stack).
+    """Prevent certain sidereal days from progressing
+    further in the pipeline processing (e.g.,
+    exclude certain sidereal days from the sidereal stack).
     """
 
     def setup(self, csd_flag):
-        """ Create dictionary from input .
-        """
+        """Create dictionary from input ."""
 
         self.csd_dict = {}
         for cc, csd in enumerate(csd_flag.csd[:]):
             self.csd_dict[csd] = csd_flag.csd_flag[cc]
 
     def process(self, timestream):
-        """ If this sidereal day is flagged as good or
+        """If this sidereal day is flagged as good or
         if no flag is specified for this sidereal day,
         then return the timestream.  If this sidereal day
         is flagged as bad, then return None.
@@ -1044,8 +1042,7 @@ class ApplySiderealDayFlag(task.SingleTask):
 
 
 class NanToNum(task.SingleTask):
-    """ Finds NaN and replaces with 0.
-    """
+    """Finds NaN and replaces with 0."""
 
     def process(self, timestream):
         """Converts any NaN in the vis dataset and weight dataset
@@ -1091,13 +1088,13 @@ class NanToNum(task.SingleTask):
 
 
 class RadiometerWeight(task.SingleTask):
-    """ Update vis_weight according to the radiometer equation:
+    """Update vis_weight according to the radiometer equation:
 
-            vis_weight_ij = Nsamples / V_ii V_jj
+    vis_weight_ij = Nsamples / V_ii V_jj
     """
 
     def process(self, timestream):
-        """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
+        """Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
         multiplies by the total number of samples, and divides by the autocorrelations of the
         two feeds that form each baseline.
 
@@ -1693,8 +1690,7 @@ class MaskCHIMEData(task.SingleTask):
 
 
 class MaskCHIMEMisc(task.SingleTask):
-    """Some miscellaneous data masking routines.
-    """
+    """Some miscellaneous data masking routines."""
 
     mask_clock = config.Property(proptype=bool, default=True)
 
