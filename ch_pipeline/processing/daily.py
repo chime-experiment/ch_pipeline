@@ -114,14 +114,16 @@ pipeline:
       params:
         cache: true
 
-    # Correct the miscalibration of the data due to the varying estimates of telescope rotation
+    # Correct the miscalibration of the data due to the varying estimates of telescope
+    # rotation
     - type: ch_pipeline.analysis.calibration.CorrectTelescopeRotation
       in: [tstream_corr, inputmap]
       out: tstream_rot
       params:
         rotation: -0.071
 
-    # Correct an early bug in the interpretation of the timestamps that effected the calibration
+    # Correct an early bug in the interpretation of the timestamps that effected the
+    # calibration
     - type: ch_pipeline.analysis.calibration.CorrectTimeOffset
       in: [tstream_rot, inputmap]
       out: tstream
@@ -173,13 +175,25 @@ pipeline:
       in: [tstream_day, rfimask]
       out: tstream_day_rfi
 
+    # Calculate the thermal gain correction
+    - type: ch_pipeline.analysis.calibration.ThermalCalibration
+      in: tstream_day_rfi
+      out: thermal_gain
+      params:
+        caltime_path: "{caltimes_file}"
+
+    # Apply the thermal correction
+    - type: draco.core.misc.ApplyGain
+      in: [tstream_day_rfi, thermal_gain]
+      out: tstream_thermal_corrected
+
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
-      in: tstream_day_rfi
+      in: tstream_thermal_corrected
       out: tstream_day_smoothweight
 
     # Regrid the data onto a regular grid in sidereal time
-    - type: draco.analysis.sidereal.SiderealRegridder
+    - type: draco.analysis.sidereal.SiderealRegridderCubic
       requires: manager
       in: tstream_day_smoothweight
       out: sstream
@@ -189,16 +203,10 @@ pipeline:
         save: true
         output_name: "sstream_{{tag}}.h5"
 
-    - type: draco.analysis.flagging.ThresholdVisWeight
-      in: sstream
-      out: sstream_threshold
-      params:
-          relative_threshold: 0.5
-
     # Make a map of the full dataset
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream_threshold
+      in: sstream
       out: ringmap
       params:
         single_beam: true
@@ -212,7 +220,7 @@ pipeline:
     # cross talk and emphasis point sources
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream_threshold
+      in: sstream
       out: ringmapint
       params:
         single_beam: true
@@ -227,24 +235,25 @@ pipeline:
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream_threshold
+      in: sstream
       out: sstream_inter
       params:
         share: vis
         mask_short_ew: 1.0
 
-    # Load the source catalog (sources > 10 Jy estimate at 600 MHz)
+    # Load the source catalogs to measure fluxes of
     - type: draco.core.io.LoadBasicCont
       out: source_catalog
       params:
         files:
-        - "{source_catalog}"
+        - "{catalogs[0]}"
+        - "{catalogs[1]}"
+        - "{catalogs[2]}"
 
-    # Measure the observed fluxes of the bright point sources
-    - type: draco.analysis.beamform.BeamForm
-      requires: [manager, source_catalog]
-      in: sstream_inter
-      out: source_flux
+    # Measure the observed fluxes of the point sources in the catalogs
+    - type: draco.analysis.beamform.BeamFormCat
+      requires: [manager, sstream_inter]
+      in: source_catalog
       params:
         timetrack: 60.0
         save: true
@@ -253,13 +262,17 @@ pipeline:
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
       in: sstream
-      out: sstream_mask
+      out: sstream_mask1
+
+    - type: ch_pipeline.analysis.flagging.MaskMoon
+      in: sstream_mask1
+      out: sstream_mask2
 
     # Remove ranges of time known to be bad that may effect the delay power
     # spectrum estimate
     - type: ch_pipeline.analysis.flagging.DataFlagger
-      in: sstream_mask
-      out: sstream_mask2
+      in: sstream_mask2
+      out: sstream_mask3
       params:
         flag_type:
           - acjump
@@ -270,18 +283,39 @@ pipeline:
           - globalflag
           - rain1mm
 
+    # Load the stack that we will blend into the daily data
+    - type: draco.core.io.LoadBasicCont
+      out: sstack
+      params:
+        files:
+            - "{blend_stack_file}"
+        selections:
+            freq_range: [{freq[0]:d}, {freq[1]:d}]
+
+    - type: draco.analysis.flagging.BlendStack
+      requires: sstack
+      in: sstream_mask3
+      out: sstream_blend1
+      params:
+        frac: 1e-4
+
+    # Mask the daytime data again. This ensures that we only see the point sources in
+    # the delay spectrum we would expect
+    - type: ch_pipeline.analysis.flagging.MaskDay
+      in: sstream_blend1
+      out: sstream_blend2
+
     # Estimate the delay power spectrum of the data. This is a good diagnostic
     # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_mask2
+      in: sstream_blend2
       params:
         freq_zero: 800.0
         nfreq: 1025
         nsamp: 40
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
-
 """
 
 
@@ -297,10 +331,11 @@ class DailyProcessing(base.ProcessingType):
         "intervals": [
             ## Priority days to reprocess
             # Good ranges from rev_00
-            {"start": "CSD1870", "end": "CSD1875"},
+            {"start": "CSD1868", "end": "CSD1875"},
+            {"start": "CSD1927", "end": "CSD1935"},
             {"start": "CSD1973", "end": "CSD1977"},
-            {"start": "CSD2072", "end": "CSD2075"},
-            {"start": "CSD2072", "end": "CSD2075"},
+            {"start": "CSD2071", "end": "CSD2080"},
+            {"start": "CSD2162", "end": "CSD2166"},
             # A good looking interval from late 2019 (determined from run
             # notes, dataflags and data availability)
             {"start": "CSD2143", "end": "CSD2148"},
@@ -325,14 +360,24 @@ class DailyProcessing(base.ProcessingType):
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        # Calibration times for thermal correction
+        "caltimes_file": (
+            "/project/rpp-krs/chime/chime_processed/gain/calibration_times/"
+            "20180902_20200404_calibration_times.h5"
+        ),
         # File for the timing correction
         "timing_file": (
             "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
         ),
-        "source_catalog": (
-            "/project/rpp-krs/chime/chime_processed/catalogs/"
-            "pointsource_cora_600MHz_10Jy.h5"
+        "catalogs": (
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_CGRaBS.h5",
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
+        ),
+        "blend_stack_file": (
+            "/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/"
+            "sidereal_stack.h5"
         ),
         # Job params
         "time": 180,  # How long in minutes?
