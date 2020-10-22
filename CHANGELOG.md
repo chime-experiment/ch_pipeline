@@ -1,3 +1,21 @@
+# [20.10.0](https://github.com/chime-experiment/ch_pipeline/compare/v20.5.0...v20.10.0) (2020-10-22)
+
+
+### Bug Fixes
+
+* **processing.base:** Write revconfig directly via stream. ([2874b64](https://github.com/chime-experiment/ch_pipeline/commit/2874b64a32ef54f602a72c729c98078102d95a7f))
+* **SiderealRegridder:** throw an exception if down_mix is set ([83b588b](https://github.com/chime-experiment/ch_pipeline/commit/83b588b2c5706d8d9d835f7a2fa72cd35d5db82f))
+
+
+### Features
+
+* **analysis.beam.FilterHolographyProcessed:** Allow list of directories. ([296e5f0](https://github.com/chime-experiment/ch_pipeline/commit/296e5f02a9ced4923da3ffbdcdeadf767c990b4a))
+* **analysis.fringestop:** Add wterm option. ([27070a3](https://github.com/chime-experiment/ch_pipeline/commit/27070a3445f628ec633305621d982f61350370c5))
+* **processing.beam:** Add holography fringestopping. ([fe65cef](https://github.com/chime-experiment/ch_pipeline/commit/fe65cef6687c0ce7d9e4cb1b6b58e0abce0241e0))
+* **ThermalCalibration:** a task to correct temperature related gains ([79988ba](https://github.com/chime-experiment/ch_pipeline/commit/79988ba77bc70263685542569fa38a309a2355e4))
+
+
+
 # [20.5.0](https://github.com/chime-experiment/ch_pipeline/releases/tag/v20.5.0) (2020-05-07)
 
 
