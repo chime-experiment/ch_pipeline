@@ -1,7 +1,7 @@
 import re
 import yaml
 import os
-from subprocess import check_call
+import subprocess as sp
 import tempfile
 
 # TODO: Python 3 workaround
@@ -359,7 +359,6 @@ def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
 
     import os
-    import tempfile
 
     with tempfile.NamedTemporaryFile("w+") as fh:
         fh.write(script)
@@ -386,9 +385,6 @@ def slurm_jobs(user=None):
     jobs : list
         List of dictionaries giving the jobs state.
     """
-
-    import subprocess as sp
-
     if user is None:
         import getpass
 
@@ -452,6 +448,53 @@ def slurm_jobs(user=None):
             entries.append(d)
 
     return entries
+
+
+def slurm_fairshare(account, user=None):
+    """Get the LevelFS for the current user and account.
+
+    Parameters
+    ----------
+    account : str
+        The account to check.
+    user : str, optional
+        The user on the account to check for.
+
+    Returns
+    -------
+    account_fs : str
+        The LevelFS for the whole account, i.e. the priority relative to all other
+        accounts on the cluster.
+    user_fs : str
+        The LevelFS for the user, i.e. the priority compared to all other users on
+        the account.
+    """
+    cmd = ["sshare", "-A", account, "-o", "LevelFS", "-n"]
+
+    if user is not None:
+        cmd += ["-u", user]
+
+    # Call sshare to get the level fairshares
+    try:
+        process = sp.Popen(
+            cmd,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            shell=False,
+            universal_newlines=True,
+        )
+        proc_stdout, proc_stderr = process.communicate()
+        lines = proc_stdout.split("\n")
+    except OSError as e:
+        raise RuntimeError('Failure running "sshare".') from e
+
+    # Filter empty lines
+    lines = [line for line in lines if line]
+
+    if len(lines) != 2:
+        raise RuntimeError('Could not parse output from "sshare".')
+
+    return tuple(float(line) for line in lines)
 
 
 def all_subclasses(cls):
