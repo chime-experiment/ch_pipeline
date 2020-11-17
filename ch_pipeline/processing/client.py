@@ -1,10 +1,3 @@
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
-
 import click
 
 from . import base
@@ -176,14 +169,61 @@ def pending(revision):
     "--number",
     type=int,
     default=10,
-    help="The maximum number of jobs to be submitted.",
+    help="The maximum number of jobs to be submitted this time.",
+)
+@click.option(
+    "-m",
+    "--max-number",
+    type=int,
+    default=20,
+    help=(
+        "The maximum number of jobs to be end up in the queue. This does not include "
+        " running jobs."
+    ),
 )
 @click.option(
     "--submit/--no-submit", default=True, help="Submit the jobs to the queue (or not)"
 )
-def generate(revision, number, submit):
+@click.option(
+    "-f",
+    "--fairshare",
+    type=float,
+    default=None,
+    help="Only submit jobs if the account LevelFS is above this threshold.",
+)
+@click.option(
+    "--user-fairshare",
+    type=float,
+    default=None,
+    help="Only submit jobs if the user LevelFS is above this threshold.",
+)
+def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     """Submit pending jobs for REVISION (given as type:revision)."""
-    revision.generate(max=number, submit=submit)
+
+    if fairshare or user_fairshare:
+        # TODO: find a better way of supplying the account
+        fs = base.slurm_fairshare("rpp-krs_cpu")
+
+    if fairshare and fairshare > fs[0]:
+        click.echo(
+            f"Current fairshare {fs[0]} is lower than threshold {fairshare}. Skipping."
+        )
+        return
+
+    if user_fairshare and user_fairshare > fs[1]:
+        click.echo(
+            f"Current user fairshare {fs[1]} is lower than threshold {user_fairshare}. "
+            "Skipping."
+        )
+        return
+
+    number_in_queue = len(revision.queued()[0])
+    number_to_submit = min(number, max_number - number_in_queue)
+
+    click.echo(
+        f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
+    )
+    revision.generate(max=number_to_submit, submit=submit)
 
 
 def dirstats(path):

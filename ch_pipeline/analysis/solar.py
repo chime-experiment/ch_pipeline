@@ -24,12 +24,6 @@ Usage
 
 
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 from datetime import datetime
 import numpy as np
@@ -64,7 +58,7 @@ def unix_to_localtime(unix_time):
 
 
 def ra_dec_of(body, time):
-    """ Calculate the coordinates of a celestial
+    """Calculate the coordinates of a celestial
     body at a particular time.
 
     Parameters
@@ -520,8 +514,7 @@ class SolarClean(task.SingleTask):
 
 
 class SunClean(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location.
-    """
+    """Clean the sun from data by projecting out signal from its location."""
 
     def process(self, sstream, inputmap):
         """Clean the sun.
