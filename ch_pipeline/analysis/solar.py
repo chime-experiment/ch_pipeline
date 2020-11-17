@@ -853,34 +853,61 @@ class SunCalibration(task.SingleTask):
         ha = sun_pos[:, 0]
         dec = sun_pos[:, 1]
         el = sun_pos[:, 2]
-        
-        # CHIME Latitude
-        latitude = np.radians(ephemeris.CHIMELATITUDE)
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
-        
+        vis_pos = np.array([ feed_pos[fi] - feed_pos[fj] for fi, fj in
+            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
+
         feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in
             sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]]
         
-        vis_pos = np.array([ feed_pos[ii] - feed_pos[ij] for ii, ij in
+        auto_mask = np.array([ fi != fj for fi, fj in
             sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
-
-        # Determine polarisation for each visibility
-        pol_ind = np.full(len(feed_list), -1, dtype=np.int)
-        for ii, (fi, fj) in enumerate(feed_list):
-            if tools.is_chime(fi) and tools.is_chime(fj):
-                pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
-
-        # Change vis_pos for non-CHIME feeds from NaN to 0.0
-        vis_pos[(pol_ind == -1), :] = 0.0
         
-        print np.unique(vis_pos)
+        # Determine polarisation for each visibility
+        pol_ind = np.full(nprod, -1, dtype=np.int)
+        cyl_i = np.full(nprod, -1, dtype=np.int)
+        cyl_j = np.full(nprod, -1, dtype=np.int)
+        good_ind = np.full(nprod, 1, dtype=np.int)
+        
+        for ii, (fi, fj) in enumerate(feed_list):
+            
+            if tools.is_chime(fi) and tools.is_chime(fj):
+                
+                pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
+                
+                if fi.reflector=='cylinder_A':
+                    cyl_i[ii] = 0
+                elif fi.reflector=='cylinder_B':
+                    cyl_i[ii] = 1
+                elif fi.reflector=='cylinder_C':
+                    cyl_i[ii] = 2
+                elif fi.reflector=='cylinder_D':
+                    cyl_i[ii] = 3
+                    
+                if fj.reflector=='cylinder_A':
+                    cyl_j[ii] = 0
+                elif fj.reflector=='cylinder_B':
+                    cyl_j[ii] = 1
+                elif fj.reflector=='cylinder_C':
+                    cyl_j[ii] = 2
+                elif fj.reflector=='cylinder_D':
+                    cyl_j[ii] = 3
+                
+            else:
+                good_ind[ii] = 0
+                
+                # Change vis_pos for non-CHIME feeds from NaN to 0.0
+                vis_pos[ii, :] = 0.0
+        
+        # Indices of intra-cyl baselines
+        intra_cyl = (cyl_i == cyl_j)
+                
+        newprod = [[0, 0],[1,1]]
 
-        # Initialise new container
-        newprod = np.array([[0, 0],[0,1],[1,0],[1,1]],
-                           dtype=sstream.index_map['prod'].dtype)
-        newstack = np.zeros(4, dtype=[('prod', '<u4'), ('conjugate', 'u1')])
+        newprod = np.array(newprod,dtype=sstream.index_map['prod'].dtype)
+        newstack = np.zeros(len(newprod), dtype=[('prod', '<u4'), ('conjugate', 'u1')])
         newstack['prod'][:] = np.arange(len(newprod))
         newstack['conjugate'] = 0
 
@@ -910,40 +937,37 @@ class SunCalibration(task.SingleTask):
                 # Initialize the visiblities matrix
                 vis = sstream.vis[fi, :, ri]
                 weight = sstream.weight[fi, :, ri]
-                #sunstream.vis[fi, :, ri] = np.zeros(vis.shape, dtype=vis.dtype)
 
                 # Check if sun has set
                 if el[ri] > 0.0:
 
                     # Calculate the phase that the sun would have using the fringestop routine
-                    sun_fringe_phase = tools.fringestop_phase(ha[ri], latitude, dec[ri], u, v)
-
-                    # Mask out the auto-correlations
-                    sun_fringe_phase *= np.logical_or(u != 0.0, v != 0.0)
-                    
-                    # Mask out intracylinder baselines
-                    sun_fringe_phase *= (u == 0.0)
+                    sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
 
                     # Iterate over polarisations to do projection independently for each.
                     # This is needed because of the different beams for each pol.
-                    for pol in range(4):
+                    for pi, pol in enumerate([0,3]):
 
                         # Mask out other polarisations in the visibility vector
-                        sun_fringe_phase_pol = sun_fringe_phase * (pol_ind == pol)
+                        sun_vis_pol = sun_vis * (pol_ind == pol)
+                        # Mask out autos and other bad (non-chime) visibilities
+                        sun_vis_pol *= auto_mask * good_ind
+                        # Mask out inter-cyl visibilities
+                        sun_vis_pol *= intra_cyl
+                        # Mask out long NS baselines
+                        sun_vis_pol *= (np.abs(vis_pos[:, 1]) <= 10.0)
 
-                        # Calculate various projections, then take average over products
-                        vds = (vis * sun_fringe_phase_pol * weight).sum(axis=0)
-                        sds = weight.sum(axis=0)
+                        # Calculate various projections
+                        vds = (vis * sun_vis_pol * weight).sum(axis=0)
+                        sds = (sun_vis_pol * sun_vis_pol.conj() * weight).sum(axis=0)
                         isds = tools.invert_no_zero(sds)
-                        fringe_stopped_sun = vds * isds
 
-                        # Add fringestopped and averaged data to new array
-                        sunstream.vis[fi, pol, ri] = fringe_stopped_sun
+                        sunstream.vis[fi, pi, ri] = vds * isds
                 else:
 
                     sunstream.vis[fi, :, ri] = 0.0
 
-        # Return the fringestopped, averaged sidereal stream
+        # Return the clean sidereal stream
         return sunstream
 
 
