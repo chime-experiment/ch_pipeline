@@ -158,59 +158,83 @@ class ConstructTimingCorrection(task.SingleTask):
 
     Parameters
     ----------
-    check_amp: bool
-        Do not include frequencies and times where the
-        square root of the autocorrelations is an outlier.
-    check_sig: bool
-        Do not include frequencies and times where the
-        square root of the inverse weight is an outlier.
-    nsigma: float
-        Number of median absolute deviations to consider
-        a data point an outlier in the checks specified above.
+    min_frac_kept: float
+        Do not include frequencies and times where the fraction
+        of data that remains is less than this threshold.
     threshold: float
         A (frequency, input) must pass the checks specified above
         more than this fraction of the time,  otherwise it will be
         flaged as bad for all times.
-    nparam: int
-        Number of parameters for polynomial fit to the
-        time averaged phase versus frequency.
     min_freq: float
         Minimum frequency in MHz to include in the fit.
     max_freq: float
         Maximum frequency in MHz to include in the fit.
+    mask_rfi: bool
+        Mask frequencies that occur within known RFI bands.  Note that the
+        noise source data does not contain RFI, however the real-time pipeline
+        does not distinguish between noise source inputs and sky inputs, and as
+        a result will discard large amounts of data in these bands.
     max_iter_weight: int
         The weight for each frequency is estimated from the variance of the
-        residuals of the template fit from the previous iteration.  This
-        is the total number of times to iterate.  Setting to 0 corresponds
-        to linear least squares.
+        residuals of the template fit from the previous iteration.  Outliers
+        are also flagged at each iteration with an increasingly aggresive threshold.
+        This is the total number of times to iterate.  Setting to 1 corresponds
+        to linear least squares.  Default is 1, unless check_amp or check_phi is True,
+        in which case this defaults to the maximum number of thresholds provided.
+    check_amp: bool
+        Do not fit frequencies and times where the residual amplitude is an outlier.
+    nsigma_amp: list of float
+        If check_amp is True, then residuals greater than this number of sigma
+        will be considered an outlier.  Provide a list containing the value to be used
+        at each iteration.  If the length of the list is less than max_iter_weight,
+        then the last value in the list will be repeated for the remaining iterations.
+    check_phi: bool
+        Do not fit frequencies and times where the residual phase is an outlier.
+    nsigma_phi: list of float
+        If check_phi is True, then residuals greater than this number of sigma
+        will be considered an outlier.  Provide a list containing the value to be used
+        at each iteration.  If the length of the list is less than max_iter_weight,
+        then the last value in the list will be repeated for the remaining iterations.
     input_sel : list
         Generate the timing correction from inputs with these chan_id's.
     output_suffix: str
         The suffix to append to the end of the name of the output files.
     """
 
-    check_amp = config.Property(proptype=bool, default=True)
-    check_sig = config.Property(proptype=bool, default=True)
-    nsigma = config.Property(proptype=float, default=5.0)
+    min_frac_kept = config.Property(proptype=float, default=0.85)
     threshold = config.Property(proptype=float, default=0.5)
-    nparam = config.Property(proptype=int, default=2)
     min_freq = config.Property(proptype=float, default=420.0)
-    max_freq = config.Property(proptype=float, default=780.0)
-    max_iter_weight = config.Property(proptype=int, default=2)
+    max_freq = config.Property(proptype=float, default=600.0)
+    mask_rfi = config.Property(proptype=bool, default=True)
+    max_iter_weight = config.Property(
+        proptype=(lambda val: val if val is None else int(val)), default=None
+    )
+    check_amp = config.Property(proptype=bool, default=False)
+    nsigma_amp = config.Property(
+        default=[1000.0, 500.0, 200.0, 100.0, 50.0, 20.0, 10.0, 5.0]
+    )
+    check_phi = config.Property(proptype=bool, default=True)
+    nsigma_phi = config.Property(
+        default=[1000.0, 500.0, 200.0, 100.0, 50.0, 20.0, 10.0, 5.0]
+    )
+    nparam = config.Property(proptype=int, default=2)
     input_sel = config.Property(
         proptype=(lambda val: val if val is None else list(val)), default=None
     )
     output_suffix = config.Property(proptype=str, default="chimetiming_delay")
 
     _parameters = [
-        "check_amp",
-        "check_sig",
-        "nsigma",
+        "min_frac_kept",
         "threshold",
-        "nparam",
         "min_freq",
         "max_freq",
+        "mask_rfi",
         "max_iter_weight",
+        "check_amp",
+        "nsigma_amp",
+        "check_phi",
+        "nsigma_phi",
+        "nparam",
         "input_sel",
     ]
 
@@ -286,6 +310,9 @@ class ConstructTimingCorrection(task.SingleTask):
             else:
                 msg = "Dataset %s could not be found in timing correction object." % key
                 raise RuntimeError(msg)
+
+        # Save the names of the files used to construct the correction
+        tcorr.attrs["archive_files"] = np.array(filelist)
 
         # Create a tag indicating the range of time processed
         tfmt = "%Y%m%dT%H%M%SZ"
