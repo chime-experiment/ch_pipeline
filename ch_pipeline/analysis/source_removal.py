@@ -101,8 +101,9 @@ def model_extended_sources(
 
     # Setup for calculating source coordinates
     lat = np.radians(ephemeris.CHIMELATITUDE)
-    observer = ephemeris._get_chime()
-    observer.date = timestamp
+    observer = ephemeris.chime
+    sf_time = ephemeris.unix_to_skyfield_time(timestamp)
+    obs = observer.skyfield_obs().at(sf_time)
 
     # Generate polynomials
     ncoeff_x = degree_x + 1
@@ -118,8 +119,9 @@ def model_extended_sources(
     for ss, body in enumerate(bodies):
 
         # Calculate the source coordinates
-        src_ra, src_dec = observer.cirs_radec(body)
-        src_alt, src_az = observer.altaz(body)
+        pos = obs.observe(body)
+        src_alt = pos.apparent().altaz()[0]
+        src_ra, src_dec, _ = pos.cirs_radec(sf_time)
 
         ha = np.radians(ephemeris.lsa(timestamp)) - src_ra.radians
         dec = src_dec.radians
