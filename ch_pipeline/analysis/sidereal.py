@@ -15,8 +15,10 @@ Generally you would want to use these tasks together. Starting with a
 
 import gc
 import numpy as np
+from mpi4py import MPI
 
 from caput import pipeline, config, weighted_median
+from caput.weighted_median import weighted_median
 from ch_util import andata, ephemeris, tools
 from draco.core import task
 from draco.analysis import sidereal
@@ -239,7 +241,12 @@ class SiderealMean(task.SingleTask):
     nsigma : float
         Mask this number of sigma on either side of the source transits.
         Here sigma is the expected width of the primary beam for an E-W
-        polarisation antenna at 400 MHz as defined by :py:func:`ch_util.cal_utils.guess_fwhm`.
+        polarisation antenna at 400 MHz as defined by
+        :py:func:`ch_util.cal_utils.guess_fwhm`.
+    missing_threshold : float
+        If less than this fraction of data remains within the regions included by the
+        specified masks, then all the data is counted as missing (per baseline and
+        frequency). Default is 0.0, i.e. this is not applied.
     """
 
     median = config.Property(proptype=bool, default=False)
@@ -250,6 +257,7 @@ class SiderealMean(task.SingleTask):
     flux_threshold = config.Property(proptype=float, default=400.0)
     dec_threshold = config.Property(proptype=bool, default=5.0)
     nsigma = config.Property(proptype=float, default=2.0)
+    missing_threshold = config.Property(proptype=float, default=0.0)
 
     def setup(self):
         """Determine which sources will be masked, if any."""
@@ -354,28 +362,32 @@ class SiderealMean(task.SingleTask):
         if not self.inverse_variance:
             all_weight = (all_weight > 0.0).astype(np.float32)
 
-        # Save the total number of nonzero samples as the weight dataset of the output container
+        # Only include freqs/baselines where enough data is actually present
+        frac_present = all_weight.sum(axis=-1) / flag_quiet.sum(axis=-1)
+        all_weight *= (frac_present > self.missing_threshold)[..., np.newaxis]
+
+        num_freq_missing_local = int(
+            (frac_present < self.missing_threshold).all(axis=1).sum()
+        )
+        num_freq_missing = self.comm.allreduce(num_freq_missing_local, op=MPI.SUM)
+
+        self.log.info(
+            "Cannot estimate a sidereal mean for "
+            f"{100.0 * num_freq_missing / len(mustream.freq):.2f}% of all frequencies."
+        )
+
+        # Save the total number of nonzero samples as the weight dataset of the output
+        # container
         mustream.weight[:] = np.sum(all_weight, axis=-1, keepdims=True)
 
         # If requested, compute median (requires loop over frequencies and baselines)
         if self.median:
-            nfreq, nbaseline, _ = all_vis.shape
-            for ff in range(nfreq):
-                for bb in range(nbaseline):
+            mu_vis[..., 0].real = weighted_median(all_vis.real.copy(), all_weight)
+            mu_vis[..., 0].imag = weighted_median(all_vis.imag.copy(), all_weight)
 
-                    vis = all_vis[ff, bb]
-                    weight = all_weight[ff, bb]
-
-                    # If all the weights are zero, this isn't well defined.
-                    # Check for this case and set the mean visibility to 0+0j.
-                    if np.any(weight):
-                        mu_vis[ff, bb, 0] = weighted_median.weighted_median(
-                            vis.real.copy(), weight
-                        ) + 1.0j * weighted_median.weighted_median(
-                            vis.imag.copy(), weight
-                        )
-                    else:
-                        mu_vis[ff, bb, 0] = 0.0 + 0.0j
+            # Where all the weights are zero explicitly set the median to zero
+            missing = ~(all_weight.any(axis=-1))
+            mu_vis[missing, 0] = 0.0
 
         else:
             # Otherwise calculate the mean
