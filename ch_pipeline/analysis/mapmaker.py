@@ -150,7 +150,7 @@ class RingMapMaker(task.SingleTask):
         invvar = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
         weight = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
 
-        # If natural or uniform weighting was choosen, then calculate the
+        # If natural or uniform weighting was chosen, then calculate the
         # redundancy of the collated visibilities.
         if self.weight != "inverse_variance":
             redundancy = tools.calculate_redundancy(
