@@ -3,6 +3,7 @@ import click
 from . import base
 from . import daily
 from . import beam
+from . import quarterstack
 
 click.disable_unicode_literals_warning = True
 
@@ -217,8 +218,10 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
         )
         return
 
-    number_in_queue = len(revision.queued()[0])
-    number_to_submit = max(min(number, max_number - number_in_queue), 0)
+    number_in_queue, number_running = [len(l) for l in revision.queued()]
+    number_to_submit = max(
+        min(number, max_number - number_in_queue - number_running), 0
+    )
 
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."

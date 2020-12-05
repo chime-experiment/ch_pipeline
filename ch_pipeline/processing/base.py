@@ -28,7 +28,17 @@ Please describe the purpose/changes of this revision here.
 
 
 class ProcessingType(object):
-    """Baseclass for a pipeline processing type."""
+    """Baseclass for a pipeline processing type.
+
+    Parameters
+    ----------
+    revision : str
+        Revision to use.
+    create : bool, optional
+        Create the revision if it isn't found.
+    root_path : str, optional
+        Override the path to the processing root.
+    """
 
     # Must be set externally before using
     root_path = None
@@ -37,9 +47,12 @@ class ProcessingType(object):
     default_params = {}
     default_script = DEFAULT_SCRIPT
 
-    def __init__(self, revision, create=False):
+    def __init__(self, revision, create=False, root_path=None):
 
         self.revision = revision
+
+        if root_path:
+            self.root_path = root_path
 
         # Run the create hook if specified
         if create:
@@ -50,6 +63,9 @@ class ProcessingType(object):
 
     def _create(self):
         """Save default parameters and pipeline config for this revision."""
+
+        # Subclass hook
+        self._create_hook()
 
         # Write default configuration into directory
         with (self.revconfig_path).open("w") as fh:
@@ -72,11 +88,11 @@ class ProcessingType(object):
             fh.write(DESC_HEAD.format(self.revision, self.type_name))
         os.system(r"${EDITOR:-vi} " + str(desc_path))
 
-        # Subclass hook
-        self._create_hook()
-
     def _create_hook(self):
-        """Implement to add custom behaviour when a revision is created."""
+        """Implement to add custom behaviour when a revision is created.
+
+        This is called *before* the revision configuration is written out.
+        """
         pass
 
     def _load(self):
@@ -94,7 +110,10 @@ class ProcessingType(object):
         self._load_hook()
 
     def _load_hook(self):
-        """Implement to add custom behaviour when a revision is loaded."""
+        """Implement to add custom behaviour when a revision is loaded.
+
+        This is called *after* the object has had it's configuration loaded.
+        """
         pass
 
     def job_script(self, tag):
@@ -106,6 +125,7 @@ class ProcessingType(object):
                 "jobname": self.job_name(tag),
                 "dir": str(self.base_path / tag),
                 "tempdir": str(self.workdir_path / tag),
+                "tag": tag,
             }
         )
 
