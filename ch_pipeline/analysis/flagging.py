@@ -1305,13 +1305,13 @@ def transit_flag(body, time, nsigma=2.0):
         and False otherwise.
     """
     time = np.atleast_1d(time)
-    obs = ephemeris._get_chime()
+    obs = ephemeris.chime
 
     # Create boolean flag
     flag = np.zeros(time.size, dtype=np.bool)
 
     # Find transit times
-    transit_times = ephemeris.transit_times(
+    transit_times = obs.transit_times(
         body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0
     )
 
@@ -1319,9 +1319,11 @@ def transit_flag(body, time, nsigma=2.0):
     for ttrans in transit_times:
 
         # Compute source coordinates
-        obs.date = ttrans
-        alt, az = obs.altaz(body)
-        ra, dec = obs.cirs_radec(body)
+        sf_time = ephemeris.unix_to_skyfield_time(ttrans)
+        pos = obs.skyfield_obs().at(sf_time).observe(body)
+
+        alt = pos.apparent().altaz()[0]
+        dec = pos.cirs_radec(sf_time)[1]
 
         # Make sure body is above horizon
         if alt.radians > 0.0:
