@@ -11,33 +11,33 @@ cluster:
 pipeline :
     tasks:
 
-        -   type:       ch_pipeline.dataquery.QueryRun
+        -   type:       ch_pipeline.core.dataquery.QueryRun
             out:        filelist
             params:
                 run_name:   "run_pass1_g"
 
-        -   type:       ch_pipeline.io.LoadCorrDataFiles
+        -   type:       ch_pipeline.core.io.LoadCorrDataFiles
             requires:   filelist
             out:        tstream
             
-        -   type:       ch_pipeline.dataquery.QueryInputs
+        -   type:       ch_pipeline.core.dataquery.QueryInputs
             in:         tstream
             out:        inputmap
 
-        -   type:       ch_pipeline.calibration.NoiseSourceFold
+        -   type:       ch_pipeline.analysis.calibration.NoiseSourceFold
             in:         tstream
             out:        foldedday
             params:
                 period:   2
-                phase:    1
+                phase:    [1]
 
-        -   type:       ch_pipeline.flagging.BadNodeFlagger
+        -   type:       ch_pipeline.analysis.flagging.BadNodeFlagger
             in:         foldedday
             out:        foldedday2
             params:
                 nodes:  [2, 6, 9, 10, 15]
 
-        -   type:       ch_pipeline.calibration.GatedNoiseCalibration
+        -   type:       ch_pipeline.analysis.calibration.GatedNoiseCalibration
             in:         [foldedday2, inputmap]
             out:        noisecalday
             params:
