@@ -10,7 +10,7 @@ Usage
 Generally you would want to use these tasks together. Starting with a
 :class:`LoadTimeStreamSidereal`, then feeding that into
 :class:`SiderealRegridder` to grid onto each sidereal day, and then into
-:class:`SiderealStacker` if you want to combine the different days.
+:class:`draco.analysis.SiderealStacker` if you want to combine the different days.
 """
 
 import gc
