@@ -1,7 +1,7 @@
 cluster:
     name:               tcorr
     directory:          $SCRATCH/timing/
-    venv:               /home/ssiegel/ch_pipeline/venv
+    venv:               my_venv
 
     ## Cluster configuration (ignored unless on a cluster)
     name:               tcorr                   # Jobname

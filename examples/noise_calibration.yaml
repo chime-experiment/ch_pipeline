@@ -6,7 +6,7 @@ cluster:
     ompnum:    8
     time:      120:00
 
-    venv:      /home/k/krs/jrs65/ch_pipeline/venv
+    venv:      my_venv
 
 pipeline :
     tasks:
