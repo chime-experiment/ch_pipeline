@@ -41,66 +41,6 @@ from ch_util import andata
 from draco.core import task
 
 
-def _list_of_filelists(files):
-    # Take in a list of lists/glob patterns of filenames
-    import glob
-
-    f2 = []
-
-    for filelist in files:
-
-        if isinstance(filelist, str):
-            filelist = glob.glob(filelist)
-        elif isinstance(filelist, list):
-            pass
-        else:
-            raise Exception("Must be list or glob pattern.")
-        f2.append(filelist)
-
-    return f2
-
-
-def _list_or_glob(files):
-    # Take in a list of lists/glob patterns of filenames
-    import glob
-
-    if isinstance(files, str):
-        files = sorted(glob.glob(files))
-    elif isinstance(files, list):
-        pass
-    else:
-        raise RuntimeError("Must be list or glob pattern.")
-
-    return files
-
-
-def _list_of_filegroups(groups):
-    # Process a file group/groups
-    import glob
-
-    # Convert to list if the group was not included in a list
-    if not isinstance(groups, list):
-        groups = [groups]
-
-    # Iterate over groups, set the tag if needed, and process the file list
-    # through glob
-    for gi, group in enumerate(groups):
-
-        files = group["files"]
-
-        if "tag" not in group:
-            group["tag"] = "group_%i" % gi
-
-        flist = []
-
-        for fname in files:
-            flist += glob.glob(fname)
-
-        group["files"] = flist
-
-    return groups
-
-
 class LoadCorrDataFiles(task.SingleTask):
     """Load data from files passed into the setup routine.
 
