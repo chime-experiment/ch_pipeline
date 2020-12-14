@@ -65,8 +65,7 @@ class TransitGrouper(task.SingleTask):
         `caput.config.CaputConfigError`
             If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
-        self.observer = ephem.chime_observer() if observer is None else observer
-        self.sky_obs = wrap_observer(self.observer)
+        self.observer = ephem.chime if observer is None else observer
         try:
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
@@ -106,9 +105,6 @@ class TransitGrouper(task.SingleTask):
         # Redistribute if needed
         tstream.redistribute("freq")
 
-        # Update observer time
-        self.sky_obs.date = tstream.time[0]
-
         # placeholder for finalized transit when it is ready
         final_ts = None
 
@@ -123,7 +119,14 @@ class TransitGrouper(task.SingleTask):
 
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
-            self.cur_transit = self.sky_obs.next_transit(self.src)
+            tr_time = self.observer.transit_times(self.src, tstream.time[0])
+            if len(tr_time) != 1:
+                raise ValueError(
+                    "Didn't find exactly one transit time. Found {:d}.".format(
+                        len(tr_time)
+                    )
+                )
+            self.cur_transit = tr_time[0]
             self._transit_bounds()
 
         # check if we've accumulated enough past the transit
@@ -192,8 +195,10 @@ class TransitGrouper(task.SingleTask):
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = self.tstreams[0]
-            _, dec = self.sky_obs.radec(self.src)
-            ts.attrs["dec"] = dec._degrees
+            _, dec = ephem.object_coords(
+                self.src, all_t[0], deg=True, obs=self.observer
+            )
+            ts.attrs["dec"] = dec
             ts.attrs["source_name"] = self.source
             ts.attrs["transit_time"] = self.cur_transit
             ts.attrs["observation_id"] = self.obs_id
@@ -278,8 +283,7 @@ class TransitRegridder(Regridder):
         `caput.config.CaputConfigError`
             If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
-        self.observer = ephem.chime_observer() if observer is None else observer
-        self.sky_obs = wrap_observer(self.observer)
+        self.observer = ephem.chime if observer is None else observer
 
         # Setup bounds for interpolation grid
         self.start = -self.ha_span / 2
@@ -316,18 +320,13 @@ class TransitRegridder(Regridder):
         weight = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
 
-        # Update observer time
-        self.sky_obs.date = data.time[0]
-
         # Get apparent source RA, including precession effects
-        ra, _ = self.sky_obs.cirs_radec(self.src)
-        ra = ra._degrees
+        ra, _ = ephem.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
         # Get catalogue RA for reference
-        ra_icrs, _ = self.sky_obs.radec(self.src)
-        ra_icrs = ra_icrs._degrees
+        ra_icrs, _ = ephem.object_coords(self.src, deg=True, obs=self.observer)
 
         # Convert input times to hour angle
-        lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
+        lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
 
         # perform regridding
         success = 1
@@ -444,8 +443,7 @@ class TransitResampler(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-        self.observer = ephem.chime_observer() if observer is None else observer
-        self.sky_obs = wrap_observer(self.observer)
+        self.observer = ephem.chime if observer is None else observer
 
     def process(self, beam, data):
         """Resample the measured beam at arbitrary RA by convolving with a Lanczos kernel.
@@ -477,7 +475,7 @@ class TransitResampler(task.SingleTask):
         if "ra" in data.index_map:
             ra = data.index_map["ra"][:]
         elif "time" in data.index_map:
-            ra = self.sky_obs.unix_to_lsa(data.time)
+            ra = self.observer.unix_to_lsa(data.time)
         else:
             raise RuntimeError("Unable to extract RA from input container.")
 
@@ -1286,28 +1284,6 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
         self.log.info("Leaving next for task %s" % self.__class__.__name__)
         return files
-
-
-def wrap_observer(obs):
-    """Wrap a `ch_util.ephemeris.chime_observer()` with the
-    `ch_util.ephemeris.SkyfieldObserverWrapper` class.
-
-    Parameters
-    ----------
-    obs: caput.time.Observer
-        CHIME observer.
-
-    Returns
-    -------
-    obs: ch_util.ephemeris.SkyfieldObserverWrapper
-        Wrapped observer.
-    """
-    return ephem.SkyfieldObserverWrapper(
-        lon=obs.longitude,
-        lat=obs.latitude,
-        alt=obs.altitude,
-        lsd_start=obs.lsd_start_day,
-    )
 
 
 def unwrap_lha(lsa, src_ra):
