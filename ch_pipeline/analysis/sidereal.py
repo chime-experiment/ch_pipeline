@@ -195,7 +195,7 @@ class SiderealGrouper(sidereal.SiderealGrouper):
         """
 
         # Set up the default Observer
-        observer = ephemeris.chime_observer() if observer is None else observer
+        observer = ephemeris.chime if observer is None else observer
 
         sidereal.SiderealGrouper.setup(self, observer)
 
@@ -221,7 +221,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
             raise ValueError("A Telescope object must be supplied if down_mix=True.")
 
         # Set up the default Observer
-        observer = ephemeris.chime_observer() if observer is None else observer
+        observer = ephemeris.chime if observer is None else observer
 
         sidereal.SiderealRegridder.setup(self, observer)
 
