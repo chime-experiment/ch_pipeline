@@ -29,6 +29,10 @@ param_anchors:
 
 # Pipeline task configuration
 pipeline:
+
+  logging:
+    root: DEBUG
+
   tasks:
 
     - type: draco.core.task.SetMPILogging
