@@ -1,29 +1,15 @@
 """
-==========================================
-Tasks for IO (:mod:`~ch_pipeline.core.io`)
-==========================================
-
-.. currentmodule:: ch_pipeline.core.io
+Tasks for IO
 
 Tasks for calculating IO. Notably a task which will write out the parallel
 MPIDataset classes.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    LoadCorrDataFiles
-    LoadSetupFile
-    LoadFileFromTag
 
 File Groups
 ===========
 
 Several tasks accept groups of files as arguments. These are specified in the YAML file as a dictionary like below.
 
-.. codeblock:: yaml
+.. code-block:: yaml
 
     list_of_file_groups:
         -   tag: first_group  # An optional tag naming the group
@@ -318,14 +304,12 @@ class LoadFileFromTag(task.SingleTask):
     Attributes
     ----------
     prefix : str
-        Filename is assumed to have the format:
-            prefix + incont.attrs['tag'] + '.h5'
+        Filename is assumed to have the format: prefix + incont.attrs['tag'] + '.h5'
 
     only_prefix : bool
         If True, then the class will return the same
         container at each iteration.  The filename
-        is assumed to have the format:
-            prefix + '.h5'
+        is assumed to have the format: prefix + '.h5'
 
     distributed : bool
         Whether or not the memh5 container should be

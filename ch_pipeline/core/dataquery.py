@@ -1,34 +1,9 @@
 """
-==========================================================
-Dataset Specification (:mod:`~ch_pipeline.core.dataquery`)
-==========================================================
-
-.. currentmodule:: ch_pipeline.core.dataquery
+Dataset Specification
 
 Lookup information from the database about the data, particularly which files
 are contained in a specific dataset (defined by a `run` global flag) and what
 each correlator input is connected to.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    QueryDatabase
-    QueryRun
-    QueryDataspec
-    QueryAcquisitions
-    QueryInputs
-
-Routines
-========
-
-.. autosummary::
-    :toctree: generated/
-
-    finder_from_spec
-    files_from_spec
 
 Dataspec Format
 ===============
@@ -50,7 +25,7 @@ keys, containing datetime objects (in UTC). Or it can be a list of such
 ditionaries, to specify multiple time ranges to include. This can be contained
 in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
 
-.. codeblock:: yaml
+.. code-block:: yaml
 
     datasets:
         -   name:       A
@@ -98,7 +73,7 @@ class QueryDatabase(task.MPILoggedTask):
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
         can be in any format ensure_unix will support, including eg
-            20190116T150323 and 2019-1-16 08:03:23 -7
+        20190116T150323 and 2019-1-16 08:03:23 -7
     start_csd, end_csd : float
         Start and end CSDs. Only used if `start_time` is not set.
     instrument : string (default: 'chimestack')
@@ -640,7 +615,7 @@ class QueryInputs(task.MPILoggedTask):
 
         Returns
         -------
-        inputs : list of :class:`CorrInput`s
+        inputs : list of :class:`CorrInput`
             A list of describing the inputs as they are in the file.
         """
 

@@ -1,19 +1,6 @@
-"""
-===================================
-Tasks for fringestopping CHIME data
-===================================
-
-.. currentmodule:: ch_pipeline.analysis.fringestop
+"""Tasks for fringestopping CHIME data
 
 Tasks for taking the timestream data and fringestop it to a given source
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-    
-    FringeStop
 
 Usage
 =====

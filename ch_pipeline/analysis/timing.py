@@ -1,16 +1,4 @@
-"""Tasks for constructing timing corrections and applying them to data.
-
-.. currentmodule:: ch_pipeline.analysis.timing
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    ApplyTimingCorrection
-    ConstructTimingCorrection
-"""
+"""Tasks for constructing timing corrections and applying them to data."""
 
 
 import os

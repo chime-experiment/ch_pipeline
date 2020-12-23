@@ -1,24 +1,8 @@
 """
-=====================================================================
-Tasks for sidereal regridding (:mod:`~ch_pipeline.analysis.sidereal`)
-=====================================================================
-
-.. currentmodule:: ch_pipeline.analysis.sidereal
+Tasks for sidereal regridding
 
 Tasks for taking the timestream data and regridding it into sidereal days
 which can be stacked.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    LoadTimeStreamSidereal
-    SiderealGrouper
-    SiderealRegridder
-    SiderealMean
-    ChangeSiderealMean
 
 Usage
 =====
@@ -255,8 +239,7 @@ class SiderealMean(task.SingleTask):
     nsigma : float
         Mask this number of sigma on either side of the source transits.
         Here sigma is the expected width of the primary beam for an E-W
-        polarisation antenna at 400 MHz as defined by the
-       `ch_util.cal_utils.guess_fwhm` function.
+        polarisation antenna at 400 MHz as defined by :py:func:`ch_util.cal_utils.guess_fwhm`.
     """
 
     median = config.Property(proptype=bool, default=False)
