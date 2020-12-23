@@ -1,21 +1,9 @@
 """
-====================================================================
-Pathfinder/CHIME Telescope Model (:mod:`ch_pipeline.core.telescope`)
-====================================================================
-
-.. currentmodule:: ch_pipeline.core.telescope
+Pathfinder/CHIME Telescope Model
 
 A model for both CHIME and Pathfinder telescopes. This attempts to query the
 configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
-
-Classes
-=======
-
-.. autosummary::
-    :toctree: generated/
-
-    CHIME
 """
 
 import logging

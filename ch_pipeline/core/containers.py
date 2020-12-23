@@ -1,39 +1,8 @@
-"""
-==============================================================
-Parallel data containers (:mod:`~ch_pipeline.core.containers`)
-==============================================================
-
-.. currentmodule:: ch_pipeline.core.containers
+"""Parallel data containers
 
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
 containers which are imported into this module.
-
-Containers
-==========
-
-.. autosummary::
-    :toctree: generated/
-
-    RFIMask
-    CorrInputMask
-    CorrInputTest
-    CorrInputMonitor
-    SiderealDayFlag
-    TransitFitParams
-    PointSourceTransit
-    SourceModel
-    SunTransit
-    RingMap
-    Photometry
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    MonkeyPatchContainers
 """
 
 import numpy as np

@@ -1,38 +1,8 @@
-"""
-===============================================================
-Tasks for Flagging Data (:mod:`~ch_pipeline.analysis.flagging`)
-===============================================================
-
-.. currentmodule:: ch_pipeline.analysis.flagging
+"""Tasks for Flagging Data
 
 Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    RFIFilter
-    ChannelFlagger
-    MonitorCorrInput
-    TestCorrInput
-    AccumulateCorrInputMask
-    ApplyCorrInputMask
-    ApplySiderealDayFlag
-    NanToNum
-    RadiometerWeight
-    BadNodeFlagger
-    MaskDay
-    MaskSource
-    MaskSun
-    MaskMoon
-    MaskRA
-    MaskData
-    MaskCHIMEData
-    DataFlagger
 """
 
 import numpy as np
@@ -653,7 +623,7 @@ class TestCorrInput(task.SingleTask):
         ----------
         timestream : andata.CorrData
             Apply series of tests to this timestream.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list of describing the inputs as they are in timestream.
 
         Returns

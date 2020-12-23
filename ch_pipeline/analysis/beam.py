@@ -1,23 +1,4 @@
-""" Tasks for beam measurement processing.
-
-    Tasks
-    =====
-
-    .. autosummary::
-        :toctree:
-
-        TransitGrouper
-        TransitRegridder
-        EdgeFlagger
-        TransitResampler
-        MakeHolographyBeam
-        ConstructStackedBeam
-        HolographyTransitFit
-        DetermineHolographyGainsFromFits
-        ApplyHolographyGains
-        TransitStacker
-        FilterHolographyProcessed
-"""
+"""Tasks for beam measurement processing"""
 import json
 import yaml
 from os import path, listdir

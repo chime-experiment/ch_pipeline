@@ -1,32 +1,4 @@
-"""
-================================================================
-Tasks for Calibration (:mod:`~ch_pipeline.analysis.calibration`)
-================================================================
-
-.. currentmodule:: ch_pipeline.analysis.calibration
-
-Tasks for calibrating the data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    NoiseSourceCalibration
-    NoiseSourceFold
-    GatedNoiseCalibration
-    DetermineSourceTransit
-    EigenCalibration
-    TransitFit
-    GainFromTransitFit
-    FlagAmplitude
-    InterpolateGainOverFrequency
-    SiderealCalibration
-    ThermalCalibration
-    CorrectTimeOffset
-    CorrectTelescopeRotation
-"""
+"""Tasks for calibrating the data."""
 
 import json
 
@@ -209,8 +181,8 @@ def solve_gain(data, feeds=None, norm=None):
 def interp_gains(trans_times, gain_mat, times, axis=-1):
     """Linearly interpolates gain solutions in sidereal day.
 
-    Parameter
-    ---------
+    Parameters
+    ----------
     trans_times : array_like
         Unix time of object transit
     gain_mat : array_like
@@ -1529,7 +1501,7 @@ class SiderealCalibration(task.SingleTask):
         ----------
         sstream : containers.SiderealStream
             Rigidized sidereal timestream to calibrate.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             List describing the inputs as they are in the file.
         inputmask : containers.CorrInputMask
             Mask indicating which correlator inputs to use in the

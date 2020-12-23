@@ -1,28 +1,8 @@
 """
-==========================================================================
-Tasks for analysis of the radio sun. (:mod:`~ch_pipeline.analysis.solar`)
-==========================================================================
-
-.. currentmodule:: ch_pipeline.analysis.solar
+Tasks for analysis of the radio sun
 
 Tasks for analysis of the radio sun.  Includes grouping individual files
 into a solar day; solar calibration; and sun excision from sidereal stream.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    SolarGrouper
-    SolarCalibration
-    SolarClean
-    SunClean
-
-Usage
-=====
-
-
 """
 
 from datetime import datetime
@@ -215,7 +195,7 @@ class SolarCalibration(task.SingleTask):
         ----------
         sstream : andata.CorrData or containers.SiderealStream
             Timestream collected during the day.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list describing the inputs as they are in the file.
         inputmask : containers.CorrInputMask
             Mask indicating which correlator inputs to use in the
@@ -447,7 +427,7 @@ class SolarClean(task.SingleTask):
             Sidereal stream.
         suntrans : containers.SolarTransit
             Response to the sun.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list describing the inputs as they are in the file.
 
         Returns

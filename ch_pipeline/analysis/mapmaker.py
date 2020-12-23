@@ -1,19 +1,6 @@
-"""
-========================================================
-Map making tasks (:mod:`~ch_pipeline.analysis.mapmaker`)
-========================================================
-
-.. currentmodule:: ch_pipeline.analysis.mapmaker
+"""Map making tasks
 
 Tools for making maps from CHIME data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    RingMapMaker
 """
 
 import numpy as np

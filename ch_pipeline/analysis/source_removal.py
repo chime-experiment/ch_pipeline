@@ -1,18 +1,6 @@
 """Tasks for removing bright sources from the data.
 
-.. currentmodule:: ch_pipeline.analysis.source_removal
-
 Tasks for constructing models for bright sources and subtracting them from the data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    SolveSources
-    SubtractSources
-
 """
 
 import json
