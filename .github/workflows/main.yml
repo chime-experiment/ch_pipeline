@@ -44,12 +44,12 @@ jobs:
 
     - name: Install pip dependencies
       run: |
-        pip install git+https://github.com/chime-experiment/ch_util-stub.git
+        pip install --use-deprecated=legacy-resolver git+https://github.com/chime-experiment/ch_util-stub.git
         pip install future
         pip install numpy
         pip install cython
-        pip install -r requirements.txt
-        pip install -r doc/requirements.txt
+        pip install --use-deprecated=legacy-resolver -r requirements.txt
+        pip install --use-deprecated=legacy-resolver -r doc/requirements.txt
 
     - name: Install ch_pipeline
       run: python setup.py develop
