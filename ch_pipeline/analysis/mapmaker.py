@@ -232,7 +232,8 @@ class RingMapMaker(task.SingleTask):
             bfm_y[:] = np.matmul(weight[lfi] * vis[lfi], pa)
             sb_y[:] = np.matmul(weight[lfi], pa)
             if self.single_beam:
-                # Only need the 0th term if the irfft, equivalent to adding in EW direction
+                # Only need the 0th term if the irfft, equivalent to adding in EW
+                # direction
                 bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
                 sb[:] = np.sum(sb_y, axis=2)[:, :, np.newaxis, ...]
             else:
