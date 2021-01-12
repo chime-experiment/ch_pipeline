@@ -3,6 +3,24 @@
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
 containers which are imported into this module.
+
+Containers
+==========
+- :py:class:`RFIMask`
+- :py:class:`CorrInputMask`
+- :py:class:`CorrInputTest`
+- :py:class:`CorrInputMonitor`
+- :py:class:`SiderealDayFlag`
+- :py:class:`TransitFitParams`
+- :py:class:`PointSourceTransit`
+- :py:class:`SourceModel`
+- :py:class:`SunTransit`
+- :py:class:`RingMap`
+- :py:class:`Photometry`
+
+Tasks
+=====
+- :py:class:`MonkeyPatchContainers`
 """
 
 import numpy as np
