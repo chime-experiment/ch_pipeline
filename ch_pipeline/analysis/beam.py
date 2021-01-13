@@ -26,7 +26,7 @@ import numpy as np
 from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
-from caput.pipeline import PipelineConfigError, PipelineRuntimeError
+from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
@@ -78,6 +78,11 @@ class TransitGrouper(task.SingleTask):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
+
+        Raises
+        ------
+        `caput.config.CaputConfigError`
+            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
         self.observer = ephem.chime_observer() if observer is None else observer
         self.sky_obs = wrap_observer(self.observer)
@@ -89,7 +94,7 @@ class TransitGrouper(task.SingleTask):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise PipelineConfigError(msg)
+            raise config.CaputConfigError(msg)
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -286,6 +291,11 @@ class TransitRegridder(Regridder):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
+
+        Raises
+        ------
+        `caput.config.CaputConfigError`
+            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
         self.observer = ephem.chime_observer() if observer is None else observer
         self.sky_obs = wrap_observer(self.observer)
@@ -302,7 +312,7 @@ class TransitRegridder(Regridder):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise PipelineConfigError(msg)
+            raise config.CaputConfigError(msg)
 
     def process(self, data):
         """Regrid visibility data onto a regular grid in hour angle.
