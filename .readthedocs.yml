@@ -8,8 +8,7 @@ version: 2
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
   configuration: doc/conf.py
-  # TODO: activate when possible
-  #fail_on_warning: true
+  fail_on_warning: true
 
 python:
   version: 3.8
