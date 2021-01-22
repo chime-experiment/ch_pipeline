@@ -56,7 +56,7 @@ both version tags, and commit hashes. An example `requirements.txt` file is
 given below:
 ```
 caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d
--e git+ssh://git@bitbucket.org/chime/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util-e
+ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util
 cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0
 driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0
 ```
