@@ -1,6 +1,6 @@
 # This is from requirements.txt:
 caput @ git+https://github.com/radiocosmology/caput
-ch_util @ git+ssh://git@github.com/chime-experiment/ch_util.git
+ch_util @ git+https://github.com/chime-experiment/ch_util.git
 cora @ git+https://github.com/radiocosmology/cora
 driftscan @ git+https://github.com/radiocosmology/driftscan
 draco @ git+https://github.com/radiocosmology/draco
