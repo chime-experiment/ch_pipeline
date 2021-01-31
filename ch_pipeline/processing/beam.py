@@ -102,8 +102,16 @@ pipeline:
         wterm: True
         overwrite: True
 
+    - type: ch_pipeline.analysis.decorrelation.CorrectDecorrelation
+      in: [transits_fs, inputs]
+      out: transits_corr
+      params:
+        source: *source_name
+        wterm: True
+        overwrite: True
+
     - type: ch_pipeline.analysis.beam.TransitRegridder
-      in: transits_fs
+      in: transits_corr
       out: transit_regrid
       params:
         ha_span: *hour_angle
