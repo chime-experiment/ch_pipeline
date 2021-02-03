@@ -322,7 +322,7 @@ class CHIME(telescope.PolarisedTelescope):
 
         return self._pos
 
-    @property
+    @cached_property
     def beamclass(self):
         """Beam class definition for the CHIME/Pathfinder.
 
@@ -363,7 +363,7 @@ class CHIME(telescope.PolarisedTelescope):
             ]
             return np.array(beamclass)
 
-    @property
+    @cached_property
     def polarisation(self):
         """
         Polarisation map.
