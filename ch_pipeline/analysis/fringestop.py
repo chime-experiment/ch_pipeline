@@ -27,12 +27,6 @@ Use this task together with:
 * :class:`~ch_pipeline.core.dataquery.QueryInputs` to query the inputmap
   of the timestream data
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 from datetime import datetime
 from caput import config, mpiutil
@@ -58,6 +52,7 @@ class FringeStop(task.SingleTask):
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
     telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
         """Apply the fringe stop of CHIME data to a given source
@@ -97,6 +92,7 @@ class FringeStop(task.SingleTask):
             feeds=feeds,
             src=src,
             prod_map=prod_map,
+            wterm=self.wterm,
         )
 
         # Return telescope to default rotation

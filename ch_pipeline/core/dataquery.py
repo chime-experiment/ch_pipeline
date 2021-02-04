@@ -62,12 +62,6 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import os
 
@@ -250,7 +244,7 @@ class QueryDatabase(task.MPILoggedTask):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
                         ephemeris.source_dictionary[src]
-                        if isinstance(src, basestring)
+                        if isinstance(src, str)
                         else src
                     )
                     f.include_transits(bdy, time_delta=tdelta)
@@ -267,7 +261,7 @@ class QueryDatabase(task.MPILoggedTask):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
                         ephemeris.source_dictionary[src]
-                        if isinstance(src, basestring)
+                        if isinstance(src, str)
                         else src
                     )
                     f.exclude_transits(bdy, time_delta=tdelta)
@@ -590,7 +584,8 @@ class QueryAcquisitions(task.MPILoggedTask):
                         max(1, int(0.10 * self.max_num_files)),
                     )
 
-                    bnd = list(range((nfiles % group_size) // 2, nfiles, group_size))
+                    ngroup, offset = nfiles // group_size, (nfiles % group_size) // 2
+                    bnd = [offset + gg * group_size for gg in range(ngroup + 1)]
                     bnd[0], bnd[-1] = 0, nfiles
 
                     files += [
@@ -622,7 +617,18 @@ class QueryAcquisitions(task.MPILoggedTask):
 class QueryInputs(task.MPILoggedTask):
     """From a dataspec describing the data create a list of objects describing
     the inputs in the files.
+
+    Attributes
+    ----------
+    cache : bool
+        Only query for the inputs for the first container received. For all
+        subsequent files just return the initial set of inputs. This can help
+        minimise the number of potentially fragile database operations.
     """
+
+    cache = config.Property(proptype=bool, default=False)
+
+    _cached_inputs = None
 
     def next(self, ts):
         """Generate an input description from the timestream passed in.
@@ -637,6 +643,12 @@ class QueryInputs(task.MPILoggedTask):
         inputs : list of :class:`CorrInput`s
             A list of describing the inputs as they are in the file.
         """
+
+        # Fetch from the cache if we can
+        if self.cache and self._cached_inputs:
+            self.log.debug("Using cached inputs.")
+            return self._cached_inputs
+
         inputs = None
 
         if mpiutil.rank0:
@@ -649,6 +661,10 @@ class QueryInputs(task.MPILoggedTask):
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)
+
+        # Save into the cache for the next iteration
+        if self.cache:
+            self._cached_inputs = inputs
 
         # Make sure all nodes have container before return
         mpiutil.world.Barrier()

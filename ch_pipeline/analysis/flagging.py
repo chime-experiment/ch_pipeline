@@ -34,18 +34,12 @@ Tasks
     MaskCHIMEData
     DataFlagger
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
-from chimedb import data_index as di
+from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
@@ -191,33 +185,32 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             Mixing array as a function of time. If `True` that sample will be
             filled from the MAD, if `False` use the SumThreshold algorithm.
         """
-
-        sidereal_day = ephemeris.SIDEREAL_S * 24 * 3600
-
-        ntime = len(times)
-        start_csd = ephemeris.unix_to_csd(times[0])
-        start_ra = (start_csd - int(start_csd)) * (2.0 * np.pi)
-        ra_axis = (start_ra + (2.0 * np.pi) / ntime * np.arange(ntime)) % (2.0 * np.pi)
+        # Switch for 4 deg each side of the source
+        beam_window = np.radians(4.0)
+        SIDEREAL_DAY = ephemeris.SIDEREAL_S * 24 * 3600
 
         # Select Sun transit times
         suntt = ephemeris.solar_transit(times[0])  # Sun transit time
-        beam_window = (2.0 * np.pi) / 90.0  # 4 deg in radians for the Sun. Each side.
+
         # Mask the sun for the maximum aparent dec of ~24 deg
         ra_window = beam_window / np.cos(np.deg2rad(24))
-        time_window = ra_window / (2 * np.pi) * sidereal_day
+        time_window = ra_window / (2 * np.pi) * SIDEREAL_DAY
+
         # Time spans where we apply the MAD filter.
-        madtimes = abs(times - suntt) < time_window
+        madtimes = np.abs(times - suntt) < time_window
 
         # Select bright source transit times. Only CasA, CygA and TauA.
         sources = [ephemeris.CasA, ephemeris.CygA, ephemeris.TauA]
 
+        ra_axis = np.radians(ephemeris.lsa(times))
+
+        # Include bright point source transits in MAD times
         for src in sources:
-            src_ra = src.ra.radians
-            src_idx = np.argmin(abs(ra_axis - src_ra))
-            ra_window = beam_window / np.cos(src.dec.radians)
-            time_window = ra_window / (2 * np.pi) * sidereal_day
-            # Include bright point source transit in MAD times
-            madtimes += abs(times - times[src_idx]) < time_window
+            ra = src.ra.radians
+            dec = src.dec.radians
+            ra_window = beam_window / np.cos(dec)
+
+            madtimes |= np.abs(ra_axis - ra) < ra_window
 
         return madtimes
 
@@ -343,7 +336,7 @@ class ChannelFlagger(task.SingleTask):
 
 
 class MonitorCorrInput(task.SingleTask):
-    """ Monitor good correlator inputs over several sidereal days.
+    """Monitor good correlator inputs over several sidereal days.
 
     Parameters
     ----------
@@ -638,8 +631,8 @@ class TestCorrInput(task.SingleTask):
     known_bad = config.Property(proptype=list, default=[])
 
     def __init__(self):
-        """ Set up variables that gives names to the various test
-            and specify which tests will be applied.
+        """Set up variables that gives names to the various test
+        and specify which tests will be applied.
         """
 
         # Gives names to the tests that will be run
@@ -782,7 +775,7 @@ class TestCorrInput(task.SingleTask):
 
 
 class AccumulateCorrInputMask(task.SingleTask):
-    """ Find good correlator inputs over multiple sidereal days.
+    """Find good correlator inputs over multiple sidereal days.
 
     Parameters
     ----------
@@ -800,16 +793,16 @@ class AccumulateCorrInputMask(task.SingleTask):
     n_cut = config.Property(proptype=int, default=5)
 
     def __init__(self):
-        """ Create empty list.  As we iterate through
-            sidereal days, we will append the corr_input_mask
-            from each day to this list.
+        """Create empty list.  As we iterate through
+        sidereal days, we will append the corr_input_mask
+        from each day to this list.
         """
 
         self._accumulated_input_mask = []
         self._csd = []
 
     def process(self, corr_input_mask):
-        """ Append corr_input_mask to list.
+        """Append corr_input_mask to list.
 
         Parameters
         ----------
@@ -823,7 +816,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         self._csd.append(corr_input_mask.attrs["csd"])
 
     def process_finish(self):
-        """ Determine good days as those where the fraction
+        """Determine good days as those where the fraction
         of good inputs is above some user specified
         threshold.  Then create accumulated input mask
         by taking the product of the input mask for all
@@ -888,8 +881,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
 
 class ApplyCorrInputMask(task.SingleTask):
-    """ Apply an input mask to a timestream.
-    """
+    """Apply an input mask to a timestream."""
 
     def process(self, timestream, cmask):
         """Flag out events by giving them zero weight.
@@ -967,21 +959,20 @@ class ApplyCorrInputMask(task.SingleTask):
 
 
 class ApplySiderealDayFlag(task.SingleTask):
-    """ Prevent certain sidereal days from progressing
-        further in the pipeline processing (e.g.,
-        exclude certain sidereal days from the sidereal stack).
+    """Prevent certain sidereal days from progressing
+    further in the pipeline processing (e.g.,
+    exclude certain sidereal days from the sidereal stack).
     """
 
     def setup(self, csd_flag):
-        """ Create dictionary from input .
-        """
+        """Create dictionary from input ."""
 
         self.csd_dict = {}
         for cc, csd in enumerate(csd_flag.csd[:]):
             self.csd_dict[csd] = csd_flag.csd_flag[cc]
 
     def process(self, timestream):
-        """ If this sidereal day is flagged as good or
+        """If this sidereal day is flagged as good or
         if no flag is specified for this sidereal day,
         then return the timestream.  If this sidereal day
         is flagged as bad, then return None.
@@ -1045,8 +1036,7 @@ class ApplySiderealDayFlag(task.SingleTask):
 
 
 class NanToNum(task.SingleTask):
-    """ Finds NaN and replaces with 0.
-    """
+    """Finds NaN and replaces with 0."""
 
     def process(self, timestream):
         """Converts any NaN in the vis dataset and weight dataset
@@ -1092,13 +1082,13 @@ class NanToNum(task.SingleTask):
 
 
 class RadiometerWeight(task.SingleTask):
-    """ Update vis_weight according to the radiometer equation:
+    """Update vis_weight according to the radiometer equation:
 
-            vis_weight_ij = Nsamples / V_ii V_jj
+    vis_weight_ij = Nsamples / V_ii V_jj
     """
 
     def process(self, timestream):
-        """ Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
+        """Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
         multiplies by the total number of samples, and divides by the autocorrelations of the
         two feeds that form each baseline.
 
@@ -1315,13 +1305,13 @@ def transit_flag(body, time, nsigma=2.0):
         and False otherwise.
     """
     time = np.atleast_1d(time)
-    obs = ephemeris._get_chime()
+    obs = ephemeris.chime
 
     # Create boolean flag
     flag = np.zeros(time.size, dtype=np.bool)
 
     # Find transit times
-    transit_times = ephemeris.transit_times(
+    transit_times = obs.transit_times(
         body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0
     )
 
@@ -1329,9 +1319,11 @@ def transit_flag(body, time, nsigma=2.0):
     for ttrans in transit_times:
 
         # Compute source coordinates
-        obs.date = ttrans
-        alt, az = obs.altaz(body)
-        ra, dec = obs.cirs_radec(body)
+        sf_time = ephemeris.unix_to_skyfield_time(ttrans)
+        pos = obs.skyfield_obs().at(sf_time).observe(body)
+
+        alt = pos.apparent().altaz()[0]
+        dec = pos.cirs_radec(sf_time)[1]
 
         # Make sure body is above horizon
         if alt.radians > 0.0:
@@ -1694,8 +1686,7 @@ class MaskCHIMEData(task.SingleTask):
 
 
 class MaskCHIMEMisc(task.SingleTask):
-    """Some miscellaneous data masking routines.
-    """
+    """Some miscellaneous data masking routines."""
 
     mask_clock = config.Property(proptype=bool, default=True)
 
@@ -1754,13 +1745,13 @@ class DataFlagger(task.SingleTask):
         # Query flag database if on 0th node
         if self.comm.rank == 0:
             connect_database()
-            flag_types = di.DataFlagType.select()
+            flag_types = df.DataFlagType.select()
             possible_flags = []
             for ft in flag_types:
                 possible_flags.append(ft.name)
                 if ft.name in self.flag_type or "all" in self.flag_type:
                     self.log.info("Querying for %s Flags" % ft.name)
-                    new_flags = di.DataFlag.select().where(di.DataFlag.type == ft)
+                    new_flags = df.DataFlag.select().where(df.DataFlag.type == ft)
                     flags[ft.name] = list(new_flags)
 
             # Check that user-proved flag names are valid

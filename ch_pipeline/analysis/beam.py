@@ -16,18 +16,17 @@
         DetermineHolographyGainsFromFits
         ApplyHolographyGains
         TransitStacker
-        RegisterHolographyProcessed
         FilterHolographyProcessed
 """
 import json
 import yaml
-from os import path
+from os import path, listdir
 
 import numpy as np
 from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
-from caput.pipeline import PipelineConfigError, PipelineRuntimeError
+from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
@@ -39,13 +38,9 @@ from chimedb.core import connect as connect_database
 from draco.core import task, io
 from draco.util import regrid
 from draco.analysis.transform import Regridder
-from draco.core.containers import SiderealStream, TimeStream, TrackBeam
+from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
 from draco.util.tools import invert_no_zero
 
-from ..core.processed_db import (
-    RegisterProcessedFiles,
-    append_product,
-)
 from ..core.containers import TransitFitParams
 from .calibration import TransitFit, GainFromTransitFit
 
@@ -83,6 +78,11 @@ class TransitGrouper(task.SingleTask):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
+
+        Raises
+        ------
+        `caput.config.CaputConfigError`
+            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
         self.observer = ephem.chime_observer() if observer is None else observer
         self.sky_obs = wrap_observer(self.observer)
@@ -94,7 +94,7 @@ class TransitGrouper(task.SingleTask):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise PipelineConfigError(msg)
+            raise config.CaputConfigError(msg)
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -183,7 +183,7 @@ class TransitGrouper(task.SingleTask):
         """Concatenate grouped time streams for the currrent transit."""
 
         # Find where transit starts and ends
-        if len(self.tstreams) == 0:
+        if len(self.tstreams) == 0 or self.cur_transit is None:
             self.log.info("Did not find any transits.")
             return None
         self.log.debug(
@@ -210,14 +210,15 @@ class TransitGrouper(task.SingleTask):
                 # Concatenate timestreams
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
-                ts = ts[0]
+                ts = self.tstreams[0]
             _, dec = self.sky_obs.radec(self.src)
             ts.attrs["dec"] = dec._degrees
             ts.attrs["source_name"] = self.source
             ts.attrs["transit_time"] = self.cur_transit
             ts.attrs["observation_id"] = self.obs_id
-            ts.attrs["tag"] = "{}_{}".format(
+            ts.attrs["tag"] = "{}_{:0>4d}_{}".format(
                 self.source,
+                self.obs_id,
                 ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
             )
             ts.attrs["archivefiles"] = filenames
@@ -290,6 +291,11 @@ class TransitRegridder(Regridder):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
+
+        Raises
+        ------
+        `caput.config.CaputConfigError`
+            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
         self.observer = ephem.chime_observer() if observer is None else observer
         self.sky_obs = wrap_observer(self.observer)
@@ -306,7 +312,7 @@ class TransitRegridder(Regridder):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise PipelineConfigError(msg)
+            raise config.CaputConfigError(msg)
 
     def process(self, data):
         """Regrid visibility data onto a regular grid in hour angle.
@@ -873,59 +879,6 @@ class ConstructStackedBeam(task.SingleTask):
             return ipol1, ipol2
 
 
-class RegisterHolographyProcessed(RegisterProcessedFiles):
-    """Register a processed (fringestopped, regridded) holography transit in
-    the processed data database (at the moment this is a YAML file,
-    specified by the 'db_fname' config parameter).
-
-    Saves the transit to with the prefix specified in the  'output_root'
-    config parameter.
-    """
-
-    def process(self, output):
-        """Register and save a processed transit.
-
-        Parameters
-        ----------
-        output: TrackBeam
-            The transit to be saved. Should include attributes
-            'observation_id' and 'archivefiles.
-        """
-
-        # Create a tag for the output file name
-        tag = output.attrs["tag"] if "tag" in output.attrs else self._count
-
-        # Construct the filename
-        outfile = self.output_root + str(tag) + ".h5"
-
-        # Expand any variables in the path
-        outfile = path.expanduser(outfile)
-        outfile = path.expandvars(outfile)
-
-        self.write_output(outfile, output)
-
-        obs_id = output.attrs.get("observation_id", None)
-        files = output.attrs.get("archivefiles", None)
-
-        if output.distributed and output.comm.rank != 0:
-            pass
-        else:
-            # Add entry in database
-            # TODO: check for duplicates ?
-            append_product(
-                self.db_fname,
-                outfile,
-                self.product_type,
-                config=None,
-                tag=self.tag,
-                git_tags=self.git_tags,
-                holobs_id=obs_id,
-                archivefiles=files,
-            )
-
-        return None
-
-
 class HolographyTransitFit(TransitFit):
     """Fit a model to the transit.
 
@@ -1255,20 +1208,48 @@ class TransitStacker(task.SingleTask):
 
 class FilterHolographyProcessed(task.MPILoggedTask):
     """Filter holography transit DataIntervals produced by `io.QueryDatabase`
-    to exclude those that have already been registered in the database
-    (in the file specified by config parameter 'db_fname').
+    to exclude those already processed.
+
+    Attributes
+    ----------
+    processed_dir: str or list of str
+        Directory or list of directories to look in for processed files.
+    source: str
+        The name of the holography source (as used in the holography database).
     """
 
-    db_fname = config.Property(proptype=str)
+    processed_dir = config.Property(
+        proptype=lambda x: x if isinstance(x, list) else [x]
+    )
     source = config.Property(proptype=str)
 
     def setup(self):
-        """Read processed transits from database ('db_fname' parameter) and
-        and load list of observations from holography database.
-        """
+        """Get a list of existing processed files."""
 
-        # Read database of processed transits
-        self.proc_transits = get_proc_transits(self.db_fname)
+        # Find processed transit files
+        self.proc_transits = []
+        for processed_dir in self.processed_dir:
+            self.log.debug(
+                "Looking for processed transits in {}...".format(processed_dir)
+            )
+            # Expand path
+            processed_dir = path.expanduser(processed_dir)
+            processed_dir = path.expandvars(processed_dir)
+
+            try:
+                processed_files = listdir(processed_dir)
+            except FileNotFoundError:
+                processed_files = []
+            for fname in processed_files:
+                if not path.splitext(fname)[1] == ".h5":
+                    continue
+                with ContainerBase.from_file(
+                    fname, ondisk=True, distributed=False, mode="r"
+                ) as fh:
+                    obs_id = fh.attrs.get("observation_id", None)
+                    if obs_id is not None:
+                        self.proc_transits.append(obs_id)
+        self.log.debug("Found {:d} processed transits.".format(len(self.proc_transits)))
 
         # Query database for observations of this source
         hol_obs = None
@@ -1278,7 +1259,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         mpiutil.barrier()
 
     def next(self, intervals):
-        """Filter files and time intervals to exclude those already processed.
+        """Filter input files to exclude those already processed.
 
         Parameters
         ----------
@@ -1313,7 +1294,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
                         ephem.unix_to_datetime(start)
                     )
                 )
-            elif this_obs[0].id in [int(t["holobs_id"]) for t in self.proc_transits]:
+            elif this_obs[0].id in self.proc_transits:
                 self.log.warning(
                     "Already processed transit for {}. Skipping.".format(
                         ephem.unix_to_datetime(start)
@@ -1323,7 +1304,6 @@ class FilterHolographyProcessed(task.MPILoggedTask):
                 files += fi[0]
 
         self.log.info("Leaving next for task %s" % self.__class__.__name__)
-
         return files
 
 
@@ -1397,22 +1377,3 @@ def get_holography_obs(src):
         holography.HolographyObservation.source == db_src
     )
     return db_obs
-
-
-def get_proc_transits(db_fname):
-    """Read processed holography transits from the processed database
-    YAML file.
-
-    Parameters
-    ----------
-    db_fname: str
-        Path to YAML database file.
-    """
-
-    with open(db_fname, "r") as fh:
-        entries = yaml.load(fh)
-    entries_filt = []
-    for e in entries:
-        if isinstance(e, dict) and "holobs_id" in e.keys():
-            entries_filt.append(e)
-    return entries_filt

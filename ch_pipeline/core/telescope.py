@@ -17,12 +17,6 @@ Classes
 
     CHIME
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import logging
 
@@ -278,8 +272,7 @@ class CHIME(telescope.PolarisedTelescope):
 
     @property
     def feeds(self):
-        """Return a description of the feeds as a list of :class:`tools.CorrInput` instances.
-        """
+        """Return a description of the feeds as a list of :class:`tools.CorrInput` instances."""
 
         if self.input_sel is None:
             feeds = self._feeds

@@ -28,19 +28,11 @@ Generally you would want to use these tasks together. Starting with a
 :class:`SiderealRegridder` to grid onto each sidereal day, and then into
 :class:`SiderealStacker` if you want to combine the different days.
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-from past.builtins import basestring
-
-# === End Python 2/3 compatibility
 
 import gc
 import numpy as np
 
-from caput import pipeline, config
-from caput import mpiutil
+from caput import pipeline, config, weighted_median
 from ch_util import andata, ephemeris, tools
 from draco.core import task
 from draco.analysis import sidereal
@@ -97,7 +89,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         self.files = files
 
         filemap = None
-        if mpiutil.rank0:
+        if self.comm.rank == 0:
 
             se_times = get_times(self.files)
             se_csd = ephemeris.csd(se_times)
@@ -112,7 +104,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             filemap = [(day, dmap) for day, dmap in filemap if dmap.size > 1]
             filemap.sort()
 
-        self.filemap = mpiutil.world.bcast(filemap, root=0)
+        self.filemap = self.comm.bcast(filemap, root=0)
 
         # Set up frequency selection.
         if self.freq_physical:
@@ -223,6 +215,11 @@ class SiderealRegridder(sidereal.SiderealRegridder):
             Details of the observer, if not set default to CHIME.
         """
 
+        # Down mix requires the baseline distribution to work and so this simple
+        # wrapper around the draco regridder will not work if it is turned on
+        if self.down_mix and observer is None:
+            raise ValueError("A Telescope object must be supplied if down_mix=True.")
+
         # Set up the default Observer
         observer = ephemeris.chime_observer() if observer is None else observer
 
@@ -306,7 +303,6 @@ class SiderealMean(task.SingleTask):
             Sidereal stream containing only the mean(median) value.
         """
         from .flagging import daytime_flag, transit_flag
-        import weighted as wq
 
         # Make sure we are distributed over frequency
         sstream.redistribute("freq")
@@ -387,12 +383,14 @@ class SiderealMean(task.SingleTask):
                     vis = all_vis[ff, bb]
                     weight = all_weight[ff, bb]
 
-                    # wq.median will generate warnings and return NaN if the weights are all zero.
+                    # If all the weights are zero, this isn't well defined.
                     # Check for this case and set the mean visibility to 0+0j.
                     if np.any(weight):
-                        mu_vis[ff, bb, 0] = wq.median(
-                            vis.real, weight
-                        ) + 1.0j * wq.median(vis.imag, weight)
+                        mu_vis[ff, bb, 0] = weighted_median.weighted_median(
+                            vis.real.copy(), weight
+                        ) + 1.0j * weighted_median.weighted_median(
+                            vis.imag.copy(), weight
+                        )
                     else:
                         mu_vis[ff, bb, 0] = 0.0 + 0.0j
 
@@ -480,7 +478,7 @@ def get_times(acq_files):
     """
     if isinstance(acq_files, list):
         return np.array([get_times(acq_file) for acq_file in acq_files])
-    elif isinstance(acq_files, basestring):
+    elif isinstance(acq_files, str):
         # Load in file (but ignore all datasets)
         ad_empty = andata.AnData.from_acq_h5(acq_files, datasets=())
         start = ad_empty.timestamp[0]

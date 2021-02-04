@@ -15,12 +15,6 @@ Tasks
 
     RingMapMaker
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import numpy as np
 import scipy.constants
@@ -129,7 +123,10 @@ class RingMapMaker(task.SingleTask):
 
             pind[pp] = 2 * int(fi.pol == "S") + int(fj.pol == "S")
             xind[pp] = np.abs(fi.cyl - fj.cyl)
-            ysep[pp] = fi.pos[1] - fj.pos[1]
+
+            # TODO: don't use this internal property. This can probably wait
+            # until the RingMapMaker gets completely moved into draco
+            ysep[pp] = fi._pos[1] - fj._pos[1]
 
         abs_ysep = np.abs(ysep)
         min_ysep, max_ysep = np.percentile(abs_ysep[abs_ysep > 0.0], [0, 100])
@@ -153,7 +150,7 @@ class RingMapMaker(task.SingleTask):
         invvar = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
         weight = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
 
-        # If natural or uniform weighting was choosen, then calculate the
+        # If natural or uniform weighting was chosen, then calculate the
         # redundancy of the collated visibilities.
         if self.weight != "inverse_variance":
             redundancy = tools.calculate_redundancy(

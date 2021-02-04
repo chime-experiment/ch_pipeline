@@ -1,14 +1,7 @@
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
-
 import re
 import yaml
 import os
-from subprocess import check_call
+import subprocess as sp
 import tempfile
 
 # TODO: Python 3 workaround
@@ -60,10 +53,12 @@ class ProcessingType(object):
 
         # Write default configuration into directory
         with (self.revconfig_path).open("w") as fh:
-            dump = yaml.safe_dump(
-                self.default_params, encoding="utf-8", allow_unicode=True
+            yaml.safe_dump(
+                self.default_params,
+                encoding="utf-8",
+                allow_unicode=True,
+                stream=fh,
             )
-            fh.write(str(dump))  # TODO: Python 3 - str needed
         with (self.jobtemplate_path).open("w") as fh:
             fh.write(self.default_script)
 
@@ -341,9 +336,10 @@ class ProcessingType(object):
         """Jobs available to run."""
 
         waiting, running = self.queued()
-        pending = set(self.available()).difference(self.ls(), waiting, running)
+        not_pending = set(self.ls()) | set(waiting) | set(running)
+        pending = [job for job in self.available() if job not in not_pending]
 
-        return sorted(list(pending))
+        return pending
 
 
 def find_venv():
@@ -363,7 +359,6 @@ def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
 
     import os
-    import tempfile
 
     with tempfile.NamedTemporaryFile("w+") as fh:
         fh.write(script)
@@ -390,9 +385,6 @@ def slurm_jobs(user=None):
     jobs : list
         List of dictionaries giving the jobs state.
     """
-
-    import subprocess as sp
-
     if user is None:
         import getpass
 
@@ -456,6 +448,53 @@ def slurm_jobs(user=None):
             entries.append(d)
 
     return entries
+
+
+def slurm_fairshare(account, user=None):
+    """Get the LevelFS for the current user and account.
+
+    Parameters
+    ----------
+    account : str
+        The account to check.
+    user : str, optional
+        The user on the account to check for.
+
+    Returns
+    -------
+    account_fs : str
+        The LevelFS for the whole account, i.e. the priority relative to all other
+        accounts on the cluster.
+    user_fs : str
+        The LevelFS for the user, i.e. the priority compared to all other users on
+        the account.
+    """
+    cmd = ["sshare", "-A", account, "-o", "LevelFS", "-n"]
+
+    if user is not None:
+        cmd += ["-u", user]
+
+    # Call sshare to get the level fairshares
+    try:
+        process = sp.Popen(
+            cmd,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            shell=False,
+            universal_newlines=True,
+        )
+        proc_stdout, proc_stderr = process.communicate()
+        lines = proc_stdout.split("\n")
+    except OSError as e:
+        raise RuntimeError('Failure running "sshare".') from e
+
+    # Filter empty lines
+    lines = [line for line in lines if line]
+
+    if len(lines) != 2:
+        raise RuntimeError('Could not parse output from "sshare".')
+
+    return tuple(float(line) for line in lines)
 
 
 def all_subclasses(cls):
