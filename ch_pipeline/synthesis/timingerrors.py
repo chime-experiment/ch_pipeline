@@ -206,3 +206,12 @@ class TimingErrors(gain.BaseGains):
         self._prev_time = time
 
         return gain_phase
+
+
+class SiderealTimingErrors(TimingErrors, gain.SiderealGains):
+    """Generate sidereal timing errors gains on a sidereal grid.
+
+    See the documentation for `TimingErrors` and `SiderealGains` for more detail.
+    """
+
+    pass
