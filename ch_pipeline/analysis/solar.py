@@ -7,7 +7,6 @@ into a solar day; solar calibration; and sun excision from sidereal stream.
 
 from datetime import datetime
 import numpy as np
-import ephem
 
 from caput import config
 from caput import mpiutil
@@ -269,7 +268,9 @@ class SolarCalibration(task.SingleTask):
         ra = np.concatenate([ra[slc[0]] for slc in time_slice])
 
         # Get ra, dec, alt of sun
-        sun_pos = np.array([ra_dec_of(ephem.Sun(), t) for t in time])
+        sun_pos = np.array(
+            [ra_dec_of(ephemeris.skyfield_wrapper.ephemeris["sun"], t) for t in time]
+        )
 
         # Convert from ra to hour angle
         sun_pos[:, 0] = np.radians(ra) - sun_pos[:, 0]
@@ -365,7 +366,7 @@ class SolarCalibration(task.SingleTask):
             # Estimate peak RA
             i_transit = np.argmin(np.abs(sun_pos[:, 0]))
 
-            body = ephem.Sun()
+            body = ephemeris.skyfield_wrapper.ephemeris["sun"]
             obs = ephemeris._get_chime()
             obs.date = ephemeris.unix_to_ephem_time(time[i_transit])
             body.compute(obs)
@@ -521,7 +522,9 @@ class SunClean(task.SingleTask):
 
         # Get position of sun at every time sample
         times = ephemeris.csd_to_unix(csd)
-        sun_pos = np.array([ra_dec_of(ephem.Sun(), t) for t in times])
+        sun_pos = np.array(
+            [ra_dec_of(ephemeris.skyfield_wrapper.ephemeris["sun"], t) for t in times]
+        )
 
         # Get hour angle and dec of sun, in radians
         ha = 2 * np.pi * (ra / 360.0) - sun_pos[:, 0]
