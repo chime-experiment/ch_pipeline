@@ -11,6 +11,7 @@ Tasks
 
 
 import numpy as np
+from mpi4py import MPI
 
 from caput import config, mpiarray, mpiutil
 from draco.synthesis import gain
@@ -45,35 +46,42 @@ class TimingErrors(gain.BaseGains):
         Size of fluctuations for delay fluctuations (s).
     sim_type: string, optional
         Timing error simulation type. List of allowed options are `relative`
-        (non common-mode delay errors), `common_mode_cyl` (common-mode within
-        a cylinder) and `common_mode_iceboard` (common-mode within an iceboard)
-    common_mode_type : string, optional
-        Options are 'random' and 'sinusoidal' if sim_type `common_mode_cyl` is chosen.
+        (non common-mode delay errors), `commonmode` (common-mode within number of
+        channels nchannels)
+    nchannels : int
+        Number of channels that share a delay error. Default: 128.
+    commonmode_type : string, optional
+        Options are 'random' and 'sinusoidal' if sim_type `commonmode` is chosen.
+        'Sinusoidal' variations are patterned after CHIME's chiller cycling (doclib
+        #704) and exclusively commonmode to huts.
     sinusoidal_period : list, optional
-        Specify the periods of the sinusoids for each cylinder. Needs to be specified
-        when simulating `sinusoidal` `common_mode_cyl` timing errors.
+        Specify the periods of the sinusoids for each hut. Needs to be specified
+        when simulating `sinusoidal` timing errors.
+    ncyl : int
+        Number of cylinders in this simulation. Default : 2.
     """
-    ndays = config.Property(proptype=float, default=733)
     corr_length_delay = config.Property(proptype=float, default=3600)
     sigma_delay = config.Property(proptype=float, default=1e-12)
 
     sim_type = config.enum(
-        ["relative", "common_mode_cyl", "common_mode_iceboard"], default="relative"
+        ["relative", "commonmode"], default="relative"
     )
 
-    common_mode_type = config.enum(["random", "sinusoidal"], default="random")
+    nchannels = config.Property(proptype=int, default=128)
+
+    commonmode_type = config.enum(["random", "sinusoidal"], default="random")
 
     # Default periods of chime specific timing jitter with the clock
     # distribution system informed by data see doclib 704
     sinusoidal_period = config.Property(proptype=list, default=[333, 500])
+    ncyl = config.Property(proptype=int, default=2)
+
+    ndays = config.Property(proptype=float, default=1)
 
     _prev_delay = None
     _prev_time = None
 
     amp = False
-
-    nchannel = 16
-    ncyl = 2
 
     def _generate_phase(self, time):
         ntime = len(time)
@@ -101,100 +109,95 @@ class TimingErrors(gain.BaseGains):
                 / np.sqrt(self.ndays)
             )
 
-        if self.sim_type == "common_mode_cyl":
-            n_realisations = 1
+        if self.sim_type == "commonmode":
             ninput = self.ninput_global
 
-            # Generates as many random delay errors as there are cylinders
-            if self.comm.rank == 0:
-                if self.common_mode_type == "sinusoidal":
-                    P1 = self.sinusoidal_period[0]
-                    P2 = self.sinusoidal_period[1]
-                    omega1 = 2 * np.pi / P1
-                    omega2 = 2 * np.pi / P2
+            if ninput % self.nchannels != 0:
+                raise ValueError("Total number of inputs must be devisable by number of channels that have commonmode timing errors")
 
-                    delay_error = (
-                        self.sigma_delay
-                        * (np.sin(omega1 * time) - np.sin(omega2 * time))[np.newaxis, :]
-                    )
+            n_realisations = ninput // self.nchannels
 
-                if self.common_mode_type == "random":
+            comm = MPI.COMM_WORLD
+
+            # Check if random or sinusoidal
+            if self.commonmode_type == "random":
+
+                if comm.rank == 0:
                     delay_error = gain.generate_fluctuations(
                         time,
                         cf_delay,
                         n_realisations,
                         self._prev_time,
                         self._prev_delay,
+                        )
+
+                else:
+                    delay_error = None
+
+                self.delay_error = comm.bcast(delay_error, root=0)
+
+                phase = (
+                    2.0
+                    * np.pi
+                    * freq[:, np.newaxis, np.newaxis]
+                    * 1e6
+                    * self.delay_error[np.newaxis, :, :]
+                    / np.sqrt(self.ndays)
                     )
-            else:
-                delay_error = None
 
-            # Broadcast to other ranks
-            self.delay_error = self.comm.bcast(delay_error, root=0)
+                gain_phase = mpiarray.MPIArray((nfreq, ninput, ntime), axis=1, dtype=complex)
 
-            # Split frequencies to processes.
-            lfreq, sfreq, efreq = mpiutil.split_local(nfreq)
+                gain_phase[:] = 0.0
 
-            # Create an array to hold all inputs, which are common-mode within
-            # a cylinder
-            gain_phase = np.zeros((lfreq, ninput, ntime), dtype=complex)
-            # Since we have 2 cylinders populate half of them with a delay)
-            # TODO: generalize this for 3 or even 4 cylinders in the future.
-            gain_phase[:, ninput // self.ncyl :, :] = (
-                2.0
-                * np.pi
-                * freq[sfreq:efreq, np.newaxis, np.newaxis]
-                * 1e6
-                * self.delay_error[np.newaxis, :, :]
-                / np.sqrt(self.ndays)
-            )
+                for il, ig in gain_phase.enumerate(axis=1):
+                    bi = int(ig / self.nchannels)
+                    gain_phase[:, il] = phase[:, bi]
 
-            gain_phase = mpiarray.MPIArray.wrap(gain_phase, axis=0, comm=self.comm)
-            # Redistribute over input to match rest of the code
-            gain_phase = gain_phase.redistribute(axis=1)
-            gain_phase = gain_phase.view(np.ndarray)
+                gain_phase = gain_phase.view(np.ndarray)
 
-        if self.sim_type == "common_mode_iceboard":
-            nchannel = self.nchannel
-            ninput = self.ninput_global
-            # Number of channels on a board
-            nboards = ninput // nchannel
+            elif self.commonmode_type == "sinusoidal":
+                P1 = self.sinusoidal_period[0]
+                P2 = self.sinusoidal_period[1]
+                omega1 = 2 * np.pi / P1
+                omega2 = 2 * np.pi / P2
 
-            # Generates as many random delay errors as there are iceboards
-            if self.comm.rank == 0:
-                delay_error = gain.generate_fluctuations(
-                    time, cf_delay, nboards, self._prev_time, self._prev_delay
-                )
-            else:
-                delay_error = None
+                if comm.rank == 0:
+                    delay_error = (
+                        self.sigma_delay
+                        * (np.sin(omega1 * time) - np.sin(omega2 * time))[np.newaxis, :]
+                        )
+                else:
+                    delay_error = None
 
-            # Broadcast to other ranks
-            self.delay_error = self.comm.bcast(delay_error, root=0)
+                self.delay_error = comm.bcast(delay_error, root=0)
 
-            # Calculate the corresponding phase by multiplying with frequencies
-            phase = (
-                2.0
-                * np.pi
-                * freq[:, np.newaxis, np.newaxis]
-                * 1e6
-                * self.delay_error[np.newaxis, :]
-                / np.sqrt(self.ndays)
-            )
+                # If even number of cylinders, put half of the channels in one receiving hut
+                if self.ncyl % 2 == 0:
+                    nchannels = ninput // 2
+                # Otherwise put 1/3 channels in one receiving hut.
+                else:
+                    nchannels = ninput // 3
 
-            # Create an array to hold all inputs, which are common-mode within
-            # one iceboard
-            gain_phase = mpiarray.MPIArray(
-                (nfreq, ninput, ntime), axis=1, dtype=np.complex128, comm=self.comm
-            )
-            gain_phase[:] = 0.0
+                # Split frequencies to processes.
+                lfreq, sfreq, efreq = mpiutil.split_local(nfreq)
 
-            # Loop over inputs and and group common-mode phases on every board
-            for il, ig in gain_phase.enumerate(axis=1):
-                # Get the board number bi
-                bi = int(ig / nchannel)
-                gain_phase[:, il] = phase[:, bi]
+                # Create and array to hold all inputs, which are common-mode within
+                # a cylinder
+                gain_phase = np.zeros((lfreq, ninput, ntime), dtype=complex)
 
-            gain_phase = gain_phase.view(np.ndarray)
+                gain_phase[:, nchannels:, :] = (
+                    2.0
+                    * np.pi
+                    * freq[sfreq:efreq, np.newaxis, np.newaxis]
+                    * 1e6
+                    * self.delay_error[np.newaxis, :, :]
+                    / np.sqrt(self.ndays)
+                    )
+
+                gain_phase = mpiarray.MPIArray.wrap(gain_phase, axis=0)
+                # Redistribute over input to match rest of the code
+                gain_phase = gain_phase.redistribute(axis=1)
+                gain_phase = gain_phase.view(np.ndarray)
 
         self._prev_delay = self.delay_error
         self._prev_time = time
