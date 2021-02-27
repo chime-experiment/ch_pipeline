@@ -60,6 +60,10 @@ class RingMapMaker(task.SingleTask):
 
     single_beam = config.Property(proptype=bool, default=False)
 
+    #(Xin) specify separation of cylinders
+    #sep = config.Property(proptype=int, default=0)
+    sep = config.Property(proptype=list, default=[0,1,2,3])
+
     def setup(self, tel):
         """Set the Telescope instance to use.
 
@@ -164,7 +168,11 @@ class RingMapMaker(task.SingleTask):
                 w = (ssw[:, vis_ind] > 0.0).astype(np.float32)
                 w *= redundancy[np.newaxis, vis_ind]
 
-            if x_ind != 0 or not self.exclude_intracyl:
+            #if x_ind != 0 or not self.exclude_intracyl:
+            #(Xin) select cylinder sep
+            #if x_ind != 0 or not self.exclude_intracyl:
+            #if x_ind == self.sep:
+            if x_ind in self.sep:
                 vis[:, p_ind, :, x_ind, y_ind] = ssv[:, vis_ind]
                 invvar[:, p_ind, :, x_ind, y_ind] = ssw[:, vis_ind]
                 weight[:, p_ind, :, x_ind, y_ind] = w
@@ -243,8 +251,11 @@ class RingMapMaker(task.SingleTask):
             # for co-pol we take twice the real part
             # to complete sum over negative baselines
             copol_ind = [0, 3]
-            rmm[:, copol_ind, lfi] = 2 * bfm[copol_ind].real.transpose(2, 0, 1, 3)
-            rmb[:, copol_ind, lfi] = 2 * sb[copol_ind].real.transpose(2, 0, 1, 3)
+            # (Xin)
+            rmm[:, copol_ind, lfi] = 2 * bfm[copol_ind].transpose(2, 0, 1, 3)
+            rmb[:, copol_ind, lfi] = 2 * sb[copol_ind].transpose(2, 0, 1, 3)
+            #rmm[:, copol_ind, lfi] = 2 * bfm[copol_ind].real.transpose(2, 0, 1, 3)
+            #rmb[:, copol_ind, lfi] = 2 * sb[copol_ind].real.transpose(2, 0, 1, 3)
             # for cross-pol we save real and imaginary parts of complex map formed
             # by combining positive and negative baselines (which are in the other index)
             xpol_ind = [1, 2]
