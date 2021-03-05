@@ -38,8 +38,8 @@ from chimedb.core import connect as connect_database
 from draco.core import task, io
 from draco.util import regrid
 from draco.analysis.transform import Regridder
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
-from draco.util.tools import invert_no_zero
+from draco.core.containers import ContainerBase, SiderealStream, SystemSensitivity, TimeStream, TrackBeam
+from draco.util.tools import invert_no_zero, calculate_redundancy
 
 from ..core.containers import TransitFitParams
 from .calibration import TransitFit, GainFromTransitFit
@@ -1297,6 +1297,293 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         self.log.info("Leaving next for task %s" % self.__class__.__name__)
         return files
 
+class ComputeHolographicSensitivity(task.SingleTask):
+
+    nan_check = config.Property(default=False, proptype=bool)
+    nan_skip = config.Property(default=False, proptype=bool)
+    nan_dump = config.Property(default=False, proptype=bool)
+
+    def setup(self, pm):
+        """ Load the telescope instance.
+ 
+        Parameters
+        ----------
+        pm : drift.manager.ProductManager
+            The on-disk telescope model containing layout information.
+
+        """
+        self.telescope = io.get_telescope(pm)
+        self._POL_DICT = {"XX" : 1, "XY" : 2, "YX" : 2, "YY" : 0} # fixed on 8/18/2020 10:25 PM to match measured convention
+        self._26m_POL = [1225, 1521]
+
+    def process(self, hol_data, ch_data): 
+	# Distribute both datasets over frequency. 
+        hol_data.redistribute("freq")
+        ch_data.redistribute("freq")
+	
+	# Obtain the shape of the holographic visibilities and load the product map. 
+        nfreq, nprod, ntime = hol_data.vis.local_shape
+        npol = 2 # 2 co-pol products
+
+        prodmap_h = hol_data.prod[:]
+
+	# Get the start and end times for the holography dataset and get the overlapping portion of the chimestack. 
+        hol_start, hol_stop = hol_data.time[[0, -1]]
+        self.log.warning("The start and stop times for the holography are {}->{}".format(hol_start, hol_stop)) # debug
+        timerange = ((ch_data.time[:] > hol_start) & (ch_data.time[:] < hol_stop))
+        self.log.warning("Overlap is {}".format(np.sum(timerange))) # debug
+
+        # Dereference the two visibility datasets 
+        vis_ho = hol_data.vis[:].view(np.ndarray)
+        vis_st = ch_data.vis[:].view(np.ndarray)
+        self.log.warning("We were able to get the data shape and some numbers {}, {}, {}, max {} ".format(nfreq, nprod, ntime, np.max(vis_ho[0, 0, :].real)))
+        self.log.warning("We were able to get the stack shape and some numbers {}, {}, {}, max {} ".format(*(ch_data.vis.local_shape), np.max(vis_st[0, 0, :].real)))
+
+        # Get the gain dataset from the chimestack to calibrate the holographic weights
+        # Also get the fraction of packets lost 
+        gain = ch_data.gain[:].view(np.ndarray)
+        frac_lost = ch_data.flags["frac_lost"][:]
+
+	# Get the flags for the two co-pol products (we ignore x-pol entirely for flagging purposes).
+        copols = ComputeHolographicSensitivity._get_copols(prodmap_h)
+
+        # Calculate the redundancy of the chimestack products
+        inpflg = ch_data.input_flags[:].view(np.ndarray)
+
+        stack_cnt = calculate_redundancy(
+                inpflg.astype(np.float32),
+                ch_data.prod,
+                ch_data.reverse_map["stack"]["stack"],
+                ch_data.stack.size,
+	)
+
+	# Derefence the weight dataset 
+        weight = hol_data.weight[:].view(np.ndarray)	
+
+	# Average the weight and visibility datasets down to match chimestack cadence 
+        rwe = np.array([(weight[..., i] + weight[..., i+1]) / 2. for i in range(0, ntime-1, 2)])
+        rwe = np.swapaxes(np.swapaxes(rwe, 0, 2), 1, 0)
+
+        rvi = np.array([(vis_ho[..., i].real + vis_ho[..., i+1].real) / 2. for i in range(0, ntime-1, 2)])
+        rvi = np.swapaxes(np.swapaxes(rvi, 0, 2), 1, 0)
+
+        # Select only the stack data within the holography time range
+        vis_st = vis_st[..., timerange]
+        gain = gain[..., timerange]
+        stack_cnt = stack_cnt[..., timerange]
+        frac_lost = frac_lost[..., timerange]
+
+        ntreduced = vis_st.shape[-1]
+
+        # Feels hacky, but currently necessary to resolve the shapes exactly
+        if ntreduced > rwe.shape[-1]:
+            vis_st = vis_st[..., :rwe.shape[-1]]
+            gain = gain[..., :rwe.shape[-1]]
+            stack_cnt = stack_cnt[..., :rwe.shape[-1]]
+            frac_lost = frac_lost[..., :rwe.shape[-1]]
+            nt = rwe.shape[-1]
+        elif ntreduced < rwe.shape[-1]:
+            rwe = rwe[..., :ntreduced]
+            rvi = rvi[..., :ntreduced]
+            nt = ntreduced
+        else:
+            nt = np.sum(timerange)
+
+        # Invert the weights, flag for only the positive weights
+        inv_weight = tools.invert_no_zero(rwe) 
+        wflag = (rwe > 0.0)
+
+        # Initialize the variance and counter containers
+        var =  np.zeros((nfreq, npol, nt), dtype=np.float32) 
+        counter = np.zeros((nfreq, npol, nt), dtype=np.float32) 
+
+        for ff in range(nfreq):
+
+            for ipol in range(npol):
+
+                inputs = np.array([ina if ina != self._26m_POL[ipol] else inb for (ina, inb) in prodmap_h[copols[ipol]]]) 
+
+                self.log.warning("Pol index {} and over {} baselines ".format(ipol, np.sum(copols[ipol])))
+                self.log.warning("Weight flag -> {} good elements".format(np.sum(wflag)))
+                self.log.warning("Gain dataset on these inputs {}".format(gain[ff, inputs, :]))
+
+                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, copols[ipol]] * (np.abs(gain[ff, inputs, :]) ** 2) * inv_weight[ff, copols[ipol]], axis=0)
+                counter[ff, ipol, :] = np.sum(wflag[ff, copols[ipol]], axis=0)
+
+	# Normalize
+        var *= tools.invert_no_zero(counter ** 2)
+
+	# To obtain the radiometric estimate, get the stacked CHIME autocorrelations
+        prodstack = ch_data.prod[ch_data.stack["prod"]]
+        input_a, input_b = prodstack["input_a"], prodstack["input_b"]
+
+        nfreq_st, nstack, _ = ch_data.vis.local_shape
+
+        auto_stack = vis_st[:].real
+        auto_flag_ch = (input_a == input_b)
+        auto_stack_id = np.flatnonzero(auto_flag_ch)
+        auto_inputs = prodstack[auto_stack_id]["input_a"]
+
+        auto_pol = np.array([self.telescope.polarisation[ai] for ai in auto_inputs])
+
+        hol_auto_id = [2450, 3568] # Y, X 
+        hol_auto_pol = ["Y", "X"]
+
+	# Limit the chimestack data to the holography timerange (debug)
+        self.log.warning("Holography start and stop times: {}->{}".format(hol_start, hol_stop))
+        self.log.warning("Chime stack start and stop times: {}->{}".format(ch_data.time[0], ch_data.time[-1]))
+        if np.sum(timerange)  == 0:
+            msg = "The holography and chimestack datasets you selected do not overlap in time. Aborting..."
+            self.log.warning(msg)
+            #raise ValueError(msg)
+
+        # Initialize the radiometer and counter
+        radiometer = np.zeros((nfreq_st, npol, nt), dtype=np.float32)	
+        radiometer_counter = np.zeros((nfreq_st, npol, nt), dtype=np.float32)
+
+        for ii, (cha, chap) in enumerate(zip(auto_stack_id, auto_pol)):
+
+            for jj, (hoa, hoap) in enumerate(zip(hol_auto_id, hol_auto_pol)):
+
+                try:
+                    pp = self._POL_DICT[chap + hoap]
+                except KeyError:
+                    msg = "Unknown polarization product: {}{}".format(chap, hoap)		
+                    self.log.warning(msg)
+
+                if pp == 2: # Ignore x-pol for now
+                    continue
+
+                self.log.warning("Shapes: {}, {}, {}".format(stack_cnt[cha].shape, auto_stack[:, cha, :].shape, rvi[:, hoa, :].shape))
+                radiometer[:, pp, :] += stack_cnt[cha] * auto_stack[:, cha, :] * rvi[:, hoa, :]
+                radiometer_counter[:, pp, :] += stack_cnt[cha] 
+                self.log.warning("Added {} to rad_counter for stack_id {}".format(stack_cnt[cha], cha))
+
+        tint = np.abs(np.median(np.diff(hol_data.time[:])))
+        dnu = np.abs(np.median(np.diff(hol_data.freq[:]))) * 1e6
+
+        nint = (tint * dnu) * (1.0 - frac_lost.astype(np.float32))
+
+        radiometer *= tools.invert_no_zero(nint[:, np.newaxis, :] * (radiometer_counter ** 2))
+        self.log.warning("Radiometer {}".format(np.max(radiometer)))
+
+        times = np.linspace(hol_start, hol_stop, nt) # Hacky for now
+
+        metrics = SystemSensitivity(
+            pol=np.array([b"YY", b"XX"]),
+            time=times,
+            axes_from=hol_data,
+            attrs_from=hol_data,
+            comm=hol_data.comm,
+            distributed=hol_data.distributed,
+	)
+
+        metrics.redistribute("freq")
+        metrics.radiometer[:] = np.sqrt(2 * radiometer)
+        metrics.measured[:] = np.sqrt(var)
+	
+        metrics.weight[:] = counter
+        #metrics.frac_lost[:] = frac_lost
+
+        self.log.info("Wrapping up...")
+
+        return metrics
+
+    @staticmethod
+    def _get_copols(prod_map):
+        """Return two lists of indices into the `prod` axis that represent 
+        respectively the two sets of co-polarization products for a holography
+        dataset. 
+
+        Parameters
+        ----------
+        prod_map : np.ndarray [nprod]
+            The CHIME-26m products represented by the corresponding
+            index of the holographic CorrData `prod` axis.  
+
+        Returns
+        -------
+        copols : np.ndarray [nprod]
+            Masks representing, respectively, the co-polarization products
+            for each polarization. 
+
+        """
+        # This implementation feels pretty hacky. May need to explore if there are better ways. 
+        input_a, input_b = prod_map["input_a"], prod_map["input_b"]
+
+        Y_26m_flag1, Y_26m_flag2 = ((input_a == 1225),  (input_b == 1225))
+        X_26m_flag1, X_26m_flag2 = ((input_a == 1521),  (input_b == 1521))
+
+        ina_pol = np.array(["Y" if ((ina // 256) % 2 == 0) else "X" for ina in input_a])
+        inb_pol = np.array(["Y" if ((inb // 256) % 2 == 0) else "X" for inb in input_b])
+
+        ina_pol[Y_26m_flag1] = "Y"
+        ina_pol[X_26m_flag1] = "X"
+        inb_pol[Y_26m_flag2] = "Y"
+        inb_pol[X_26m_flag2] = "X"
+
+        polprods = np.array([pola + polb for (pola, polb) in zip(ina_pol, inb_pol)])
+        YY = np.flatnonzero((polprods == "YY"))
+        XX = np.flatnonzero((polprods == "XX"))
+
+        copols = np.zeros((2, len(YY) - 1), dtype=np.int)
+        copols[0] = YY[YY != 2450]
+        copols[1] = XX[XX != 3568]
+
+        return copols 
+
+class ApplyRFIMask(task.SingleTask):
+
+    # Mask type
+    # Mask out entire frequencies, if most time samples are bad
+    majority_mask = config.Property(default=True, proptype=bool)
+
+    # Apply the mask with full time resolution, may not interact with fit well
+    full_mask = config.Property(default=False, proptype=bool)
+
+    def process(self, transit, mask):
+
+        transit.redistribute("freq")
+
+        beam = transit.beam[:].view(np.ndarray)
+        weight = transit.weight[:].view(np.ndarray)
+        ma = (~(mask.mask[:].view(np.ndarray))).astype(np.float32)
+
+        nfreq = transit.beam.local_shape[0]
+        npol = transit.beam.local_shape[1]
+        ninput = transit.beam.local_shape[2]
+        npix = transit.beam.local_shape[3]
+
+        local_slice = slice(
+            transit.beam.local_offset[0],
+            transit.beam.local_offset[0] + nfreq
+        )
+
+        if self.majority_mask:
+
+             rfimask1d = np.median(ma, axis=1)
+
+             beam *= rfimask1d[local_slice, None, None, None] 
+
+        if self.full_mask:
+
+             bb = np.mean(abs(beam.reshape((nfreq, npol*ninput, npix))), axis=1) 
+
+             non0 = np.where(bb != 0)[-1]
+             st, en = non0.min(), non0.max()
+
+             drange = 2 * (en - st)
+
+             reducedmask = np.array([(ma[:, ii] + ma[:, ii + 1]) / 2 for ii in range(0, drange, 2)])
+             reducedmask[reducedmask < 1.0] = 0.0
+
+             beam[..., st:en] *= reducedmask.T[local_slice, None, None, :]
+             weight[..., st:en] *= reducedmask.T[local_slice, None, None, :]
+
+        transit.beam[:] = beam
+        transit.weight[:] = weight
+
+        return transit
 
 def wrap_observer(obs):
     """Wrap a `ch_util.ephemeris.chime_observer()` with the
