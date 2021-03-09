@@ -153,18 +153,26 @@ pipeline:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
 
-    # Calculate the RFI mask from the sensitivity data
-    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
-      in: sensitivity_day
+    # Calculate the RFI mask from the autocorrelation data
+    - type: ch_pipeline.analysis.flagging.RFIFilter
+      in: tstream_day
       out: rfimask
       params:
-        include_pol: ["XY"]
+        stack: true
+        flag1d: false
+        rolling: true
+        apply_static_mask: true
+        keep_auto: true
+        keep_ndev: true
+        freq_width: 10.0
+        time_width: 420.0
+        threshold_mad: 6.0
         save: true
         output_name: "rfi_mask_{{tag}}.h5"
         nan_check: false
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: ch_pipeline.analysis.flagging.ApplyCorrInputMask
       in: [tstream_day, rfimask]
       out: tstream_day_rfi
 
@@ -196,10 +204,16 @@ pipeline:
         save: true
         output_name: "sstream_{{tag}}.h5"
 
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream
+      out: sstream_mask
+      params:
+          stack_ind: 66
+
     # Make a map of the full dataset
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream
+      in: sstream_mask
       out: ringmap
       params:
         single_beam: true
@@ -213,7 +227,7 @@ pipeline:
     # cross talk and emphasis point sources
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstream
+      in: sstream_mask
       out: ringmapint
       params:
         single_beam: true
@@ -228,7 +242,7 @@ pipeline:
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream
+      in: sstream_mask
       out: sstream_inter
       params:
         share: vis
@@ -254,7 +268,7 @@ pipeline:
 
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
-      in: sstream
+      in: sstream_mask
       out: sstream_mask1
 
     - type: ch_pipeline.analysis.flagging.MaskMoon
