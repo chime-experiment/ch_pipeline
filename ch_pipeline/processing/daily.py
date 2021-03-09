@@ -194,13 +194,12 @@ pipeline:
       out: tstream_day_smoothweight
 
     # Regrid the data onto a regular grid in sidereal time
-    - type: draco.analysis.sidereal.SiderealRegridderCubic
+    - type: draco.analysis.sidereal.SiderealRegridder
       requires: manager
       in: tstream_day_smoothweight
       out: sstream
       params:
         samples: 4096
-        weight: natural
         save: true
         output_name: "sstream_{{tag}}.h5"
 
