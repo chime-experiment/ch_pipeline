@@ -135,7 +135,15 @@ class ApplyTimingCorrection(task.SingleTask):
 
         # Apply the timing correction
         tcorr.apply_timing_correction(
-            tstream, time=timestamp, freq=freq, input_flags=input_flags, copy=False
+            tstream.vis.local_array[:],
+            time=timestamp,
+            freq=freq,
+            prod=timestream.index_map["prod"][:],
+            input=timestream.input[:],
+            stack=timestream.index_map["stack"][:],
+            reverse_stack=timestream.reverse_map["stack"][:],
+            input_flags=input_flags,
+            copy=False,
         )
 
         return tstream
