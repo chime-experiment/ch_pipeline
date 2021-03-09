@@ -261,7 +261,7 @@ pipeline:
       requires: [manager, sstream_inter]
       in: source_catalog
       params:
-        timetrack: 60.0
+        timetrack: 300.0
         save: true
         output_name: "sourceflux_{{tag}}.h5"
 
