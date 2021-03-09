@@ -203,8 +203,16 @@ pipeline:
         save: true
         output_name: "sstream_{{tag}}.h5"
 
-    - type: draco.analysis.flagging.RFIMask
+    # Flag out low weight samples to remove transient RFI artifacts at the edges of
+    # flagged regions
+    - type: draco.analysis.flagging.ThresholdVisWeight
       in: sstream
+      out: sstream_threshold
+      params:
+          relative_threshold: 0.5
+
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream_threshold
       out: sstream_mask
       params:
           stack_ind: 66
