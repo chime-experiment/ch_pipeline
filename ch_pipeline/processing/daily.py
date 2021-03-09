@@ -378,8 +378,8 @@ class DailyProcessing(base.ProcessingType):
         ),
         "catalogs": (
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_CGRaBS.h5",
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5",
         ),
         "blend_stack_file": (
             "/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/"
