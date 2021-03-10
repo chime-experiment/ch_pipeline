@@ -218,7 +218,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
         return
 
     number_in_queue = len(revision.queued()[0])
-    number_to_submit = min(number, max_number - number_in_queue)
+    number_to_submit = max(min(number, max_number - number_in_queue), 0)
 
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
