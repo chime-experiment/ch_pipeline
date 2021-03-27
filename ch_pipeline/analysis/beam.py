@@ -1316,36 +1316,47 @@ class ComputeHolographicSensitivity(task.SingleTask):
         self._POL_DICT = {"XX" : 1, "XY" : 2, "YX" : 2, "YY" : 0} # fixed on 8/18/2020 10:25 PM to match measured convention
         self._26m_POL = [1225, 1521]
 
-    def process(self, hol_data, ch_data): 
+    def process(self, transit, ch_data): 
 	# Distribute both datasets over frequency. 
-        hol_data.redistribute("freq")
+        transit.redistribute("freq")
         ch_data.redistribute("freq")
 	
 	# Obtain the shape of the holographic visibilities and load the product map. 
-        nfreq, nprod, ntime = hol_data.vis.local_shape
-        npol = 2 # 2 co-pol products
+        nfreq, npol, ninputs, ntime = transit.beam.local_shape
+        index_map = transit.index_map
 
-        prodmap_h = hol_data.prod[:]
+        channels = index_map["input"]["chan_id"][:]
+        ha = index_map["pix"]["phi"][:]
 
 	# Get the start and end times for the holography dataset and get the overlapping portion of the chimestack. 
-        hol_start, hol_stop = hol_data.time[[0, -1]]
-        self.log.warning("The start and stop times for the holography are {}->{}".format(hol_start, hol_stop)) # debug
-        timerange = ((ch_data.time[:] > hol_start) & (ch_data.time[:] < hol_stop))
+        unix_time = ephem.csd_to_unix(ephem.csd(transit.attrs["transit_time"]) + ha / 360.) 
+
+        weight_h = transit.weight[:].view(np.ndarray)
+        wflag = (weight_h > 0.0)
+        valid_pix = np.where(wflag)[-1]
+        start_h, stop_h = valid_pix.min(), valid_pix.max() 
+        nt = stop_h - start_h
+        overlap_slice = slice(0, 2 * nt, 2)
+        
+        #self.log.warning("The start and stop times for the holography are {}->{}".format(hol_start, hol_stop)) # debug
+        timerange = ((ch_data.time[:] > unix_time[start_h]) & (ch_data.time[:] < unix_time[stop_h]))
         self.log.warning("Overlap is {}".format(np.sum(timerange))) # debug
 
         # Dereference the two visibility datasets 
-        vis_ho = hol_data.vis[:].view(np.ndarray)
-        vis_st = ch_data.vis[:].view(np.ndarray)
-        self.log.warning("We were able to get the data shape and some numbers {}, {}, {}, max {} ".format(nfreq, nprod, ntime, np.max(vis_ho[0, 0, :].real)))
-        self.log.warning("We were able to get the stack shape and some numbers {}, {}, {}, max {} ".format(*(ch_data.vis.local_shape), np.max(vis_st[0, 0, :].real)))
+        vis_h = transit.beam[:].view(np.ndarray)
+        vis_s = ch_data.vis[:].view(np.ndarray)
+
+        vis_h = vis_h[..., start_h:stop_h]
+        vis_s = vis_s[..., timerange][..., overlap_slice]
 
         # Get the gain dataset from the chimestack to calibrate the holographic weights
         # Also get the fraction of packets lost 
-        gain = ch_data.gain[:].view(np.ndarray)
-        frac_lost = ch_data.flags["frac_lost"][:]
+        gain = ch_data.gain[:].view(np.ndarray)[..., timerange][..., overlap_slice]
+        frac_lost = ch_data.flags["frac_lost"][:][..., timerange][..., overlap_slice]
 
 	# Get the flags for the two co-pol products (we ignore x-pol entirely for flagging purposes).
-        copols = ComputeHolographicSensitivity._get_copols(prodmap_h)
+        Y_pol_flag = np.where(self.telescope.polarisation == 'Y')[0]
+        X_pol_flag = np.where(self.telescope.polarisation == 'X')[0]
 
         # Calculate the redundancy of the chimestack products
         inpflg = ch_data.input_flags[:].view(np.ndarray)
@@ -1355,43 +1366,10 @@ class ComputeHolographicSensitivity(task.SingleTask):
                 ch_data.prod,
                 ch_data.reverse_map["stack"]["stack"],
                 ch_data.stack.size,
-	)
-
-	# Derefence the weight dataset 
-        weight = hol_data.weight[:].view(np.ndarray)	
-
-	# Average the weight and visibility datasets down to match chimestack cadence 
-        rwe = np.array([(weight[..., i] + weight[..., i+1]) / 2. for i in range(0, ntime-1, 2)])
-        rwe = np.swapaxes(np.swapaxes(rwe, 0, 2), 1, 0)
-
-        rvi = np.array([(vis_ho[..., i].real + vis_ho[..., i+1].real) / 2. for i in range(0, ntime-1, 2)])
-        rvi = np.swapaxes(np.swapaxes(rvi, 0, 2), 1, 0)
-
-        # Select only the stack data within the holography time range
-        vis_st = vis_st[..., timerange]
-        gain = gain[..., timerange]
-        stack_cnt = stack_cnt[..., timerange]
-        frac_lost = frac_lost[..., timerange]
-
-        ntreduced = vis_st.shape[-1]
-
-        # Feels hacky, but currently necessary to resolve the shapes exactly
-        if ntreduced > rwe.shape[-1]:
-            vis_st = vis_st[..., :rwe.shape[-1]]
-            gain = gain[..., :rwe.shape[-1]]
-            stack_cnt = stack_cnt[..., :rwe.shape[-1]]
-            frac_lost = frac_lost[..., :rwe.shape[-1]]
-            nt = rwe.shape[-1]
-        elif ntreduced < rwe.shape[-1]:
-            rwe = rwe[..., :ntreduced]
-            rvi = rvi[..., :ntreduced]
-            nt = ntreduced
-        else:
-            nt = np.sum(timerange)
+	)[..., timerange][..., overlap_slice]
 
         # Invert the weights, flag for only the positive weights
-        inv_weight = tools.invert_no_zero(rwe) 
-        wflag = (rwe > 0.0)
+        inv_weight = tools.invert_no_zero(weight_h)[..., start_h:stop_h] 
 
         # Initialize the variance and counter containers
         var =  np.zeros((nfreq, npol, nt), dtype=np.float32) 
@@ -1401,14 +1379,15 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
             for ipol in range(npol):
 
-                inputs = np.array([ina if ina != self._26m_POL[ipol] else inb for (ina, inb) in prodmap_h[copols[ipol]]]) 
+                if ipol == 0:
+                    copols = Y_pol_flag
+                else:
+                    copols = X_pol_flag
 
-                self.log.warning("Pol index {} and over {} baselines ".format(ipol, np.sum(copols[ipol])))
                 self.log.warning("Weight flag -> {} good elements".format(np.sum(wflag)))
-                self.log.warning("Gain dataset on these inputs {}".format(gain[ff, inputs, :]))
 
-                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, copols[ipol]] * (np.abs(gain[ff, inputs, :]) ** 2) * inv_weight[ff, copols[ipol]], axis=0)
-                counter[ff, ipol, :] = np.sum(wflag[ff, copols[ipol]], axis=0)
+                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, ipol, copols, start_h:stop_h] * (np.abs(gain[ff, copols, :]) ** 2) * inv_weight[ff, ipol, copols], axis=0)
+                counter[ff, ipol, :] = np.sum(wflag[ff, ipol, copols, start_h:stop_h], axis=0)
 
 	# Normalize
         var *= tools.invert_no_zero(counter ** 2)
@@ -1419,27 +1398,18 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
         nfreq_st, nstack, _ = ch_data.vis.local_shape
 
-        auto_stack = vis_st[:].real
         auto_flag_ch = (input_a == input_b)
         auto_stack_id = np.flatnonzero(auto_flag_ch)
         auto_inputs = prodstack[auto_stack_id]["input_a"]
 
         auto_pol = np.array([self.telescope.polarisation[ai] for ai in auto_inputs])
 
-        hol_auto_id = [2450, 3568] # Y, X 
+        hol_auto_id = [1225, 1531] # Y, X 
         hol_auto_pol = ["Y", "X"]
 
-	# Limit the chimestack data to the holography timerange (debug)
-        self.log.warning("Holography start and stop times: {}->{}".format(hol_start, hol_stop))
-        self.log.warning("Chime stack start and stop times: {}->{}".format(ch_data.time[0], ch_data.time[-1]))
-        if np.sum(timerange)  == 0:
-            msg = "The holography and chimestack datasets you selected do not overlap in time. Aborting..."
-            self.log.warning(msg)
-            #raise ValueError(msg)
-
         # Initialize the radiometer and counter
-        radiometer = np.zeros((nfreq_st, npol, nt), dtype=np.float32)	
-        radiometer_counter = np.zeros((nfreq_st, npol, nt), dtype=np.float32)
+        radiometer = np.zeros((nfreq, npol, nt), dtype=np.float32)	
+        radiometer_counter = np.zeros((nfreq, npol, nt), dtype=np.float32)
 
         for ii, (cha, chap) in enumerate(zip(auto_stack_id, auto_pol)):
 
@@ -1454,35 +1424,41 @@ class ComputeHolographicSensitivity(task.SingleTask):
                 if pp == 2: # Ignore x-pol for now
                     continue
 
-                self.log.warning("Shapes: {}, {}, {}".format(stack_cnt[cha].shape, auto_stack[:, cha, :].shape, rvi[:, hoa, :].shape))
-                radiometer[:, pp, :] += stack_cnt[cha] * auto_stack[:, cha, :] * rvi[:, hoa, :]
+                #self.log.warning("Shapes: {}, {}, {}".format(stack_cnt[cha].shape, auto_stack[:, cha, :].shape, rvi[:, hoa, :].shape))
+                radiometer[:, pp, :] += stack_cnt[cha] * vis_s[:, cha, :].real * vis_h[:, pp, hoa, :].real
                 radiometer_counter[:, pp, :] += stack_cnt[cha] 
                 self.log.warning("Added {} to rad_counter for stack_id {}".format(stack_cnt[cha], cha))
 
-        tint = np.abs(np.median(np.diff(hol_data.time[:])))
-        dnu = np.abs(np.median(np.diff(hol_data.freq[:]))) * 1e6
+        tint = np.abs(np.median(np.diff(unix_time[:])))
+        self.log.warning("Integration time is {}".format(tint))
+        dnu = np.abs(np.median(np.diff(transit.freq[:]))) * 1e6
 
         nint = (tint * dnu) * (1.0 - frac_lost.astype(np.float32))
 
         radiometer *= tools.invert_no_zero(nint[:, np.newaxis, :] * (radiometer_counter ** 2))
         self.log.warning("Radiometer {}".format(np.max(radiometer)))
 
-        times = np.linspace(hol_start, hol_stop, nt) # Hacky for now
-
         metrics = SystemSensitivity(
             pol=np.array([b"YY", b"XX"]),
-            time=times,
-            axes_from=hol_data,
-            attrs_from=hol_data,
-            comm=hol_data.comm,
-            distributed=hol_data.distributed,
+            time=unix_time,
+            axes_from=ch_data,
+            attrs_from=transit,
+            comm=transit.comm,
+            distributed=transit.distributed,
 	)
 
         metrics.redistribute("freq")
-        metrics.radiometer[:] = np.sqrt(2 * radiometer)
-        metrics.measured[:] = np.sqrt(var)
-	
-        metrics.weight[:] = counter
+        rad_fsize = np.zeros((nfreq, npol, ntime))
+        mes_fsize = np.zeros_like(rad_fsize)
+        con_fsize = np.zeros_like(rad_fsize)
+
+        rad_fsize[..., start_h:stop_h] = np.sqrt(2 * radiometer)
+        mes_fsize[..., start_h:stop_h] = np.sqrt(var)
+        con_fsize[..., start_h:stop_h] = counter
+
+        metrics.radiometer[:] = rad_fsize
+        metrics.measured[:] = mes_fsize
+        metrics.weight[:] = con_fsize
         #metrics.frac_lost[:] = frac_lost
 
         self.log.info("Wrapping up...")
