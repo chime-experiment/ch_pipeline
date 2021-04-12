@@ -193,6 +193,8 @@ class LoadCorrDataFiles(task.SingleTask):
             The timestream of each sidereal day.
         """
 
+        self.files = files
+
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -270,6 +272,118 @@ class LoadCorrDataFiles(task.SingleTask):
         # Return timestream
         return ts
 
+class LoadCorrDataFromInput(task.SingleTask)
+
+    _file_ptr = 0 
+
+    freq_physical = config.Property(proptype=list, default=[])
+    channel_range = config.Property(proptype=list, default=[])
+    channel_index = config.Property(proptype=list, default=[])
+
+    datasets = config.Property(default=None)
+
+    only_autos = config.Property(proptype=bool, default=False)
+
+     def setup(self):
+        # Set up frequency selection.
+        if self.freq_physical:
+            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+            self.freq_sel = sorted(
+                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+            )
+
+        elif self.channel_range and (len(self.channel_range) <= 3):
+            self.freq_sel = slice(*self.channel_range)
+
+        elif self.channel_index:
+            self.freq_sel = self.channel_index
+
+        else:
+            self.freq_sel = slice(None)
+
+    def process(self, files):
+        """Load in each sidereal day.
+
+        Returns
+        -------
+        ts : andata.CorrData
+            The timestream of each sidereal day.
+        """
+
+        self.files = files
+
+        if len(self.files) == self._file_ptr:
+            raise pipeline.PipelineStopIteration
+
+        # Collect garbage to remove any prior CorrData objects
+        gc.collect()
+
+        # Fetch and remove the first item in the list
+        file_ = self.files[self._file_ptr]
+        self._file_ptr += 1
+
+        # Set up product selection
+        # NOTE: this probably doesn't work with stacked data
+        prod_sel = None
+
+        # Load file
+        if (
+            isinstance(self.freq_sel, slice)
+            and (prod_sel is None)
+            and (self.datasets is None)
+        ):
+            self.log.info(
+                "Reading file %i of %i. (%s) [fast io]",
+                self._file_ptr,
+                len(self.files),
+                file_,
+            )
+            ts = andata.CorrData.from_acq_h5_fast(
+                file_, freq_sel=self.freq_sel, comm=self.comm
+            )
+        else:
+            self.log.info(
+                "Reading file %i of %i. (%s) [slow io]",
+                self._file_ptr,
+                len(self.files),
+                file_,
+            )
+            ts = andata.CorrData.from_acq_h5(
+                file_,
+                datasets=self.datasets,
+                distributed=True,
+                comm=self.comm,
+                freq_sel=self.freq_sel,
+                stack_sel=[0, 1789, 3067, 3834, 12266, 14055, 15333, 16100], 
+                
+            )
+
+        # Store file name
+        ts.attrs["filename"] = file_
+
+        # Use a simple incrementing string as the tag
+        if "tag" not in ts.attrs:
+            tag = "file%03i" % self._file_ptr
+            ts.attrs["tag"] = tag
+
+        # Add a weight dataset if needed
+        if "vis_weight" not in ts.flags:
+            weight_dset = ts.create_flag(
+                "vis_weight",
+                shape=ts.vis.shape,
+                dtype=np.uint8,
+                distributed=True,
+                distributed_axis=0,
+            )
+            weight_dset.attrs["axis"] = ts.vis.attrs["axis"]
+
+            # Set weight to maximum value (255), unless the vis value is
+            # zero which presumably came from missing data. NOTE: this may have
+            # a small bias
+            weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
+
+        # Return timestream
+        return ts
 
 class LoadSetupFile(task.MPILoggedTask):
     """Loads a file from disk into a memh5 container during setup.

@@ -293,6 +293,67 @@ class QueryDatabase(task.MPILoggedTask):
 
         return files
 
+class QueryFromTransit(task.MPILoggedTask)
+
+    def setup(self):
+        self.node_spoof = {"cedar_archive" : "/project/rpp-chime/chime/chime_archive"}
+        self.accept_all_global_flags = True
+        self.instrument = "chimestack"
+        self.return_intervals = False
+
+    def process(self, transit):
+        transit_time = transit.attrs["transit_time"]
+        ha =  transit.index_map["pix"]["phi"][:]
+
+        u_time = ephemeris.csd_to_unix(ephemeris.csd(transit_time) + ha / 360.)
+
+        self.start_time = u_time[0]
+        self.end_time = u_time[-1]
+
+        files = None
+
+        # Query the database on rank=0 only, and broadcast to everywhere else
+        if mpiutil.rank0:
+
+            if self.run_name:
+                return self.QueryRun()
+
+            layout.connect_database()
+
+            f = finder.Finder(node_spoof=self.node_spoof)
+
+            # should be redundant if an instrument has been specified
+            f.only_corr()
+
+            if self.accept_all_global_flags:
+                f.accept_all_global_flags()
+
+            # Use start and end times if set, or try and use the start and end CSDs
+            if self.start_time:
+                st, et = self.start_time, self.end_time
+
+            # Note: include_time_interval includes the specified time interval
+            # Using this instead of set_time_range, which only narrows the interval
+            # f.include_time_interval(self.start_time, self.end_time)
+            f.set_time_range(st, et)
+
+            f.filter_acqs(di.ArchiveInst.name == self.instrument)
+
+            results = f.get_results()
+            if not self.return_intervals:
+                files = [fname for result in results for fname in result[0]]
+                files.sort()
+            else:
+                files = results
+                files.sort(key=lambda x: x[1][0])
+
+        files = mpiutil.world.bcast(files, root=0)
+
+        # Make sure all nodes have container before return
+        mpiutil.world.Barrier()
+
+        return files
+
 
 class QueryRun(task.MPILoggedTask):
     """Find the files belonging to a specific `run`.

@@ -1459,7 +1459,11 @@ class ComputeHolographicSensitivity(task.SingleTask):
         metrics.radiometer[:] = rad_fsize
         metrics.measured[:] = mes_fsize
         metrics.weight[:] = con_fsize
+
         #metrics.frac_lost[:] = frac_lost
+        #metrics.radiometer[:] = np.sqrt(2 * radiometer)
+        #metrics.measured[:] = np.sqrt(var)
+        #metrics.weight[:] = counter
 
         self.log.info("Wrapping up...")
 
