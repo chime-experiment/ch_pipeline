@@ -170,11 +170,9 @@ class QuarterStackProcessing(base.ProcessingType):
 
     # Parameters of the job processing
     default_params = {
-
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
         "daily_revisions": ["rev_03"],
-
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overriden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
@@ -182,13 +180,11 @@ class QuarterStackProcessing(base.ProcessingType):
         "opinion_overrides": {
             "rev_03": "rev_02",
         },
-
-        "daily_root": "/project/rpp-krs/chime/chime_processed/",
+        "daily_root": "/project/rpp-chime/chime/chime_processed/",
         # Frequencies to process
         "freq": [0, 1024],
-
         # The beam transfers to use (need to have the same freq range as above)
-        "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
