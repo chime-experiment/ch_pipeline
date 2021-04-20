@@ -170,12 +170,23 @@ class QuarterStackProcessing(base.ProcessingType):
 
     # Parameters of the job processing
     default_params = {
+
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
-        "daily_revisions": ["rev_02"],
+        "daily_revisions": ["rev_03"],
+
+        # Usually the opinions are queried for each revision, this dictionary allows
+        # that to be overriden. Each `data_rev: opinion_rev` pair means that the
+        # opinions used to select days for `data_rev` will instead be taken from
+        # `opinion_rev`.
+        "opinion_overrides": {
+            "rev_03": "rev_02",
+        },
+
         "daily_root": "/project/rpp-krs/chime/chime_processed/",
         # Frequencies to process
         "freq": [0, 1024],
+
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
         "partitions": 2,
@@ -208,9 +219,11 @@ class QuarterStackProcessing(base.ProcessingType):
 
         core.connect()
 
+        opinion_overrides = self.default_params.get("opinion_overrides", {})
+
         # Go over each revision and construct the set of LSDs we should stack, and save
         # the path to each.
-        # NOTE: later entries is `daily_revisions` will override LSDs found in earlier
+        # NOTE: later entries in `daily_revisions` will override LSDs found in earlier
         # revisions.
         for rev in self.default_params["daily_revisions"]:
             daily_path = (
@@ -220,8 +233,12 @@ class QuarterStackProcessing(base.ProcessingType):
             )
             daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
 
+            # Get the revision used to determine the opinions, by default this is the
+            # revision, but it can be overriden
+            opinion_rev = opinion_overrides.get(rev, rev)
+
             # Get all the bad days in this revision
-            revision = df.DataRevision.get(name=rev)
+            revision = df.DataRevision.get(name=opinion_rev)
             query = (
                 df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
                 .distinct()
