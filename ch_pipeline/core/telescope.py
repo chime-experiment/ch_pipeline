@@ -17,6 +17,8 @@ from caput import config, mpiutil
 from drift.core import telescope
 from drift.telescope import cylbeam
 
+from draco.core.containers import ContainerBase
+
 from ch_util import ephemeris, tools
 
 
@@ -532,19 +534,22 @@ class CHIMEExternalBeam(CHIME):
     This class uses an external beam model that is read in from a file.
     """
 
-    primary_beamx_filename = config.Property(
-        proptype=str,
-        default="/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5",
-    )
+    primary_beam_filename = config.Property(proptype=str)
+    freq_interp_beam = config.Property(proptype=bool, default=False)
 
-    primary_beamy_filename = config.Property(
-        proptype=str,
-        default="/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5",
-    )
+    def _finalise_config(self):
+        """Get the beam file object."""
+        logger.debug("Reading beam model from {}...".format(self.primary_beam_filename))
+        self._primary_beam = ContainerBase.from_file(
+            self.primary_beam_filename, mode="r", distributed=False, ondisk=True
+        )
+
+        if len(self._primary_beam.input) > 1:
+            raise ValueError("Per-feed beam model not supported for now.")
+
+        super()._finalise_config()
 
     def beam(self, feed, freq_id):
-        # Fetch beam parameters out of config database.
-
         feed_obj = self.feeds[feed]
         tel_freq = self.frequencies
         nside = self._nside
@@ -554,27 +559,44 @@ class CHIMEExternalBeam(CHIME):
             raise ValueError("The requested feed doesn't seem to exist.")
 
         if tools.is_array_x(feed_obj):
-            fname = self.primary_beamx_filename
-
+            pol_ind = list(self._primary_beam.pol[:]).index(b"x")
         elif tools.is_array_y(feed_obj):
-            fname = self.primary_beamy_filename
-
+            pol_ind = list(self._primary_beam.pol[:]).index(b"y")
         else:
             raise ValueError("Polarisation not supported by this feed", feed_obj)
-        try:
-            logger.debug("Attempting to read beam file from disk...")
-            with h5py.File(fname, "r") as f:
-                map_freq = f["freq"][:]
-                freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
-                beam_map = f["beam"][freq_sel, :]
 
-        except IOError:
-            raise IOError("Could not load beams from disk [path: %s]." % fname)
+        # find nearest frequency
+        map_freq = self._primary_beam.freq[:]
+        freq_sel = _nearest_freq(
+            tel_freq, map_freq, freq_id, single=(not self.freq_interp_beam)
+        )
+        beam_map = self._primary_beam.beam[freq_sel, pol_ind, 0, :]
+
+        # check resolution
+        if nside != self._primary_beam.nside:
+            logger.debug(
+                "Resampling external beam from nside {:d} to {:d}".format(
+                    self._primary_beam.nside,
+                    nside,
+                )
+            )
+            beam_map_new = np.zeros((len(freq_sel), npix), dtype=beam_map.dtype)
+            beam_map_new["Et"] = healpy.ud_grade(beam_map["Et"], nside)
+            beam_map_new["Ep"] = healpy.ud_grade(beam_map["Ep"], nside)
+            beam_map = beam_map_new
 
         if len(freq_sel) == 1:
-            return beam_map
-
+            # exact match
+            map_out = np.empty((npix, 2), dtype=beam_map.dtype["Et"])
+            map_out[:, 0] = beam_map["Et"][0]
+            map_out[:, 1] = beam_map["Ep"][0]
+            return map_out
+        elif len(freq_sel) == 0:
+            raise ValueError(
+                "No beam model spans frequency {:.2f}.".format(tel_freq[freq_id])
+            )
         else:
+            # interpolate between pair of frequencies
             freq_high = map_freq[freq_sel[1]]
             freq_low = map_freq[freq_sel[0]]
             freq_int = tel_freq[freq_id]
@@ -585,16 +607,16 @@ class CHIMEExternalBeam(CHIME):
             map_t = beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
             map_p = beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
 
-            map_out = np.empty((npix, 2), dtype=np.complex128)
+            map_out = np.empty((npix, 2), dtype=beam_map.dtype["Et"])
             map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
             map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
 
             return map_out
 
 
-def _nearest_freq(tel_freq, map_freq, freq_id):
-
-    """Find nearest neighbor frequencies.
+def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
+    """Find nearest neighbor frequencies. Assumes map frequencies
+    are uniformly spaced.
 
     Parameters
     ----------
@@ -604,6 +626,8 @@ def _nearest_freq(tel_freq, map_freq, freq_id):
         frequencies from beam map file.
     freq_id : int
         frequency selection.
+    single : bool
+        Only return the single nearest neighbour.
 
     Returns
     -------
@@ -612,6 +636,9 @@ def _nearest_freq(tel_freq, map_freq, freq_id):
     """
 
     diff_freq = abs(map_freq - tel_freq[freq_id])
+    if single:
+        return np.array([np.argmin(diff_freq)])
+
     map_freq_width = abs(map_freq[1] - map_freq[0])
     match_mask = diff_freq < map_freq_width
 
