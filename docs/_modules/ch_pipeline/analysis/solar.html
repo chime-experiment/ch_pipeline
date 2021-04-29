@@ -1,0 +1,806 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.analysis.solar &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>ch_pipeline.analysis.solar</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for ch_pipeline.analysis.solar</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Tasks for analysis of the radio sun</span>
+
+<span class="sd">Tasks for analysis of the radio sun.  Includes grouping individual files</span>
+<span class="sd">into a solar day; solar calibration; and sun excision from sidereal stream.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">caput</span> <span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span> <span class="nn">caput</span> <span class="kn">import</span> <span class="n">mpiutil</span>
+<span class="kn">from</span> <span class="nn">ch_util</span> <span class="kn">import</span> <span class="n">andata</span><span class="p">,</span> <span class="n">ephemeris</span><span class="p">,</span> <span class="n">tools</span><span class="p">,</span> <span class="n">cal_utils</span>
+<span class="kn">from</span> <span class="nn">draco.core</span> <span class="kn">import</span> <span class="n">task</span>
+
+<span class="kn">from</span> <span class="nn">..core</span> <span class="kn">import</span> <span class="n">containers</span>
+
+
+<div class="viewcode-block" id="unix_to_localtime"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.unix_to_localtime">[docs]</a><span class="k">def</span> <span class="nf">unix_to_localtime</span><span class="p">(</span><span class="n">unix_time</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Converts unix time to a :class:`datetime.datetime` object.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    unix_time : float</span>
+<span class="sd">        Unix/POSIX time.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    --------</span>
+<span class="sd">    dt : :class:`datetime.datetime`</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">pytz</span>
+
+    <span class="n">utc_time</span> <span class="o">=</span> <span class="n">pytz</span><span class="o">.</span><span class="n">utc</span><span class="o">.</span><span class="n">localize</span><span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">utcfromtimestamp</span><span class="p">(</span><span class="n">unix_time</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">utc_time</span><span class="o">.</span><span class="n">astimezone</span><span class="p">(</span><span class="n">pytz</span><span class="o">.</span><span class="n">timezone</span><span class="p">(</span><span class="s2">&quot;Canada/Pacific&quot;</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="ra_dec_of"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.ra_dec_of">[docs]</a><span class="k">def</span> <span class="nf">ra_dec_of</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">time</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Calculate the coordinates of a celestial</span>
+<span class="sd">    body at a particular time.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    body : ephem.Body</span>
+<span class="sd">        PyEphem celestial body.</span>
+
+<span class="sd">    time : float</span>
+<span class="sd">        Unix/POSIX time.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    --------</span>
+<span class="sd">    coord : (ra, dec, alt, az)</span>
+<span class="sd">        Coordinates of the sources</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">obs</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">_get_chime</span><span class="p">()</span>
+    <span class="n">obs</span><span class="o">.</span><span class="n">date</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_ephem_time</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+
+    <span class="n">body</span><span class="o">.</span><span class="n">compute</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">body</span><span class="o">.</span><span class="n">ra</span><span class="p">,</span> <span class="n">body</span><span class="o">.</span><span class="n">dec</span><span class="p">,</span> <span class="n">body</span><span class="o">.</span><span class="n">alt</span><span class="p">,</span> <span class="n">body</span><span class="o">.</span><span class="n">az</span></div>
+
+
+<div class="viewcode-block" id="SolarGrouper"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarGrouper">[docs]</a><span class="k">class</span> <span class="nc">SolarGrouper</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Group individual timestreams together into whole solar days.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    min_span : float</span>
+<span class="sd">        The minimum solar day length (in hours) to process.</span>
+<span class="sd">        Default is 2.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">min_span</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="SolarGrouper.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarGrouper.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tstream</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Load in each solar day.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tstream : andata.CorrData</span>
+<span class="sd">            Timestream to group together.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        ts : andata.CorrData or None</span>
+<span class="sd">            Returns the timestream of each solar day when we have received</span>
+<span class="sd">            the last file, otherwise returns :obj:`None`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Get the start and end day of the file as an int with format YYYYMMDD</span>
+        <span class="n">day_start</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">unix_to_localtime</span><span class="p">(</span><span class="n">tstream</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y%m</span><span class="si">%d</span><span class="s2">&quot;</span><span class="p">))</span>
+        <span class="n">day_end</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">unix_to_localtime</span><span class="p">(</span><span class="n">tstream</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y%m</span><span class="si">%d</span><span class="s2">&quot;</span><span class="p">))</span>
+
+        <span class="c1"># If current_day is None then this is the first time we&#39;ve run</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="o">=</span> <span class="n">day_start</span>
+
+        <span class="c1"># If this file started during the current day add it onto the list</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="o">==</span> <span class="n">day_start</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tstream</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Adding file into group for date: </span><span class="si">%i</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">day_start</span><span class="p">)</span>
+
+        <span class="c1"># If this file ends during a later day then we need to process the</span>
+        <span class="c1"># current list and restart the system</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="o">&lt;</span> <span class="n">day_end</span><span class="p">:</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Concatenating files for date: </span><span class="si">%i</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">day_start</span><span class="p">)</span>
+
+            <span class="c1"># Combine timestreams into a single container for the whole day this</span>
+            <span class="c1"># could get returned as None if there wasn&#39;t enough data</span>
+            <span class="n">tstream_all</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_current_day</span><span class="p">()</span>
+
+            <span class="c1"># Reset list and current day for the new file</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">tstream</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span> <span class="o">=</span> <span class="n">day_end</span>
+
+            <span class="k">return</span> <span class="n">tstream_all</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="SolarGrouper.process_finish"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarGrouper.process_finish">[docs]</a>    <span class="k">def</span> <span class="nf">process_finish</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return the final day.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        ts : andata.CorrData or None</span>
+<span class="sd">            Returns the timestream of the final day if it&#39;s long</span>
+<span class="sd">            enough, otherwise returns :obj:`None`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># If we are here there is no more data coming, we just need to process any remaining data</span>
+        <span class="n">tstream_all</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_current_day</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">tstream_all</span></div>
+
+    <span class="k">def</span> <span class="nf">_process_current_day</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="c1"># Combine the current set of files into a timestream</span>
+
+        <span class="n">day</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_current_day</span><span class="p">)</span>
+
+        <span class="c1"># Calculate the length of data in the current day</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcfromtimestamp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcfromtimestamp</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">tdelta</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+        <span class="n">day_length</span> <span class="o">=</span> <span class="n">tdelta</span><span class="o">.</span><span class="n">days</span> <span class="o">*</span> <span class="mf">24.0</span> <span class="o">+</span> <span class="n">tdelta</span><span class="o">.</span><span class="n">seconds</span> <span class="o">/</span> <span class="mf">3600.0</span>
+
+        <span class="c1"># If the amount of data for this day is too small, then just skip</span>
+        <span class="k">if</span> <span class="n">day_length</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_span</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Constructing </span><span class="si">%s</span><span class="s2"> [</span><span class="si">%i</span><span class="s2"> files]&quot;</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">))</span>
+
+        <span class="c1"># Construct the combined timestream</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">)</span>
+
+        <span class="c1"># Add attributes for the date and a tag for labelling saved files</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">day</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">day</span>
+
+        <span class="k">return</span> <span class="n">ts</span></div>
+
+
+<div class="viewcode-block" id="SolarCalibration"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarCalibration">[docs]</a><span class="k">class</span> <span class="nc">SolarCalibration</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Use Sun to measure antenna beam pattern.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    fringestop:  bool, default False</span>
+<span class="sd">        Fringestop prior to solving for the sun response.</span>
+<span class="sd">    model_fit: bool, default False</span>
+<span class="sd">        Fit a model to the primary beam.</span>
+<span class="sd">    nsig: float, default 2.0</span>
+<span class="sd">        Relevant if model_fit is True.  The model is only fit to</span>
+<span class="sd">        time samples within +/- nsig sigma from the expected</span>
+<span class="sd">        peak location.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">fringestop</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">model_fit</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">nsig</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SolarCalibration.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarCalibration.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">,</span> <span class="n">inputmap</span><span class="p">,</span> <span class="n">inputmask</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Determine calibration from a timestream.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : andata.CorrData or containers.SiderealStream</span>
+<span class="sd">            Timestream collected during the day.</span>
+<span class="sd">        inputmap : list of :class:`CorrInput`</span>
+<span class="sd">            A list describing the inputs as they are in the file.</span>
+<span class="sd">        inputmask : containers.CorrInputMask</span>
+<span class="sd">            Mask indicating which correlator inputs to use in the</span>
+<span class="sd">            eigenvalue decomposition.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        suntrans : containers.SunTransit</span>
+<span class="sd">            Response to the sun.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="kn">from</span> <span class="nn">operator</span> <span class="kn">import</span> <span class="n">itemgetter</span>
+        <span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">groupby</span>
+        <span class="kn">from</span> <span class="nn">.calibration</span> <span class="kn">import</span> <span class="n">_extract_diagonal</span><span class="p">,</span> <span class="n">solve_gain</span>
+
+        <span class="c1"># Ensure that we are distributed over frequency</span>
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">nfreq</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="c1"># Get the local frequency axis</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="s2">&quot;centre&quot;</span><span class="p">][</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+        <span class="n">wv</span> <span class="o">=</span> <span class="mf">3e2</span> <span class="o">/</span> <span class="n">freq</span>
+
+        <span class="c1"># Get times</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sstream</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">):</span>
+            <span class="n">time</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">time</span>
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">transit_RA</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;ra&quot;</span><span class="p">][:]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="p">)</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">csd</span> <span class="o">+</span> <span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span>
+            <span class="n">time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+
+        <span class="c1"># Only examine data between sunrise and sunset</span>
+        <span class="n">time_flag</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">time</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="n">rise</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">solar_rising</span><span class="p">(</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mf">24.0</span> <span class="o">*</span> <span class="mf">3600.0</span><span class="p">,</span> <span class="n">end_time</span><span class="o">=</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">rr</span> <span class="ow">in</span> <span class="n">rise</span><span class="p">:</span>
+            <span class="n">ss</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">solar_setting</span><span class="p">(</span><span class="n">rr</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">time_flag</span> <span class="o">|=</span> <span class="p">(</span><span class="n">time</span> <span class="o">&gt;=</span> <span class="n">rr</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">time</span> <span class="o">&lt;=</span> <span class="n">ss</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">time_flag</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                <span class="s2">&quot;No daytime data between </span><span class="si">%s</span><span class="s2"> and </span><span class="si">%s</span><span class="s2">.&quot;</span><span class="p">,</span>
+                <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%b </span><span class="si">%d</span><span class="s2"> %H:%M&quot;</span><span class="p">),</span>
+                <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%b </span><span class="si">%d</span><span class="s2"> %H:%M&quot;</span><span class="p">),</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="c1"># Convert boolean flag to slices</span>
+        <span class="n">time_index</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">time_flag</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">time_slice</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">ntime</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">groupby</span><span class="p">(</span>
+            <span class="nb">enumerate</span><span class="p">(</span><span class="n">time_index</span><span class="p">),</span> <span class="k">lambda</span> <span class="n">index_item</span><span class="p">:</span> <span class="n">index_item</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">index_item</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="p">):</span>
+            <span class="n">group</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">group</span><span class="p">))</span>
+            <span class="n">ngroup</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">)</span>
+            <span class="n">time_slice</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="p">(</span><span class="nb">slice</span><span class="p">(</span><span class="n">group</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">group</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="nb">slice</span><span class="p">(</span><span class="n">ntime</span><span class="p">,</span> <span class="n">ntime</span> <span class="o">+</span> <span class="n">ngroup</span><span class="p">))</span>
+            <span class="p">)</span>
+            <span class="n">ntime</span> <span class="o">+=</span> <span class="n">ngroup</span>
+
+        <span class="n">time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">time</span><span class="p">[</span><span class="n">slc</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">for</span> <span class="n">slc</span> <span class="ow">in</span> <span class="n">time_slice</span><span class="p">])</span>
+        <span class="n">ra</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">ra</span><span class="p">[</span><span class="n">slc</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">for</span> <span class="n">slc</span> <span class="ow">in</span> <span class="n">time_slice</span><span class="p">])</span>
+
+        <span class="c1"># Get ra, dec, alt of sun</span>
+        <span class="n">sun_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">ra_dec_of</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="s2">&quot;sun&quot;</span><span class="p">],</span> <span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">time</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Convert from ra to hour angle</span>
+        <span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">ra</span><span class="p">)</span> <span class="o">-</span> <span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># Determine good inputs</span>
+        <span class="n">nfeed</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">good_input</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">nfeed</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)[</span><span class="n">inputmask</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;input_mask&quot;</span><span class="p">][:]]</span>
+
+        <span class="c1"># Use input map to figure out which are the X and Y feeds</span>
+        <span class="n">xfeeds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span>
+                <span class="n">idx</span>
+                <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">inp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">inputmap</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_x</span><span class="p">(</span><span class="n">inp</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">idx</span> <span class="ow">in</span> <span class="n">good_input</span><span class="p">)</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">yfeeds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span>
+                <span class="n">idx</span>
+                <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">inp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">inputmap</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_y</span><span class="p">(</span><span class="n">inp</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">idx</span> <span class="ow">in</span> <span class="n">good_input</span><span class="p">)</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+            <span class="s2">&quot;Performing sun calibration with </span><span class="si">%d</span><span class="s2">/</span><span class="si">%d</span><span class="s2"> good feeds (</span><span class="si">%d</span><span class="s2"> xpol, </span><span class="si">%d</span><span class="s2"> ypol).&quot;</span><span class="p">,</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">good_input</span><span class="p">),</span>
+            <span class="n">nfeed</span><span class="p">,</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">xfeeds</span><span class="p">),</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">yfeeds</span><span class="p">),</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Construct baseline vector for each visibility</span>
+        <span class="n">feed_pos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">vis_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feed_pos</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="o">-</span> <span class="n">feed_pos</span><span class="p">[</span><span class="n">ij</span><span class="p">]</span> <span class="k">for</span> <span class="n">ii</span><span class="p">,</span> <span class="n">ij</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:]]</span>
+        <span class="p">)</span>
+        <span class="n">vis_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">vis_pos</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">vis_pos</span><span class="p">),</span> <span class="n">vis_pos</span><span class="p">)</span>
+
+        <span class="n">u</span> <span class="o">=</span> <span class="p">(</span><span class="n">vis_pos</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">wv</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">])[:,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="p">(</span><span class="n">vis_pos</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">wv</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">])[:,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+
+        <span class="c1"># Create container to hold results of fit</span>
+        <span class="n">suntrans</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">SunTransit</span><span class="p">(</span>
+            <span class="n">time</span><span class="o">=</span><span class="n">time</span><span class="p">,</span> <span class="n">pol_x</span><span class="o">=</span><span class="n">xfeeds</span><span class="p">,</span> <span class="n">pol_y</span><span class="o">=</span><span class="n">yfeeds</span><span class="p">,</span> <span class="n">axes_from</span><span class="o">=</span><span class="n">sstream</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">suntrans</span><span class="o">.</span><span class="n">datasets</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="n">key</span><span class="p">][:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+        <span class="c1"># Set coordinates</span>
+        <span class="n">suntrans</span><span class="o">.</span><span class="n">coord</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">sun_pos</span>
+
+        <span class="c1"># Loop over time slices</span>
+        <span class="k">for</span> <span class="n">slc_in</span><span class="p">,</span> <span class="n">slc_out</span> <span class="ow">in</span> <span class="n">time_slice</span><span class="p">:</span>
+
+            <span class="c1"># Extract visibility slice</span>
+            <span class="n">vis_slice</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">slc_in</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+            <span class="n">ha</span> <span class="o">=</span> <span class="p">(</span><span class="n">sun_pos</span><span class="p">[</span><span class="n">slc_out</span><span class="p">,</span> <span class="mi">0</span><span class="p">])[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+            <span class="n">dec</span> <span class="o">=</span> <span class="p">(</span><span class="n">sun_pos</span><span class="p">[</span><span class="n">slc_out</span><span class="p">,</span> <span class="mi">1</span><span class="p">])[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+            <span class="c1"># Extract the diagonal (to be used for weighting)</span>
+            <span class="n">norm</span> <span class="o">=</span> <span class="p">(</span><span class="n">_extract_diagonal</span><span class="p">(</span><span class="n">vis_slice</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">real</span><span class="p">)</span> <span class="o">**</span> <span class="mf">0.5</span>
+            <span class="n">norm</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">norm</span><span class="p">)</span>
+
+            <span class="c1"># Fringestop</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">fringestop</span><span class="p">:</span>
+                <span class="n">vis_slice</span> <span class="o">*=</span> <span class="n">tools</span><span class="o">.</span><span class="n">fringestop_phase</span><span class="p">(</span>
+                    <span class="n">ha</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">CHIMELATITUDE</span><span class="p">),</span> <span class="n">dec</span><span class="p">,</span> <span class="n">u</span><span class="p">,</span> <span class="n">v</span>
+                <span class="p">)</span>
+
+            <span class="c1"># Solve for the point source response of each set of polarisations</span>
+            <span class="n">ev_x</span><span class="p">,</span> <span class="n">resp_x</span><span class="p">,</span> <span class="n">err_resp_x</span> <span class="o">=</span> <span class="n">solve_gain</span><span class="p">(</span>
+                <span class="n">vis_slice</span><span class="p">,</span> <span class="n">feeds</span><span class="o">=</span><span class="n">xfeeds</span><span class="p">,</span> <span class="n">norm</span><span class="o">=</span><span class="n">norm</span><span class="p">[:,</span> <span class="n">xfeeds</span><span class="p">]</span>
+            <span class="p">)</span>
+            <span class="n">ev_y</span><span class="p">,</span> <span class="n">resp_y</span><span class="p">,</span> <span class="n">err_resp_y</span> <span class="o">=</span> <span class="n">solve_gain</span><span class="p">(</span>
+                <span class="n">vis_slice</span><span class="p">,</span> <span class="n">feeds</span><span class="o">=</span><span class="n">yfeeds</span><span class="p">,</span> <span class="n">norm</span><span class="o">=</span><span class="n">norm</span><span class="p">[:,</span> <span class="n">yfeeds</span><span class="p">]</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Save to container</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">evalue_x</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">ev_x</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">evalue_y</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">ev_y</span>
+
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">response</span><span class="p">[:,</span> <span class="n">xfeeds</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">resp_x</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">response</span><span class="p">[:,</span> <span class="n">yfeeds</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">resp_y</span>
+
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">response_error</span><span class="p">[:,</span> <span class="n">xfeeds</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">err_resp_x</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">response_error</span><span class="p">[:,</span> <span class="n">yfeeds</span><span class="p">,</span> <span class="n">slc_out</span><span class="p">]</span> <span class="o">=</span> <span class="n">err_resp_y</span>
+
+        <span class="c1"># If requested, fit a model to the primary beam of the sun transit</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_fit</span><span class="p">:</span>
+
+            <span class="c1"># Estimate peak RA</span>
+            <span class="n">i_transit</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]))</span>
+
+            <span class="n">body</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="s2">&quot;sun&quot;</span><span class="p">]</span>
+            <span class="n">obs</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">_get_chime</span><span class="p">()</span>
+            <span class="n">obs</span><span class="o">.</span><span class="n">date</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_ephem_time</span><span class="p">(</span><span class="n">time</span><span class="p">[</span><span class="n">i_transit</span><span class="p">])</span>
+            <span class="n">body</span><span class="o">.</span><span class="n">compute</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+
+            <span class="n">peak_ra</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">peak_RA</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+            <span class="n">dra</span> <span class="o">=</span> <span class="n">ra</span> <span class="o">-</span> <span class="n">peak_ra</span>
+            <span class="n">dra</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">dra</span> <span class="o">-</span> <span class="p">(</span><span class="n">dra</span> <span class="o">&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span> <span class="o">*</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+            <span class="c1"># Estimate FWHM</span>
+            <span class="n">sig_x</span> <span class="o">=</span> <span class="n">cal_utils</span><span class="o">.</span><span class="n">guess_fwhm</span><span class="p">(</span><span class="n">freq</span><span class="p">,</span> <span class="n">pol</span><span class="o">=</span><span class="s2">&quot;X&quot;</span><span class="p">,</span> <span class="n">dec</span><span class="o">=</span><span class="n">body</span><span class="o">.</span><span class="n">dec</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span>
+                <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
+            <span class="p">]</span>
+            <span class="n">sig_y</span> <span class="o">=</span> <span class="n">cal_utils</span><span class="o">.</span><span class="n">guess_fwhm</span><span class="p">(</span><span class="n">freq</span><span class="p">,</span> <span class="n">pol</span><span class="o">=</span><span class="s2">&quot;Y&quot;</span><span class="p">,</span> <span class="n">dec</span><span class="o">=</span><span class="n">body</span><span class="o">.</span><span class="n">dec</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span>
+                <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
+            <span class="p">]</span>
+
+            <span class="c1"># Only fit ra values above the specified dynamic range threshold</span>
+            <span class="n">fit_flag</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">([</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">nfeed</span><span class="p">,</span> <span class="n">ntime</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+            <span class="n">fit_flag</span><span class="p">[:,</span> <span class="n">xfeeds</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">dra</span> <span class="o">&lt;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsig</span> <span class="o">*</span> <span class="n">sig_x</span><span class="p">)</span>
+            <span class="n">fit_flag</span><span class="p">[:,</span> <span class="n">yfeeds</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">dra</span> <span class="o">&lt;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsig</span> <span class="o">*</span> <span class="n">sig_y</span><span class="p">)</span>
+
+            <span class="c1"># Fit model for the complex response of each feed to the point source</span>
+            <span class="n">param</span><span class="p">,</span> <span class="n">param_cov</span> <span class="o">=</span> <span class="n">cal_utils</span><span class="o">.</span><span class="n">fit_point_source_transit</span><span class="p">(</span>
+                <span class="n">ra</span><span class="p">,</span> <span class="n">suntrans</span><span class="o">.</span><span class="n">response</span><span class="p">[:],</span> <span class="n">suntrans</span><span class="o">.</span><span class="n">response_error</span><span class="p">[:],</span> <span class="n">flag</span><span class="o">=</span><span class="n">fit_flag</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Save to container</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;flag&quot;</span><span class="p">)</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">flag</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">fit_flag</span>
+
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;parameter&quot;</span><span class="p">)</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">parameter</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">param</span>
+
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;parameter_cov&quot;</span><span class="p">)</span>
+            <span class="n">suntrans</span><span class="o">.</span><span class="n">parameter_cov</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">param_cov</span>
+
+        <span class="c1"># Update attributes</span>
+        <span class="n">units</span> <span class="o">=</span> <span class="s2">&quot;sqrt(&quot;</span> <span class="o">+</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;units&quot;</span><span class="p">,</span> <span class="s2">&quot;correlator-units&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;)&quot;</span>
+        <span class="n">suntrans</span><span class="o">.</span><span class="n">response</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;units&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">units</span>
+        <span class="n">suntrans</span><span class="o">.</span><span class="n">response_error</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;units&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">units</span>
+
+        <span class="n">suntrans</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Sun&quot;</span>
+
+        <span class="c1"># Return sun transit</span>
+        <span class="k">return</span> <span class="n">suntrans</span></div></div>
+
+
+<div class="viewcode-block" id="SolarClean"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarClean">[docs]</a><span class="k">class</span> <span class="nc">SolarClean</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Clean the sun from daytime data by removing the outer product of the</span>
+<span class="sd">    eigenvector corresponding to the largest eigenvalue.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SolarClean.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SolarClean.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">,</span> <span class="n">suntrans</span><span class="p">,</span> <span class="n">inputmap</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Clean the sun.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : containers.SiderealStream</span>
+<span class="sd">            Sidereal stream.</span>
+<span class="sd">        suntrans : containers.SolarTransit</span>
+<span class="sd">            Response to the sun.</span>
+<span class="sd">        inputmap : list of :class:`CorrInput`</span>
+<span class="sd">            A list describing the inputs as they are in the file.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        mstream : containers.SiderealStream</span>
+<span class="sd">            Sidereal stream with sun removed</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">suntrans</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine time mapping</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sstream</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">):</span>
+            <span class="n">stime</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">time</span><span class="p">[:]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;ra&quot;</span><span class="p">][:]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="p">)</span>
+            <span class="n">stime</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+
+        <span class="c1"># Extract gain array</span>
+        <span class="n">gtime</span> <span class="o">=</span> <span class="n">suntrans</span><span class="o">.</span><span class="n">time</span><span class="p">[:]</span>
+        <span class="n">gain</span> <span class="o">=</span> <span class="n">suntrans</span><span class="o">.</span><span class="n">response</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="n">ninput</span> <span class="o">=</span> <span class="n">gain</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Determine product map</span>
+        <span class="n">prod_map</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:]</span>
+        <span class="n">nprod</span> <span class="o">=</span> <span class="n">prod_map</span><span class="o">.</span><span class="n">size</span>
+
+        <span class="k">if</span> <span class="n">nprod</span> <span class="o">!=</span> <span class="p">(</span><span class="n">ninput</span> <span class="o">*</span> <span class="p">(</span><span class="n">ninput</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Number of inputs does not match the number of products.&quot;</span><span class="p">)</span>
+
+        <span class="n">feed_list</span> <span class="o">=</span> <span class="p">[(</span><span class="n">inputmap</span><span class="p">[</span><span class="n">ii</span><span class="p">],</span> <span class="n">inputmap</span><span class="p">[</span><span class="n">jj</span><span class="p">])</span> <span class="k">for</span> <span class="n">ii</span><span class="p">,</span> <span class="n">jj</span> <span class="ow">in</span> <span class="n">prod_map</span><span class="p">]</span>
+
+        <span class="c1"># Determine polarisation for each visibility</span>
+        <span class="n">same_pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">nprod</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="p">(</span><span class="n">ii</span><span class="p">,</span> <span class="n">jj</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">feed_list</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime</span><span class="p">(</span><span class="n">ii</span><span class="p">)</span> <span class="ow">and</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime</span><span class="p">(</span><span class="n">jj</span><span class="p">):</span>
+                <span class="n">same_pol</span><span class="p">[</span><span class="n">pp</span><span class="p">]</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_y</span><span class="p">(</span><span class="n">ii</span><span class="p">)</span> <span class="o">==</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_y</span><span class="p">(</span><span class="n">jj</span><span class="p">)</span>
+
+        <span class="c1"># Match ra</span>
+        <span class="n">match</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">gt</span> <span class="o">-</span> <span class="n">stime</span><span class="p">))</span> <span class="k">for</span> <span class="n">gt</span> <span class="ow">in</span> <span class="n">gtime</span><span class="p">])</span>
+
+        <span class="c1"># Loop over frequencies and products</span>
+        <span class="k">for</span> <span class="n">lfi</span><span class="p">,</span> <span class="n">fi</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">enumerate</span><span class="p">(</span><span class="mi">0</span><span class="p">):</span>
+
+            <span class="k">for</span> <span class="n">pp</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nprod</span><span class="p">):</span>
+
+                <span class="k">if</span> <span class="n">same_pol</span><span class="p">[</span><span class="n">pp</span><span class="p">]:</span>
+
+                    <span class="n">ii</span><span class="p">,</span> <span class="n">jj</span> <span class="o">=</span> <span class="n">prod_map</span><span class="p">[</span><span class="n">pp</span><span class="p">]</span>
+
+                    <span class="c1"># Fetch the gains</span>
+                    <span class="n">gi</span> <span class="o">=</span> <span class="n">gain</span><span class="p">[</span><span class="n">lfi</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="p">:]</span>
+                    <span class="n">gj</span> <span class="o">=</span> <span class="n">gain</span><span class="p">[</span><span class="n">lfi</span><span class="p">,</span> <span class="n">jj</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span>
+
+                    <span class="c1"># Subtract the gains</span>
+                    <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="n">pp</span><span class="p">,</span> <span class="n">match</span><span class="p">]</span> <span class="o">-=</span> <span class="n">gi</span> <span class="o">*</span> <span class="n">gj</span>
+
+        <span class="c1"># Return the clean sidereal stream</span>
+        <span class="k">return</span> <span class="n">sstream</span></div></div>
+
+
+<div class="viewcode-block" id="SunClean"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SunClean">[docs]</a><span class="k">class</span> <span class="nc">SunClean</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Clean the sun from data by projecting out signal from its location.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SunClean.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.solar.html#ch_pipeline.analysis.solar.SunClean.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">,</span> <span class="n">inputmap</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Clean the sun.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : containers.SiderealStream</span>
+<span class="sd">            Sidereal stream.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        mstream : containers.SiderealStream</span>
+<span class="sd">            Sidereal stack with sun projected out.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Get array of CSDs for each sample</span>
+        <span class="n">ra</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;ra&quot;</span><span class="p">][:]</span>
+        <span class="n">csd</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+        <span class="n">csd</span> <span class="o">=</span> <span class="n">csd</span> <span class="o">+</span> <span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span>
+
+        <span class="n">nprod</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Get position of sun at every time sample</span>
+        <span class="n">times</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+        <span class="n">sun_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">ra_dec_of</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="s2">&quot;sun&quot;</span><span class="p">],</span> <span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">times</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Get hour angle and dec of sun, in radians</span>
+        <span class="n">ha</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="p">(</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span> <span class="o">-</span> <span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+        <span class="n">dec</span> <span class="o">=</span> <span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">el</span> <span class="o">=</span> <span class="n">sun_pos</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span>
+
+        <span class="c1"># Construct baseline vector for each visibility</span>
+        <span class="n">feed_pos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">vis_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feed_pos</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="o">-</span> <span class="n">feed_pos</span><span class="p">[</span><span class="n">ij</span><span class="p">]</span> <span class="k">for</span> <span class="n">ii</span><span class="p">,</span> <span class="n">ij</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:]]</span>
+        <span class="p">)</span>
+
+        <span class="n">feed_list</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">inputmap</span><span class="p">[</span><span class="n">fi</span><span class="p">],</span> <span class="n">inputmap</span><span class="p">[</span><span class="n">fj</span><span class="p">])</span> <span class="k">for</span> <span class="n">fi</span><span class="p">,</span> <span class="n">fj</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:]</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Determine polarisation for each visibility</span>
+        <span class="n">pol_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">feed_list</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">ii</span><span class="p">,</span> <span class="p">(</span><span class="n">fi</span><span class="p">,</span> <span class="n">fj</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">feed_list</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime</span><span class="p">(</span><span class="n">fi</span><span class="p">)</span> <span class="ow">and</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime</span><span class="p">(</span><span class="n">fj</span><span class="p">):</span>
+                <span class="n">pol_ind</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_y</span><span class="p">(</span><span class="n">fi</span><span class="p">)</span> <span class="o">+</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_chime_y</span><span class="p">(</span><span class="n">fj</span><span class="p">)</span>
+
+        <span class="c1"># Change vis_pos for non-CHIME feeds from NaN to 0.0</span>
+        <span class="n">vis_pos</span><span class="p">[(</span><span class="n">pol_ind</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="p">:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+        <span class="c1"># Initialise new container</span>
+        <span class="n">sscut</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span><span class="n">axes_from</span><span class="o">=</span><span class="n">sstream</span><span class="p">,</span> <span class="n">attrs_from</span><span class="o">=</span><span class="n">sstream</span><span class="p">)</span>
+        <span class="n">sscut</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="n">wv</span> <span class="o">=</span> <span class="mf">3e2</span> <span class="o">/</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">][</span><span class="s2">&quot;centre&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Iterate over frequencies and polarisations to null out the sun</span>
+        <span class="k">for</span> <span class="n">lfi</span><span class="p">,</span> <span class="n">fi</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">enumerate</span><span class="p">(</span><span class="mi">0</span><span class="p">):</span>
+
+            <span class="c1"># Get the baselines in wavelengths</span>
+            <span class="n">u</span> <span class="o">=</span> <span class="n">vis_pos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">wv</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">vis_pos</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">wv</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span>
+
+            <span class="c1"># Loop over ra to reduce memory usage</span>
+            <span class="k">for</span> <span class="n">ri</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ra</span><span class="p">)):</span>
+
+                <span class="c1"># Copy over the visiblities and weights</span>
+                <span class="n">vis</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ri</span><span class="p">]</span>
+                <span class="n">weight</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ri</span><span class="p">]</span>
+                <span class="n">sscut</span><span class="o">.</span><span class="n">vis</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ri</span><span class="p">]</span> <span class="o">=</span> <span class="n">vis</span>
+                <span class="n">sscut</span><span class="o">.</span><span class="n">weight</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ri</span><span class="p">]</span> <span class="o">=</span> <span class="n">weight</span>
+
+                <span class="c1"># Check if sun has set</span>
+                <span class="k">if</span> <span class="n">el</span><span class="p">[</span><span class="n">ri</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
+
+                    <span class="c1"># Calculate the phase that the sun would have using the fringestop routine</span>
+                    <span class="n">sun_vis</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">fringestop_phase</span><span class="p">(</span>
+                        <span class="n">ha</span><span class="p">[</span><span class="n">ri</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">CHIMELATITUDE</span><span class="p">),</span> <span class="n">dec</span><span class="p">[</span><span class="n">ri</span><span class="p">],</span> <span class="n">u</span><span class="p">,</span> <span class="n">v</span>
+                    <span class="p">)</span>
+
+                    <span class="c1"># Calculate the visibility vector for the sun</span>
+                    <span class="n">sun_vis</span> <span class="o">=</span> <span class="n">sun_vis</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span>
+
+                    <span class="c1"># Mask out the auto-correlations</span>
+                    <span class="n">sun_vis</span> <span class="o">*=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_or</span><span class="p">(</span><span class="n">u</span> <span class="o">!=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">v</span> <span class="o">!=</span> <span class="mf">0.0</span><span class="p">)</span>
+
+                    <span class="c1"># Iterate over polarisations to do projection independently for each.</span>
+                    <span class="c1"># This is needed because of the different beams for each pol.</span>
+                    <span class="k">for</span> <span class="n">pol</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">):</span>
+
+                        <span class="c1"># Mask out other polarisations in the visibility vector</span>
+                        <span class="n">sun_vis_pol</span> <span class="o">=</span> <span class="n">sun_vis</span> <span class="o">*</span> <span class="p">(</span><span class="n">pol_ind</span> <span class="o">==</span> <span class="n">pol</span><span class="p">)</span>
+
+                        <span class="c1"># Calculate various projections</span>
+                        <span class="n">vds</span> <span class="o">=</span> <span class="p">(</span><span class="n">vis</span> <span class="o">*</span> <span class="n">sun_vis_pol</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span> <span class="o">*</span> <span class="n">weight</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">sds</span> <span class="o">=</span> <span class="p">(</span><span class="n">sun_vis_pol</span> <span class="o">*</span> <span class="n">sun_vis_pol</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span> <span class="o">*</span> <span class="n">weight</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">isds</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">sds</span><span class="p">)</span>
+
+                        <span class="c1"># Subtract sun contribution from visibilities and place in new array</span>
+                        <span class="n">sscut</span><span class="o">.</span><span class="n">vis</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ri</span><span class="p">]</span> <span class="o">-=</span> <span class="n">sun_vis_pol</span> <span class="o">*</span> <span class="n">vds</span> <span class="o">*</span> <span class="n">isds</span>
+
+        <span class="c1"># Return the clean sidereal stream</span>
+        <span class="k">return</span> <span class="n">sscut</span></div></div>
+</pre></div>
+
+           </div>
+           
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

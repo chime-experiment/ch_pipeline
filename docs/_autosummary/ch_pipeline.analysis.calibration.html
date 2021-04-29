@@ -1,0 +1,1389 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.analysis.calibration &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.flagging" href="ch_pipeline.analysis.flagging.html" />
+    <link rel="prev" title="ch_pipeline.analysis.beam" href="ch_pipeline.analysis.beam.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../reference.html">Reference</a> &raquo;</li>
+        
+          <li><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a> &raquo;</li>
+        
+      <li>ch_pipeline.analysis.calibration</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+          
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.calibration.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="module-ch_pipeline.analysis.calibration">
+<span id="ch-pipeline-analysis-calibration"></span><h1>ch_pipeline.analysis.calibration<a class="headerlink" href="#module-ch_pipeline.analysis.calibration" title="Permalink to this headline">¶</a></h1>
+<p>Tasks for calibrating the data.</p>
+<p class="rubric">Functions</p>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.find_contiguous_time_ranges" title="ch_pipeline.analysis.calibration.find_contiguous_time_ranges"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_contiguous_time_ranges</span></code></a>(timestamp[, dt])</p></td>
+<td><p>Find contiguous ranges within an array of unix timestamps.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.interp_gains" title="ch_pipeline.analysis.calibration.interp_gains"><code class="xref py py-obj docutils literal notranslate"><span class="pre">interp_gains</span></code></a>(trans_times, gain_mat, times[, …])</p></td>
+<td><p>Linearly interpolates gain solutions in sidereal day.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.solve_gain" title="ch_pipeline.analysis.calibration.solve_gain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">solve_gain</span></code></a>(data[, feeds, norm])</p></td>
+<td><p>Calculate gain from largest eigenvector.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CalibrationCorrection</span></code></a>()</p></td>
+<td><p>Base class for applying multiplicative corrections based on a DataFlag.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CorrectTelescopeRotation" title="ch_pipeline.analysis.calibration.CorrectTelescopeRotation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrectTelescopeRotation</span></code></a>()</p></td>
+<td><p>Correct stacked visibilities for a different telescope rotation used during calibration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CorrectTimeOffset" title="ch_pipeline.analysis.calibration.CorrectTimeOffset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrectTimeOffset</span></code></a>()</p></td>
+<td><p>Correct stacked visibilities for a different time standard used during calibration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit" title="ch_pipeline.analysis.calibration.DetermineSourceTransit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DetermineSourceTransit</span></code></a>()</p></td>
+<td><p>Determine the sources that are transiting within time range covered by container.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.EigenCalibration" title="ch_pipeline.analysis.calibration.EigenCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EigenCalibration</span></code></a>()</p></td>
+<td><p>Deteremine response of each feed to a point source.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.FlagAmplitude" title="ch_pipeline.analysis.calibration.FlagAmplitude"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FlagAmplitude</span></code></a>()</p></td>
+<td><p>Flag feeds and frequencies with outlier gain amplitude.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.GainFromTransitFit" title="ch_pipeline.analysis.calibration.GainFromTransitFit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GainFromTransitFit</span></code></a>()</p></td>
+<td><p>Determine gain by evaluating the best-fit model for the point source transit.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="ch_pipeline.analysis.calibration.GatedNoiseCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GatedNoiseCalibration</span></code></a>()</p></td>
+<td><p>Calibration using noise injection.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency" title="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency"><code class="xref py py-obj docutils literal notranslate"><span class="pre">InterpolateGainOverFrequency</span></code></a>()</p></td>
+<td><p>Replace gain at flagged frequencies with interpolated values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration" title="ch_pipeline.analysis.calibration.NoiseInjectionCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NoiseInjectionCalibration</span></code></a>()</p></td>
+<td><p>Calibration using noise injection.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.NoiseSourceFold" title="ch_pipeline.analysis.calibration.NoiseSourceFold"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NoiseSourceFold</span></code></a>()</p></td>
+<td><p>Fold the noise source for synced data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.SiderealCalibration" title="ch_pipeline.analysis.calibration.SiderealCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealCalibration</span></code></a>()</p></td>
+<td><p>Use point source as a calibrator for a sidereal stack.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ThermalCalibration" title="ch_pipeline.analysis.calibration.ThermalCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ThermalCalibration</span></code></a>()</p></td>
+<td><p>Use weather temperature to correct calibration in between point source transits.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.TransitFit" title="ch_pipeline.analysis.calibration.TransitFit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitFit</span></code></a>()</p></td>
+<td><p>Fit model to the transit of a point source.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.CalibrationCorrection">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">CalibrationCorrection</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Base class for applying multiplicative corrections based on a DataFlag.</p>
+<p>This task is not functional.  It simply defines <cite>setup</cite> and <cite>process</cite>
+methods that are common to several subclasses.  All subclasses must
+define the <cite>_get_correction</cite> and <cite>_correction_is_nonzero</cite> methods.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>rotation</strong> (<em>float</em>) – Current best estimate of telescope rotation.</p></li>
+<li><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.CalibrationCorrection.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Apply a multiplicative correction to visiblities during range of time covered by flags.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>andata.CorrData</em><em>, </em><em>containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – Apply a correction to the <cite>vis</cite> dataset in this container.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – List describing the inputs as they are in the file, output from
+<cite>tools.get_correlator_inputs()</cite></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>sstream_out</strong> – The input container with the correction applied.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>same as sstream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.CalibrationCorrection.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Query the database for all DataFlags with name equal to the <cite>name_of_flag</cite> property.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.CorrectTelescopeRotation">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">CorrectTelescopeRotation</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectTelescopeRotation"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectTelescopeRotation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-class docutils literal notranslate"><span class="pre">ch_pipeline.analysis.calibration.CalibrationCorrection</span></code></a></p>
+<p>Correct stacked visibilities for a different telescope rotation used during calibration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag that contains the telescope rotation
+used was during calibration.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.CorrectTimeOffset">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">CorrectTimeOffset</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectTimeOffset"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectTimeOffset" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-class docutils literal notranslate"><span class="pre">ch_pipeline.analysis.calibration.CalibrationCorrection</span></code></a></p>
+<p>Correct stacked visibilities for a different time standard used during calibration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag that contains the time offset.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">DetermineSourceTransit</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Determine the sources that are transiting within time range covered by container.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit.source_list">
+<code class="sig-name descname">source_list</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.source_list" title="Permalink to this definition">¶</a></dt>
+<dd><p>List of source names to consider.  If not specified, all sources
+contained in <cite>ch_util.ephemeris.source_dictionary</cite> will be considered.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit.freq">
+<code class="sig-name descname">freq</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.freq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Frequency in MHz.  Sort the sources by the flux at this frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit.require_transit">
+<code class="sig-name descname">require_transit</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.require_transit" title="Permalink to this definition">¶</a></dt>
+<dd><p>If this is True and a source transit is not found in the container,
+then the task will return None.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add attributes to container describing source transit contained within.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>containers.SiderealStream</em><em>, </em><em>containers.TimeStream</em><em>, or </em><em>equivalent</em>) – Container covering the source transit.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>sstream</strong> – Container covering the source transit, now with <cite>source_name</cite> and
+<cite>transit_time</cite> attributes.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.SiderealStream, containers.TimeStream, or equivalent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.DetermineSourceTransit.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set list of sources, sorted by flux in descending order.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">EigenCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EigenCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Deteremine response of each feed to a point source.</p>
+<p>Extract the feed response from the real-time eigendecomposition
+of the N2 visibility matrix.  Flag frequencies that have low dynamic
+range, orthogonalize the polarizations, fringestop, and reference
+the phases appropriately.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.source">
+<code class="sig-name descname">source</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.source" title="Permalink to this definition">¶</a></dt>
+<dd><p>Name of the source (same format as <cite>ephemeris.source_dictionary</cite>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.eigen_ref">
+<code class="sig-name descname">eigen_ref</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.eigen_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>Index of the feed that is current phase reference of the eigenvectors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.phase_ref">
+<code class="sig-name descname">phase_ref</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.phase_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>Two element list that indicates the chan_id of the feeds to use
+as phase reference for the [Y, X] polarisation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.med_phase_ref">
+<code class="sig-name descname">med_phase_ref</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.med_phase_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>Overides <cite>phase_ref</cite>, instead referencing the phase with respect
+to the median value over feeds of a given polarisation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.neigen">
+<code class="sig-name descname">neigen</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.neigen" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of eigenvalues to include in the orthogonalization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.max_hour_angle">
+<code class="sig-name descname">max_hour_angle</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.max_hour_angle" title="Permalink to this definition">¶</a></dt>
+<dd><p>The maximum hour angle in degrees to consider in the analysis.
+Hour angles between [window * max_hour_angle, max_hour_angle] will
+be used for the determination of the off source eigenvalue.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.window">
+<code class="sig-name descname">window</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.window" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fraction of the maximum hour angle considered still on source.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.dyn_rng_threshold">
+<code class="sig-name descname">dyn_rng_threshold</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.dyn_rng_threshold" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ratio of the second largest eigenvalue on source to the largest eigenvalue
+off source below which frequencies and times will be considered contaminated
+and discarded from further analysis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.telescope_rotation">
+<code class="sig-name descname">telescope_rotation</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.telescope_rotation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Rotation of the telescope from true north in degrees.  A positive rotation is
+anti-clockwise when looking down at the telescope from the sky.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.EigenCalibration.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EigenCalibration.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine feed response from eigendecomposition.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>andata.CorrData</em>) – CorrData object that contains the chimecal acquisition datasets,
+specifically vis, weight, erms, evec, and eval.</p></li>
+<li><p><strong>inputmap</strong> (<em>list of CorrInput's</em>) – List describing the inputs as ordered in data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>response</strong> – Response of each feed to the point source.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">FlagAmplitude</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagAmplitude"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Flag feeds and frequencies with outlier gain amplitude.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.min_amp_scale_factor">
+<code class="sig-name descname">min_amp_scale_factor</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.min_amp_scale_factor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flag feeds and frequencies where the amplitude of the gain
+is less than <cite>min_amp_scale_factor</cite> times the median amplitude
+over all feeds and frequencies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.max_amp_scale_factor">
+<code class="sig-name descname">max_amp_scale_factor</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.max_amp_scale_factor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flag feeds and frequencies where the amplitude of the gain
+is greater than <cite>max_amp_scale_factor</cite> times the median amplitude
+over all feeds and frequencies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_outlier">
+<code class="sig-name descname">nsigma_outlier</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_outlier" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flag a feed at a particular frequency if the gain amplitude
+is greater than <cite>nsigma_outlier</cite> from the median value over
+all feeds of the same polarisation at that frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_med_outlier">
+<code class="sig-name descname">nsigma_med_outlier</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_med_outlier" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flag a frequency if the median gain amplitude over all feeds of a
+given polarisation is <cite>nsigma_med_outlier</cite> away from the local median.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.window_med_outlier">
+<code class="sig-name descname">window_med_outlier</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.window_med_outlier" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of frequency bins to use to determine the local median for
+the test outlined in the description of <cite>nsigma_med_outlier</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_freq">
+<code class="sig-name descname">threshold_good_freq</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_freq" title="Permalink to this definition">¶</a></dt>
+<dd><p>If a frequency has less than this fraction of good inputs, then
+it is considered bad and the data for all inputs is flagged.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_input">
+<code class="sig-name descname">threshold_good_input</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_input" title="Permalink to this definition">¶</a></dt>
+<dd><p>If an input has less than this fraction of good frequencies, then
+it is considered bad and the data for all frequencies is flagged.
+Note that the fraction is relative to the number of frequencies
+that pass the test described in <cite>threshold_good_freq</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.valid_gains_frac_good_freq">
+<code class="sig-name descname">valid_gains_frac_good_freq</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.valid_gains_frac_good_freq" title="Permalink to this definition">¶</a></dt>
+<dd><p>If the fraction of frequencies that remain after flagging is less than
+this value, then the task will return None and the processing of the
+sidereal day will not proceed further.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.FlagAmplitude.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">gain</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagAmplitude.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set weight to zero for feeds and frequencies with outlier gain amplitude.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gain</strong> (<em>containers.StaticGainData</em>) – Gain derived from point source transit.</p></li>
+<li><p><strong>inputmap</strong> (<em>list of CorrInput's</em>) – List describing the inputs as ordered in gain.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>gain</strong> – The input gain container with modified weights.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.GainFromTransitFit">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">GainFromTransitFit</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GainFromTransitFit"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Determine gain by evaluating the best-fit model for the point source transit.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.GainFromTransitFit.evaluate">
+<code class="sig-name descname">evaluate</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.evaluate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Evaluate the model at this location, either ‘transit’ or ‘peak’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.GainFromTransitFit.chisq_per_dof_threshold">
+<code class="sig-name descname">chisq_per_dof_threshold</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.chisq_per_dof_threshold" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set gain and weight to zero if the chisq per degree of freedom
+of the fit is less than this threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.GainFromTransitFit.alpha">
+<code class="sig-name descname">alpha</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.alpha" title="Permalink to this definition">¶</a></dt>
+<dd><p>Use confidence level 1 - alpha for the uncertainty on the gain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.GainFromTransitFit.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">fit</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GainFromTransitFit.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine gain from best-fit model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>fit</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.TransitFitParams" title="ch_pipeline.core.containers.TransitFitParams"><em>containers.TransitFitParams</em></a>) – Parameters of the model fit and their covariance.
+Must also contain ‘model_class’ and ‘model_kwargs’
+attributes that can be used to evaluate the model.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>gain</strong> – Gain and uncertainty on the gain.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.GatedNoiseCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">GatedNoiseCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GatedNoiseCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Calibration using noise injection.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.GatedNoiseCalibration.norm">
+<code class="sig-name descname">norm</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration.norm" title="Permalink to this definition">¶</a></dt>
+<dd><p>Specify what to use to normalise the matrix.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>[‘gated’, ‘off’, ‘identity’]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.GatedNoiseCalibration.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">ts</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GatedNoiseCalibration.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find gains from noise injection data and apply them to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ts</strong> (<em>andata.CorrData</em>) – Parallel timestream class containing noise injection data.</p></li>
+<li><p><strong>inputmap</strong> (<em>list of CorrInputs</em>) – List describing the inputs to the correlator.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>ts</strong> – Timestream with calibrated (decimated) visibilities, gains and
+respective timestamps.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">InterpolateGainOverFrequency</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InterpolateGainOverFrequency"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Replace gain at flagged frequencies with interpolated values.</p>
+<p>Uses a gaussian process regression to perform the interpolation
+with a Matern function describing the covariance between frequencies.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.interp_scale">
+<code class="sig-name descname">interp_scale</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.interp_scale" title="Permalink to this definition">¶</a></dt>
+<dd><p>Correlation length of the gain with frequency in MHz.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">gain</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InterpolateGainOverFrequency.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Interpolate the gain over the frequency axis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>containers.StaticGainData</em>) – Complex gains at single time.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>gain</strong> – Complex gains with flagged frequencies (<cite>weight = 0.0</cite>)
+replaced with interpolated values and <cite>weight</cite> dataset
+updated to reflect the uncertainty on the interpolation.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">NoiseInjectionCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.MPILoggedTask</span></code></p>
+<p>Calibration using noise injection.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.nchannels">
+<code class="sig-name descname">nchannels</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.nchannels" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of channels (default 16).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.ch_ref">
+<code class="sig-name descname">ch_ref</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.ch_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reference channel (default 0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int in the range 0 &lt;= ch_ref &lt;= Nchannels-1, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.fbin_ref">
+<code class="sig-name descname">fbin_ref</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.fbin_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reference frequency bin</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.decimate_only">
+<code class="sig-name descname">decimate_only</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.decimate_only" title="Permalink to this definition">¶</a></dt>
+<dd><p>If set (not default), then we do not apply the gain solution
+and return a decimated but uncalibrated timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt>
+<code class="sig-name descname">.. deprecated:: pass1G</code></dt>
+<dd><p>This calibration technique only works on old data from before Pass 1G.
+For more recent data, look at <a class="reference internal" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="ch_pipeline.analysis.calibration.GatedNoiseCalibration"><code class="xref py py-class docutils literal notranslate"><span class="pre">GatedNoiseCalibration</span></code></a>.</p>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.next">
+<code class="sig-name descname">next</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">ts</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration.next"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.next" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find gains from noise injection data and apply them to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>ts</strong> (<em>containers.TimeStream</em>) – Parallel timestream class containing noise injection data.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>cts</strong> – Timestream with calibrated (decimated) visibilities, gains and
+respective timestamps.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.CalibratedTimeStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Use the input map to set up the calibrator.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">tools.CorrInputs</span></code>) – Describing the inputs to the correlator.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.NoiseSourceFold">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">NoiseSourceFold</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseSourceFold"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Fold the noise source for synced data.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseSourceFold.period">
+<code class="sig-name descname">period</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.period" title="Permalink to this definition">¶</a></dt>
+<dd><p>Period of the noise source in integration samples.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.NoiseSourceFold.phase">
+<code class="sig-name descname">phase</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.phase" title="Permalink to this definition">¶</a></dt>
+<dd><p>Phase of noise source on sample.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.NoiseSourceFold.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">ts</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseSourceFold.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fold on the noise source and generate a gated dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>ts</strong> (<em>andata.CorrData object</em>) – Timestream to fold on.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>folded_ts</strong> – Timestream with a gated_vis0 dataset containing the noise
+source data.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">SiderealCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#SiderealCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Use point source as a calibrator for a sidereal stack.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration.source">
+<code class="sig-name descname">source</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.source" title="Permalink to this definition">¶</a></dt>
+<dd><p>Name of the point source to use as calibrator.
+Default CygA.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration.model_fit">
+<code class="sig-name descname">model_fit</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.model_fit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fit a model to the point source transit.
+Default False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration.use_peak">
+<code class="sig-name descname">use_peak</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.use_peak" title="Permalink to this definition">¶</a></dt>
+<dd><p>Relevant if model_fit is True.  If set to True,
+estimate the gain as the response at the
+actual peak location. If set to False, estimate
+the gain as the response at the expected peak location.
+Default False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration.threshold">
+<code class="sig-name descname">threshold</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.threshold" title="Permalink to this definition">¶</a></dt>
+<dd><p>Relevant if model_fit is True.  The model is only fit to
+time samples with dynamic range greater than threshold.
+Default is 3.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.SiderealCalibration.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em>, <em class="sig-param"><span class="n">inputmap</span></em>, <em class="sig-param"><span class="n">inputmask</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#SiderealCalibration.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine calibration from a sidereal stream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – Rigidized sidereal timestream to calibrate.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – List describing the inputs as they are in the file.</p></li>
+<li><p><strong>inputmask</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><em>containers.CorrInputMask</em></a>) – Mask indicating which correlator inputs to use in the
+eigenvalue decomposition.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>gains</strong> – Response of each feed to the point source and best-fit model
+(model_fit is True), or gains at the expected peak location
+(model_fit is False).</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.PointSourceTransit" title="ch_pipeline.core.containers.PointSourceTransit">containers.PointSourceTransit</a> or containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.ThermalCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">ThermalCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ThermalCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Use weather temperature to correct calibration in between point source transits.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.ThermalCalibration.caltime_path">
+<code class="sig-name descname">caltime_path</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.caltime_path" title="Permalink to this definition">¶</a></dt>
+<dd><p>Full path to file describing the calibration times.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>string</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.ThermalCalibration.node_spoof">
+<code class="sig-name descname">node_spoof</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.node_spoof" title="Permalink to this definition">¶</a></dt>
+<dd><p>(default: {‘cedar_archive’: ‘/project/rpp-krs/chime/chime_archive/’} )
+host and directory in which to find data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.ThermalCalibration.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ThermalCalibration.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine thermal calibration for a sidereal stream or time stream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>data</strong> (<cite>containers.SiderealStream</cite> or <cite>containers.TimeStream</cite>) – Data to generate calibration for.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>gain</strong> – The type depends on the type of <cite>data</cite>.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Either <cite>containers.SiderealGainData</cite> or <cite>containers.GainData</cite></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.ThermalCalibration.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ThermalCalibration.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load calibration times.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.calibration.TransitFit">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">TransitFit</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Fit model to the transit of a point source.</p>
+<p>Multiple model choices are available and can be specified through the <cite>model</cite>
+config property.  Default is <cite>gauss_amp_poly_phase</cite>, a nonlinear fit
+of a gaussian in amplitude and a polynomial in phase to the complex data.
+There is also <cite>poly_log_amp_poly_phase</cite>, an iterative weighted least squares
+fit of a polynomial to log amplitude and phase.  The type of polynomial can be
+chosen through the <cite>poly_type</cite>, <cite>poly_deg_amp</cite>, and <cite>poly_deg_phi</cite> config properties.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.model">
+<code class="sig-name descname">model</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.model" title="Permalink to this definition">¶</a></dt>
+<dd><p>Name of the model to fit.  One of ‘gauss_amp_poly_phase’ or
+‘poly_log_amp_poly_phase’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.nsigma">
+<code class="sig-name descname">nsigma</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.nsigma" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of standard deviations away from transit to fit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.absolute_sigma">
+<code class="sig-name descname">absolute_sigma</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.absolute_sigma" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set to True if the errors provided are absolute.  Set to False if
+the errors provided are relative, in which case the parameter covariance
+will be scaled by the chi-squared per degree-of-freedom.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.poly_type">
+<code class="sig-name descname">poly_type</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Type of polynomial.  Either ‘standard’, ‘hermite’, or ‘chebychev’.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.poly_deg_amp">
+<code class="sig-name descname">poly_deg_amp</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_deg_amp" title="Permalink to this definition">¶</a></dt>
+<dd><p>Degree of the polynomial to fit to amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.poly_deg_phi">
+<code class="sig-name descname">poly_deg_phi</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_deg_phi" title="Permalink to this definition">¶</a></dt>
+<dd><p>Degree of the polynomial to fit to phase.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.niter">
+<code class="sig-name descname">niter</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.niter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of times to update the errors using model amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.moving_window">
+<code class="sig-name descname">moving_window</code><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.moving_window" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of standard deviations away from peak to fit.
+The peak location is updated with each iteration.
+Must be less than <cite>nsigma</cite>.  Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">response</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fit model to the point source response for each feed and frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>response</strong> (<em>containers.SiderealStream</em>) – SiderealStream covering the source transit.  Must contain
+<cite>source_name</cite> and <cite>transit_time</cite> attributes.</p></li>
+<li><p><strong>inputmap</strong> (<em>list of CorrInput's</em>) – List describing the inputs as ordered in response.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>fit</strong> – Parameters of the model fit and their covariance.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.TransitFitParams" title="ch_pipeline.core.containers.TransitFitParams">containers.TransitFitParams</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.calibration.TransitFit.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Define model to fit to transit.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="ch_pipeline.analysis.calibration.find_contiguous_time_ranges">
+<code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">find_contiguous_time_ranges</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">timestamp</span></em>, <em class="sig-param"><span class="n">dt</span><span class="o">=</span><span class="default_value">3600.0</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#find_contiguous_time_ranges"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.find_contiguous_time_ranges" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find contiguous ranges within an array of unix timestamps.</p>
+<p>Used by ThermalCalibration to determine the ranges of time
+to load temperature data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>timestamp</strong> (<em>np.ndarray</em><em>[</em><em>ntime</em><em>,</em><em>]</em>) – Unix timestamps.</p></li>
+<li><p><strong>dt</strong> (<em>float</em>) – Maximum time difference in seconds.
+If consecutive timestamps are separated
+by more than 2 * dt, then they will be
+placed into separate time ranges. Note that
+each time range will be expanded by dt
+on either end.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>time_ranges</strong> – List of 2 element tuples, which each tuple
+containing the start and stop time covering
+a contiguous range of timestamps.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>[(start_time, stop_time), ..]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="ch_pipeline.analysis.calibration.interp_gains">
+<code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">interp_gains</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">trans_times</span></em>, <em class="sig-param"><span class="n">gain_mat</span></em>, <em class="sig-param"><span class="n">times</span></em>, <em class="sig-param"><span class="n">axis</span><span class="o">=</span><span class="default_value">- 1</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#interp_gains"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.interp_gains" title="Permalink to this definition">¶</a></dt>
+<dd><p>Linearly interpolates gain solutions in sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>trans_times</strong> (<em>array_like</em>) – Unix time of object transit</p></li>
+<li><p><strong>gain_mat</strong> (<em>array_like</em>) – Array of gains shaped (freq, ncorr, ndays)</p></li>
+<li><p><strong>times</strong> (<em>array_like</em>) – Timestamps onto which gain solution is interpolated</p></li>
+<li><p><strong>axis</strong> (<em>int</em>) – Axis along which to interpolate.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Array of interpolated gains</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="ch_pipeline.analysis.calibration.solve_gain">
+<code class="sig-prename descclassname">ch_pipeline.analysis.calibration.</code><code class="sig-name descname">solve_gain</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data</span></em>, <em class="sig-param"><span class="n">feeds</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">norm</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#solve_gain"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.solve_gain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate gain from largest eigenvector.</p>
+<p>Step through each time/freq pixel, generate a Hermitian matrix,
+perform eigendecomposition, iteratively replacing the diagonal
+elements with a low-rank approximation, and calculate complex gains
+from the largest eigenvector.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>, </em><em>nprod</em><em>, </em><em>ntime</em><em>]</em>) – Visibility array to be decomposed</p></li>
+<li><p><strong>feeds</strong> (<em>list</em>) – Which feeds to include. If <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code> include all feeds.</p></li>
+<li><p><strong>norm</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>, </em><em>nfeed</em><em>, </em><em>ntime</em><em>]</em><em>, </em><em>optional</em>) – Array to use for weighting.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>evalue</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Eigenvalues obtained from eigenvalue decomposition
+of the visibility matrix.</p></li>
+<li><p><strong>gain</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Gain solution for each feed, time, and frequency</p></li>
+<li><p><strong>gain_error</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Error on the gain solution for each feed, time, and frequency</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+        <a href="ch_pipeline.analysis.flagging.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.flagging" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="ch_pipeline.analysis.beam.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.beam" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

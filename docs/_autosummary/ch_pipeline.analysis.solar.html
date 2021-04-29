@@ -1,0 +1,497 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.analysis.solar &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.source_removal" href="ch_pipeline.analysis.source_removal.html" />
+    <link rel="prev" title="ch_pipeline.analysis.sidereal" href="ch_pipeline.analysis.sidereal.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../reference.html">Reference</a> &raquo;</li>
+        
+          <li><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a> &raquo;</li>
+        
+      <li>ch_pipeline.analysis.solar</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+          
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.solar.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="module-ch_pipeline.analysis.solar">
+<span id="ch-pipeline-analysis-solar"></span><h1>ch_pipeline.analysis.solar<a class="headerlink" href="#module-ch_pipeline.analysis.solar" title="Permalink to this headline">¶</a></h1>
+<p>Tasks for analysis of the radio sun</p>
+<p>Tasks for analysis of the radio sun.  Includes grouping individual files
+into a solar day; solar calibration; and sun excision from sidereal stream.</p>
+<p class="rubric">Functions</p>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.ra_dec_of" title="ch_pipeline.analysis.solar.ra_dec_of"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ra_dec_of</span></code></a>(body, time)</p></td>
+<td><p>Calculate the coordinates of a celestial body at a particular time.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.unix_to_localtime" title="ch_pipeline.analysis.solar.unix_to_localtime"><code class="xref py py-obj docutils literal notranslate"><span class="pre">unix_to_localtime</span></code></a>(unix_time)</p></td>
+<td><p>Converts unix time to a <code class="xref py py-class docutils literal notranslate"><span class="pre">datetime.datetime</span></code> object.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.SolarCalibration" title="ch_pipeline.analysis.solar.SolarCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolarCalibration</span></code></a>()</p></td>
+<td><p>Use Sun to measure antenna beam pattern.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.SolarClean" title="ch_pipeline.analysis.solar.SolarClean"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolarClean</span></code></a>()</p></td>
+<td><p>Clean the sun from daytime data by removing the outer product of the eigenvector corresponding to the largest eigenvalue.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.SolarGrouper" title="ch_pipeline.analysis.solar.SolarGrouper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolarGrouper</span></code></a>()</p></td>
+<td><p>Group individual timestreams together into whole solar days.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.solar.SunClean" title="ch_pipeline.analysis.solar.SunClean"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SunClean</span></code></a>()</p></td>
+<td><p>Clean the sun from data by projecting out signal from its location.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt id="ch_pipeline.analysis.solar.SolarCalibration">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">SolarCalibration</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarCalibration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarCalibration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Use Sun to measure antenna beam pattern.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.solar.SolarCalibration.fringestop">
+<code class="sig-name descname">fringestop</code><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarCalibration.fringestop" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fringestop prior to solving for the sun response.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool, default False</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.solar.SolarCalibration.model_fit">
+<code class="sig-name descname">model_fit</code><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarCalibration.model_fit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Fit a model to the primary beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool, default False</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.solar.SolarCalibration.nsig">
+<code class="sig-name descname">nsig</code><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarCalibration.nsig" title="Permalink to this definition">¶</a></dt>
+<dd><p>Relevant if model_fit is True.  The model is only fit to
+time samples within +/- nsig sigma from the expected
+peak location.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float, default 2.0</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.solar.SolarCalibration.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em>, <em class="sig-param"><span class="n">inputmap</span></em>, <em class="sig-param"><span class="n">inputmask</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarCalibration.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarCalibration.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine calibration from a timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>andata.CorrData</em><em> or </em><em>containers.SiderealStream</em>) – Timestream collected during the day.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – A list describing the inputs as they are in the file.</p></li>
+<li><p><strong>inputmask</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><em>containers.CorrInputMask</em></a>) – Mask indicating which correlator inputs to use in the
+eigenvalue decomposition.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>suntrans</strong> – Response to the sun.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SunTransit" title="ch_pipeline.core.containers.SunTransit">containers.SunTransit</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.solar.SolarClean">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">SolarClean</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarClean"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarClean" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Clean the sun from daytime data by removing the outer product of the
+eigenvector corresponding to the largest eigenvalue.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.solar.SolarClean.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em>, <em class="sig-param"><span class="n">suntrans</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarClean.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarClean.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Clean the sun.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – Sidereal stream.</p></li>
+<li><p><strong>suntrans</strong> (<em>containers.SolarTransit</em>) – Response to the sun.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – A list describing the inputs as they are in the file.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>mstream</strong> – Sidereal stream with sun removed</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.solar.SolarGrouper">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">SolarGrouper</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarGrouper"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarGrouper" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Group individual timestreams together into whole solar days.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.solar.SolarGrouper.min_span">
+<code class="sig-name descname">min_span</code><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarGrouper.min_span" title="Permalink to this definition">¶</a></dt>
+<dd><p>The minimum solar day length (in hours) to process.
+Default is 2.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.solar.SolarGrouper.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">tstream</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarGrouper.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarGrouper.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load in each solar day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>tstream</strong> (<em>andata.CorrData</em>) – Timestream to group together.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>ts</strong> – Returns the timestream of each solar day when we have received
+the last file, otherwise returns <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>andata.CorrData or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.solar.SolarGrouper.process_finish">
+<code class="sig-name descname">process_finish</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SolarGrouper.process_finish"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SolarGrouper.process_finish" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return the final day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p><strong>ts</strong> – Returns the timestream of the final day if it’s long
+enough, otherwise returns <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>andata.CorrData or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="ch_pipeline.analysis.solar.SunClean">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">SunClean</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SunClean"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SunClean" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>Clean the sun from data by projecting out signal from its location.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.solar.SunClean.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em>, <em class="sig-param"><span class="n">inputmap</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#SunClean.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.SunClean.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Clean the sun.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – Sidereal stream.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>mstream</strong> – Sidereal stack with sun projected out.</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>containers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="ch_pipeline.analysis.solar.ra_dec_of">
+<code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">ra_dec_of</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">body</span></em>, <em class="sig-param"><span class="n">time</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#ra_dec_of"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.ra_dec_of" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate the coordinates of a celestial
+body at a particular time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>body</strong> (<em>ephem.Body</em>) – PyEphem celestial body.</p></li>
+<li><p><strong>time</strong> (<em>float</em>) – Unix/POSIX time.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>coord</strong> – Coordinates of the sources</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>(ra, dec, alt, az)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="ch_pipeline.analysis.solar.unix_to_localtime">
+<code class="sig-prename descclassname">ch_pipeline.analysis.solar.</code><code class="sig-name descname">unix_to_localtime</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">unix_time</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/solar.html#unix_to_localtime"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.solar.unix_to_localtime" title="Permalink to this definition">¶</a></dt>
+<dd><p>Converts unix time to a <code class="xref py py-class docutils literal notranslate"><span class="pre">datetime.datetime</span></code> object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>unix_time</strong> (<em>float</em>) – Unix/POSIX time.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>dt</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime.datetime</span></code></p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+        <a href="ch_pipeline.analysis.source_removal.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.source_removal" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="ch_pipeline.analysis.sidereal.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.sidereal" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

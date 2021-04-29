@@ -1,0 +1,708 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.processing.daily &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>ch_pipeline.processing.daily</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for ch_pipeline.processing.daily</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">datetime</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">base</span>
+
+
+<span class="n">DEFAULT_SCRIPT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Cluster configuration</span>
+<span class="s2">cluster:</span>
+<span class="s2">  name: </span><span class="si">{jobname}</span><span class="s2"></span>
+
+<span class="s2">  directory: </span><span class="si">{dir}</span><span class="s2"></span>
+<span class="s2">  temp_directory: </span><span class="si">{tempdir}</span><span class="s2"></span>
+
+<span class="s2">  time: </span><span class="si">{time}</span><span class="s2"></span>
+<span class="s2">  system: cedar</span>
+<span class="s2">  nodes: </span><span class="si">{nodes}</span><span class="s2"></span>
+<span class="s2">  ompnum: </span><span class="si">{ompnum}</span><span class="s2"></span>
+<span class="s2">  pernode: </span><span class="si">{pernode}</span><span class="s2"></span>
+<span class="s2">  mem: 192000M</span>
+
+<span class="s2">  venv: </span><span class="si">{venv}</span><span class="s2"></span>
+
+<span class="s2"># Pipeline task configuration</span>
+<span class="s2">pipeline:</span>
+
+<span class="s2">  logging:</span>
+<span class="s2">    root: DEBUG</span>
+<span class="s2">    peewee: INFO</span>
+<span class="s2">    matplotlib: INFO</span>
+
+<span class="s2">  save_versions:</span>
+<span class="s2">    - caput</span>
+<span class="s2">    - ch_util</span>
+<span class="s2">    - ch_pipeline</span>
+<span class="s2">    - chimedb.core</span>
+<span class="s2">    - chimedb.data_index</span>
+<span class="s2">    - chimedb.dataflag</span>
+<span class="s2">    - cora</span>
+<span class="s2">    - draco</span>
+<span class="s2">    - drift</span>
+<span class="s2">    - numpy</span>
+<span class="s2">    - scipy</span>
+<span class="s2">    - h5py</span>
+<span class="s2">    - mpi4py</span>
+
+<span class="s2">  tasks:</span>
+<span class="s2">    - type: ch_pipeline.core.containers.MonkeyPatchContainers</span>
+
+<span class="s2">    - type: draco.core.task.SetMPILogging</span>
+<span class="s2">      params:</span>
+<span class="s2">        level_rank0: DEBUG</span>
+<span class="s2">        level_all: WARNING</span>
+
+<span class="s2">    # Query for all the data for the sidereal day we are processing</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryDatabase</span>
+<span class="s2">      out: filelist</span>
+<span class="s2">      params:</span>
+<span class="s2">        start_csd: </span><span class="si">{csd[0]:.2f}</span><span class="s2"></span>
+<span class="s2">        end_csd: </span><span class="si">{csd[1]:.2f}</span><span class="s2"></span>
+<span class="s2">        accept_all_global_flags: true</span>
+<span class="s2">        node_spoof:</span>
+<span class="s2">          cedar_archive: &quot;/project/rpp-krs/chime/chime_archive/&quot;</span>
+<span class="s2">        instrument: chimestack</span>
+
+<span class="s2">    # Load the telescope model that we need for several steps</span>
+<span class="s2">    - type: draco.core.io.LoadProductManager</span>
+<span class="s2">      out: manager</span>
+<span class="s2">      params:</span>
+<span class="s2">        product_directory: &quot;</span><span class="si">{product_path}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Load and accumulate the available timing correction files.</span>
+<span class="s2">    - type: draco.core.io.LoadFilesFromParams</span>
+<span class="s2">      out: tcorr</span>
+<span class="s2">      params:</span>
+<span class="s2">        files: &quot;</span><span class="si">{timing_file}</span><span class="s2">&quot;</span>
+<span class="s2">        distributed: false</span>
+
+<span class="s2">    - type: draco.core.misc.AccumulateList</span>
+<span class="s2">      in: tcorr</span>
+<span class="s2">      out: tcorrlist</span>
+
+<span class="s2">    # We need to block the loading of the files until all the timing correction files are available</span>
+<span class="s2">    - type: draco.core.misc.WaitUntil</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: filelist</span>
+<span class="s2">      out: filelist2</span>
+
+<span class="s2">    # Load the individual data files</span>
+<span class="s2">    - type: ch_pipeline.core.io.LoadCorrDataFiles</span>
+<span class="s2">      requires: filelist2</span>
+<span class="s2">      out: tstream_orig</span>
+<span class="s2">      params:</span>
+<span class="s2">        channel_range: [</span><span class="si">{freq[0]:d}</span><span class="s2">, </span><span class="si">{freq[1]:d}</span><span class="s2">]</span>
+
+<span class="s2">    # Correct the timing distribution errors</span>
+<span class="s2">    - type: ch_pipeline.analysis.timing.ApplyTimingCorrection</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: tstream_orig</span>
+<span class="s2">      out: tstream_corr</span>
+<span class="s2">      params:</span>
+<span class="s2">        use_input_flags: true</span>
+
+<span class="s2">    # Get the telescope layout that was active when this data file was recorded</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryInputs</span>
+<span class="s2">      in: tstream_corr</span>
+<span class="s2">      out: inputmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        cache: true</span>
+
+<span class="s2">    # Correct the miscalibration of the data due to the varying estimates of telescope</span>
+<span class="s2">    # rotation</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTelescopeRotation</span>
+<span class="s2">      in: [tstream_corr, inputmap]</span>
+<span class="s2">      out: tstream_rot</span>
+<span class="s2">      params:</span>
+<span class="s2">        rotation: -0.071</span>
+
+<span class="s2">    # Correct an early bug in the interpretation of the timestamps that effected the</span>
+<span class="s2">    # calibration</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTimeOffset</span>
+<span class="s2">      in: [tstream_rot, inputmap]</span>
+<span class="s2">      out: tstream</span>
+
+<span class="s2">    # Calculate the system sensitivity for this file</span>
+<span class="s2">    - type: draco.analysis.sensitivity.ComputeSystemSensitivity</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_corr</span>
+<span class="s2">      out: sensitivity</span>
+<span class="s2">      params:</span>
+<span class="s2">        exclude_intracyl: true</span>
+
+<span class="s2">    # Average over redundant baselines across all cylinder pairs</span>
+<span class="s2">    - type: draco.analysis.transform.CollateProducts</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_corr</span>
+<span class="s2">      out: tstream_col</span>
+<span class="s2">      params:</span>
+<span class="s2">        weight: &quot;natural&quot;</span>
+
+<span class="s2">    # Concatenate together all the days timestream information</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_col</span>
+<span class="s2">      out: tstream_day</span>
+
+<span class="s2">    # Concatenate together all the days sensitivity information and output it</span>
+<span class="s2">    # for validation</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sensitivity</span>
+<span class="s2">      out: sensitivity_day</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sensitivity_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Calculate the RFI mask from the autocorrelation data</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.RFIFilter</span>
+<span class="s2">      in: tstream_day</span>
+<span class="s2">      out: rfimask</span>
+<span class="s2">      params:</span>
+<span class="s2">        stack: true</span>
+<span class="s2">        flag1d: false</span>
+<span class="s2">        rolling: true</span>
+<span class="s2">        apply_static_mask: true</span>
+<span class="s2">        keep_auto: true</span>
+<span class="s2">        keep_ndev: true</span>
+<span class="s2">        freq_width: 10.0</span>
+<span class="s2">        time_width: 420.0</span>
+<span class="s2">        threshold_mad: 6.0</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_{{tag}}.h5&quot;</span>
+<span class="s2">        nan_check: false</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.ApplyCorrInputMask</span>
+<span class="s2">      in: [tstream_day, rfimask]</span>
+<span class="s2">      out: tstream_day_rfi</span>
+
+<span class="s2">    # Calculate the thermal gain correction</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.ThermalCalibration</span>
+<span class="s2">      in: tstream_day_rfi</span>
+<span class="s2">      out: thermal_gain</span>
+<span class="s2">      params:</span>
+<span class="s2">        caltime_path: &quot;</span><span class="si">{caltimes_file}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Apply the thermal correction</span>
+<span class="s2">    - type: draco.core.misc.ApplyGain</span>
+<span class="s2">      in: [tstream_day_rfi, thermal_gain]</span>
+<span class="s2">      out: tstream_thermal_corrected</span>
+
+<span class="s2">    # Smooth the noise estimates which suffer from sample variance</span>
+<span class="s2">    - type: draco.analysis.flagging.SmoothVisWeight</span>
+<span class="s2">      in: tstream_thermal_corrected</span>
+<span class="s2">      out: tstream_day_smoothweight</span>
+
+<span class="s2">    # Regrid the data onto a regular grid in sidereal time</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealRegridder</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_day_smoothweight</span>
+<span class="s2">      out: sstream</span>
+<span class="s2">      params:</span>
+<span class="s2">        samples: 4096</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sstream_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Flag out low weight samples to remove transient RFI artifacts at the edges of</span>
+<span class="s2">    # flagged regions</span>
+<span class="s2">    - type: draco.analysis.flagging.ThresholdVisWeight</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: sstream_threshold</span>
+<span class="s2">      params:</span>
+<span class="s2">          relative_threshold: 0.5</span>
+
+<span class="s2">    - type: draco.analysis.flagging.RFIMask</span>
+<span class="s2">      in: sstream_threshold</span>
+<span class="s2">      out: sstream_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">          stack_ind: 66</span>
+
+<span class="s2">    # Make a map of the full dataset</span>
+<span class="s2">    - type: ch_pipeline.analysis.mapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: ringmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: false</span>
+<span class="s2">        include_auto: false</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Make a map from the inter cylinder baselines. This is less sensitive to</span>
+<span class="s2">    # cross talk and emphasis point sources</span>
+<span class="s2">    - type: ch_pipeline.analysis.mapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: ringmapint</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: true</span>
+<span class="s2">        include_auto: false</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Mask out intercylinder baselines before beam forming to minimise cross</span>
+<span class="s2">    # talk. This creates a copy of the input that shares the vis dataset (but</span>
+<span class="s2">    # with a distinct weight dataset) to save memory</span>
+<span class="s2">    - type: draco.analysis.flagging.MaskBaselines</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: sstream_inter</span>
+<span class="s2">      params:</span>
+<span class="s2">        share: vis</span>
+<span class="s2">        mask_short_ew: 1.0</span>
+
+<span class="s2">    # Load the source catalogs to measure fluxes of</span>
+<span class="s2">    - type: draco.core.io.LoadBasicCont</span>
+<span class="s2">      out: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[0]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[1]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[2]}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Measure the observed fluxes of the point sources in the catalogs</span>
+<span class="s2">    - type: draco.analysis.beamform.BeamFormCat</span>
+<span class="s2">      requires: [manager, sstream_inter]</span>
+<span class="s2">      in: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        timetrack: 300.0</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sourceflux_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Mask out day time data</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DayMask</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: sstream_mask1</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskMoon</span>
+<span class="s2">      in: sstream_mask1</span>
+<span class="s2">      out: sstream_mask2</span>
+
+<span class="s2">    # Remove ranges of time known to be bad that may effect the delay power</span>
+<span class="s2">    # spectrum estimate</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DataFlagger</span>
+<span class="s2">      in: sstream_mask2</span>
+<span class="s2">      out: sstream_mask3</span>
+<span class="s2">      params:</span>
+<span class="s2">        flag_type:</span>
+<span class="s2">          - acjump</span>
+<span class="s2">          - bad_calibration_acquisition_restart</span>
+<span class="s2">          - bad_calibration_fpga_restart</span>
+<span class="s2">          - bad_calibration_gains</span>
+<span class="s2">          - decorrelated_cylinder</span>
+<span class="s2">          - globalflag</span>
+<span class="s2">          - rain1mm</span>
+
+<span class="s2">    # Load the stack that we will blend into the daily data</span>
+<span class="s2">    - type: draco.core.io.LoadBasicCont</span>
+<span class="s2">      out: sstack</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">            - &quot;</span><span class="si">{blend_stack_file}</span><span class="s2">&quot;</span>
+<span class="s2">        selections:</span>
+<span class="s2">            freq_range: [</span><span class="si">{freq[0]:d}</span><span class="s2">, </span><span class="si">{freq[1]:d}</span><span class="s2">]</span>
+
+<span class="s2">    - type: draco.analysis.flagging.BlendStack</span>
+<span class="s2">      requires: sstack</span>
+<span class="s2">      in: sstream_mask3</span>
+<span class="s2">      out: sstream_blend1</span>
+<span class="s2">      params:</span>
+<span class="s2">        frac: 1e-4</span>
+
+<span class="s2">    # Mask the daytime data again. This ensures that we only see the point sources in</span>
+<span class="s2">    # the delay spectrum we would expect</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskDay</span>
+<span class="s2">      in: sstream_blend1</span>
+<span class="s2">      out: sstream_blend2</span>
+
+<span class="s2">    # Estimate the delay power spectrum of the data. This is a good diagnostic</span>
+<span class="s2">    # of instrument performance</span>
+<span class="s2">    - type: draco.analysis.delay.DelaySpectrumEstimator</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_blend2</span>
+<span class="s2">      params:</span>
+<span class="s2">        freq_zero: 800.0</span>
+<span class="s2">        nfreq: 1025</span>
+<span class="s2">        nsamp: 40</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;delayspectrum_{{tag}}.h5&quot;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">class</span> <span class="nc">DailyProcessing</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;&quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;daily&quot;</span>
+    <span class="n">tag_pattern</span> <span class="o">=</span> <span class="sa">r</span><span class="s2">&quot;\d+&quot;</span>
+
+    <span class="c1"># Parameters of the job processing</span>
+    <span class="n">default_params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="c1"># Time range(s) to process</span>
+        <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="c1">## Priority days to reprocess</span>
+            <span class="c1"># Good ranges from rev_00</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1868&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1875&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1927&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1935&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1973&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1977&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2071&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2080&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2162&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2166&quot;</span><span class="p">},</span>
+            <span class="c1"># A good looking interval from late 2019 (determined from run</span>
+            <span class="c1"># notes, dataflags and data availability)</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2143&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2148&quot;</span><span class="p">},</span>
+            <span class="c1">## Runs processed for rev_00</span>
+            <span class="c1"># October run</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20181011T140000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20181019T220000Z&quot;</span><span class="p">},</span>
+            <span class="c1"># Winter run periods - as defined by Mateus</span>
+            <span class="c1"># Pass A (start trimmed for timing solutions)</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20181223T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20181229T000000Z&quot;</span><span class="p">},</span>
+            <span class="c1"># Pass B</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20190111T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20190207T000000Z&quot;</span><span class="p">},</span>
+            <span class="c1"># Pass C (end trimmed for timing sols)</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20190210T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20190304T000000Z&quot;</span><span class="p">},</span>
+            <span class="c1"># April run</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20190406T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20190418T000000Z&quot;</span><span class="p">},</span>
+            <span class="c1"># July run</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20190713T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20190723T000000Z&quot;</span><span class="p">},</span>
+        <span class="p">],</span>
+        <span class="c1"># Amount of padding each side of sidereal day to load</span>
+        <span class="s2">&quot;padding&quot;</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="c1"># Frequencies to process</span>
+        <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">],</span>
+        <span class="c1"># The beam transfers to use (need to have the same freq range as above)</span>
+        <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/&quot;</span><span class="p">,</span>
+        <span class="c1"># Calibration times for thermal correction</span>
+        <span class="s2">&quot;caltimes_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/gain/calibration_times/&quot;</span>
+            <span class="s2">&quot;20180902_20200404_calibration_times.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># File for the timing correction</span>
+        <span class="s2">&quot;timing_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/&quot;</span>
+            <span class="s2">&quot;*_chimetiming_delay.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;catalogs&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5&quot;</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;blend_stack_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/&quot;</span>
+            <span class="s2">&quot;sidereal_stack.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># Job params</span>
+        <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">180</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+        <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">16</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+        <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+        <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+    <span class="p">}</span>
+    <span class="n">default_script</span> <span class="o">=</span> <span class="n">DEFAULT_SCRIPT</span>
+
+    <span class="k">def</span> <span class="nf">_load_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="c1"># Process the intervals</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;intervals&quot;</span><span class="p">]:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">],</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;end&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;padding&quot;</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_available_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Return all the tags that are available to run.</span>
+
+<span class="sd">        This includes any that currently exist or are in the job queue.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># TODO: should decide availability based on what data is actually</span>
+        <span class="c1"># available</span>
+        <span class="c1"># - Need to find all correlator data in the range</span>
+        <span class="c1"># - Figure out which ones are on cedar</span>
+        <span class="c1"># - Figure out which sidereal days are covered by this range</span>
+
+        <span class="n">csds</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># For each interval find and add all CSDs that have not already been added</span>
+        <span class="k">for</span> <span class="n">interval</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span><span class="p">:</span>
+            <span class="n">csd_i</span> <span class="o">=</span> <span class="n">csds_in_range</span><span class="p">(</span><span class="o">*</span><span class="n">interval</span><span class="p">)</span>
+            <span class="n">csd_set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">csds</span><span class="p">)</span>
+            <span class="n">csds</span> <span class="o">+=</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csd_i</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">csd_set</span><span class="p">]</span>
+
+        <span class="n">tags</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;</span><span class="si">%i</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">tags</span>
+
+    <span class="k">def</span> <span class="nf">_finalise_jobparams</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set bounds for this CSD.&quot;&quot;&quot;</span>
+
+        <span class="n">csd</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">jobparams</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;csd&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">csd</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">,</span> <span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">]})</span>
+
+        <span class="k">return</span> <span class="n">jobparams</span>
+
+
+<div class="viewcode-block" id="TestDailyProcessing"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.TestDailyProcessing">[docs]</a><span class="k">class</span> <span class="nc">TestDailyProcessing</span><span class="p">(</span><span class="n">DailyProcessing</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A test version of the daily processing.</span>
+
+<span class="sd">    Processes only 16 frequencies on a single node.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;test_daily&quot;</span>
+
+    <span class="c1"># Override params above</span>
+    <span class="n">default_params</span> <span class="o">=</span> <span class="n">DailyProcessing</span><span class="o">.</span><span class="n">default_params</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">default_params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20181224T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20181228T000000Z&quot;</span><span class="p">}],</span>
+            <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">400</span><span class="p">,</span> <span class="mi">416</span><span class="p">],</span>
+            <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">60</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+            <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+            <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+            <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+        <span class="p">}</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="csds_in_range"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.csds_in_range">[docs]</a><span class="k">def</span> <span class="nf">csds_in_range</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Get the CSDs within a time range.</span>
+
+<span class="sd">    The start and end parameters must either be strings of the form &quot;CSD\d+&quot;</span>
+<span class="sd">    (i.e. CSD followed by an int), which specifies an exact CSD start, or a</span>
+<span class="sd">    form that `ephemeris.ensure_unix` understands.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start : str or parseable to datetime</span>
+<span class="sd">        Start of interval.</span>
+<span class="sd">    end : str or parseable to datetime</span>
+<span class="sd">        End of interval. If `None` use now. Note that for CSD intervals the</span>
+<span class="sd">        end is *inclusive* (unlike a `range`).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    csds : list of ints</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="kn">import</span> <span class="nn">math</span>
+    <span class="kn">from</span> <span class="nn">ch_util</span> <span class="kn">import</span> <span class="n">ephemeris</span>
+
+    <span class="k">if</span> <span class="n">end</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">start</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_csd</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">start</span><span class="p">))</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">end</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">end</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_csd</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">end</span><span class="p">))</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">end_csd</span><span class="p">)</span>
+
+    <span class="n">csds</span> <span class="o">=</span> <span class="p">[</span><span class="n">day</span> <span class="k">for</span> <span class="n">day</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">start_csd</span><span class="p">,</span> <span class="n">end_csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">csds</span></div>
+</pre></div>
+
+           </div>
+           
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

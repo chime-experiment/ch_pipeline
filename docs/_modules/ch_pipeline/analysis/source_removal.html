@@ -1,0 +1,1133 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.analysis.source_removal &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../../../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../../index.html">Module code</a> &raquo;</li>
+        
+      <li>ch_pipeline.analysis.source_removal</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <h1>Source code for ch_pipeline.analysis.source_removal</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for removing bright sources from the data.</span>
+
+<span class="sd">Tasks for constructing models for bright sources and subtracting them from the data.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">scipy.constants</span> <span class="kn">import</span> <span class="n">c</span> <span class="k">as</span> <span class="n">speed_of_light</span>
+
+<span class="kn">from</span> <span class="nn">caput</span> <span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span> <span class="nn">ch_util</span> <span class="kn">import</span> <span class="n">andata</span><span class="p">,</span> <span class="n">ephemeris</span><span class="p">,</span> <span class="n">tools</span>
+<span class="kn">from</span> <span class="nn">draco.core</span> <span class="kn">import</span> <span class="n">task</span><span class="p">,</span> <span class="n">io</span>
+
+<span class="kn">from</span> <span class="nn">..core</span> <span class="kn">import</span> <span class="n">containers</span>
+
+
+<div class="viewcode-block" id="model_extended_sources"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.model_extended_sources">[docs]</a><span class="k">def</span> <span class="nf">model_extended_sources</span><span class="p">(</span>
+    <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="n">bodies</span><span class="p">,</span> <span class="n">min_altitude</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+<span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Generate a model for the visibilities.</span>
+
+<span class="sd">    Model consists of the sum of the signal from multiple (possibly extended) sources.</span>
+<span class="sd">    For extended sources, the dependence of the signal on (W-E, S-N) baseline is described</span>
+<span class="sd">    by a 2D hermite polynomial.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    freq : np.ndarray[nfreq,]</span>
+<span class="sd">        Frequencies in MHz.</span>
+<span class="sd">    distance : np.ndarray[2, nbaseline]</span>
+<span class="sd">        The S-N and W-E distance for each baseline.</span>
+<span class="sd">    timestamp : np.ndarray[ntime,]</span>
+<span class="sd">        Unix timestamp.</span>
+<span class="sd">    bodies : nsource element list</span>
+<span class="sd">        List of `skyfield.api.Star` (or equivalent) for the sources being modelled.</span>
+<span class="sd">    min_altitude : float</span>
+<span class="sd">        Do not include a source in the model if it has an altitude less than this value.</span>
+<span class="sd">    scale_x : nsource element list</span>
+<span class="sd">        Angular extent of each source in arcmin in the W-E direction</span>
+<span class="sd">    scale_y : nsource element list</span>
+<span class="sd">        Angular extent of each source in arcmin in the S-N direction</span>
+<span class="sd">    degree_x : nsource element list</span>
+<span class="sd">        The degree of the polynomial used to model the extend emission</span>
+<span class="sd">        of each source in the W-E direction.</span>
+<span class="sd">    degree_y : nsource element list</span>
+<span class="sd">        The degree of the polynomial used to model the extend emission</span>
+<span class="sd">        of each source in the S-N direction.</span>
+<span class="sd">    degree_t : nsource element list</span>
+<span class="sd">        The degree of the polynomial used to model time-dependent,</span>
+<span class="sd">        common-mode variations in the gain.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    S : np.ndarray[nfreq, nbaseline, ntime, nparam]</span>
+<span class="sd">        Model for the visibilities.</span>
+<span class="sd">    source_bound : np.ndarray[nsource+1,]</span>
+<span class="sd">        Indices into the param axis of the source model.</span>
+<span class="sd">        The model for source `i` is given by the parameters</span>
+<span class="sd">        between `source_bound[i]` and `source_bound[i+1]`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">nsource</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bodies</span><span class="p">)</span>
+
+    <span class="c1"># Parse input parameters</span>
+    <span class="n">scale_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;scale_x&quot;</span><span class="p">])</span> <span class="o">/</span> <span class="mf">60.0</span><span class="p">)</span>
+    <span class="n">scale_y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;scale_y&quot;</span><span class="p">])</span> <span class="o">/</span> <span class="mf">60.0</span><span class="p">)</span>
+    <span class="n">scale_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;scale_t&quot;</span><span class="p">,</span> <span class="p">[</span><span class="mf">0.66</span><span class="p">]</span> <span class="o">*</span> <span class="n">nsource</span><span class="p">))</span>
+
+    <span class="n">degree_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;degree_x&quot;</span><span class="p">])</span>
+    <span class="n">degree_y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;degree_y&quot;</span><span class="p">])</span>
+    <span class="n">degree_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;degree_t&quot;</span><span class="p">,</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">nsource</span><span class="p">))</span>
+
+    <span class="n">scale</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">((</span><span class="n">scale_x</span><span class="p">,</span> <span class="n">scale_y</span><span class="p">,</span> <span class="n">scale_t</span><span class="p">))</span><span class="o">.</span><span class="n">T</span>
+    <span class="n">poly_deg</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">((</span><span class="n">degree_x</span><span class="p">,</span> <span class="n">degree_y</span><span class="p">,</span> <span class="n">degree_t</span><span class="p">))</span><span class="o">.</span><span class="n">T</span>
+
+    <span class="n">freq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_1d</span><span class="p">(</span><span class="n">freq</span><span class="p">)</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_1d</span><span class="p">(</span><span class="n">timestamp</span><span class="p">)</span>
+
+    <span class="n">nfreq</span> <span class="o">=</span> <span class="n">freq</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">ntime</span> <span class="o">=</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">nbaseline</span> <span class="o">=</span> <span class="n">distance</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="c1"># Calculate baseline distances in wavelengths</span>
+    <span class="n">lmbda</span> <span class="o">=</span> <span class="n">speed_of_light</span> <span class="o">*</span> <span class="mf">1e-6</span> <span class="o">/</span> <span class="n">freq</span>
+    <span class="n">u</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">distance</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="o">/</span> <span class="n">lmbda</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Setup for calculating source coordinates</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">CHIMELATITUDE</span><span class="p">)</span>
+    <span class="n">observer</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">chime</span>
+    <span class="n">sf_time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_skyfield_time</span><span class="p">(</span><span class="n">timestamp</span><span class="p">)</span>
+    <span class="n">obs</span> <span class="o">=</span> <span class="n">observer</span><span class="o">.</span><span class="n">skyfield_obs</span><span class="p">()</span><span class="o">.</span><span class="n">at</span><span class="p">(</span><span class="n">sf_time</span><span class="p">)</span>
+
+    <span class="c1"># Generate polynomials</span>
+    <span class="n">ncoeff_x</span> <span class="o">=</span> <span class="n">degree_x</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">ncoeff_y</span> <span class="o">=</span> <span class="n">degree_y</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">ncoeff_t</span> <span class="o">=</span> <span class="n">degree_t</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">ncoeff</span> <span class="o">=</span> <span class="n">ncoeff_x</span> <span class="o">*</span> <span class="n">ncoeff_y</span> <span class="o">*</span> <span class="n">ncoeff_t</span>
+    <span class="n">nparam</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">ncoeff</span><span class="p">)</span>
+
+    <span class="n">source_bound</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(([</span><span class="mi">0</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">ncoeff</span><span class="p">)))</span>
+
+    <span class="n">S</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">nbaseline</span><span class="p">,</span> <span class="n">ntime</span><span class="p">,</span> <span class="n">nparam</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">bodies</span><span class="p">):</span>
+
+        <span class="c1"># Calculate the source coordinates</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">obs</span><span class="o">.</span><span class="n">observe</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+        <span class="n">src_alt</span> <span class="o">=</span> <span class="n">pos</span><span class="o">.</span><span class="n">apparent</span><span class="p">()</span><span class="o">.</span><span class="n">altaz</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">src_ra</span><span class="p">,</span> <span class="n">src_dec</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">pos</span><span class="o">.</span><span class="n">cirs_radec</span><span class="p">(</span><span class="n">sf_time</span><span class="p">)</span>
+
+        <span class="n">ha</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">lsa</span><span class="p">(</span><span class="n">timestamp</span><span class="p">))</span> <span class="o">-</span> <span class="n">src_ra</span><span class="o">.</span><span class="n">radians</span>
+        <span class="n">dec</span> <span class="o">=</span> <span class="n">src_dec</span><span class="o">.</span><span class="n">radians</span>
+        <span class="n">weight</span> <span class="o">=</span> <span class="n">src_alt</span><span class="o">.</span><span class="n">radians</span> <span class="o">&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">min_altitude</span><span class="p">)</span>
+
+        <span class="c1"># Evaluate polynomial</span>
+        <span class="n">aa</span><span class="p">,</span> <span class="n">bb</span> <span class="o">=</span> <span class="n">source_bound</span><span class="p">[</span><span class="n">ss</span><span class="p">],</span> <span class="n">source_bound</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">H</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">polynomial</span><span class="o">.</span><span class="n">hermite</span><span class="o">.</span><span class="n">hermvander3d</span><span class="p">(</span>
+            <span class="n">u</span> <span class="o">*</span> <span class="n">scale</span><span class="p">[</span><span class="n">ss</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">v</span> <span class="o">*</span> <span class="n">scale</span><span class="p">[</span><span class="n">ss</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">ha</span> <span class="o">*</span> <span class="n">scale</span><span class="p">[</span><span class="n">ss</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">poly_deg</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Calculate the fringestop phase</span>
+        <span class="n">phi</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">fringestop_phase</span><span class="p">(</span>
+            <span class="n">ha</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:],</span> <span class="n">lat</span><span class="p">,</span> <span class="n">dec</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:],</span> <span class="n">u</span><span class="p">,</span> <span class="n">v</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">conj</span><span class="p">()</span>
+
+        <span class="n">S</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">aa</span><span class="p">:</span><span class="n">bb</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">H</span> <span class="o">*</span> <span class="n">phi</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span> <span class="o">*</span> <span class="n">weight</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">S</span><span class="p">,</span> <span class="n">source_bound</span></div>
+
+
+<div class="viewcode-block" id="solve_single_time"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.solve_single_time">[docs]</a><span class="k">def</span> <span class="nf">solve_single_time</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">source_model</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fit source model to the visibilities, treating each time independently.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    vis : np.ndarray[nbaseline, ntime]</span>
+<span class="sd">        Measured visibilities.</span>
+<span class="sd">    weight : np.ndarray[nbaseline, ntime]</span>
+<span class="sd">        1/sigma^2 uncertainty on the visibilities.</span>
+<span class="sd">    source_model : np.ndarray[nbaseline, ntime, nparam]</span>
+<span class="sd">        Model for the visibilities generated by the</span>
+<span class="sd">        `model_extended_sources` method.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    coeff : np.ndarray[ntime, nparam]</span>
+<span class="sd">        Best-fit coefficients of the model for each time.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">nbaseline</span><span class="p">,</span> <span class="n">ntime</span><span class="p">,</span> <span class="n">nparam</span> <span class="o">=</span> <span class="n">source_model</span><span class="o">.</span><span class="n">shape</span>
+
+    <span class="n">coeff</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">ntime</span><span class="p">,</span> <span class="n">nparam</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">tt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ntime</span><span class="p">):</span>
+
+        <span class="n">S</span> <span class="o">=</span> <span class="n">source_model</span><span class="p">[:,</span> <span class="n">tt</span><span class="p">,</span> <span class="p">:]</span>
+
+        <span class="c1"># Calculate covariance of model coefficients</span>
+        <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">conj</span><span class="p">(),</span> <span class="n">weight</span><span class="p">[:,</span> <span class="n">tt</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span> <span class="o">*</span> <span class="n">S</span><span class="p">)</span>
+
+        <span class="c1"># Solve for model coefficients</span>
+        <span class="n">coeff</span><span class="p">[</span><span class="n">tt</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">lstsq</span><span class="p">(</span>
+            <span class="n">C</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">conj</span><span class="p">(),</span> <span class="n">weight</span><span class="p">[:,</span> <span class="n">tt</span><span class="p">]</span> <span class="o">*</span> <span class="n">vis</span><span class="p">[:,</span> <span class="n">tt</span><span class="p">]),</span> <span class="n">rcond</span><span class="o">=</span><span class="kc">None</span>
+        <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">coeff</span></div>
+
+
+<div class="viewcode-block" id="solve_multiple_times"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.solve_multiple_times">[docs]</a><span class="k">def</span> <span class="nf">solve_multiple_times</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">source_model</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fit source model to the visibilities at all times.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    vis : np.ndarray[nbaseline, ntime]</span>
+<span class="sd">        Measured visibilities.</span>
+<span class="sd">    weight : np.ndarray[nbaseline, ntime]</span>
+<span class="sd">        1/sigma^2 uncertainty on the visibilities.</span>
+<span class="sd">    source_model : np.ndarray[nbaseline, ntime, nparam]</span>
+<span class="sd">        Model for the visibilities generated by the</span>
+<span class="sd">        `model_extended_sources` method.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    coeff : np.ndarray[nparam,]</span>
+<span class="sd">        Best-fit coefficients of the model.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">nbaseline</span><span class="p">,</span> <span class="n">ntime</span><span class="p">,</span> <span class="n">nparam</span> <span class="o">=</span> <span class="n">source_model</span><span class="o">.</span><span class="n">shape</span>
+
+    <span class="n">weight</span> <span class="o">=</span> <span class="n">weight</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+    <span class="n">vis</span> <span class="o">=</span> <span class="n">vis</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+
+    <span class="n">S</span> <span class="o">=</span> <span class="n">source_model</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">nparam</span><span class="p">)</span>
+
+    <span class="c1"># Calculate covariance of model coefficients</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">conj</span><span class="p">(),</span> <span class="n">weight</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span> <span class="o">*</span> <span class="n">S</span><span class="p">)</span>
+
+    <span class="c1"># Solve for model coefficients</span>
+    <span class="n">coeff</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">lstsq</span><span class="p">(</span><span class="n">C</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">conj</span><span class="p">(),</span> <span class="n">weight</span> <span class="o">*</span> <span class="n">vis</span><span class="p">),</span> <span class="n">rcond</span><span class="o">=</span><span class="kc">None</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">coeff</span></div>
+
+
+<div class="viewcode-block" id="SolveSources"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSources">[docs]</a><span class="k">class</span> <span class="nc">SolveSources</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fit source model to the visibilities.</span>
+
+<span class="sd">    Model consists of the sum of the signal from multiple (possibly extended) sources.</span>
+<span class="sd">    Note that the extended source option is still in development.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    sources : nsource element list</span>
+<span class="sd">        Names of the sources that will be included in the model.</span>
+<span class="sd">    degree_x : nsource element list</span>
+<span class="sd">        The degree of the polynomial used to model the extended emission</span>
+<span class="sd">        of each source in the W-E direction.  Set to zero for point source (default).</span>
+<span class="sd">    degree_y : nsource element list</span>
+<span class="sd">        The degree of the polynomial used to model the extended emission</span>
+<span class="sd">        of each source in the S-N direction.  Set to zero for point source (default).</span>
+<span class="sd">    extent : nsource element list</span>
+<span class="sd">        Angular extent of each source in arcmin.</span>
+<span class="sd">    min_altitude : float</span>
+<span class="sd">        Do not include a source in the model if its altitude is less than this value.</span>
+<span class="sd">    min_distance : float</span>
+<span class="sd">        Do not include baselines in the fit with a total distance less than this value.</span>
+<span class="sd">    telescope_rotation : float</span>
+<span class="sd">        Rotation of the telescope from true north in degrees.  A positive rotation is</span>
+<span class="sd">        anti-clockwise when looking down at the telescope from the sky.</span>
+<span class="sd">    max_iter : int</span>
+<span class="sd">        Maximum number of iterations to perform for extended sources.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">sources</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span>
+        <span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;CYG_A&quot;</span><span class="p">,</span> <span class="s2">&quot;CAS_A&quot;</span><span class="p">,</span> <span class="s2">&quot;TAU_A&quot;</span><span class="p">,</span> <span class="s2">&quot;VIR_A&quot;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">degree_x</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+    <span class="n">degree_y</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+    <span class="n">degree_t</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+
+    <span class="n">extent</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">])</span>
+    <span class="n">scale_t</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mf">0.66</span><span class="p">,</span> <span class="mf">0.66</span><span class="p">,</span> <span class="mf">0.66</span><span class="p">,</span> <span class="mf">0.66</span><span class="p">])</span>
+
+    <span class="n">min_altitude</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+    <span class="n">min_distance</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">20.0</span><span class="p">)</span>
+    <span class="n">telescope_rotation</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">tools</span><span class="o">.</span><span class="n">_CHIME_ROT</span><span class="p">)</span>
+    <span class="n">max_iter</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SolveSources.setup"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSources.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set up the source model.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tel : analysis.telescope.CHIMETelescope</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">get_telescope</span><span class="p">(</span><span class="n">tel</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">bodies</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span>
+            <span class="k">else</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">src</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sources</span>
+        <span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">)</span>
+
+        <span class="c1"># Set up kwargs for various source models</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">point_source_kwargs</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;degree_x&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;degree_y&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;degree_t&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;scale_x&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;scale_y&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;scale_t&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">,</span>
+            <span class="s2">&quot;min_altitude&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_altitude</span><span class="p">,</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_x</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">any</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_y</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;degree_x&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_x</span><span class="p">,</span>
+                <span class="s2">&quot;degree_y&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_y</span><span class="p">,</span>
+                <span class="s2">&quot;degree_t&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_t</span><span class="p">,</span>
+                <span class="s2">&quot;scale_x&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">extent</span><span class="p">,</span>
+                <span class="s2">&quot;scale_y&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">extent</span><span class="p">,</span>
+                <span class="s2">&quot;scale_t&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale_t</span><span class="p">,</span>
+                <span class="s2">&quot;min_altitude&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_altitude</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span> <span class="o">=</span> <span class="p">{}</span></div>
+
+<div class="viewcode-block" id="SolveSources.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSources.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Fit source model to visibilities.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        out : core.containers.SourceModel</span>
+<span class="sd">            Best-fit parameters of the source model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Distribute over frequencies</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine local dimensions</span>
+        <span class="n">nfreq</span><span class="p">,</span> <span class="n">nstack</span><span class="p">,</span> <span class="n">ntime</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+
+        <span class="c1"># Calculate time</span>
+        <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fix</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">time</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Unable to extract time from input container.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Redefine stack axis so that it only contains chime antennas</span>
+        <span class="n">stack_new</span><span class="p">,</span> <span class="n">stack_flag</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">redefine_stack_index_map</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">,</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">prod_new</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+
+        <span class="c1"># Swap the product pair order for conjugated stack indices</span>
+        <span class="n">cj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;conjugate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">cj</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Calculate baseline distances</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">rotation</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_rotation</span><span class="p">)</span>
+        <span class="n">feedpos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">distance</span> <span class="o">=</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">-</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rotation set to </span><span class="si">%0.4f</span><span class="s2"> deg&quot;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">_rotation</span><span class="p">)</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Flag out short baselines</span>
+        <span class="n">sep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">distance</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
+        <span class="n">baseline_weight</span> <span class="o">=</span> <span class="p">(</span><span class="n">sep</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_distance</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># Calculate polarisation products, determine unique values</span>
+        <span class="n">feedpol</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_polarisations</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">+</span> <span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">pn</span> <span class="ow">in</span> <span class="n">prod_new</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="n">upol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">pol</span><span class="p">)</span>
+        <span class="n">npol</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">upol</span><span class="p">)</span>
+
+        <span class="c1"># Determine parameter names</span>
+        <span class="n">param_name</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">):</span>
+            <span class="n">npar</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_x</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_y</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_t</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">ii</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">npar</span><span class="p">):</span>
+                <span class="n">param_name</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;</span><span class="si">%s</span><span class="s2">_3d_hermite_polynomial_coefficient_</span><span class="si">%02d</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">src</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="n">ii</span><span class="p">)</span>
+                <span class="p">)</span>
+        <span class="n">param_name</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">param_name</span><span class="p">)</span>
+
+        <span class="c1"># Create output container</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">SourceModel</span><span class="p">(</span>
+            <span class="n">pol</span><span class="o">=</span><span class="n">upol</span><span class="p">,</span>
+            <span class="n">time</span><span class="o">=</span><span class="n">timestamp</span><span class="p">,</span>
+            <span class="n">source</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">),</span>
+            <span class="n">param</span><span class="o">=</span><span class="n">param_name</span><span class="p">,</span>
+            <span class="n">axes_from</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+            <span class="n">attrs_from</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Determine the initial source model, assuming all sources are point sources</span>
+        <span class="n">source_model</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">model_extended_sources</span><span class="p">(</span>
+            <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bodies</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">point_source_kwargs</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Determine extended source model</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span><span class="p">:</span>
+            <span class="n">ext_source_model</span><span class="p">,</span> <span class="n">sedge</span> <span class="o">=</span> <span class="n">model_extended_sources</span><span class="p">(</span>
+                <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bodies</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span>
+            <span class="p">)</span>
+
+            <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;amplitude&quot;</span><span class="p">)</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;coeff&quot;</span><span class="p">)</span>
+
+            <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;source_index&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">ss</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">):</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">source_index</span><span class="p">[</span><span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="n">ss</span>
+
+            <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_model_kwargs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;amplitude&quot;</span><span class="p">)</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_model_kwargs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">point_source_kwargs</span><span class="p">)</span>
+
+        <span class="c1"># Dereference datasets</span>
+        <span class="n">all_vis</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+        <span class="n">all_weight</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">out_amplitude</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">amplitude</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span><span class="p">:</span>
+            <span class="n">out_coeff</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">coeff</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="c1"># Loop over polarisations</span>
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="n">upp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">upol</span><span class="p">):</span>
+
+            <span class="n">this_pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">pol</span> <span class="o">==</span> <span class="n">upp</span><span class="p">)</span>
+
+            <span class="c1"># Loop over frequencies</span>
+            <span class="k">for</span> <span class="n">ff</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfreq</span><span class="p">):</span>
+
+                <span class="c1"># Extract datasets for this polarisation and frequency</span>
+                <span class="n">vis</span> <span class="o">=</span> <span class="n">all_vis</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span>
+                <span class="n">weight</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">all_weight</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">baseline_weight</span><span class="p">[</span><span class="n">this_pol</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="n">psrc_model</span> <span class="o">=</span> <span class="n">source_model</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+
+                <span class="c1"># Obtain initial estimate of each source assuming point source</span>
+                <span class="n">amplitude</span> <span class="o">=</span> <span class="n">solve_single_time</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">psrc_model</span><span class="p">)</span>
+
+                <span class="c1"># If modeling extended sources, iterate over time-dependent normalization</span>
+                <span class="c1"># and baseline dependent response.  Assumes the description of the extended</span>
+                <span class="c1"># emission is constant in time.</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">extended_source_kwargs</span><span class="p">:</span>
+
+                    <span class="n">ext_model</span> <span class="o">=</span> <span class="n">ext_source_model</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+
+                    <span class="n">iters</span> <span class="o">=</span> <span class="mi">0</span>
+                    <span class="k">while</span> <span class="n">iters</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_iter</span><span class="p">:</span>
+
+                        <span class="n">model</span> <span class="o">=</span> <span class="n">ext_model</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                        <span class="k">for</span> <span class="n">ss</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">):</span>
+                            <span class="n">model</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">*=</span> <span class="n">amplitude</span><span class="p">[</span>
+                                <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="n">ss</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
+                            <span class="p">]</span>
+
+                        <span class="n">coeff</span> <span class="o">=</span> <span class="n">solve_multiple_times</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+                        <span class="c1"># Correct for extended structure</span>
+                        <span class="n">model</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">psrc_model</span><span class="p">)</span>
+                        <span class="k">for</span> <span class="n">ss</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">):</span>
+                            <span class="n">model</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">ss</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                                <span class="n">ext_model</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span>
+                                <span class="o">*</span> <span class="n">coeff</span><span class="p">[</span><span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]],</span>
+                                <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                            <span class="p">)</span>
+
+                        <span class="c1"># Obtain initial estimate of coefficients assuming point source</span>
+                        <span class="n">amplitude</span> <span class="o">=</span> <span class="n">solve_single_time</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+                        <span class="c1"># Increment counter</span>
+                        <span class="n">iters</span> <span class="o">+=</span> <span class="mi">1</span>
+
+                    <span class="c1"># Save results to container</span>
+                    <span class="n">out_coeff</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">pp</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">coeff</span>
+
+                <span class="n">out_amplitude</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">pp</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">amplitude</span>
+
+        <span class="c1"># Save a few attributes necessary to interpret the data</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;min_distance&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_distance</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;telescope_rotation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope_rotation</span>
+
+        <span class="k">return</span> <span class="n">out</span></div></div>
+
+
+<div class="viewcode-block" id="SubtractSources"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSources">[docs]</a><span class="k">class</span> <span class="nc">SubtractSources</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Subtract a source model from the visibilities.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SubtractSources.setup"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSources.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract inputmap from the telescope instance provided.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tel : analysis.telescope.CHIMETelescope</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">get_telescope</span><span class="p">(</span><span class="n">tel</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span></div>
+
+<div class="viewcode-block" id="SubtractSources.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSources.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Subtract a source model from the visibilities.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+
+<span class="sd">        model : core.containers.SourceModel</span>
+<span class="sd">            Best-fit parameters of the source model.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Extract various arguments describing the model from the attributes of the model container</span>
+        <span class="n">sources</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span>
+        <span class="n">telescope_rotation</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;telescope_rotation&quot;</span><span class="p">]</span>
+        <span class="n">source_model_kwargs</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_model_kwargs&quot;</span><span class="p">])</span>
+
+        <span class="n">bodies</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span>
+            <span class="k">else</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">sources</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Distribute over frequencies</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine local dimensions</span>
+        <span class="n">nfreq</span><span class="p">,</span> <span class="n">nstack</span><span class="p">,</span> <span class="n">ntime</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+
+        <span class="c1"># Calculate time</span>
+        <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fix</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">time</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Unable to extract time from input container.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Redefine stack axis so that it only contains chime antennas</span>
+        <span class="n">stack_new</span><span class="p">,</span> <span class="n">stack_flag</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">redefine_stack_index_map</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">,</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">prod_new</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+
+        <span class="c1"># Swap the product pair order for conjugated stack indices</span>
+        <span class="n">cj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;conjugate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">cj</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Calculate baseline distances</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">rotation</span><span class="o">=</span><span class="n">telescope_rotation</span><span class="p">)</span>
+        <span class="n">feedpos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">distance</span> <span class="o">=</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">-</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rotation set to </span><span class="si">%0.4f</span><span class="s2"> deg&quot;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">_rotation</span><span class="p">)</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Calculate polarisation products, determine unique values</span>
+        <span class="n">feedpol</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_polarisations</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">+</span> <span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">pn</span> <span class="ow">in</span> <span class="n">prod_new</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Calculate source model</span>
+        <span class="n">source_model</span><span class="p">,</span> <span class="n">sedge</span> <span class="o">=</span> <span class="n">model_extended_sources</span><span class="p">(</span>
+            <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="n">bodies</span><span class="p">,</span> <span class="o">**</span><span class="n">source_model_kwargs</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Dereference dataset</span>
+        <span class="n">vis</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">amplitude</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="n">coeff</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">coeff</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="k">if</span> <span class="s2">&quot;coeff&quot;</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">datasets</span> <span class="k">else</span> <span class="kc">None</span>
+
+        <span class="c1"># Subtract source model</span>
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="n">upp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;pol&quot;</span><span class="p">]):</span>
+
+            <span class="n">this_pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">pol</span> <span class="o">==</span> <span class="n">upp</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">coeff</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">mdl</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                    <span class="n">amp</span><span class="p">[:,</span> <span class="n">pp</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:][</span><span class="o">...</span><span class="p">,</span> <span class="n">model</span><span class="o">.</span><span class="n">source_index</span><span class="p">]</span>
+                    <span class="o">*</span> <span class="n">coeff</span><span class="p">[:,</span> <span class="n">pp</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+                    <span class="o">*</span> <span class="n">source_model</span><span class="p">[:,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:],</span>
+                    <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">mdl</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                    <span class="n">amp</span><span class="p">[:,</span> <span class="n">pp</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">source_model</span><span class="p">[:,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:],</span>
+                    <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                <span class="p">)</span>
+
+            <span class="n">vis</span><span class="p">[:,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span> <span class="o">-=</span> <span class="n">mdl</span>
+
+        <span class="k">return</span> <span class="n">data</span></div></div>
+
+
+<div class="viewcode-block" id="AccumulateBeam"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.AccumulateBeam">[docs]</a><span class="k">class</span> <span class="nc">AccumulateBeam</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Accumulate the stacked beam for each source.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AccumulateBeam.setup"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.AccumulateBeam.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">beam_stack</span> <span class="o">=</span> <span class="p">{}</span></div>
+
+    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">beam_stack</span><span class="p">):</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">beam_stack</span><span class="p">[</span><span class="n">beam_stack</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_name&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">beam_stack</span>
+
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">process_finish</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">beam_stack</span></div>
+
+
+<div class="viewcode-block" id="SolveSourcesWithBeam"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam">[docs]</a><span class="k">class</span> <span class="nc">SolveSourcesWithBeam</span><span class="p">(</span><span class="n">SolveSources</span><span class="p">):</span>
+<div class="viewcode-block" id="SolveSourcesWithBeam.setup"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Set up the source model.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tel : analysis.telescope.CHIMETelescope</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">get_telescope</span><span class="p">(</span><span class="n">tel</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">bodies</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span>
+            <span class="k">else</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">src</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sources</span>
+        <span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">nsources</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">)</span>
+
+        <span class="c1"># Set up kwargs for various source models</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">source_kwargs</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;degree_x&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_x</span><span class="p">,</span>
+            <span class="s2">&quot;degree_y&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_y</span><span class="p">,</span>
+            <span class="s2">&quot;degree_t&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">degree_t</span><span class="p">,</span>
+            <span class="s2">&quot;scale_x&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">extent</span><span class="p">,</span>
+            <span class="s2">&quot;scale_y&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">extent</span><span class="p">,</span>
+            <span class="s2">&quot;scale_t&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale_t</span><span class="p">,</span>
+            <span class="s2">&quot;min_altitude&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_altitude</span><span class="p">,</span>
+        <span class="p">}</span></div>
+
+<div class="viewcode-block" id="SolveSourcesWithBeam.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">beams</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Fit source model to visibilities.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        out : core.containers.SourceModel</span>
+<span class="sd">            Best-fit parameters of the source model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Distribute over frequencies</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine local dimensions</span>
+        <span class="n">nfreq</span><span class="p">,</span> <span class="n">nstack</span><span class="p">,</span> <span class="n">ntime</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+
+        <span class="c1"># Calculate time</span>
+        <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fix</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">time</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Unable to extract time from input container.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Redefine stack axis so that it only contains chime antennas</span>
+        <span class="n">stack_new</span><span class="p">,</span> <span class="n">stack_flag</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">redefine_stack_index_map</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">,</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">prod_new</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+
+        <span class="c1"># Swap the product pair order for conjugated stack indices</span>
+        <span class="n">cj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;conjugate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">cj</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Calculate baseline distances</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">rotation</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_rotation</span><span class="p">)</span>
+        <span class="n">feedpos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">distance</span> <span class="o">=</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">-</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rotation set to </span><span class="si">%0.4f</span><span class="s2"> deg&quot;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">_rotation</span><span class="p">)</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Flag out short baselines</span>
+        <span class="n">sep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">distance</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
+        <span class="n">baseline_weight</span> <span class="o">=</span> <span class="p">(</span><span class="n">sep</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_distance</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># Calculate polarisation products, determine unique values</span>
+        <span class="n">feedpol</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_polarisations</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">+</span> <span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">pn</span> <span class="ow">in</span> <span class="n">prod_new</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="n">upol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">pol</span><span class="p">)</span>
+        <span class="n">npol</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">upol</span><span class="p">)</span>
+
+        <span class="c1"># Determine parameter names</span>
+        <span class="n">param_name</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">):</span>
+            <span class="n">npar</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_x</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_y</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">degree_t</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="k">for</span> <span class="n">ii</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">npar</span><span class="p">):</span>
+                <span class="n">param_name</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;</span><span class="si">%s</span><span class="s2">_3d_hermite_polynomial_coefficient_</span><span class="si">%02d</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">src</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="n">ii</span><span class="p">)</span>
+                <span class="p">)</span>
+        <span class="n">param_name</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">param_name</span><span class="p">)</span>
+
+        <span class="c1"># Create output container</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">SourceModel</span><span class="p">(</span>
+            <span class="n">pol</span><span class="o">=</span><span class="n">upol</span><span class="p">,</span>
+            <span class="n">time</span><span class="o">=</span><span class="n">timestamp</span><span class="p">,</span>
+            <span class="n">source</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">),</span>
+            <span class="n">param</span><span class="o">=</span><span class="n">param_name</span><span class="p">,</span>
+            <span class="n">axes_from</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+            <span class="n">attrs_from</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Determine extended source model</span>
+        <span class="n">source_model</span><span class="p">,</span> <span class="n">sedge</span> <span class="o">=</span> <span class="n">model_extended_sources</span><span class="p">(</span>
+            <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bodies</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">source_kwargs</span>
+        <span class="p">)</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;coeff&quot;</span><span class="p">)</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;source_index&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">ss</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nsources</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">source_index</span><span class="p">[</span><span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="n">ss</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_model_kwargs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source_kwargs</span><span class="p">)</span>
+
+        <span class="c1"># Multipy source model by the effective beam</span>
+        <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">sources</span><span class="p">):</span>
+            <span class="n">this_beam</span> <span class="o">=</span> <span class="n">beams</span><span class="p">[</span><span class="n">src</span><span class="p">]</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span>
+                <span class="n">beams</span><span class="p">[</span><span class="n">src</span><span class="p">]</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.0</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+            <span class="n">source_model</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">*=</span> <span class="n">this_beam</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+
+        <span class="c1"># Dereference datasets</span>
+        <span class="n">all_vis</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+        <span class="n">all_weight</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">out_coeff</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">coeff</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="c1"># Loop over polarisations</span>
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="n">upp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">upol</span><span class="p">):</span>
+
+            <span class="n">this_pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">pol</span> <span class="o">==</span> <span class="n">upp</span><span class="p">)</span>
+
+            <span class="c1"># Loop over frequencies</span>
+            <span class="k">for</span> <span class="n">ff</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfreq</span><span class="p">):</span>
+
+                <span class="c1"># Extract datasets for this polarisation and frequency</span>
+                <span class="n">vis</span> <span class="o">=</span> <span class="n">all_vis</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span>
+                <span class="n">weight</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">all_weight</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">baseline_weight</span><span class="p">[</span><span class="n">this_pol</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="n">model</span> <span class="o">=</span> <span class="n">source_model</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+
+                <span class="n">out_coeff</span><span class="p">[</span><span class="n">ff</span><span class="p">,</span> <span class="n">pp</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">solve_multiple_times</span><span class="p">(</span><span class="n">vis</span><span class="p">,</span> <span class="n">weight</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+        <span class="c1"># Save a few attributes necessary to interpret the data</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;min_distance&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_distance</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;telescope_rotation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope_rotation</span>
+
+        <span class="k">return</span> <span class="n">out</span></div></div>
+
+
+<div class="viewcode-block" id="SubtractSourcesWithBeam"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam">[docs]</a><span class="k">class</span> <span class="nc">SubtractSourcesWithBeam</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">SingleTask</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Subtract a source model from the visibilities.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SubtractSourcesWithBeam.setup"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.setup">[docs]</a>    <span class="k">def</span> <span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tel</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Extract inputmap from the telescope instance provided.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tel : analysis.telescope.CHIMETelescope</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">get_telescope</span><span class="p">(</span><span class="n">tel</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span></div>
+
+<div class="viewcode-block" id="SubtractSourcesWithBeam.process"><a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.source_removal.html#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.process">[docs]</a>    <span class="k">def</span> <span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">beams</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Subtract a source model from the visibilities.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+
+<span class="sd">        model : core.containers.SourceModel</span>
+<span class="sd">            Best-fit parameters of the source model.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        data : andata.CorrData, core.containers.SiderealStream, or equivalent</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Extract various arguments describing the model from the attributes of the model container</span>
+        <span class="n">sources</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span>
+        <span class="n">telescope_rotation</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;telescope_rotation&quot;</span><span class="p">]</span>
+        <span class="n">source_model_kwargs</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_model_kwargs&quot;</span><span class="p">])</span>
+
+        <span class="n">bodies</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">source_dictionary</span>
+            <span class="k">else</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">skyfield_wrapper</span><span class="o">.</span><span class="n">ephemeris</span><span class="p">[</span><span class="n">src</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">sources</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Distribute over frequencies</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine local dimensions</span>
+        <span class="n">nfreq</span><span class="p">,</span> <span class="n">nstack</span><span class="p">,</span> <span class="n">ntime</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+
+        <span class="c1"># Calculate time</span>
+        <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fix</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">data</span><span class="o">.</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">time</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Unable to extract time from input container.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Redefine stack axis so that it only contains chime antennas</span>
+        <span class="n">stack_new</span><span class="p">,</span> <span class="n">stack_flag</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">redefine_stack_index_map</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">,</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">prod_new</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+
+        <span class="c1"># Swap the product pair order for conjugated stack indices</span>
+        <span class="n">cj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">stack_new</span><span class="p">[</span><span class="s2">&quot;conjugate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">cj</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+                <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">][</span><span class="n">cj</span><span class="p">],</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Calculate baseline distances</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">rotation</span><span class="o">=</span><span class="n">telescope_rotation</span><span class="p">)</span>
+        <span class="n">feedpos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">distance</span> <span class="o">=</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">-</span> <span class="n">feedpos</span><span class="p">[:,</span> <span class="n">prod_new</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Rotation set to </span><span class="si">%0.4f</span><span class="s2"> deg&quot;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">_rotation</span><span class="p">)</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Calculate polarisation products, determine unique values</span>
+        <span class="n">feedpol</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_polarisations</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputmap</span><span class="p">)</span>
+        <span class="n">pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]]</span> <span class="o">+</span> <span class="n">feedpol</span><span class="p">[</span><span class="n">pn</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">pn</span> <span class="ow">in</span> <span class="n">prod_new</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Calculate source model</span>
+        <span class="n">source_model</span><span class="p">,</span> <span class="n">sedge</span> <span class="o">=</span> <span class="n">model_extended_sources</span><span class="p">(</span>
+            <span class="n">freq</span><span class="p">,</span> <span class="n">distance</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">,</span> <span class="n">bodies</span><span class="p">,</span> <span class="o">**</span><span class="n">source_model_kwargs</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Multipy source model by the effective beam</span>
+        <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sources</span><span class="p">):</span>
+            <span class="n">this_beam</span> <span class="o">=</span> <span class="n">beams</span><span class="p">[</span><span class="n">src</span><span class="p">]</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span>
+                <span class="n">beams</span><span class="p">[</span><span class="n">src</span><span class="p">]</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.0</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+            <span class="n">source_model</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span><span class="p">]</span> <span class="p">:</span> <span class="n">sedge</span><span class="p">[</span><span class="n">ss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">*=</span> <span class="n">this_beam</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+
+        <span class="c1"># Dereference dataset</span>
+        <span class="n">vis</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+        <span class="n">coeff</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">coeff</span><span class="p">[:]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="c1"># Subtract source model</span>
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="n">upp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;pol&quot;</span><span class="p">]):</span>
+
+            <span class="n">this_pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">pol</span> <span class="o">==</span> <span class="n">upp</span><span class="p">)</span>
+
+            <span class="n">mdl</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                <span class="n">coeff</span><span class="p">[:,</span> <span class="n">pp</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+                <span class="o">*</span> <span class="n">source_model</span><span class="p">[:,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:],</span>
+                <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="n">vis</span><span class="p">[:,</span> <span class="n">this_pol</span><span class="p">,</span> <span class="p">:]</span> <span class="o">-=</span> <span class="n">mdl</span>
+
+        <span class="k">return</span> <span class="n">data</span></div></div>
+</pre></div>
+
+           </div>
+           
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

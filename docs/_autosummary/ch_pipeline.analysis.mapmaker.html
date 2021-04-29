@@ -1,0 +1,362 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>ch_pipeline.analysis.mapmaker &mdash; ch_pipeline  documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+
+  
+  
+
+  
+  
+
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script src="../_static/jquery.js"></script>
+        <script src="../_static/underscore.js"></script>
+        <script src="../_static/doctools.js"></script>
+        <script async="async" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.sidereal" href="ch_pipeline.analysis.sidereal.html" />
+    <link rel="prev" title="ch_pipeline.analysis.fringestop" href="ch_pipeline.analysis.fringestop.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> ch_pipeline
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="../reference.html">Reference</a> &raquo;</li>
+        
+          <li><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a> &raquo;</li>
+        
+      <li>ch_pipeline.analysis.mapmaker</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+          
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.mapmaker.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="module-ch_pipeline.analysis.mapmaker">
+<span id="ch-pipeline-analysis-mapmaker"></span><h1>ch_pipeline.analysis.mapmaker<a class="headerlink" href="#module-ch_pipeline.analysis.mapmaker" title="Permalink to this headline">¶</a></h1>
+<p>Map making tasks</p>
+<p>Tools for making maps from CHIME data.</p>
+<p class="rubric">Classes</p>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.mapmaker.RingMapMaker" title="ch_pipeline.analysis.mapmaker.RingMapMaker"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RingMapMaker</span></code></a>()</p></td>
+<td><p>A simple and quick map-maker that forms a series of beams on the meridian.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker">
+<em class="property">class </em><code class="sig-prename descclassname">ch_pipeline.analysis.mapmaker.</code><code class="sig-name descname">RingMapMaker</code><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">draco.core.task.SingleTask</span></code></p>
+<p>A simple and quick map-maker that forms a series of beams on the meridian.</p>
+<p>This is designed to run on data after it has been collapsed down to
+non-redundant baselines only.</p>
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.npix">
+<code class="sig-name descname">npix</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.npix" title="Permalink to this definition">¶</a></dt>
+<dd><p>Number of map pixels in the declination dimension.  Default is 512.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.span">
+<code class="sig-name descname">span</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.span" title="Permalink to this definition">¶</a></dt>
+<dd><p>Span of map in the declination dimension. Value of 1.0 generates a map
+that spans from horizon-to-horizon.  Default is 1.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.weight">
+<code class="sig-name descname">weight</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.weight" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="simple">
+<dt>How to weight the non-redundant baselines:</dt><dd><p>‘natural’ - each baseline weighted by its redundancy (default)
+‘uniform’ - each baseline given equal weight
+‘inverse_variance’ - each baseline weighted by the weight attribute</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>string (‘natural’, ‘uniform’, or ‘inverse_variance’)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.exclude_intracyl">
+<code class="sig-name descname">exclude_intracyl</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.exclude_intracyl" title="Permalink to this definition">¶</a></dt>
+<dd><p>Exclude intracylinder baselines from the calculation.  Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.include_auto">
+<code class="sig-name descname">include_auto</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.include_auto" title="Permalink to this definition">¶</a></dt>
+<dd><p>Include autocorrelations in the calculation.  Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.single_beam">
+<code class="sig-name descname">single_beam</code><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.single_beam" title="Permalink to this definition">¶</a></dt>
+<dd><p>Only calculate the map for the central beam. Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<cite>config.Property</cite> attributes are set and after ‘input’ and ‘requires’
+keys are set up.</p>
+<dl class="py method">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.process">
+<code class="sig-name descname">process</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">sstream</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the ringmap.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – The input sidereal stream.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>rm</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap">containers.RingMap</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="ch_pipeline.analysis.mapmaker.RingMapMaker.setup">
+<code class="sig-name descname">setup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">tel</span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker.setup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set the Telescope instance to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>TransitTelescope</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+        <a href="ch_pipeline.analysis.sidereal.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.sidereal" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="ch_pipeline.analysis.fringestop.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.fringestop" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright 2015, CHIME collaboration.
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>
