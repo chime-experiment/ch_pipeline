@@ -199,7 +199,7 @@ class ProcessingType(object):
 
         # Revisions are labelled by a two digit code
         # TODO: decide if two digits (i.e. 100 revisions max is enough)
-        rev_regex = re.compile("^rev_\d{2}$")
+        rev_regex = re.compile(r"^rev_\d{2}$")
 
         return sorted([t.name for t in base.glob("*") if rev_regex.match(t.name)])
 

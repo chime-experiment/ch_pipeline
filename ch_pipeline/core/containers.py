@@ -22,12 +22,10 @@ Tasks
 =====
 - :py:class:`MonkeyPatchContainers`
 """
-
 import numpy as np
 
 from caput import memh5, pipeline
-
-from draco.core.containers import *
+from draco.core.containers import ContainerBase, StaticGainData
 
 
 class RFIMask(ContainerBase):

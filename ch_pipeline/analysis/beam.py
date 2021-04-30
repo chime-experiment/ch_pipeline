@@ -1,6 +1,5 @@
 """Tasks for beam measurement processing"""
 import json
-import yaml
 from os import path, listdir
 
 import numpy as np
@@ -11,8 +10,7 @@ from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
-from ch_util import tools, layout, holography
-from chimedb import data_index as di
+from ch_util import tools, holography
 from chimedb.core import connect as connect_database
 
 
@@ -23,7 +21,7 @@ from draco.core.containers import ContainerBase, SiderealStream, TimeStream, Tra
 from draco.util.tools import invert_no_zero
 
 from ..core.containers import TransitFitParams
-from .calibration import TransitFit, GainFromTransitFit
+from .calibration import TransitFit
 
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600

@@ -9,7 +9,6 @@ from datetime import datetime
 import numpy as np
 
 from caput import config
-from caput import mpiutil
 from ch_util import andata, ephemeris, tools, cal_utils
 from draco.core import task
 
@@ -517,8 +516,6 @@ class SunClean(task.SingleTask):
         ra = sstream.index_map["ra"][:]
         csd = sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
         csd = csd + ra / 360.0
-
-        nprod = len(sstream.index_map["prod"])
 
         # Get position of sun at every time sample
         times = ephemeris.csd_to_unix(csd)

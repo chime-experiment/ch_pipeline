@@ -15,8 +15,7 @@ Use this task together with:
   of the timestream data
 """
 
-from datetime import datetime
-from caput import config, mpiutil
+from caput import config
 from ch_util import tools, ephemeris
 from draco.core import containers, task
 
