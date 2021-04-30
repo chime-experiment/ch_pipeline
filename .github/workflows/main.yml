@@ -20,11 +20,16 @@ jobs:
       with:
         python-version: 3.8
 
-    - name: Install black
-      run: pip install black
+    - name: Install pip dependencies
+      run: |
+        pip install black pylint flake8
+        pip install -r requirements.txt
 
     - name: Check code with black
       run: black --check .
+
+    - name: Run flake8
+      run: flake8 --show-source --ignore=E501,E741,E203,W503,E266 caput
 
   install-build-docs:
 
