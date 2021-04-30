@@ -162,7 +162,7 @@ class HolographyFringestop(base.ProcessingType):
                 )
                 .where(
                     (holo.HolographyObservation.quality_flag == 0)
-                    | (holo.HolographyObservation.quality_flag == None)
+                    | (holo.HolographyObservation.quality_flag is None)
                 )
                 .order_by(holo.HolographyObservation.start_time)
             )

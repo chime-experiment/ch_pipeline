@@ -6,7 +6,7 @@ import numpy as np
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
 
-from caput import config, pipeline, memh5
+from caput import config, memh5
 from caput import mpiarray, mpiutil
 
 from ch_util import tools
@@ -728,10 +728,7 @@ class EigenCalibration(task.SingleTask):
             ]
         )
 
-        nfeed = xfeeds.size + yfeeds.size
-
         pol = [yfeeds, xfeeds]
-        polstr = ["Y", "X"]
         npol = len(pol)
 
         phase_ref_by_pol = [

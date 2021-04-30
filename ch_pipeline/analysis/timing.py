@@ -6,7 +6,7 @@ import os
 import numpy as np
 
 from ch_util import timing, ephemeris
-from caput import config, pipeline
+from caput import config
 from draco.core import task
 
 

@@ -9,7 +9,7 @@ import numpy as np
 from scipy.constants import c as speed_of_light
 
 from caput import config
-from ch_util import andata, ephemeris, tools
+from ch_util import ephemeris, tools
 from draco.core import task, io
 
 from ..core import containers
@@ -362,7 +362,6 @@ class SolveSources(task.SingleTask):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []
@@ -730,7 +729,6 @@ class SolveSourcesWithBeam(SolveSources):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []

@@ -17,7 +17,7 @@ import gc
 import numpy as np
 from mpi4py import MPI
 
-from caput import pipeline, config, weighted_median
+from caput import pipeline, config
 from caput.weighted_median import weighted_median
 from ch_util import andata, ephemeris, tools
 from draco.core import task

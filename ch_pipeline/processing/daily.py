@@ -468,7 +468,7 @@ class TestDailyProcessing(DailyProcessing):
 def csds_in_range(start, end):
     """Get the CSDs within a time range.
 
-    The start and end parameters must either be strings of the form "CSD\d+"
+    The start and end parameters must either be strings of the form "CSD\\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
     form that `ephemeris.ensure_unix` understands.
 
