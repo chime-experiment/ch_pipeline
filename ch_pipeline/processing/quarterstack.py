@@ -54,7 +54,6 @@ pipeline:
     - mpi4py
 
   tasks:
-    - type: ch_pipeline.core.containers.MonkeyPatchContainers
 
     - type: draco.core.task.SetMPILogging
       params:
@@ -101,10 +100,12 @@ pipeline:
       params:
         filename: {gain_err_file}
         distributed: true
+        selections:
+          freq_range: [{freq[0]:d}, {freq[1]:d}]
 
     # Apply a mask that removes frequencies and times that suffer from gain errors
     - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
-      requires: gair_err
+      requires: gain_err
       in: sstream_mask3
       out: mask_gain_err
       params:
@@ -119,17 +120,30 @@ pipeline:
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeight
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
       in: sstream_mask4
-      out: sstream_mask5
+      out: full_tvwb_mask
       params:
-          relative_threshold: 0.5
+        relative_threshold: 0.5
+        ignore_absolute_threshold: -1
+        average_type: "mean"
+        pols_to_flag: "all"
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyBaselineMask
+      in: [sstream_mask4, full_tvwb_mask]
+      out: sstream_mask5
 
     - type: draco.analysis.flagging.RFIMask
       in: sstream_mask5
-      out: sstream_mask6
+      out: rfi_mask
       params:
           stack_ind: 66
+
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_mask5, rfi_mask]
+      out: sstream_mask6
 
     - type: ch_pipeline.analysis.sidereal.SiderealMean
       in: sstream_mask6
@@ -173,7 +187,7 @@ pipeline:
       params:
         output_name: "sstack.zarr.zip"
 
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstack_trunc
       out: ringmap
@@ -232,8 +246,8 @@ class QuarterStackProcessing(base.ProcessingType):
 
     This uses opinions in the dataflag database `chimedb.dataflag` to determine which
     days are good and bad for each revision of the daily processing. It will then
-    take the each good day (taking from the latest revision if multiple revisions
-    contain a good version), and then perform the stacking.
+    take each good day (taking from the latest revision if multiple revisions contain
+    a good version), and then perform the stacking.
 
     Implementation
     --------------
@@ -258,7 +272,7 @@ class QuarterStackProcessing(base.ProcessingType):
     default_params = {
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
-        "daily_revisions": ["rev_03"],
+        "daily_revisions": ["rev_07"],
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
@@ -269,6 +283,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "daily_root": "/project/rpp-chime/chime/chime_processed/",
         # Frequencies to process
         "freq": [0, 1024],
+        "nfreq_delay": 1025,
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         "partitions": 2,
@@ -283,8 +298,8 @@ class QuarterStackProcessing(base.ProcessingType):
         },
         "gain_error_file": {
             2018: (
-              "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
-              "20180905_20191231_gain_inverted_error_input_flagged.h5"
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20180905_20191231_gain_inverted_error_input_flagged.h5"
             ),
             2019: (
                 "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
@@ -366,14 +381,20 @@ class QuarterStackProcessing(base.ProcessingType):
             good_days = [x[0] for x in query.tuples()]
 
             for d in daily_rev.ls():
+                try:
+                    lsd = int(d)
+                except ValueError as e:
+                    raise RuntimeError(
+                        f'Could not parse string tag "{d}" into a valid LSD'
+                    ) from e
+
                 # Filter out known bad days here
-                if (int(d) in bad_days) or (int(d) not in good_days):
+                if (lsd in bad_days) or (lsd not in good_days):
                     continue
 
                 # Insert the day and path into the dict, this will replace the entries
                 # from prior revisions
                 path = daily_rev.base_path / d
-                lsd = int(d)
                 days[lsd] = path
 
         lsds = sorted(days)
@@ -393,7 +414,7 @@ class QuarterStackProcessing(base.ProcessingType):
         for quarter in quarters:
             lsds_in_quarter = sorted(np.array(lsds)[yq == quarter])
 
-            # Skip quarters with two few days in them
+            # Skip quarters with too few days in them
             if len(lsds_in_quarter) < self.default_params["min_days"] * npart:
                 continue
 
@@ -430,16 +451,20 @@ class QuarterStackProcessing(base.ProcessingType):
         # TODO: find a better way to do this. Some kind of configuration language
         # (Jsonnet/YTT/...) seems like it would be a better idea here
         day_list_str = "\n" + "\n".join(
-            [f"- {paths[day]}/sstream_lsd_{day}.h5" for day in days]
+            [f"- {paths[day]}/sstream_lsd_{day}.zarr.zip" for day in days]
         )
 
-        year, quarter, _ = self._parse_tag(tag)[1]
+        year, quarter, _ = self._parse_tag(tag)
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
         gain_err_file = self._revparams["gain_error_file"][year]
 
-        jobparams.update({
-            "days": day_list_str, "ra_range": ra_range, "gain_err_file": gain_err_file
-        })
+        jobparams.update(
+            {
+                "days": day_list_str,
+                "ra_range": ra_range,
+                "gain_err_file": gain_err_file,
+            }
+        )
 
         return jobparams
 
