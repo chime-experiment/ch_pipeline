@@ -95,8 +95,22 @@ pipeline:
           - snow
           - decorrelated_cylinder
 
-    - type: ch_pipeline.analysis.sidereal.SiderealMean
+    # Flag out low weight samples to remove transient RFI artifacts at the edges of
+    # flagged regions
+    - type: draco.analysis.flagging.ThresholdVisWeight
       in: sstream_mask3
+      out: sstream_mask4
+      params:
+          relative_threshold: 0.5
+
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream_mask4
+      out: sstream_mask5
+      params:
+          stack_ind: 66
+
+    - type: ch_pipeline.analysis.sidereal.SiderealMean
+      in: sstream_mask5
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -105,11 +119,11 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask3, med]
-      out: sstream_mask4
+      in: [sstream_mask5, med]
+      out: sstream_mask6
 
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask4
+      in: sstream_mask6
       out: sstack_stack
       params:
         save: true
