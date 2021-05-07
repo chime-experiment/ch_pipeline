@@ -601,13 +601,13 @@ class CHIME(telescope.PolarisedTelescope):
 
                     beam_lookup[beamclass] = np.ones((self.nfreq, 2), dtype=np.float64)
                     for fr in range(self.nfreq):
-                            beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[
-                                0
-                            ]
+                        beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[0]
 
                 beam[:, fe, :] = beam_lookup[beamclass]
 
-            self._beam_normalization = tools.invert_no_zero(np.sqrt(np.sum(beam ** 2, axis=-1)))
+            self._beam_normalization = tools.invert_no_zero(
+                np.sqrt(np.sum(beam ** 2, axis=-1))
+            )
 
 
 def _flat_top_gauss6(x, A, sig, x0):
