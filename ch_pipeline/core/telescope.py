@@ -74,6 +74,9 @@ class CHIME(telescope.PolarisedTelescope):
         Minimum and maximum North-South baseline lengths to include (in metres)
     minlength_ew, maxlength_ew:
         Minimum and maximum East-West baseline lengths to include (in metres)
+    dec_normalized: float, optional
+        Normalize the beam by its magnitude at transit at this declination
+        in degrees.
     """
 
     # Configure which feeds and layout to use
@@ -108,6 +111,9 @@ class CHIME(telescope.PolarisedTelescope):
     # Auto-correlations setting (overriding default in baseclass)
     auto_correlations = config.Property(proptype=bool, default=True)
 
+    # Beam normalization
+    dec_normalized = config.Property(proptype=float, default=None)
+
     # Fix base properties
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
@@ -130,6 +136,9 @@ class CHIME(telescope.PolarisedTelescope):
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
+
+        # Set the overall normalization of the beam
+        self._set_beam_normalization()
 
     @classmethod
     def from_layout(cls, layout, correlator=None, skip=False):
@@ -187,6 +196,9 @@ class CHIME(telescope.PolarisedTelescope):
         if self.layout is not None:
             logger.debug("Loading layout: %s", str(self.layout))
             self._load_layout()
+
+        # Set the overall normalization of the beam
+        self._set_beam_normalization()
 
     #
     # === Redefine properties of the base class ===
@@ -376,13 +388,29 @@ class CHIME(telescope.PolarisedTelescope):
     # === Setup the primary beams ===
     #
 
-    def beam(self, feed, freq):
+    def beam(self, feed, freq, angpos=None):
         """Primary beam implementation for the CHIME/Pathfinder.
 
         This only supports normal CHIME cylinder antennas. Asking for the beams
         for other types of inputs will cause an exception to be thrown. The
         beams from this routine are rotated by `self.rotation_angle` to account
-        for the Pathfinder rotation, and are not rotated for CHIME.
+        for the CHIME/Pathfinder rotation.
+
+        Parameters
+        ----------
+        feed : int
+            Index for the feed.
+        freq : int
+            Index for the frequency.
+        angpos : np.ndarray[nposition, 2], optional
+            Angular position on the sky (in radians).
+            If not provided, default to the _angpos
+            class attribute.
+
+        Returns
+        -------
+        beam : np.ndarray[nposition, 2]
+            Amplitude vector of beam at each position on the sky.
         """
         # # Fetch beam parameters out of config database.
 
@@ -395,6 +423,11 @@ class CHIME(telescope.PolarisedTelescope):
         if not tools.is_array(feed_obj):
             raise ValueError("Requested feed is not a CHIME antenna.")
 
+        # If the angular position was not provided, then use the values in the
+        # class attribute.
+        if angpos is None:
+            angpos = self._angpos
+
         # Get the beam rotation parameters.
         yaw = -self.rotation_angle
         pitch = 0.0
@@ -405,8 +438,8 @@ class CHIME(telescope.PolarisedTelescope):
         # We can only support feeds angled parallel or perp to the cylinder
         # axis. Check for these and throw exception for anything else.
         if tools.is_array_y(feed_obj):
-            return cylbeam.beam_y(
-                self._angpos,
+            beam = cylbeam.beam_y(
+                angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
                 self.fwhm_e,
@@ -414,8 +447,8 @@ class CHIME(telescope.PolarisedTelescope):
                 rot=rot,
             )
         elif tools.is_array_x(feed_obj):
-            return cylbeam.beam_x(
-                self._angpos,
+            beam = cylbeam.beam_x(
+                angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
                 self.fwhm_e,
@@ -426,6 +459,12 @@ class CHIME(telescope.PolarisedTelescope):
             raise RuntimeError(
                 "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
             )
+
+        # Normalize the beam
+        if self._beam_normalization is not None:
+            beam *= self._beam_normalization[freq, feed, np.newaxis, :]
+
+        return beam
 
     #
     # === Override methods determining the feed pairs we should calculate ===
@@ -524,6 +563,139 @@ class CHIME(telescope.PolarisedTelescope):
         beam_mask = np.logical_and(beam_mask, bc_mask)
 
         return beam_map, beam_mask
+
+    def _set_beam_normalization(self):
+        """Determine the beam normalization for each feed and frequency.
+
+        The beam will be normalized by its value at transit at the declination
+        provided in the dec_normalized config parameter.  If this config parameter
+        is set to None, then there is no additional normalization applied.
+        """
+
+        self._beam_normalization = None
+
+        if self.dec_normalized is not None:
+
+            angpos = np.array(
+                [(0.5 * np.pi - np.radians(self.dec_normalized)), 0.0]
+            ).reshape(1, -1)
+
+            beam = np.ones((self.nfreq, self.nfeed, 2), dtype=np.float64)
+
+            beam_lookup = {}
+
+            for fe, feed in enumerate(self.feeds):
+
+                if not tools.is_array(feed):
+                    continue
+
+                beamclass = self.beamclass[fe]
+
+                if beamclass not in beam_lookup:
+
+                    beam_lookup[beamclass] = np.ones((self.nfreq, 2), dtype=np.float64)
+                    for fr in range(self.nfreq):
+                        beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[0]
+
+                beam[:, fe, :] = beam_lookup[beamclass]
+
+            self._beam_normalization = tools.invert_no_zero(
+                np.sqrt(np.sum(beam ** 2, axis=-1))
+            )
+
+
+def _flat_top_gauss6(x, A, sig, x0):
+    """Flat-top gaussian. Power of 6."""
+    return A * np.exp(-abs((x - x0) / sig) ** 6)
+
+
+def _flat_top_gauss3(x, A, sig, x0):
+    """Flat-top gaussian. Power of 3."""
+    return A * np.exp(-abs((x - x0) / sig) ** 3)
+
+
+class CHIMEParameterizedBeam(CHIME):
+    """CHIME telescope that uses a parameterized fit to the driftscan beam.
+
+    This speeds up evaluation of the beam model.
+    """
+
+    SIGMA_EW = [14.87857614, 9.95746878]
+
+    FUNC_NS = [_flat_top_gauss6, _flat_top_gauss3]
+    PARAM_NS = np.array(
+        [[9.97981768e-01, 1.29544939e00, 0.0], [9.86421047e-01, 8.10213326e-01, 0.0]]
+    )
+
+    def _sigma(self, pol_index, freq_index, dec):
+        """Width of the power beam in the EW direction."""
+        return self.SIGMA_EW[pol_index] / self.frequencies[freq_index] / np.cos(dec)
+
+    def _beam_amplitude(self, pol_index, dec):
+        """Amplitude of the power beam at meridian."""
+        return self.FUNC_NS[pol_index](
+            dec - np.radians(self.latitude), *self.PARAM_NS[pol_index]
+        )
+
+    def beam(self, feed, freq, angpos=None):
+        """Parameterized fit to driftscan cylinder beam model for CHIME telescope.
+
+        Parameters
+        ----------
+        feed : int
+            Index for the feed.
+        freq : int
+            Index for the frequency.
+        angpos : np.ndarray[nposition, 2], optional
+            Angular position on the sky (in radians).
+            If not provided, default to the _angpos
+            class attribute.
+
+        Returns
+        -------
+        beam : np.ndarray[nposition, 2]
+            Amplitude vector of beam at each position on the sky.
+        """
+
+        feed_obj = self.feeds[feed]
+
+        # Check that feed exists and is a CHIME cylinder antenna
+        if feed_obj is None:
+            raise ValueError("Craziness. The requested feed doesn't seem to exist.")
+
+        if not tools.is_array(feed_obj):
+            raise ValueError("Requested feed is not a CHIME antenna.")
+
+        # If the angular position was not provided, then use the values in the
+        # class attribute.
+        if angpos is None:
+            angpos = self._angpos
+
+        dec = 0.5 * np.pi - angpos[:, 0]
+        ha = angpos[:, 1]
+
+        # We can only support feeds angled parallel or perp to the cylinder
+        # axis. Check for these and throw exception for anything else.
+        if tools.is_array_x(feed_obj):
+            pol = 0
+        elif tools.is_array_y(feed_obj):
+            pol = 1
+        else:
+            raise RuntimeError(
+                "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
+            )
+
+        beam = np.zeros((angpos.shape[0], 2), dtype=np.float64)
+        beam[:, 0] = np.sqrt(
+            self._beam_amplitude(pol, dec)
+            * np.exp(-((ha / self._sigma(pol, freq, dec)) ** 2))
+        )
+
+        # Normalize the beam
+        if self._beam_normalization is not None:
+            beam *= self._beam_normalization[freq, feed, np.newaxis, :]
+
+        return beam
 
 
 class CHIMEExternalBeam(CHIME):
