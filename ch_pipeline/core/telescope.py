@@ -69,19 +69,23 @@ class CHIME(telescope.PolarisedTelescope):
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
     baseline_masking_type : string, optional
-        Select a subset of baselines.
-        `total_length` selects baselines according to their total length. Need to
-        specifiy `minlength` and `maxlength` properties (defined in baseclass).
-        `individual_length` selects baselines according to their seperation
-        in the North-South (specify `minlength_ns` and `maxlength_ns`) or
-        the East-West (specify `minlength_ew` and `maxlength_ew`).
-    minlength_ns, maxlength_ns : scalar
+        Select a subset of baselines.  `total_length` selects baselines according to
+        their total length. Need to specify `minlength` and `maxlength` properties
+        (defined in baseclass).  `individual_length` selects baselines according to
+        their seperation in the North-South (specify `minlength_ns` and `maxlength_ns`)
+        or the East-West (specify `minlength_ew` and `maxlength_ew`).
+    minlength_ns, maxlength_ns : float
         Minimum and maximum North-South baseline lengths to include (in metres)
-    minlength_ew, maxlength_ew:
+    minlength_ew, maxlength_ew: float
         Minimum and maximum East-West baseline lengths to include (in metres)
     dec_normalized: float, optional
         Normalize the beam by its magnitude at transit at this declination
         in degrees.
+    skip_pol_pair : list
+        List of antenna polarisation pairs to skip. Valid entries are "XX", "XY", "YX"
+        or "YY". Like the skipped frequencies these pol pairs will have entries
+        generated but their beam transfer matrices are implicitly zero and thus not
+        calculated.
     """
 
     # Configure which feeds and layout to use
@@ -118,6 +122,8 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Beam normalization
     dec_normalized = config.Property(proptype=float, default=None)
+    # Skipping frequency/baseline parameters
+    skip_pol_pair = config.list_type(type_=str, maxlength=4, default=[])
 
     # Fix base properties
     cylinder_width = 20.0
@@ -627,6 +633,19 @@ class CHIME(telescope.PolarisedTelescope):
             self._beam_normalization = tools.invert_no_zero(
                 np.sqrt(np.sum(beam ** 2, axis=-1))
             )
+
+    def _skip_baseline(self, bl_ind):
+        """Override to skip baselines based on which polarisation pair they are."""
+
+        # Pull in baseline skip choice from parent class
+        skip_bl = super()._skip_baseline(bl_ind)
+
+        pol_i, pol_j = self.polarisation[self.uniquepairs[bl_ind]]
+        pol_pair = pol_i + pol_j
+
+        skip_pol = pol_pair in self.skip_pol_pair
+
+        return skip_bl or skip_pol
 
 
 def _flat_top_gauss6(x, A, sig, x0):
