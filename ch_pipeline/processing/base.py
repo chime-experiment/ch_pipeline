@@ -1,15 +1,10 @@
 import re
-import yaml
 import os
 import subprocess as sp
 import tempfile
 
-# TODO: Python 3 workaround
-try:
-    from pathlib import Path
-except ImportError:
-    from pathlib2 import Path
-
+from pathlib import Path
+import yaml
 
 DEFAULT_SCRIPT = """
 cluster:
@@ -27,7 +22,7 @@ Please describe the purpose/changes of this revision here.
 """
 
 
-class ProcessingType(object):
+class ProcessingType:
     """Baseclass for a pipeline processing type.
 
     Parameters
@@ -370,16 +365,11 @@ def find_venv():
     path : str
         Path to the venv, or `None` if we are not in a virtual environment.
     """
-    import os
-
     return os.environ.get("VIRTUAL_ENV", None)
 
 
 def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
-
-    import os
-
     with tempfile.NamedTemporaryFile("w+") as fh:
         fh.write(script)
         fh.flush()
@@ -419,7 +409,7 @@ def slurm_jobs(user=None):
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError:
         import warnings
@@ -503,7 +493,7 @@ def slurm_fairshare(account, user=None):
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError as e:
         raise RuntimeError('Failure running "sshare".') from e

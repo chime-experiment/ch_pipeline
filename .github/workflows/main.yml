@@ -36,6 +36,14 @@ jobs:
     - name: Run flake8
       run: flake8 --show-source --ignore=E501,E741,E203,W503,E266 caput
 
+    - name: Run pylint
+      run: >
+        pylint --ignore=_version.py
+        -d line-too-long,invalid-name,import-outside-toplevel,logging-fstring-interpolation,unnecessary-pass
+        -d no-else-return,too-many-arguments,too-many-locals,too-many-ancestors,too-many-branches,no-else-raise
+        --extension-pkg-whitelist=draco.util._fast_tools,caput.weighted_median,mpi4py ch_pipeline
+
+
   install-build-docs:
 
     runs-on: ubuntu-latest

@@ -155,8 +155,8 @@ def item_list(revision, long, human):
 def pending(revision):
     """List items that do not exist within REVISION
     (given as type:revision) but can be generated."""
-    pending = revision.pending()
-    for tag in pending:
+    pending_ = revision.pending()
+    for tag in pending_:
         click.echo(tag)
 
 

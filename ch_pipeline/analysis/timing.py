@@ -95,12 +95,12 @@ class ApplyTimingCorrection(task.SingleTask):
             )
 
             if self.pass_if_missing:
-                self.log.warning(msg + " Doing nothing.")
+                self.log.warning(f"{msg} Doing nothing.")
                 return tstream
 
             raise RuntimeError(msg)
 
-        self.log.info("Using correction file %s" % tcorr.attrs["tag"])
+        self.log.info(f"Using correction file {tcorr.attrs['tag']}")
 
         # If requested, reference the timing correct with respect to source transit time
         if self.refer_to_transit:
@@ -115,18 +115,13 @@ class ApplyTimingCorrection(task.SingleTask):
                 )
                 if ttrans.size != 1:
                     raise RuntimeError(
-                        "Found %d transits of %s in timestream.  "
-                        "Require single transit." % (ttrans.size, source)
+                        f"Found {ttrans.size} transits of {source} in timestream. Require single transit."
                     )
                 else:
                     ttrans = ttrans[0]
 
             self.log.info(
-                "Referencing timing correction to %s (RA=%0.1f deg)."
-                % (
-                    ephemeris.unix_to_datetime(ttrans).strftime("%Y%m%dT%H%M%SZ"),
-                    ephemeris.lsa(ttrans),
-                )
+                f"Referencing timing correction to {ephemeris.unix_to_datetime(ttrans).strftime('%Y%m%dT%H%M%SZ')} (RA={ephemeris.lsa(ttrans):.1f} deg)."
             )
 
             tcorr.set_global_reference_time(
@@ -272,20 +267,18 @@ class ConstructTimingCorrection(task.SingleTask):
                 self.kwargs[key] = None
 
         # Process the chimetiming data
-        self.log.info(
-            "Processing %d files from %s." % (len(filelist), self.current_acq)
-        )
+        self.log.info(f"Processing {len(filelist)} files from {self.current_acq}.")
 
         tcorr = timing.TimingData.from_acq_h5(
             filelist,
             only_correction=True,
             distributed=self.comm.size > 1,
             comm=self.comm,
-            **self.kwargs
+            **self.kwargs,
         )
 
         self.log.info(
-            "Finished processing %d files from %s." % (len(filelist), self.current_acq)
+            f"Finished processing {len(filelist)} files from {self.current_acq}."
         )
 
         # Save the static phase and amplitude to be used on subsequent iterations
@@ -296,7 +289,7 @@ class ConstructTimingCorrection(task.SingleTask):
             elif key in tcorr.flags:
                 self.kwargs[key] = tcorr.flags[key][:]
             else:
-                msg = "Dataset %s could not be found in timing correction object." % key
+                msg = f"Dataset '{key}' could not be found in timing correction object."
                 raise RuntimeError(msg)
 
         # Save the names of the files used to construct the correction

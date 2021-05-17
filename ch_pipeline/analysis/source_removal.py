@@ -152,7 +152,7 @@ def solve_single_time(vis, weight, source_model):
     coeff : np.ndarray[ntime, nparam]
         Best-fit coefficients of the model for each time.
     """
-    nbaseline, ntime, nparam = source_model.shape
+    _, ntime, nparam = source_model.shape
 
     coeff = np.zeros((ntime, nparam), dtype=np.complex64)
 
@@ -189,7 +189,7 @@ def solve_multiple_times(vis, weight, source_model):
     coeff : np.ndarray[nparam,]
         Best-fit coefficients of the model.
     """
-    nbaseline, ntime, nparam = source_model.shape
+    _, _, nparam = source_model.shape
 
     weight = weight.flatten()
     vis = vis.flatten()
@@ -308,7 +308,7 @@ class SolveSources(task.SingleTask):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq, _, _ = data.vis.local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -327,7 +327,7 @@ class SolveSources(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new, _ = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
@@ -348,7 +348,7 @@ class SolveSources(task.SingleTask):
         tools.change_chime_location(rotation=self.telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
@@ -527,7 +527,7 @@ class SubtractSources(task.SingleTask):
         model.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq, _, _ = data.vis.local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -546,7 +546,7 @@ class SubtractSources(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new, _ = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
@@ -567,7 +567,7 @@ class SubtractSources(task.SingleTask):
         tools.change_chime_location(rotation=telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Calculate polarisation products, determine unique values
@@ -577,7 +577,7 @@ class SubtractSources(task.SingleTask):
         )
 
         # Calculate source model
-        source_model, sedge = model_extended_sources(
+        source_model, _ = model_extended_sources(
             freq, distance, timestamp, bodies, **source_model_kwargs
         )
 
@@ -675,7 +675,7 @@ class SolveSourcesWithBeam(SolveSources):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq, _, _ = data.vis.local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -694,7 +694,7 @@ class SolveSourcesWithBeam(SolveSources):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new, _ = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
@@ -715,7 +715,7 @@ class SolveSourcesWithBeam(SolveSources):
         tools.change_chime_location(rotation=self.telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
@@ -849,7 +849,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         model.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq, _, _ = data.vis.local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -868,7 +868,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new, _ = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
@@ -889,7 +889,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         tools.change_chime_location(rotation=telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Calculate polarisation products, determine unique values

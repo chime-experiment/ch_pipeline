@@ -90,7 +90,7 @@ class LoadCorrDataFiles(task.SingleTask):
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
             self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+                set(np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical)
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
@@ -266,8 +266,6 @@ class LoadFileFromTag(task.SingleTask):
         then load the file into a container.
         """
 
-        from caput import memh5
-
         self.outcont = None
 
         if self.only_prefix:
@@ -289,10 +287,7 @@ class LoadFileFromTag(task.SingleTask):
             )
 
         else:
-
             self.prefix = os.path.splitext(self.prefix)[0]
-
-        return
 
     def process(self, incont):
         """Determine filename from the input container.
@@ -346,7 +341,7 @@ class FilterExisting(task.MPILoggedTask):
 
     def __init__(self):
 
-        super(FilterExisting, self).__init__()
+        super().__init__()
 
         self.csd_list = []
         self.corr_files = {}

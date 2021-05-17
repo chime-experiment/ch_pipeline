@@ -96,7 +96,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
             self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+                set(np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical)
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
@@ -274,8 +274,7 @@ class SiderealMean(task.SingleTask):
                 ) and (body.dec.degrees > self.dec_threshold):
 
                     self.log.info(
-                        "Will mask %s prior to calculating sidereal %s."
-                        % (src, self._name_of_statistic)
+                        f"Will mask {src} prior to calculating sidereal {self._name_of_statistic}."
                     )
 
                     self.body.append(body)
@@ -336,7 +335,7 @@ class SiderealMean(task.SingleTask):
             mask_ra = np.zeros(ra.size, dtype=np.bool)
             for ra_range in self.mask_ra:
                 self.log.info(
-                    "Using data between RA = [%0.2f, %0.2f] deg" % tuple(ra_range)
+                    f"Using data between RA = [{ra_range[0]:.2f}, {ra_range[1]:.2f}] deg"
                 )
                 mask_ra |= (ra >= ra_range[0]) & (ra <= ra_range[1])
             flag_quiet &= mask_ra

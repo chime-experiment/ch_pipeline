@@ -470,13 +470,11 @@ class CHIME(telescope.PolarisedTelescope):
         # # Reimplemented to make sure entries we always pick the upper
         # # triangle (and do not reorder to make EW baselines)
         if self.stack_type != "unique":
-            super(CHIME, self)._make_ew()
+            super()._make_ew()
 
     def _unique_baselines(self):
         # Reimplement unique baselines in order to mask out either according to total
         # baseline length or maximum North-South and East-West baseline seperation.
-
-        from drift.core import telescope
 
         # Construct array of indices
         fshape = [self.nfeed, self.nfeed]
@@ -568,8 +566,8 @@ class CHIMEExternalBeam(CHIME):
                 freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
                 beam_map = f["beam"][freq_sel, :]
 
-        except IOError:
-            raise IOError("Could not load beams from disk [path: %s]." % fname)
+        except IOError as e:
+            raise IOError(f"Could not load beams from disk [path: {fname}].") from e
 
         if len(freq_sel) == 1:
             return beam_map

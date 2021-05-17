@@ -22,10 +22,81 @@ Tasks
 =====
 - :py:class:`MonkeyPatchContainers`
 """
+import sys
+import warnings
+
 import numpy as np
 
 from caput import memh5, pipeline
+
+# imports from draco we actually use her:
 from draco.core.containers import ContainerBase, StaticGainData
+
+from draco.core.containers import *  # noqa: W0401,F403,F401
+
+
+# We should remove this last line.
+# We have to keep providing all imported items for a while in order to not break peoples scripts.
+# But we will warn them that this will change.
+def deprecation_wrapper(mod, deprecated):
+    """Return a wrapped object that warns about deprecated accesses"""
+    deprecated = set(deprecated)
+
+    class Wrapper:  # noqa: R0903
+        def __getattr__(self, attr):
+            if attr in deprecated:
+                warnings.warn(
+                    f"Property ch_pipeline.core.containers.{attr} is deprecated and will get removed after "
+                    f"May 2022. Please use 'draco.core.containers.{attr} instead",
+                    DeprecationWarning,
+                )
+
+            return getattr(mod, attr)
+
+    return Wrapper()
+
+
+_deprecated_properties = [
+    "COMPRESSION",
+    "COMPRESSION_OPTS",
+    "CommonModeGainData",
+    "CommonModeSiderealGainData",
+    "ContainerBase",
+    "DelaySpectrum",
+    "FormedBeam",
+    "FormedBeamHA",
+    "FreqContainer",
+    "FrequencyStack",
+    "GainData",
+    "GridBeam",
+    "HybridVisMModes",
+    "HybridVisStream",
+    "KLModes",
+    "MContainer",
+    "MModes",
+    "Map",
+    "Powerspectrum2D",
+    "SVDModes",
+    "SVDSpectrum",
+    "SiderealContainer",
+    "SiderealGainData",
+    "SiderealStream",
+    "SourceCatalog",
+    "SpectroscopicCatalog",
+    "StaticGainData",
+    "SystemSensitivity",
+    "TODContainer",
+    "TableBase",
+    "TimeStream",
+    "TrackBeam",
+    "VisContainer",
+    "VisGridStream",
+    "empty_like",
+    "empty_timestream",
+]
+sys.modules[__name__] = deprecation_wrapper(
+    sys.modules[__name__], deprecated=_deprecated_properties
+)
 
 
 class RFIMask(ContainerBase):
@@ -122,7 +193,7 @@ class CorrInputTest(ContainerBase):
                 ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
             )
 
-        super(CorrInputTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -194,7 +265,7 @@ class CorrInputMonitor(ContainerBase):
         if "coord" not in kwargs:
             kwargs["coord"] = np.array(["east_west", "north_south"])
 
-        super(CorrInputMonitor, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -424,7 +495,7 @@ class PointSourceTransit(StaticGainData):
             ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
         )
 
-        super(PointSourceTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def gain(self):
@@ -598,7 +669,7 @@ class SunTransit(ContainerBase):
         )
         kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
-        super(SunTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def coord(self):
@@ -709,10 +780,6 @@ class RingMap(ContainerBase):
             "distributed_axis": "freq",
         },
     }
-
-    def __init__(self, *args, **kwargs):
-
-        super(RingMap, self).__init__(*args, **kwargs)
 
     @property
     def freq(self):

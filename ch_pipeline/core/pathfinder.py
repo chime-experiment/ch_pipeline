@@ -5,7 +5,9 @@ Pathfinder Telescope
     Use :mod:`ch_pipeline.core.telescope` instead.
 """
 import warnings
-from .telescope import *  # noqa: F403,F401
+
+# pylint: disable=wildcard-import,unused-wildcard-import
+from .telescope import *  # noqa: F401,F403,W401
 
 warnings.warn(
     "`ch_pipeline.core.pathfinder module deprecated. "

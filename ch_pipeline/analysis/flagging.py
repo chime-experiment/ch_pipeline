@@ -254,7 +254,7 @@ class ChannelFlagger(task.SingleTask):
         for fi in freq_ind:
 
             # Only run good_channels if frequency is local
-            if fi >= sf and fi < ef:
+            if sf <= fi < ef:
 
                 # Run good channels code and unpack arguments
                 res = data_quality.good_channels(
@@ -696,18 +696,13 @@ class TestCorrInput(task.SingleTask):
                 is_test_freq[fi_local] = True
 
                 # Print results for this frequency
-                self.log.info(
-                    "Frequency {} bad inputs: blank {}; gains {}{}; noise {}{}; fit {}{}".format(
-                        fi_dist,
-                        timestream.ninput - len(test_inputs),
-                        np.sum(good_gains == 0) if good_gains is not None else "failed",
-                        " [ignored]" if self.ignore_gains else "",
-                        np.sum(good_noise == 0) if good_noise is not None else "failed",
-                        " [ignored]" if self.ignore_noise else "",
-                        np.sum(good_fit == 0) if good_fit is not None else "failed",
-                        " [ignored]" if self.ignore_fit else "",
-                    )
-                )
+                self.log.info(f"Frequency {fi_dist} bad inputs: blank {timestream.ninput - len(test_inputs)}; "
+                              f"gains {np.sum(good_gains == 0) if good_gains is not None else 'failed'}"
+                              f"{' [ignored]' if self.ignore_gains else ''}; "
+                              f"noise {np.sum(good_noise == 0) if good_noise is not None else 'failed'}"
+                              f"{' [ignored]' if self.ignore_noise else ''}; "
+                              f"fit {np.sum(good_fit == 0) if good_fit is not None else 'failed'}"
+                              f"{' [ignored]' if self.ignore_fit else ''}")
 
         # Gather the input flags from all nodes
         passed_test_all = np.zeros(
@@ -1034,19 +1029,15 @@ class NanToNum(task.SingleTask):
                 timestream.weight[fi][
                     flag
                 ] = 0.0  # Also set weights to zero so we don't trust values
-                self.log.info(
-                    "%d visibilities are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
-                )
+                self.log.info(f"{np.sum(flag)} visibilities are non finite for frequency={fi} "
+                              f"({np.sum(flag) * 100.0 / flag.size:.2f} %%)")
 
             # Set non-finite values of the weight equal to zero
             flag = ~np.isfinite(timestream.weight[fi])
             if np.any(flag):
                 timestream.weight[fi][flag] = 0
-                self.log.info(
-                    "%d weights are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
-                )
+                self.log.info(f"{np.sum(flag)} weights are non finite for frequency={fi} "
+                              f"({np.sum(flag) * 100.0 / flag.size:%.2f} %%)")
 
         return timestream
 
@@ -1204,10 +1195,10 @@ class BadNodeFlagger(task.SingleTask):
         # Manually flag frequencies corresponding to specific GPU nodes
         for node in self.nodes:
             for nind in np.flatnonzero(nodelist == node):
-                if nind >= sf and nind < ef:
+                if sf <= nind < ef:
                     timestream.weight[nind] = 0
 
-                    self.log.info("Flagging node %d, freq %d.", node, nind)
+                    self.log.info(f"Flagging node {node}, freq {nind}.")
 
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
         this_acq = timestream.attrs.get("acquisition_name", None)
@@ -1221,12 +1212,10 @@ class BadNodeFlagger(task.SingleTask):
             # Loop over nodes and perform flagging
             for node in nodes_to_flag:
                 for nind in np.flatnonzero(nodelist == node):
-                    if nind >= sf and nind < ef:
+                    if sf <= nind < ef:
                         timestream.weight[nind] = 0
 
-                        self.log.info(
-                            "Flagging node %d, freq %d.", mpiutil.rank, node, nind
-                        )
+                        self.log.info(f"Flagging node {node}, freq {nind}.")
 
         # Return timestream with bad nodes flagged
         return timestream
@@ -1411,17 +1400,14 @@ class MaskDay(task.SingleTask):
                 flag |= self._flag(time)
 
         # Log how much data were masking
-        self.log.info(
-            "%0.2f percent of data will be masked."
-            % (100.0 * np.sum(flag) / float(flag.size),)
-        )
+        self.log.info(f"{100.0 * np.sum(flag) / float(flag.size):.2f} percent of data will be masked.")
 
         # Apply the mask
         if np.any(flag):
 
             # If requested, apply taper.
             if ntaper > 0:
-                self.log.info("Applying taper over %d time samples." % ntaper)
+                self.log.info(f"Applying taper over {ntaper} time samples.")
                 flag = taper_mask(flag, ntaper, outer=self.outer_taper)
 
             # Apply the mask to the weights
@@ -1474,7 +1460,7 @@ class MaskSource(MaskDay):
 
     def _flag(self, time):
 
-        flag = np.zeros(time.size, dtype=np.bool)
+        flag = np.zeros(time.size, dtype=bool)
         for body in self.body:
             flag |= transit_flag(body, time, nsigma=self.nsigma)
 
@@ -1720,22 +1706,20 @@ class DataFlagger(task.SingleTask):
             for ft in flag_types:
                 possible_flags.append(ft.name)
                 if ft.name in self.flag_type or "all" in self.flag_type:
-                    self.log.info("Querying for %s Flags" % ft.name)
+                    self.log.info(f"Querying for '{ft.name}' Flags")
                     new_flags = df.DataFlag.select().where(df.DataFlag.type == ft)
                     flags[ft.name] = list(new_flags)
 
             # Check that user-proved flag names are valid
             for flag_name in self.flag_type:
                 if flag_name != "all" and flag_name not in possible_flags:
-                    self.log.warning("Warning: Unrecognized Flag %s" % flag_name)
+                    self.log.warning(f"Warning: Unrecognized Flag '{flag_name}'")
 
         # Share flags with other nodes
         flags = self.comm.bcast(flags, root=0)
 
         # Save flags to class attribute
-        self.log.info(
-            "Found %d Flags in Total." % sum([len(flg) for flg in flags.values()])
-        )
+        self.log.info(f"Found {sum([len(flg) for flg in flags.values()])} Flags in Total.")
         self.flags = flags
 
     def process(self, timestream):
@@ -1802,21 +1786,10 @@ class DataFlagger(task.SingleTask):
                 time_idx = (time >= flag.start_time) & (time <= flag.finish_time)
                 if np.any(time_idx):
                     # Print info to log about why the data is being flagged
-                    msg = (
-                        "%d (of %d) samples flagged by a %s DataFlag covering %s to %s."
-                        % (
-                            np.sum(time_idx),
-                            time_idx.size,
-                            flag_type,
-                            ephemeris.unix_to_datetime(flag.start_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                            ephemeris.unix_to_datetime(flag.finish_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                        )
-                    )
-                    self.log.info(msg)
+                    self.log.info(f"{np.sum(time_idx)} (of {time_idx.size}) samples flagged by a '{flag_type}' "
+                                  f"DataFlag covering "
+                                  f"{ephemeris.unix_to_datetime(flag.start_time).strftime('%Y%m%dT%H%M%SZ')} "
+                                  f"to {ephemeris.unix_to_datetime(flag.finish_time).strftime('%Y%m%dT%H%M%SZ')}.")
 
                     # Refine the mask based on any frequency or input selection
                     flag_mask = time_idx[np.newaxis, np.newaxis, :]
@@ -1851,9 +1824,7 @@ class DataFlagger(task.SingleTask):
             ]
             tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
 
-        self.log.info(
-            "%0.2f percent of data was flagged as bad."
-            % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
-        )
+        self.log.info(f"{100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape)))}.2f percent of data was "
+                      f"flagged as bad.")
 
         return timestream

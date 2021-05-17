@@ -540,8 +540,7 @@ class DetermineSourceTransit(task.SingleTask):
             )
             if transit_time.size > 0:
                 self.log.info(
-                    "Data stream contains %s transit on LSD %d."
-                    % (src, ephemeris.csd(transit_time[0]))
+                    f"Data stream contains {src} transit on LSD {ephemeris.csd(transit_time[0])}."
                 )
                 sstream.attrs["source_name"] = src
                 sstream.attrs["transit_time"] = transit_time[0]
@@ -623,7 +622,7 @@ class EigenCalibration(task.SingleTask):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, neigen, ninput, ntime = data.datasets["evec"].local_shape
+        nfreq, neigen, ninput, _ = data.datasets["evec"].local_shape
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -696,15 +695,14 @@ class EigenCalibration(task.SingleTask):
             )
 
         self.log.info(
-            "%d inputs missing from eigenvalue decomposition." % np.sum(~input_flags)
+            f"{np.sum(~input_flags)} inputs missing from eigenvalue decomposition."
         )
 
         # Check that we have data for the phase reference
         for ref in self.phase_ref:
             if not input_flags[ref]:
                 ValueError(
-                    "Requested phase reference (%d) "
-                    "was not included in decomposition." % ref
+                    f"Requested phase reference ({ref}) was not included in decomposition."
                 )
 
         # Update input_flags to include feeds not present in database
@@ -768,7 +766,7 @@ class EigenCalibration(task.SingleTask):
         not_rfi = not_rfi[:, np.newaxis]
 
         self.log.info(
-            "Using a dynamic range threshold of %0.2f." % self.dyn_rng_threshold
+            f"Using a dynamic range threshold of {self.dyn_rng_threshold:.2f}."
         )
         dyn_flag = dyn > self.dyn_rng_threshold
 
@@ -786,7 +784,7 @@ class EigenCalibration(task.SingleTask):
 
         # Check that we have the correct reference feed
         if np.any(np.abs(ref_resp.imag) > eps):
-            ValueError("Reference feed %d is incorrect." % self.eigen_ref)
+            ValueError(f"Reference feed {self.eigen_ref} is incorrect.")
 
         # Create output container
         response = containers.SiderealStream(
@@ -812,7 +810,7 @@ class EigenCalibration(task.SingleTask):
         solar_rise = ephemeris.solar_rising(ttrans - 86400.0)
         for sr in solar_rise:
             ss = ephemeris.solar_setting(sr)[0]
-            if (ttrans >= sr) and (ttrans <= ss):
+            if sr <= ttrans <= ss:
                 is_daytime = 1
                 break
         response.attrs["daytime_transit"] = is_daytime
@@ -1011,7 +1009,7 @@ class TransitFit(task.SingleTask):
         response.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, ninput, nra = response.vis.local_shape
+        nfreq, ninput, _ = response.vis.local_shape
 
         # Find the local frequencies
         sfreq = response.vis.local_offset[0]
@@ -1137,8 +1135,6 @@ class GainFromTransitFit(task.SingleTask):
 
         # Distribute over frequency
         fit.redistribute("freq")
-
-        nfreq, ninput, _ = fit.parameter.local_shape
 
         # Import the function for evaluating the model and keyword arguments
         ModelClass = locate(fit.attrs["model_class"])
@@ -1354,8 +1350,7 @@ class FlagAmplitude(task.SingleTask):
                     )
 
                     self.log.info(
-                        "Pol %s:  %d frequencies are outliers."
-                        % (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int))
+                        f"Pol {polstr[pp]}: {np.sum(~not_outlier & med_flag, dtype=int)} frequencies are outliers."
                     )
 
                 # Broadcast outlier frequencies to other ranks
@@ -1374,14 +1369,14 @@ class FlagAmplitude(task.SingleTask):
 
         flag &= flag_freq[:, np.newaxis]
 
-        self.log.info("%d good frequencies after flagging amplitude." % good_freq.size)
+        self.log.info(f"{good_freq.size} good frequencies after flagging amplitude.")
 
         # If fraction of good frequencies is less than threshold, stop and return None
         frac_good_freq = good_freq.size / float(gain.freq.size)
         if frac_good_freq < self.valid_gains_frac_good_freq:
             self.log.info(
-                "Only %0.1f%% of frequencies remain after flagging amplitude.  Will "
-                "not process this sidereal day further." % (100.0 * frac_good_freq,)
+                f"Only {100.0 * frac_good_freq:.1f}%% of frequencies remain after flagging amplitude. "
+                f"Will not process this sidereal day further."
             )
             return None
 
@@ -1399,7 +1394,7 @@ class FlagAmplitude(task.SingleTask):
 
         flag[:] &= flag_input[np.newaxis, :]
 
-        self.log.info("%d good inputs after flagging amplitude." % good_input.size)
+        self.log.info(f"{good_input.size} good inputs after flagging amplitude.")
 
         # Redistribute flags back over frequencies and update container
         flag = flag.redistribute(0)
@@ -1932,11 +1927,11 @@ class ThermalCalibration(task.SingleTask):
         too_early = last_start_index < 0
         n_too_early = np.sum(too_early)
         if n_too_early > 0:
-            msg = (
-                "{0} out of {1} time entries have no reference update."
-                + "Cannot correct gains for those entries."
+            self.log.warning(
+                f"{n_too_early} out of {ntimes} time entries have no reference update. "
+                f"Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_too_early, ntimes))
+
         # Fot times after the last update, I cannot be sure the calibration is valid
         # (could be that the cal file is incomplete. To be conservative, raise warning.)
         too_late = (last_start_index >= (n_cal_file - 1)) & (
@@ -1944,11 +1939,10 @@ class ThermalCalibration(task.SingleTask):
         )
         n_too_late = np.sum(too_late)
         if n_too_late > 0:
-            msg = (
-                "{0} out of {1} time entries are beyond calibration file time values."
-                + "Cannot correct gains for those entries."
+            self.log.warning(
+                f"{n_too_late} out of {ntimes} time entries are beyond calibration file time values. "
+                f"Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_too_late, ntimes))
 
         # Array to contain reference times for each entry.
         # NaN for entries with no reference time.
@@ -1970,11 +1964,10 @@ class ThermalCalibration(task.SingleTask):
         fpga_restart = is_restart[last_start_index] == 2
         n_fpga_restart = np.sum(fpga_restart)
         if n_fpga_restart > 0:
-            msg = (
-                "{0} out of {1} time entries are after an FPGA restart but before the "
-                + "next kotekan restart. Cannot correct gains for those entries."
+            self.log.warning(
+                f"{n_fpga_restart} out of {ntimes} time entries are after an FPGA restart but before the "
+                f"next kotekan restart. Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_fpga_restart, ntimes))
 
         # This is a gain update
         gainupdate = is_restart[last_start_index] == 0
@@ -2028,11 +2021,10 @@ class ThermalCalibration(task.SingleTask):
         known_bad_times = (too_early) | (too_late) | (fpga_restart)
         n_bad_times = np.sum(~np.isfinite(reftime[~known_bad_times]))
         if n_bad_times > 0:
-            msg = (
-                "{0} out of {1} time entries don't have a reference calibration time "
-                + "without an identifiable cause. Cannot correct gains for those entries."
+            self.log.warning(
+                f"{n_bad_times} out of {ntimes} time entries don't have a reference calibration time "
+                f"without an identifiable cause. Cannot correct gains for those entries."
             )
-            self.log.warning(msg.format(n_bad_times, ntimes))
 
         # Bundle result in dictionary
         result = {
@@ -2129,7 +2121,7 @@ class CalibrationCorrection(task.SingleTask):
         flags = self.comm.bcast(flags, root=0)
 
         # Save flags to class attribute
-        self.log.info("Found %d %s flags in total." % (len(flags), self.name_of_flag))
+        self.log.info(f"Found {len(flags)} '{self.name_of_flag}' flags in total.")
         self.flags = flags
 
     def process(self, sstream, inputmap):
@@ -2175,7 +2167,7 @@ class CalibrationCorrection(task.SingleTask):
         sstream.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = sstream.vis.local_shape
+        nfreq, _, _ = sstream.vis.local_shape
 
         # Find the local frequencies
         sfreq = sstream.vis.local_offset[0]
@@ -2204,23 +2196,12 @@ class CalibrationCorrection(task.SingleTask):
             in_range = (timestamp >= flag.start_time) & (timestamp <= flag.finish_time)
             if np.any(in_range):
 
-                msg = (
-                    "%d (of %d) samples require phase correction according to "
-                    "%s DataFlag covering %s to %s."
-                    % (
-                        np.sum(in_range),
-                        in_range.size,
-                        self.name_of_flag,
-                        ephemeris.unix_to_datetime(flag.start_time).strftime(
-                            "%Y%m%dT%H%M%SZ"
-                        ),
-                        ephemeris.unix_to_datetime(flag.finish_time).strftime(
-                            "%Y%m%dT%H%M%SZ"
-                        ),
-                    )
+                self.log.info(
+                    f"{np.sum(in_range)} (of {in_range.size}) samples require phase correction according to "
+                    f"'{self.name_of_flag}' DataFlag covering "
+                    f"{ephemeris.unix_to_datetime(flag.start_time).strftime('%Y%m%dT%H%M%SZ')} to "
+                    f"{ephemeris.unix_to_datetime(flag.finish_time).strftime('%Y%m%dT%H%M%SZ')}."
                 )
-
-                self.log.info(msg)
 
                 correction = self._get_correction(
                     freq, prod, timestamp[in_range], inputmap, **flag.metadata
@@ -2228,8 +2209,7 @@ class CalibrationCorrection(task.SingleTask):
 
                 if do_not_apply.size > 0:
                     self.log.warning(
-                        "Do not have valid baseline distance for stack indices: %s"
-                        % str(do_not_apply)
+                        f"Do not have valid baseline distance for stack indices: {str(do_not_apply)}"
                     )
                     correction[:, do_not_apply, :] = 1.0 + 0.0j
 
@@ -2238,7 +2218,7 @@ class CalibrationCorrection(task.SingleTask):
         # Return input container with phase correction applied
         return sstream
 
-    def _correction_is_nonzero(self, **kwargs):
+    def _correction_is_nonzero(self, **_):
         return True
 
     def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
@@ -2264,8 +2244,8 @@ class CorrectTimeOffset(CalibrationCorrection):
         time_offset = kwargs["time_offset"]
         calibrator = kwargs["calibrator"]
         self.log.info(
-            "Applying a phase correction for a %0.2f second "
-            "time offset on the calibrator %s." % (time_offset, calibrator)
+            f"Applying a phase correction for a {time_offset:.2f} second time offset on "
+            f"the calibrator {calibrator}."
         )
 
         body = ephemeris.source_dictionary[calibrator]
@@ -2318,9 +2298,8 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         calibrator = kwargs["calibrator"]
 
         self.log.info(
-            "Applying a phase correction to convert from a telescope rotation "
-            "of %0.3f deg to %0.3f deg for the calibrator %s."
-            % (rotation, self.rotation, calibrator)
+            f"Applying a phase correction to convert from a telescope rotation of {rotation:.3f} deg "
+            f"to {self.rotation:.3f} deg for the calibrator '{calibrator}'."
         )
 
         body = ephemeris.source_dictionary[calibrator]
@@ -2341,7 +2320,7 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         # Determine location of calibrator
         ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+        _, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.

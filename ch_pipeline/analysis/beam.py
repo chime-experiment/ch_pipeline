@@ -66,13 +66,13 @@ class TransitGrouper(task.SingleTask):
         self.observer = ephem.chime if observer is None else observer
         try:
             self.src = ephem.source_dictionary[self.source]
-        except KeyError:
+        except KeyError as e:
             msg = (
                 "Could not find source {} in catalogue. "
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise config.CaputConfigError(msg) from e
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -157,7 +157,7 @@ class TransitGrouper(task.SingleTask):
         """
         for dname in ["evec", "eval", "erms"]:
             if dname in ts.datasets.keys():
-                self.log.debug("Stripping dataset {}".format(dname))
+                self.log.debug(f"Stripping dataset {dname}")
                 del ts[dname]
         self.tstreams.append(ts)
 
@@ -168,11 +168,7 @@ class TransitGrouper(task.SingleTask):
         if len(self.tstreams) == 0 or self.cur_transit is None:
             self.log.info("Did not find any transits.")
             return None
-        self.log.debug(
-            "Finalising transit for {}...".format(
-                ephem.unix_to_datetime(self.cur_transit)
-            )
-        )
+        self.log.debug(f"Finalising transit for {ephem.unix_to_datetime(self.cur_transit)}...")
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
@@ -182,10 +178,7 @@ class TransitGrouper(task.SingleTask):
 
         dt = self.tstreams[0].time[1] - self.tstreams[0].time[0]
         if dt <= 0:
-            self.log.warning(
-                "Time steps are not positive definite: dt={:.3f}".format(dt)
-                + " Skipping."
-            )
+            self.log.warning(f"Time steps are not positive definite: dt={dt:.3f} Skipping.")
             ts = None
         if stop_ind - start_ind > int(self.min_span / 360.0 * SIDEREAL_DAY_SEC / dt):
             if len(self.tstreams) > 1:
@@ -232,11 +225,8 @@ class TransitGrouper(task.SingleTask):
             if r[1][0] < self.cur_transit and r[1][1] > self.cur_transit
         ]
         if len(this_run) == 0:
-            self.log.warning(
-                "Could not find source transit in holography database for {}.".format(
-                    ephem.unix_to_datetime(self.cur_transit)
-                )
-            )
+            self.log.warning(f"Could not find source transit in holography database for "
+                             f"{ephem.unix_to_datetime(self.cur_transit)}.")
             # skip this file
             self.cur_transit = None
         else:
@@ -289,13 +279,13 @@ class TransitRegridder(Regridder):
 
         try:
             self.src = ephem.source_dictionary[self.source]
-        except KeyError:
+        except KeyError as e:
             msg = (
                 "Could not find source {} in catalogue. "
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise config.CaputConfigError(msg) from e
 
     def process(self, data):
         """Regrid visibility data onto a regular grid in hour angle.
@@ -1070,7 +1060,7 @@ class TransitStacker(task.SingleTask):
             A holography transit.
         """
 
-        self.log.info("Weight is %s" % self.weight)
+        self.log.info(f"Weight is {self.weight}")
 
         if self.stack is None:
             self.log.info("Initializing transit stack.")
@@ -1082,7 +1072,7 @@ class TransitStacker(task.SingleTask):
             self.stack.add_dataset("number_of_observations")
             self.stack.redistribute("freq")
 
-            self.log.info("Adding %s to stack." % transit.attrs["tag"])
+            self.log.info(f"Adding {transit.attrs['tag']} to stack.")
 
             # Copy over relevant attributes
             self.stack.attrs["filename"] = [transit.attrs["tag"]]
@@ -1112,15 +1102,11 @@ class TransitStacker(task.SingleTask):
 
         else:
             if list(transit.beam.shape) != list(self.stack.beam.shape):
-                self.log.error(
-                    "Transit has different shape than stack: {}, {}".format(
-                        transit.beam.shape, self.stack.beam.shape
-                    )
-                    + " Skipping."
-                )
+                self.log.error(f"Transit has different shape than stack: {transit.beam.shape}, {self.stack.beam.shape} "
+                               f"Skipping.")
                 return None
 
-            self.log.info("Adding %s to stack." % transit.attrs["tag"])
+            self.log.info(f"Adding {transit.attrs['tag']} to stack.")
 
             self.stack.attrs["filename"].append(transit.attrs["tag"])
             self.stack.attrs["observation_id"].append(transit.attrs["observation_id"])
@@ -1206,9 +1192,8 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         # Find processed transit files
         self.proc_transits = []
         for processed_dir in self.processed_dir:
-            self.log.debug(
-                "Looking for processed transits in {}...".format(processed_dir)
-            )
+            self.log.debug(f"Looking for processed transits in {processed_dir}...")
+
             # Expand path
             processed_dir = path.expanduser(processed_dir)
             processed_dir = path.expandvars(processed_dir)
@@ -1226,7 +1211,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
                     obs_id = fh.attrs.get("observation_id", None)
                     if obs_id is not None:
                         self.proc_transits.append(obs_id)
-        self.log.debug("Found {:d} processed transits.".format(len(self.proc_transits)))
+        self.log.debug(f"Found {len(self.proc_transits):d} processed transits.")
 
         # Query database for observations of this source
         hol_obs = None
@@ -1249,7 +1234,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
             List of files to be processed.
         """
 
-        self.log.info("Starting next for task %s" % self.__class__.__name__)
+        self.log.info(f"Starting next for task {self.__class__.__name__}")
 
         self.comm.Barrier()
 
@@ -1266,21 +1251,14 @@ class FilterHolographyProcessed(task.MPILoggedTask):
             ]
 
             if len(this_obs) == 0:
-                self.log.warning(
-                    "Could not find source transit in holography database for {}.".format(
-                        ephem.unix_to_datetime(start)
-                    )
-                )
+                self.log.warning(f"Could not find source transit in holography database for "
+                                 f"{ephem.unix_to_datetime(start)}.")
             elif this_obs[0].id in self.proc_transits:
-                self.log.warning(
-                    "Already processed transit for {}. Skipping.".format(
-                        ephem.unix_to_datetime(start)
-                    )
-                )
+                self.log.warning(f"Already processed transit for {ephem.unix_to_datetime(start)}. Skipping.")
             else:
                 files += fi[0]
 
-        self.log.info("Leaving next for task %s" % self.__class__.__name__)
+        self.log.info(f"Leaving next for task {self.__class__.__name__}")
         return files
 
 

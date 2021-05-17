@@ -210,7 +210,7 @@ class QueryDatabase(task.MPILoggedTask):
             if self.include_transits:
                 time_delta = self.include_transits_time_delta
                 ntime_delta = len(time_delta)
-                if (ntime_delta > 1) and (ntime_delta < len(self.include_transits)):
+                if 1 < ntime_delta < len(self.include_transits):
                     raise ValueError(
                         "Must specify `time_delta` for each source in "
                         "`include_transits` or provide single value for all sources."
@@ -227,7 +227,7 @@ class QueryDatabase(task.MPILoggedTask):
             if self.exclude_transits:
                 time_delta = self.exclude_transits_time_delta
                 ntime_delta = len(time_delta)
-                if (ntime_delta > 1) and (ntime_delta < len(self.exclude_transits)):
+                if 1 < ntime_delta < len(self.exclude_transits):
                     raise ValueError(
                         "Must specify `time_delta` for each source in "
                         "`exclude_transits` or provide single value for all sources."
@@ -289,9 +289,6 @@ class QueryRun(task.MPILoggedTask):
         files : list
             List of files to load
         """
-        from ch_util import layout
-        from chimedb import data_index as di
-
         files = None
 
         # Query the database on rank=0 only, and broadcast to everywhere else
@@ -510,8 +507,6 @@ class QueryAcquisitions(task.MPILoggedTask):
 
     def setup(self):
         """Query the database, fetch the files, and save to attribute."""
-        from ch_util import layout
-        from chimedb import data_index as di
 
         # Function to break a list of files into groups of roughly the same size
         def _choose_group_size(n, m, accept):
@@ -539,7 +534,7 @@ class QueryAcquisitions(task.MPILoggedTask):
             fi.filter_acqs(di.ArchiveInst.name == self.instrument)
 
             files = []
-            for aa, acq in enumerate(fi.acqs):
+            for aa, _ in enumerate(fi.acqs):
 
                 acq_results = fi.get_results_acq(aa)
 
