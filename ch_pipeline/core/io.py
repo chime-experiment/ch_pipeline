@@ -190,6 +190,72 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
+class LoadDataFiles(task.SingleTask):
+    """Load general CHIME data from files passed into the setup routine.
+
+    This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
+    """
+
+    files = None
+
+    _file_ptr = 0
+
+    acqtype = config.Property(proptype=str, default="weather")
+
+    _acqtype_reader = {
+        "hk": andata.HKReader,
+        "hkp": andata.HKPReader,
+        "weather": andata.WeatherReader,
+        "rawadc": andata.RawADCReader,
+        "gain": andata.CalibrationGainReader,
+        "digitalgain": andata.DigitalGainReader,
+        "flaginput": andata.FlagInputReader,
+    }
+
+    def setup(self, files):
+        """Set the list of files to load.
+
+        Parameters
+        ----------
+        files : list
+        """
+        if self.acqtype not in self._acqtype_reader:
+            raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
+
+        if not isinstance(files, (list, tuple)):
+            raise ValueError("Argument must be list of files.")
+
+        self.files = files
+
+    def process(self):
+        """Load in each sidereal day.
+
+        Returns
+        -------
+        ts : andata.CorrData
+            The timestream of each sidereal day.
+        """
+
+        if len(self.files) == self._file_ptr:
+            raise pipeline.PipelineStopIteration
+
+        # Collect garbage to remove any prior data objects
+        gc.collect()
+
+        # Fetch and remove the first item in the list
+        file_ = self.files[self._file_ptr]
+        self._file_ptr += 1
+
+        # Set up a Reader class
+        rd = self._acqtype_reader[self.acqtype](file_)
+
+        self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
+        ts = rd.read()
+
+        # Return timestream
+        return ts
+
+
 class LoadSetupFile(task.MPILoggedTask):
     """Loads a file from disk into a memh5 container during setup.
 
