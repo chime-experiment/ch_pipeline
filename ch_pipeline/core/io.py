@@ -292,18 +292,15 @@ class LoadSetupFile(io.BaseLoadFiles):
 class LoadFileFromTag(io.BaseLoadFiles):
     """Loads a file from disk into a memh5 container.
 
-    The suffix of the filename is extracted from the
-    tag of the input container.
+    The suffix of the filename is extracted from the tag of the input container.
 
     Attributes
     ----------
     prefix : str
-        Filename is assumed to have the format:
-            prefix + incont.attrs['tag'] + '.h5'
+        Filename is assumed to have the format: "{prefix}{incont.attrs['tag']}.h5"
     only_prefix : bool
-        If True, then the class will return the same container
-        at each iteration.  The filename is assumed to have the format:
-            prefix + '.h5'
+        If True, then the class will return the same container at each iteration.
+        The filename is assumed to have the format: "{prefix}.h5"
     """
 
     prefix = config.Property(proptype=str)
