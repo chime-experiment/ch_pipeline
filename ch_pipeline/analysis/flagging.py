@@ -1,45 +1,9 @@
-"""
-===============================================================
-Tasks for Flagging Data (:mod:`~ch_pipeline.analysis.flagging`)
-===============================================================
-
-.. currentmodule:: ch_pipeline.analysis.flagging
+"""Tasks for Flagging Data
 
 Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    RFIFilter
-    ChannelFlagger
-    MonitorCorrInput
-    TestCorrInput
-    AccumulateCorrInputMask
-    ApplyCorrInputMask
-    ApplySiderealDayFlag
-    NanToNum
-    RadiometerWeight
-    BadNodeFlagger
-    MaskDay
-    MaskSource
-    MaskSun
-    MaskMoon
-    MaskRA
-    MaskData
-    MaskCHIMEData
-    DataFlagger
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import numpy as np
 
@@ -659,7 +623,7 @@ class TestCorrInput(task.SingleTask):
         ----------
         timestream : andata.CorrData
             Apply series of tests to this timestream.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list of describing the inputs as they are in timestream.
 
         Returns
@@ -1311,13 +1275,13 @@ def transit_flag(body, time, nsigma=2.0):
         and False otherwise.
     """
     time = np.atleast_1d(time)
-    obs = ephemeris._get_chime()
+    obs = ephemeris.chime
 
     # Create boolean flag
     flag = np.zeros(time.size, dtype=np.bool)
 
     # Find transit times
-    transit_times = ephemeris.transit_times(
+    transit_times = obs.transit_times(
         body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0
     )
 
@@ -1325,9 +1289,11 @@ def transit_flag(body, time, nsigma=2.0):
     for ttrans in transit_times:
 
         # Compute source coordinates
-        obs.date = ttrans
-        alt, az = obs.altaz(body)
-        ra, dec = obs.cirs_radec(body)
+        sf_time = ephemeris.unix_to_skyfield_time(ttrans)
+        pos = obs.skyfield_obs().at(sf_time).observe(body)
+
+        alt = pos.apparent().altaz()[0]
+        dec = pos.cirs_radec(sf_time)[1]
 
         # Make sure body is above horizon
         if alt.radians > 0.0:

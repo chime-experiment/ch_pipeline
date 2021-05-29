@@ -1,24 +1,8 @@
 """
-=====================================================================
-Tasks for sidereal regridding (:mod:`~ch_pipeline.analysis.sidereal`)
-=====================================================================
-
-.. currentmodule:: ch_pipeline.analysis.sidereal
+Tasks for sidereal regridding
 
 Tasks for taking the timestream data and regridding it into sidereal days
 which can be stacked.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    LoadTimeStreamSidereal
-    SiderealGrouper
-    SiderealRegridder
-    SiderealMean
-    ChangeSiderealMean
 
 Usage
 =====
@@ -26,21 +10,15 @@ Usage
 Generally you would want to use these tasks together. Starting with a
 :class:`LoadTimeStreamSidereal`, then feeding that into
 :class:`SiderealRegridder` to grid onto each sidereal day, and then into
-:class:`SiderealStacker` if you want to combine the different days.
+:class:`draco.analysis.SiderealStacker` if you want to combine the different days.
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-from past.builtins import basestring
-
-# === End Python 2/3 compatibility
 
 import gc
 import numpy as np
+from mpi4py import MPI
 
-from caput import pipeline, config
-from caput import mpiutil
+from caput import pipeline, config, tod
+from caput.weighted_median import weighted_median
 from ch_util import andata, ephemeris, tools
 from draco.core import task
 from draco.analysis import sidereal
@@ -97,7 +75,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         self.files = files
 
         filemap = None
-        if mpiutil.rank0:
+        if self.comm.rank == 0:
 
             se_times = get_times(self.files)
             se_csd = ephemeris.csd(se_times)
@@ -112,7 +90,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             filemap = [(day, dmap) for day, dmap in filemap if dmap.size > 1]
             filemap.sort()
 
-        self.filemap = mpiutil.world.bcast(filemap, root=0)
+        self.filemap = self.comm.bcast(filemap, root=0)
 
         # Set up frequency selection.
         if self.freq_physical:
@@ -203,9 +181,62 @@ class SiderealGrouper(sidereal.SiderealGrouper):
         """
 
         # Set up the default Observer
-        observer = ephemeris.chime_observer() if observer is None else observer
+        observer = ephemeris.chime if observer is None else observer
 
         sidereal.SiderealGrouper.setup(self, observer)
+
+
+class WeatherGrouper(SiderealGrouper):
+    """Group Weather files together within the sidereal day.
+
+    This is just a weather file specific version of `SiderealGrouper`.
+    """
+
+    def _process_current_lsd(self):
+        # Override with a weather file specific version. It's not clear *why* exactly
+        # this is needed
+
+        # Check if we have weather data for this day.
+        if len(self._timestream_list) == 0:
+            self.log.info("No weather data for this sidereal day")
+            return None
+
+        # Check if there is data missing
+        # Calculate the length of data in this current LSD
+        start = self._timestream_list[0].time[0]
+        end = self._timestream_list[-1].time[-1]
+        sid_seconds = 86400.0 / ephemeris.SIDEREAL_S
+
+        if (end - start) < (sid_seconds + 2 * self.padding):
+            self.log.info("Not enough weather data - skipping this day")
+            return None
+
+        lsd = self._current_lsd
+
+        # Convert the current lsd day to unix time and pad it.
+        unix_start = self.observer.lsd_to_unix(lsd)
+        unix_end = self.observer.lsd_to_unix(lsd + 1)
+        self.pad_start = unix_start - self.padding
+        self.pad_end = unix_end + self.padding
+
+        times = np.concatenate([ts.time for ts in self._timestream_list])
+        start_ind = int(np.argmin(np.abs(times - self.pad_start)))
+        stop_ind = int(np.argmin(np.abs(times - self.pad_end)))
+
+        self.log.info("Constructing LSD:%i [%i files]", lsd, len(self._timestream_list))
+
+        # Concatenate timestreams
+        ts = tod.concatenate(self._timestream_list, start=start_ind, stop=stop_ind)
+
+        # Make sure that our timestamps of the concatenated files don't fall
+        # out of the requested lsd time span
+        if (ts.time[0] > unix_start) or (ts.time[-1] < unix_end):
+            return None
+
+        ts.attrs["tag"] = "lsd_%i" % lsd
+        ts.attrs["lsd"] = lsd
+
+        return ts
 
 
 class SiderealRegridder(sidereal.SiderealRegridder):
@@ -223,8 +254,13 @@ class SiderealRegridder(sidereal.SiderealRegridder):
             Details of the observer, if not set default to CHIME.
         """
 
+        # Down mix requires the baseline distribution to work and so this simple
+        # wrapper around the draco regridder will not work if it is turned on
+        if self.down_mix and observer is None:
+            raise ValueError("A Telescope object must be supplied if down_mix=True.")
+
         # Set up the default Observer
-        observer = ephemeris.chime_observer() if observer is None else observer
+        observer = ephemeris.chime if observer is None else observer
 
         sidereal.SiderealRegridder.setup(self, observer)
 
@@ -258,8 +294,12 @@ class SiderealMean(task.SingleTask):
     nsigma : float
         Mask this number of sigma on either side of the source transits.
         Here sigma is the expected width of the primary beam for an E-W
-        polarisation antenna at 400 MHz as defined by the
-       `ch_util.cal_utils.guess_fwhm` function.
+        polarisation antenna at 400 MHz as defined by
+        :py:func:`ch_util.cal_utils.guess_fwhm`.
+    missing_threshold : float
+        If less than this fraction of data remains within the regions included by the
+        specified masks, then all the data is counted as missing (per baseline and
+        frequency). Default is 0.0, i.e. this is not applied.
     """
 
     median = config.Property(proptype=bool, default=False)
@@ -270,6 +310,7 @@ class SiderealMean(task.SingleTask):
     flux_threshold = config.Property(proptype=float, default=400.0)
     dec_threshold = config.Property(proptype=bool, default=5.0)
     nsigma = config.Property(proptype=float, default=2.0)
+    missing_threshold = config.Property(proptype=float, default=0.0)
 
     def setup(self):
         """Determine which sources will be masked, if any."""
@@ -306,7 +347,6 @@ class SiderealMean(task.SingleTask):
             Sidereal stream containing only the mean(median) value.
         """
         from .flagging import daytime_flag, transit_flag
-        import weighted as wq
 
         # Make sure we are distributed over frequency
         sstream.redistribute("freq")
@@ -375,26 +415,32 @@ class SiderealMean(task.SingleTask):
         if not self.inverse_variance:
             all_weight = (all_weight > 0.0).astype(np.float32)
 
-        # Save the total number of nonzero samples as the weight dataset of the output container
+        # Only include freqs/baselines where enough data is actually present
+        frac_present = all_weight.sum(axis=-1) / flag_quiet.sum(axis=-1)
+        all_weight *= (frac_present > self.missing_threshold)[..., np.newaxis]
+
+        num_freq_missing_local = int(
+            (frac_present < self.missing_threshold).all(axis=1).sum()
+        )
+        num_freq_missing = self.comm.allreduce(num_freq_missing_local, op=MPI.SUM)
+
+        self.log.info(
+            "Cannot estimate a sidereal mean for "
+            f"{100.0 * num_freq_missing / len(mustream.freq):.2f}% of all frequencies."
+        )
+
+        # Save the total number of nonzero samples as the weight dataset of the output
+        # container
         mustream.weight[:] = np.sum(all_weight, axis=-1, keepdims=True)
 
         # If requested, compute median (requires loop over frequencies and baselines)
         if self.median:
-            nfreq, nbaseline, _ = all_vis.shape
-            for ff in range(nfreq):
-                for bb in range(nbaseline):
+            mu_vis[..., 0].real = weighted_median(all_vis.real.copy(), all_weight)
+            mu_vis[..., 0].imag = weighted_median(all_vis.imag.copy(), all_weight)
 
-                    vis = all_vis[ff, bb]
-                    weight = all_weight[ff, bb]
-
-                    # wq.median will generate warnings and return NaN if the weights are all zero.
-                    # Check for this case and set the mean visibility to 0+0j.
-                    if np.any(weight):
-                        mu_vis[ff, bb, 0] = wq.median(
-                            vis.real, weight
-                        ) + 1.0j * wq.median(vis.imag, weight)
-                    else:
-                        mu_vis[ff, bb, 0] = 0.0 + 0.0j
+            # Where all the weights are zero explicitly set the median to zero
+            missing = ~(all_weight.any(axis=-1))
+            mu_vis[missing, 0] = 0.0
 
         else:
             # Otherwise calculate the mean
@@ -480,7 +526,7 @@ def get_times(acq_files):
     """
     if isinstance(acq_files, list):
         return np.array([get_times(acq_file) for acq_file in acq_files])
-    elif isinstance(acq_files, basestring):
+    elif isinstance(acq_files, str):
         # Load in file (but ignore all datasets)
         ad_empty = andata.AnData.from_acq_h5(acq_files, datasets=())
         start = ad_empty.timestamp[0]

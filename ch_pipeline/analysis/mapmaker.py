@@ -1,26 +1,7 @@
-"""
-========================================================
-Map making tasks (:mod:`~ch_pipeline.analysis.mapmaker`)
-========================================================
-
-.. currentmodule:: ch_pipeline.analysis.mapmaker
+"""Map making tasks
 
 Tools for making maps from CHIME data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    RingMapMaker
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import numpy as np
 import scipy.constants
@@ -156,7 +137,7 @@ class RingMapMaker(task.SingleTask):
         invvar = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
         weight = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
 
-        # If natural or uniform weighting was choosen, then calculate the
+        # If natural or uniform weighting was chosen, then calculate the
         # redundancy of the collated visibilities.
         if self.weight != "inverse_variance":
             redundancy = tools.calculate_redundancy(
@@ -251,7 +232,8 @@ class RingMapMaker(task.SingleTask):
             bfm_y[:] = np.matmul(weight[lfi] * vis[lfi], pa)
             sb_y[:] = np.matmul(weight[lfi], pa)
             if self.single_beam:
-                # Only need the 0th term if the irfft, equivalent to adding in EW direction
+                # Only need the 0th term if the irfft, equivalent to adding in EW
+                # direction
                 bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
                 sb[:] = np.sum(sb_y, axis=2)[:, :, np.newaxis, ...]
             else:

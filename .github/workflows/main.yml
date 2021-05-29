@@ -1,0 +1,57 @@
+name: ch-pipeline-ci-build
+on:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+    - master
+
+jobs:
+
+  lint-code:
+
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+
+    - name: Install black
+      run: pip install black
+
+    - name: Check code with black
+      run: black --check .
+
+  install-build-docs:
+
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y libopenmpi-dev openmpi-bin libhdf5-serial-dev
+
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+
+    - name: Install pip dependencies
+      run: |
+        pip install future
+        pip install numpy
+        pip install cython
+        pip install --use-deprecated=legacy-resolver -r requirements.txt
+        pip install --use-deprecated=legacy-resolver -r doc/requirements.txt
+
+    - name: Install ch_pipeline
+      run: python setup.py develop
+
+    - name: Build sphinx docs
+      run: sphinx-build -W -b html doc/ doc/_build/html

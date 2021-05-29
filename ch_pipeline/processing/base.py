@@ -1,14 +1,7 @@
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
-
 import re
 import yaml
 import os
-from subprocess import check_call
+import subprocess as sp
 import tempfile
 
 # TODO: Python 3 workaround
@@ -35,7 +28,17 @@ Please describe the purpose/changes of this revision here.
 
 
 class ProcessingType(object):
-    """Baseclass for a pipeline processing type."""
+    """Baseclass for a pipeline processing type.
+
+    Parameters
+    ----------
+    revision : str
+        Revision to use.
+    create : bool, optional
+        Create the revision if it isn't found.
+    root_path : str, optional
+        Override the path to the processing root.
+    """
 
     # Must be set externally before using
     root_path = None
@@ -44,9 +47,12 @@ class ProcessingType(object):
     default_params = {}
     default_script = DEFAULT_SCRIPT
 
-    def __init__(self, revision, create=False):
+    def __init__(self, revision, create=False, root_path=None):
 
         self.revision = revision
+
+        if root_path:
+            self.root_path = root_path
 
         # Run the create hook if specified
         if create:
@@ -57,6 +63,9 @@ class ProcessingType(object):
 
     def _create(self):
         """Save default parameters and pipeline config for this revision."""
+
+        # Subclass hook
+        self._create_hook()
 
         # Write default configuration into directory
         with (self.revconfig_path).open("w") as fh:
@@ -79,11 +88,11 @@ class ProcessingType(object):
             fh.write(DESC_HEAD.format(self.revision, self.type_name))
         os.system(r"${EDITOR:-vi} " + str(desc_path))
 
-        # Subclass hook
-        self._create_hook()
-
     def _create_hook(self):
-        """Implement to add custom behaviour when a revision is created."""
+        """Implement to add custom behaviour when a revision is created.
+
+        This is called *before* the revision configuration is written out.
+        """
         pass
 
     def _load(self):
@@ -101,7 +110,10 @@ class ProcessingType(object):
         self._load_hook()
 
     def _load_hook(self):
-        """Implement to add custom behaviour when a revision is loaded."""
+        """Implement to add custom behaviour when a revision is loaded.
+
+        This is called *after* the object has had it's configuration loaded.
+        """
         pass
 
     def job_script(self, tag):
@@ -113,6 +125,7 @@ class ProcessingType(object):
                 "jobname": self.job_name(tag),
                 "dir": str(self.base_path / tag),
                 "tempdir": str(self.workdir_path / tag),
+                "tag": tag,
             }
         )
 
@@ -366,7 +379,6 @@ def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
 
     import os
-    import tempfile
 
     with tempfile.NamedTemporaryFile("w+") as fh:
         fh.write(script)
@@ -393,9 +405,6 @@ def slurm_jobs(user=None):
     jobs : list
         List of dictionaries giving the jobs state.
     """
-
-    import subprocess as sp
-
     if user is None:
         import getpass
 
@@ -459,6 +468,53 @@ def slurm_jobs(user=None):
             entries.append(d)
 
     return entries
+
+
+def slurm_fairshare(account, user=None):
+    """Get the LevelFS for the current user and account.
+
+    Parameters
+    ----------
+    account : str
+        The account to check.
+    user : str, optional
+        The user on the account to check for.
+
+    Returns
+    -------
+    account_fs : str
+        The LevelFS for the whole account, i.e. the priority relative to all other
+        accounts on the cluster.
+    user_fs : str
+        The LevelFS for the user, i.e. the priority compared to all other users on
+        the account.
+    """
+    cmd = ["sshare", "-A", account, "-o", "LevelFS", "-n"]
+
+    if user is not None:
+        cmd += ["-u", user]
+
+    # Call sshare to get the level fairshares
+    try:
+        process = sp.Popen(
+            cmd,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            shell=False,
+            universal_newlines=True,
+        )
+        proc_stdout, proc_stderr = process.communicate()
+        lines = proc_stdout.split("\n")
+    except OSError as e:
+        raise RuntimeError('Failure running "sshare".') from e
+
+    # Filter empty lines
+    lines = [line for line in lines if line]
+
+    if len(lines) != 2:
+        raise RuntimeError('Could not parse output from "sshare".')
+
+    return tuple(float(line) for line in lines)
 
 
 def all_subclasses(cls):

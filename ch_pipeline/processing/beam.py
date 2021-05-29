@@ -1,10 +1,3 @@
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
-
 from ch_util import holography as holo
 from ch_util import ephemeris as ephem
 from chimedb.core import connect as connect_db
@@ -128,7 +121,7 @@ pipeline:
 
 
 class HolographyFringestop(base.ProcessingType):
-    """"""
+    """ """
 
     type_name = "holo_fstop"
     # tag by name of source and processing run

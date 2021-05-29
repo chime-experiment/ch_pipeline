@@ -1,7 +1,6 @@
 cython
--e git+https://github.com/radiocosmology/caput#egg=caput
--e git+ssh://git@github.com/chime-experiment/ch_util.git#egg=ch_util
--e git+https://github.com/radiocosmology/cora#egg=cora
--e git+https://github.com/radiocosmology/driftscan#egg=driftscan
--e git+https://github.com/radiocosmology/draco#egg=draco
-GitPython
+caput @ git+https://github.com/radiocosmology/caput.git
+ch_util @ git+https://github.com/chime-experiment/ch_util.git
+cora @ git+https://github.com/radiocosmology/cora.git
+driftscan @ git+https://github.com/radiocosmology/driftscan.git
+draco @ git+https://github.com/radiocosmology/draco.git

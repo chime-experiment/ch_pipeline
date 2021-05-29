@@ -1,9 +1,4 @@
-"""
-==============================================================
-Parallel data containers (:mod:`~ch_pipeline.core.containers`)
-==============================================================
-
-.. currentmodule:: ch_pipeline.core.containers
+"""Parallel data containers
 
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
@@ -11,36 +6,22 @@ containers which are imported into this module.
 
 Containers
 ==========
-
-.. autosummary::
-    :toctree: generated/
-
-    RFIMask
-    CorrInputMask
-    CorrInputTest
-    CorrInputMonitor
-    SiderealDayFlag
-    TransitFitParams
-    PointSourceTransit
-    SourceModel
-    SunTransit
-    RingMap
-    Photometry
+- :py:class:`RFIMask`
+- :py:class:`CorrInputMask`
+- :py:class:`CorrInputTest`
+- :py:class:`CorrInputMonitor`
+- :py:class:`SiderealDayFlag`
+- :py:class:`TransitFitParams`
+- :py:class:`PointSourceTransit`
+- :py:class:`SourceModel`
+- :py:class:`SunTransit`
+- :py:class:`RingMap`
+- :py:class:`Photometry`
 
 Tasks
 =====
-
-.. autosummary::
-    :toctree: generated/
-
-    MonkeyPatchContainers
+- :py:class:`MonkeyPatchContainers`
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import numpy as np
 

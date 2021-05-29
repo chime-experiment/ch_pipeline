@@ -1,29 +1,15 @@
 """
-==========================================
-Tasks for IO (:mod:`~ch_pipeline.core.io`)
-==========================================
-
-.. currentmodule:: ch_pipeline.core.io
+Tasks for IO
 
 Tasks for calculating IO. Notably a task which will write out the parallel
 MPIDataset classes.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    LoadCorrDataFiles
-    LoadSetupFile
-    LoadFileFromTag
 
 File Groups
 ===========
 
 Several tasks accept groups of files as arguments. These are specified in the YAML file as a dictionary like below.
 
-.. codeblock:: yaml
+.. code-block:: yaml
 
     list_of_file_groups:
         -   tag: first_group  # An optional tag naming the group
@@ -40,13 +26,6 @@ Several tasks accept groups of files as arguments. These are specified in the YA
     single_group:
         files: ['file1.h5', 'file2.h5']
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-from past.builtins import basestring
-
-# === End Python 2/3 compatibility
 
 
 import re
@@ -54,72 +33,12 @@ import os.path
 import gc
 import numpy as np
 
-from caput import pipeline, memh5
+from caput import pipeline
 from caput import config
 
 from ch_util import andata
 
-from draco.core import task
-
-
-def _list_of_filelists(files):
-    # Take in a list of lists/glob patterns of filenames
-    import glob
-
-    f2 = []
-
-    for filelist in files:
-
-        if isinstance(filelist, basestring):
-            filelist = glob.glob(filelist)
-        elif isinstance(filelist, list):
-            pass
-        else:
-            raise Exception("Must be list or glob pattern.")
-        f2.append(filelist)
-
-    return f2
-
-
-def _list_or_glob(files):
-    # Take in a list of lists/glob patterns of filenames
-    import glob
-
-    if isinstance(files, basestring):
-        files = sorted(glob.glob(files))
-    elif isinstance(files, list):
-        pass
-    else:
-        raise RuntimeError("Must be list or glob pattern.")
-
-    return files
-
-
-def _list_of_filegroups(groups):
-    # Process a file group/groups
-    import glob
-
-    # Convert to list if the group was not included in a list
-    if not isinstance(groups, list):
-        groups = [groups]
-
-    # Iterate over groups, set the tag if needed, and process the file list
-    # through glob
-    for gi, group in enumerate(groups):
-
-        files = group["files"]
-
-        if "tag" not in group:
-            group["tag"] = "group_%i" % gi
-
-        flist = []
-
-        for fname in files:
-            flist += glob.glob(fname)
-
-        group["files"] = flist
-
-    return groups
+from draco.core import task, io
 
 
 class LoadCorrDataFiles(task.SingleTask):
@@ -271,22 +190,82 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadSetupFile(task.MPILoggedTask):
+class LoadDataFiles(task.SingleTask):
+    """Load general CHIME data from files passed into the setup routine.
+
+    This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
+    """
+
+    files = None
+
+    _file_ptr = 0
+
+    acqtype = config.Property(proptype=str, default="weather")
+
+    _acqtype_reader = {
+        "hk": andata.HKReader,
+        "hkp": andata.HKPReader,
+        "weather": andata.WeatherReader,
+        "rawadc": andata.RawADCReader,
+        "gain": andata.CalibrationGainReader,
+        "digitalgain": andata.DigitalGainReader,
+        "flaginput": andata.FlagInputReader,
+    }
+
+    def setup(self, files):
+        """Set the list of files to load.
+
+        Parameters
+        ----------
+        files : list
+        """
+        if self.acqtype not in self._acqtype_reader:
+            raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
+
+        if not isinstance(files, (list, tuple)):
+            raise ValueError("Argument must be list of files.")
+
+        self.files = files
+
+    def process(self):
+        """Load in each sidereal day.
+
+        Returns
+        -------
+        ts : andata.CorrData
+            The timestream of each sidereal day.
+        """
+
+        if len(self.files) == self._file_ptr:
+            raise pipeline.PipelineStopIteration
+
+        # Collect garbage to remove any prior data objects
+        gc.collect()
+
+        # Fetch and remove the first item in the list
+        file_ = self.files[self._file_ptr]
+        self._file_ptr += 1
+
+        # Set up a Reader class
+        rd = self._acqtype_reader[self.acqtype](file_)
+
+        self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
+        ts = rd.read()
+
+        # Return timestream
+        return ts
+
+
+class LoadSetupFile(io.BaseLoadFiles):
     """Loads a file from disk into a memh5 container during setup.
 
     Attributes
     ----------
     filename : str
         Path to a saved container.
-    distributed : bool, optional
-        Whether the file should be loaded distributed across ranks.
-    convert_strings : bool, optional
-        Convert strings to unicode when loading.
     """
 
     filename = config.Property(proptype=str)
-    distributed = config.Property(proptype=bool, default=True)
-    convert_strings = config.Property(proptype=bool, default=True)
 
     def setup(self):
         """Load the file into a container.
@@ -295,65 +274,50 @@ class LoadSetupFile(task.MPILoggedTask):
         -------
         cont : subclass of `memh5.BasicCont`
         """
-        # Check that the file exists
-        if not os.path.exists(self.filename):
-            raise RuntimeError("File does not exist: %s" % self.filename)
+        # Call the baseclass setup to resolve any selections
+        super().setup()
 
-        self.log.info("Loading file: %s", self.filename)
+        # Load the requested file
+        cont = self._load_file(self.filename)
 
-        # Load into container
-        cont = memh5.BasicCont.from_file(
-            self.filename,
-            distributed=self.distributed,
-            comm=self.comm,
-            convert_attribute_strings=self.convert_strings,
-            convert_dataset_strings=self.convert_strings,
-        )
+        # Set the done attribute so the pipeline recognizes this task is finished
+        self.done = True
 
-        # Make sure all nodes have container before return
-        self.comm.Barrier()
-
-        # Return container
         return cont
 
+    def process(self):
+        pass
 
-class LoadFileFromTag(task.SingleTask):
+
+class LoadFileFromTag(io.BaseLoadFiles):
     """Loads a file from disk into a memh5 container.
-    The suffix of the filename is extracted from the
-    tag of the input.
+
+    The suffix of the filename is extracted from the tag of the input container.
 
     Attributes
     ----------
     prefix : str
-        Filename is assumed to have the format:
-            prefix + incont.attrs['tag'] + '.h5'
-
+        Filename is assumed to have the format: "{prefix}{incont.attrs['tag']}.h5"
     only_prefix : bool
-        If True, then the class will return the same
-        container at each iteration.  The filename
-        is assumed to have the format:
-            prefix + '.h5'
-
-    distributed : bool
-        Whether or not the memh5 container should be
-        distributed.
+        If True, then the class will return the same container at each iteration.
+        The filename is assumed to have the format: "{prefix}.h5"
     """
 
     prefix = config.Property(proptype=str)
-
     only_prefix = config.Property(proptype=bool, default=False)
 
-    distributed = config.Property(proptype=bool, default=False)
-
     def setup(self):
-        """Determine filename convention.  If only_prefix is True,
-        then load the file into a container.
-        """
+        """Determine filename convention.
 
-        from caput import memh5
+        If only_prefix is True, then load the file into a container.
+        """
+        # Call the baseclass setup to resolve any selections
+        super().setup()
 
         self.outcont = None
 
+        # If we are returning the same file for every iteration,
+        # then load that file now.
         if self.only_prefix:
 
             filename = self.prefix
@@ -362,25 +326,15 @@ class LoadFileFromTag(task.SingleTask):
             if split_ext[1] not in [".h5", ".hdf5"]:
                 filename = split_ext[0] + ".h5"
 
-            # Check that the file exists
-            if not os.path.exists(filename):
-                raise RuntimeError("File does not exist: %s" % filename)
-
-            self.log.info("Loading file: %s", filename)
-
-            self.outcont = memh5.BasicCont.from_file(
-                filename, distributed=self.distributed
-            )
+            # Load file into outcont attribute
+            self.outcont = self._load_file(filename)
 
         else:
 
             self.prefix = os.path.splitext(self.prefix)[0]
 
-        return
-
     def process(self, incont):
-        """Determine filename from the input container.
-        Load file into the output container.
+        """Determine filename from input container.  Load file into output container.
 
         Parameters
         ----------
@@ -390,22 +344,14 @@ class LoadFileFromTag(task.SingleTask):
         -------
         outcont : subclass of `memh5.BasicCont`
         """
-
         if not self.only_prefix:
 
             filename = self.prefix + incont.attrs["tag"] + ".h5"
 
-            # Check that the file exists
-            if not os.path.exists(filename):
-                raise RuntimeError("File does not exist: %s" % filename)
+            # Load file into outcont attribute
+            self.outcont = self._load_file(filename)
 
-            self.log.info("Loading file: %s", filename)
-
-            # Load into container
-            self.outcont = memh5.BasicCont.from_file(
-                filename, distributed=self.distributed
-            )
-
+        # Return the outcont attribute
         return self.outcont
 
 

@@ -2,7 +2,7 @@
 # Peforms the same processing as the calibration broker (real-time pipeline).
 cluster:
     directory:          $SCRATCH/eigen_cal/cyg_a
-    venv:               /home/ssiegel/ch_pipeline/venv
+    venv:               my_venv
 
     ## Cluster configuration (ignored unless on a cluster)
     name:               cyga_winter             # Jobname
@@ -59,12 +59,9 @@ pipeline:
                 include_transits: *source
                 include_transits_time_delta: 7200.0
 
-        -   type:       ch_pipeline.analysis.sidereal.SiderealFileFilterFromParams
+        -   type:       ch_pipeline.analysis.sidereal.SiderealGrouper
             requires:   qfilelist
             out:        sfilelist
-            params:
-                csd_start:  *csd_start
-                csd_end:    *csd_end
 
         -   type: draco.core.io.LoadFilesFromParams
             out: tcorr

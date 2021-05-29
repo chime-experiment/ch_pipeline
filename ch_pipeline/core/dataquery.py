@@ -1,34 +1,9 @@
 """
-==========================================================
-Dataset Specification (:mod:`~ch_pipeline.core.dataquery`)
-==========================================================
-
-.. currentmodule:: ch_pipeline.core.dataquery
+Dataset Specification
 
 Lookup information from the database about the data, particularly which files
 are contained in a specific dataset (defined by a `run` global flag) and what
 each correlator input is connected to.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    QueryDatabase
-    QueryRun
-    QueryDataspec
-    QueryAcquisitions
-    QueryInputs
-
-Routines
-========
-
-.. autosummary::
-    :toctree: generated/
-
-    finder_from_spec
-    files_from_spec
 
 Dataspec Format
 ===============
@@ -50,7 +25,7 @@ keys, containing datetime objects (in UTC). Or it can be a list of such
 ditionaries, to specify multiple time ranges to include. This can be contained
 in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
 
-.. codeblock:: yaml
+.. code-block:: yaml
 
     datasets:
         -   name:       A
@@ -62,12 +37,6 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import os
 
@@ -103,12 +72,16 @@ class QueryDatabase(task.MPILoggedTask):
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
-        can be in any format ensure_unix will support, including eg
-            20190116T150323 and 2019-1-16 08:03:23 -7
-    start_csd, end_csd : float
-        Start and end CSDs. Only used if `start_time` is not set.
-    instrument : string (default: 'chimestack')
-        data set to use
+        can be in any format ensure_unix will support, including e.g.
+        20190116T150323 and 2019-1-16 08:03:23 -7
+    acqtype : string (default: 'corr')
+        Type of acquisition. Options for acqtype are: 'corr', 'hk', 'weather',
+        'rawadc', 'gain', 'flaginput', 'digitalgain'.
+    instrument : string (optional)
+        Set the instrument name. Common ArchiveInst names are: 'chimeN2',
+        'chimestack', 'chime26m', 'chimetiming', 'chimecal', 'mingun' etc.
+        While acqtype returns all 'corr' data, one must specify the instrument
+        to get e.g. only stacked data (i.e. instrument = 'chimestack')
     source_26m : string (default: None)
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
@@ -147,7 +120,8 @@ class QueryDatabase(task.MPILoggedTask):
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
-    instrument = config.Property(proptype=str, default="chimestack")
+    acqtype = config.Property(proptype=str, default="corr")
+    instrument = config.Property(proptype=str, default=None)
 
     source_26m = config.Property(proptype=str, default=None)
 
@@ -198,8 +172,10 @@ class QueryDatabase(task.MPILoggedTask):
 
             f = finder.Finder(node_spoof=self.node_spoof)
 
-            # should be redundant if an instrument has been specified
-            f.only_corr()
+            f.filter_acqs(di.AcqType.name == self.acqtype)
+
+            if self.instrument is not None:
+                f.filter_acqs(di.ArchiveInst.name == self.instrument)
 
             if self.accept_all_global_flags:
                 f.accept_all_global_flags()
@@ -250,7 +226,7 @@ class QueryDatabase(task.MPILoggedTask):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
                         ephemeris.source_dictionary[src]
-                        if isinstance(src, basestring)
+                        if isinstance(src, str)
                         else src
                     )
                     f.include_transits(bdy, time_delta=tdelta)
@@ -267,7 +243,7 @@ class QueryDatabase(task.MPILoggedTask):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
                         ephemeris.source_dictionary[src]
-                        if isinstance(src, basestring)
+                        if isinstance(src, str)
                         else src
                     )
                     f.exclude_transits(bdy, time_delta=tdelta)
@@ -590,7 +566,8 @@ class QueryAcquisitions(task.MPILoggedTask):
                         max(1, int(0.10 * self.max_num_files)),
                     )
 
-                    bnd = list(range((nfiles % group_size) // 2, nfiles, group_size))
+                    ngroup, offset = nfiles // group_size, (nfiles % group_size) // 2
+                    bnd = [offset + gg * group_size for gg in range(ngroup + 1)]
                     bnd[0], bnd[-1] = 0, nfiles
 
                     files += [
@@ -645,7 +622,7 @@ class QueryInputs(task.MPILoggedTask):
 
         Returns
         -------
-        inputs : list of :class:`CorrInput`s
+        inputs : list of :class:`CorrInput`
             A list of describing the inputs as they are in the file.
         """
 

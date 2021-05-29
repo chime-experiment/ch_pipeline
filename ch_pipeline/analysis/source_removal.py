@@ -1,25 +1,7 @@
 """Tasks for removing bright sources from the data.
 
-.. currentmodule:: ch_pipeline.analysis.source_removal
-
 Tasks for constructing models for bright sources and subtracting them from the data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    SolveSources
-    SubtractSources
-
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 import json
 import numpy as np
@@ -107,8 +89,9 @@ def model_extended_sources(
 
     # Setup for calculating source coordinates
     lat = np.radians(ephemeris.CHIMELATITUDE)
-    observer = ephemeris._get_chime()
-    observer.date = timestamp
+    observer = ephemeris.chime
+    sf_time = ephemeris.unix_to_skyfield_time(timestamp)
+    obs = observer.skyfield_obs().at(sf_time)
 
     # Generate polynomials
     ncoeff_x = degree_x + 1
@@ -124,8 +107,9 @@ def model_extended_sources(
     for ss, body in enumerate(bodies):
 
         # Calculate the source coordinates
-        src_ra, src_dec = observer.cirs_radec(body)
-        src_alt, src_az = observer.altaz(body)
+        pos = obs.observe(body)
+        src_alt = pos.apparent().altaz()[0]
+        src_ra, src_dec, _ = pos.cirs_radec(sf_time)
 
         ha = np.radians(ephemeris.lsa(timestamp)) - src_ra.radians
         dec = src_dec.radians

@@ -1,19 +1,6 @@
-"""
-===================================
-Tasks for fringestopping CHIME data
-===================================
-
-.. currentmodule:: ch_pipeline.analysis.fringestop
+"""Tasks for fringestopping CHIME data
 
 Tasks for taking the timestream data and fringestop it to a given source
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-    
-    FringeStop
 
 Usage
 =====
@@ -27,12 +14,6 @@ Use this task together with:
 * :class:`~ch_pipeline.core.dataquery.QueryInputs` to query the inputmap
   of the timestream data
 """
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
 
 from datetime import datetime
 from caput import config, mpiutil
