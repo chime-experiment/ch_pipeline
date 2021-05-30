@@ -196,12 +196,22 @@ class CHIME(telescope.PolarisedTelescope):
     @property
     def fwhm_e(self):
         """Full width half max of the E-plane antenna beam."""
-        return 1.25 
+        coeff_fwhm_input_Y = np.array([2.41511275e-10,-6.71378830e-07,\
+        7.20183967e-04,-3.52472912e-01,6.73758644e+01])
+        
+        fwhm_freq_Y = np.polyval(coeff_fwhm_input_Y, self.frequencies)
+
+        return fwhm_freq_Y
 
     @property
     def fwhm_h(self):
         """Full width half max of the H-plane antenna beam."""
-        return 1.25 
+        coeff_fwhm_input_X = np.array([ 2.86443038e-10,-7.79063706e-07,\
+        8.15859136e-04,-3.89137634e-01,7.23010129e+01])
+        
+        fwhm_freq_X = np.polyval(coeff_fwhm_input_X, self.frequencies)
+
+        return fwhm_freq_X
 
     # Set the approximate uv feed sizes
     @property
@@ -409,8 +419,8 @@ class CHIME(telescope.PolarisedTelescope):
                 self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_e,
-                self.fwhm_h,
+                self.fwhm_e[freq],
+                self.fwhm_h[freq],
                 rot=rot,
             )
         elif tools.is_array_x(feed_obj):
@@ -418,8 +428,8 @@ class CHIME(telescope.PolarisedTelescope):
                 self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_e,
-                self.fwhm_h,
+                self.fwhm_e[freq],
+                self.fwhm_h[freq],
                 rot=rot,
             )
         else:
