@@ -196,12 +196,12 @@ class CHIME(telescope.PolarisedTelescope):
     @property
     def fwhm_e(self):
         """Full width half max of the E-plane antenna beam."""
-        return 2.0 * np.pi / 3.0 * 0.7
+        return 1.25 
 
     @property
     def fwhm_h(self):
         """Full width half max of the H-plane antenna beam."""
-        return 2.0 * np.pi / 3.0 * 1.2
+        return 1.25 
 
     # Set the approximate uv feed sizes
     @property
