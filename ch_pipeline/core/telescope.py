@@ -197,7 +197,9 @@ class CHIME(telescope.PolarisedTelescope):
     def fwhm_e(self):
         """Full width half max of the E-plane antenna beam."""
 
-        coeff_fwhm_input_Y = np.array([1.15310483e-07,-2.30462590e-04,1.50451290e-01,-3.07440520e+01])
+        coeff_fwhm_input_Y = np.array(
+            [1.15310483e-07, -2.30462590e-04, 1.50451290e-01, -3.07440520e01]
+        )
 
         fwhm_freq_Y = np.polyval(coeff_fwhm_input_Y, self.frequencies)
 
@@ -207,7 +209,9 @@ class CHIME(telescope.PolarisedTelescope):
     def fwhm_h(self):
         """Full width half max of the H-plane antenna beam."""
 
-        coeff_fwhm_input_X = np.array([2.97495306e-07,-6.00582101e-04,3.99949759e-01,-8.66733249e+01])
+        coeff_fwhm_input_X = np.array(
+            [2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01]
+        )
 
         fwhm_freq_X = np.polyval(coeff_fwhm_input_X, self.frequencies)
 
