@@ -498,7 +498,7 @@ class SourceModel(ContainerBase):
         "amplitude": {
             "axes": ["freq", "pol", "time", "source"],
             "dtype": np.complex64,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
         },
@@ -508,12 +508,6 @@ class SourceModel(ContainerBase):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
-        },
-        "source_index": {
-            "axes": ["param"],
-            "dtype": np.int,
-            "initialise": False,
-            "distributed": False,
         },
     }
 
@@ -526,8 +520,17 @@ class SourceModel(ContainerBase):
         return self.datasets["coeff"]
 
     @property
+    def param(self):
+        return self.index_map["param"]
+
+    @property
+    def source(self):
+        return self.index_map["source"]
+
+    @property
     def source_index(self):
-        return self.datasets["source_index"]
+        src = list(self.source)
+        return np.array([src.index(par) for par in self.param["source"]])
 
 
 class SunTransit(ContainerBase):

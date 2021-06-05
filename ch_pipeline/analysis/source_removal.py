@@ -15,8 +15,19 @@ from draco.core import task, io
 from ..core import containers
 
 
+def _correct_phase_wrap(phi):
+    return ((phi + np.pi) % (2.0 * np.pi)) - np.pi
+
+
 def model_extended_sources(
-    freq, distance, timestamp, bodies, min_altitude=10.0, **kwargs
+    freq,
+    distance,
+    timestamp,
+    bodies,
+    min_altitude=10.0,
+    min_ha=0.0,
+    max_ha=0.0,
+    **kwargs
 ):
     """Generate a model for the visibilities.
 
@@ -35,7 +46,14 @@ def model_extended_sources(
     bodies : nsource element list
         List of `skyfield.api.Star` (or equivalent) for the sources being modelled.
     min_altitude : float
-        Do not include a source in the model if it has an altitude less than this value.
+        Do not include a source in the model if it has an altitude less than
+        this value in degrees.
+    min_ha : float
+        Do not include a source in the model if it has an hour angle less than
+        this value in degrees.
+    max_ha : float
+        Do not include a source in the model if it has an hour angle greater than
+        this value in degrees.
     scale_x : nsource element list
         Angular extent of each source in arcmin in the W-E direction
     scale_y : nsource element list
@@ -89,9 +107,9 @@ def model_extended_sources(
 
     # Setup for calculating source coordinates
     lat = np.radians(ephemeris.CHIMELATITUDE)
-    observer = ephemeris.chime
-    sf_time = ephemeris.unix_to_skyfield_time(timestamp)
-    obs = observer.skyfield_obs().at(sf_time)
+    date = ephemeris.unix_to_skyfield_time(timestamp)
+
+    observer = ephemeris.chime.skyfield_obs().at(date)
 
     # Generate polynomials
     ncoeff_x = degree_x + 1
@@ -107,13 +125,23 @@ def model_extended_sources(
     for ss, body in enumerate(bodies):
 
         # Calculate the source coordinates
-        pos = obs.observe(body)
-        src_alt = pos.apparent().altaz()[0]
-        src_ra, src_dec, _ = pos.cirs_radec(sf_time)
+        obs = observer.observe(body).apparent()
+        src_radec = obs.cirs_radec(date)
+        src_altaz = obs.altaz()
 
-        ha = np.radians(ephemeris.lsa(timestamp)) - src_ra.radians
+        src_ra, src_dec = src_radec[0], src_radec[1]
+        src_alt, src_az = src_altaz[0], src_altaz[1]
+
+        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians)
         dec = src_dec.radians
+
         weight = src_alt.radians > np.radians(min_altitude)
+
+        if max_ha > 0.0:
+            weight &= np.abs(ha) <= (np.radians(max_ha) / np.cos(dec))
+
+        if min_ha > 0.0:
+            weight &= np.abs(ha) >= (np.radians(min_ha) / np.cos(dec))
 
         # Evaluate polynomial
         aa, bb = source_bound[ss], source_bound[ss + 1]
@@ -224,9 +252,20 @@ class SolveSources(task.SingleTask):
     extent : nsource element list
         Angular extent of each source in arcmin.
     min_altitude : float
-        Do not include a source in the model if its altitude is less than this value.
-    min_distance : float
-        Do not include baselines in the fit with a total distance less than this value.
+        Do not include a source in the model if its altitude is less than
+        this value in degrees.
+    min_ha : float
+        Do not include a source in the model if it has an hour angle less than
+        this value in degrees.
+    max_ha : float
+        Do not include a source in the model if it has an hour angle greater than
+        this value in degrees.
+    min_distance : list
+        Do not include baselines in the fit with a distance less than
+        this value in meters.  If the list contains a single element,
+        then the cut is placed on the total baseline distance.  If the list
+        contains two or more elements, then the cut is placed on the
+        [W-E, N-S, ...] component.
     telescope_rotation : float
         Rotation of the telescope from true north in degrees.  A positive rotation is
         anti-clockwise when looking down at the telescope from the sky.
@@ -245,7 +284,10 @@ class SolveSources(task.SingleTask):
     scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66])
 
     min_altitude = config.Property(proptype=float, default=10.0)
-    min_distance = config.Property(proptype=float, default=20.0)
+    max_ha = config.Property(proptype=float, default=0.0)
+    min_ha = config.Property(proptype=float, default=0.0)
+
+    min_distance = config.Property(proptype=list, default=[10.0, 0.0])
     telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
     max_iter = config.Property(proptype=int, default=4)
 
@@ -277,6 +319,8 @@ class SolveSources(task.SingleTask):
             "scale_y": [1] * self.nsources,
             "scale_t": [1] * self.nsources,
             "min_altitude": self.min_altitude,
+            "max_ha": self.max_ha,
+            "min_ha": self.min_ha,
         }
 
         if any(self.degree_x) or any(self.degree_y):
@@ -288,6 +332,8 @@ class SolveSources(task.SingleTask):
                 "scale_y": self.extent,
                 "scale_t": self.scale_t,
                 "min_altitude": self.min_altitude,
+                "max_ha": self.max_ha,
+                "min_ha": self.min_ha,
             }
         else:
             self.extended_source_kwargs = {}
@@ -352,13 +398,19 @@ class SolveSources(task.SingleTask):
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
+        min_distance = np.array(self.min_distance)
         sep = np.sqrt(np.sum(distance ** 2, axis=0))
-        baseline_weight = (sep > self.min_distance).astype(np.float32)
+        if min_distance.size == 1:
+            baseline_weight = (sep >= min_distance[0]).astype(np.float32)
+        else:
+            baseline_weight = np.all(
+                distance >= min_distance[:, np.newaxis], axis=0
+            ).astype(np.float32)
 
         # Calculate polarisation products, determine unique values
         feedpol = tools.get_feed_polarisations(self.inputmap)
-        pol = np.array(
-            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
+        pol = np.core.defchararray.add(
+            feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
         )
 
         upol = np.unique(pol)
@@ -373,10 +425,8 @@ class SolveSources(task.SingleTask):
                 * (self.degree_t[ss] + 1)
             )
             for ii in range(npar):
-                param_name.append(
-                    "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
-                )
-        param_name = np.array(param_name)
+                param_name.append((src, ii))
+        param_name = np.array(param_name, dtype=[("source", "U32"), ("coeff", "u2")])
 
         # Create output container
         out = containers.SourceModel(
@@ -388,23 +438,10 @@ class SolveSources(task.SingleTask):
             attrs_from=data,
         )
 
-        # Determine the initial source model, assuming all sources are point sources
-        source_model, _ = model_extended_sources(
-            freq, distance, timestamp, self.bodies, **self.point_source_kwargs
-        )
-
         # Determine extended source model
         if self.extended_source_kwargs:
-            ext_source_model, sedge = model_extended_sources(
-                freq, distance, timestamp, self.bodies, **self.extended_source_kwargs
-            )
-
             out.add_dataset("amplitude")
             out.add_dataset("coeff")
-
-            out.add_dataset("source_index")
-            for ss in range(self.nsources):
-                out.source_index[sedge[ss] : sedge[ss + 1]] = ss
 
             out.attrs["source_model_kwargs"] = json.dumps(self.extended_source_kwargs)
 
@@ -426,15 +463,21 @@ class SolveSources(task.SingleTask):
 
             this_pol = np.flatnonzero(pol == upp)
 
+            dist_pol = distance[:, this_pol]
+            bweight_pol = baseline_weight[this_pol, np.newaxis]
+
             # Loop over frequencies
-            for ff in range(nfreq):
+            for ff, nu in enumerate(freq):
 
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :]
-                weight = (
-                    all_weight[ff, this_pol, :] * baseline_weight[this_pol, np.newaxis]
+                weight = all_weight[ff, this_pol, :] * bweight_pol
+
+                # Determine the initial source model, assuming all sources are point sources
+                psrc_model, _ = model_extended_sources(
+                    nu, dist_pol, timestamp, self.bodies, **self.point_source_kwargs
                 )
-                psrc_model = source_model[ff, this_pol, :, :]
+                psrc_model = psrc_model[0]
 
                 # Obtain initial estimate of each source assuming point source
                 amplitude = solve_single_time(vis, weight, psrc_model)
@@ -444,7 +487,14 @@ class SolveSources(task.SingleTask):
                 # emission is constant in time.
                 if self.extended_source_kwargs:
 
-                    ext_model = ext_source_model[ff, this_pol, :, :]
+                    ext_model, sedge = model_extended_sources(
+                        nu,
+                        dist_pol,
+                        timestamp,
+                        self.bodies,
+                        **self.extended_source_kwargs
+                    )
+                    ext_model = ext_model[0]
 
                     iters = 0
                     while iters < self.max_iter:
@@ -573,13 +623,8 @@ class SubtractSources(task.SingleTask):
 
         # Calculate polarisation products, determine unique values
         feedpol = tools.get_feed_polarisations(self.inputmap)
-        pol = np.array(
-            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
-        )
-
-        # Calculate source model
-        source_model, sedge = model_extended_sources(
-            freq, distance, timestamp, bodies, **source_model_kwargs
+        pol = np.core.defchararray.add(
+            feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
         )
 
         # Dereference dataset
@@ -592,21 +637,31 @@ class SubtractSources(task.SingleTask):
         for pp, upp in enumerate(model.index_map["pol"]):
 
             this_pol = np.flatnonzero(pol == upp)
+            dist_pol = distance[:, this_pol]
 
-            if coeff is not None:
-                mdl = np.sum(
-                    amp[:, pp, np.newaxis, :, :][..., model.source_index]
-                    * coeff[:, pp, np.newaxis, np.newaxis, :]
-                    * source_model[:, this_pol, :, :],
-                    axis=-1,
-                )
-            else:
-                mdl = np.sum(
-                    amp[:, pp, np.newaxis, :, :] * source_model[:, this_pol, :, :],
-                    axis=-1,
-                )
+            for ff, nu in enumerate(freq):
 
-            vis[:, this_pol, :] -= mdl
+                # Calculate source model
+                source_model, sedge = model_extended_sources(
+                    nu, dist_pol, timestamp, bodies, **source_model_kwargs
+                )
+                source_model = source_model[0]
+
+                # Sum over coefficients of source model
+                if coeff is not None:
+                    mdl = np.sum(
+                        amp[ff, pp, np.newaxis, :, :][..., model.source_index]
+                        * coeff[ff, pp, np.newaxis, np.newaxis, :]
+                        * source_model,
+                        axis=-1,
+                    )
+                else:
+                    mdl = np.sum(
+                        amp[ff, pp, np.newaxis, :, :] * source_model,
+                        axis=-1,
+                    )
+
+                vis[ff, this_pol, :] -= mdl
 
         return data
 
@@ -615,21 +670,32 @@ class AccumulateBeam(task.SingleTask):
     """Accumulate the stacked beam for each source."""
 
     def setup(self):
+        """Create a class dictionary to hold the beam for each source."""
 
         self.beam_stack = {}
 
     def process(self, beam_stack):
+        """Add the beam for this source to the class dictionary."""
 
         self.beam_stack[beam_stack.attrs["source_name"]] = beam_stack
 
         return None
 
     def process_finish(self):
+        """Return the class dictionary containing the beam for all sources."""
 
         return self.beam_stack
 
 
 class SolveSourcesWithBeam(SolveSources):
+    """Fit a source model to the visibilities using external measurements of the beam.
+
+    Model consists of the sum of the signal from multiple (possibly extended) sources.
+    The signal from each source is modelled as a static 2D hermite polynomial in (u, v)
+    modulated by three factors: the external beam measurement, the geometric phase,
+    and a hermite polynomial in time to account for common mode drift in the gain.
+    """
+
     def setup(self, tel):
         """Set up the source model.
 
@@ -658,6 +724,8 @@ class SolveSourcesWithBeam(SolveSources):
             "scale_y": self.extent,
             "scale_t": self.scale_t,
             "min_altitude": self.min_altitude,
+            "max_ha": self.max_ha,
+            "min_ha": self.min_ha,
         }
 
     def process(self, data, beams):
@@ -666,6 +734,12 @@ class SolveSourcesWithBeam(SolveSources):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+
+        beams : dict of andata.CorrData, core.containers.SiderealSteam, or equivalent
+            Dictionary containing the beam measurements.  The keys must be
+            the souce names and the values must be containers of the same type as the
+            input data, which contain the holographic measurements of that source
+            averaged over all pairs of feeds in the stacked baselines.
 
         Returns
         -------
@@ -720,13 +794,19 @@ class SolveSourcesWithBeam(SolveSources):
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
+        min_distance = np.array(self.min_distance)
         sep = np.sqrt(np.sum(distance ** 2, axis=0))
-        baseline_weight = (sep > self.min_distance).astype(np.float32)
+        if min_distance.size == 1:
+            baseline_weight = (sep >= min_distance[0]).astype(np.float32)
+        else:
+            baseline_weight = np.all(
+                distance >= min_distance[:, np.newaxis], axis=0
+            ).astype(np.float32)
 
         # Calculate polarisation products, determine unique values
         feedpol = tools.get_feed_polarisations(self.inputmap)
-        pol = np.array(
-            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
+        pol = np.core.defchararray.add(
+            feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
         )
 
         upol = np.unique(pol)
@@ -741,10 +821,8 @@ class SolveSourcesWithBeam(SolveSources):
                 * (self.degree_t[ss] + 1)
             )
             for ii in range(npar):
-                param_name.append(
-                    "%s_3d_hermite_polynomial_coefficient_%02d" % (src.lower(), ii)
-                )
-        param_name = np.array(param_name)
+                param_name.append((src, ii))
+        param_name = np.array(param_name, dtype=[("source", "U32"), ("coeff", "u2")])
 
         # Create output container
         out = containers.SourceModel(
@@ -756,25 +834,11 @@ class SolveSourcesWithBeam(SolveSources):
             attrs_from=data,
         )
 
-        # Determine extended source model
-        source_model, sedge = model_extended_sources(
-            freq, distance, timestamp, self.bodies, **self.source_kwargs
-        )
-
         out.add_dataset("coeff")
-
-        out.add_dataset("source_index")
-        for ss in range(self.nsources):
-            out.source_index[sedge[ss] : sedge[ss + 1]] = ss
 
         out.attrs["source_model_kwargs"] = json.dumps(self.source_kwargs)
 
-        # Multipy source model by the effective beam
-        for ss, src in enumerate(self.sources):
-            this_beam = beams[src].vis[:].view(np.ndarray) * (
-                beams[src].weight[:].view(np.ndarray) > 0.0
-            ).astype(np.float32)
-            source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
+        self.log.info("Beams contain following sources: %s" % str(list(beams.keys())))
 
         # Dereference datasets
         all_vis = data.vis[:].view(np.ndarray)
@@ -788,20 +852,35 @@ class SolveSourcesWithBeam(SolveSources):
 
             this_pol = np.flatnonzero(pol == upp)
 
+            dist_pol = distance[:, this_pol]
+            bweight_pol = baseline_weight[this_pol, np.newaxis]
+
             # Loop over frequencies
-            for ff in range(nfreq):
+            for ff, nu in enumerate(freq):
+
+                # Determine extended source model
+                source_model, sedge = model_extended_sources(
+                    nu, dist_pol, timestamp, self.bodies, **self.source_kwargs
+                )
+                source_model = source_model[0]
+
+                # Multipy source model by the effective beam
+                for ss, src in enumerate(self.sources):
+                    this_beam = beams[src].vis[ff][this_pol].view(np.ndarray) * (
+                        beams[src].weight[ff][this_pol].view(np.ndarray) > 0.0
+                    ).astype(np.float32)
+                    source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[
+                        ..., np.newaxis
+                    ]
 
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :]
-                weight = (
-                    all_weight[ff, this_pol, :] * baseline_weight[this_pol, np.newaxis]
-                )
-                model = source_model[ff, this_pol, :, :]
+                weight = all_weight[ff, this_pol, :] * bweight_pol
 
-                out_coeff[ff, pp, :] = solve_multiple_times(vis, weight, model)
+                out_coeff[ff, pp, :] = solve_multiple_times(vis, weight, source_model)
 
         # Save a few attributes necessary to interpret the data
-        out.attrs["min_distance"] = self.min_distance
+        out.attrs["min_distance"] = min_distance
         out.attrs["telescope_rotation"] = self.telescope_rotation
 
         return out
@@ -829,6 +908,12 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         model : core.containers.SourceModel
             Best-fit parameters of the source model.
+
+        beams : dict of andata.CorrData, core.containers.SiderealSteam, or equivalent
+            Dictionary containing the beam measurements.  The keys must be
+            the souce names and the values must be containers of the same type as the
+            input data, which contain the holographic measurements of that source
+            averaged over all pairs of feeds in the stacked baselines.
 
         Returns
         -------
@@ -900,18 +985,6 @@ class SubtractSourcesWithBeam(task.SingleTask):
             [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
         )
 
-        # Calculate source model
-        source_model, sedge = model_extended_sources(
-            freq, distance, timestamp, bodies, **source_model_kwargs
-        )
-
-        # Multipy source model by the effective beam
-        for ss, src in enumerate(sources):
-            this_beam = beams[src].vis[:].view(np.ndarray) * (
-                beams[src].weight[:].view(np.ndarray) > 0.0
-            ).astype(np.float32)
-            source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[..., np.newaxis]
-
         # Dereference dataset
         vis = data.vis[:].view(np.ndarray)
         coeff = model.coeff[:].view(np.ndarray)
@@ -920,13 +993,31 @@ class SubtractSourcesWithBeam(task.SingleTask):
         for pp, upp in enumerate(model.index_map["pol"]):
 
             this_pol = np.flatnonzero(pol == upp)
+            dist_pol = distance[:, this_pol]
 
-            mdl = np.sum(
-                coeff[:, pp, np.newaxis, np.newaxis, :]
-                * source_model[:, this_pol, :, :],
-                axis=-1,
-            )
+            # Loop over frequencies
+            for ff, nu in enumerate(freq):
 
-            vis[:, this_pol, :] -= mdl
+                # Calculate source model
+                source_model, sedge = model_extended_sources(
+                    nu, dist_pol, timestamp, bodies, **source_model_kwargs
+                )
+                source_model = source_model[0]
+
+                # Multipy source model by the effective beam
+                for ss, src in enumerate(sources):
+                    this_beam = beams[src].vis[ff][this_pol].view(np.ndarray) * (
+                        beams[src].weight[ff][this_pol].view(np.ndarray) > 0.0
+                    ).astype(np.float32)
+                    source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[
+                        ..., np.newaxis
+                    ]
+
+                mdl = np.sum(
+                    coeff[ff, pp, np.newaxis, np.newaxis, :] * source_model,
+                    axis=-1,
+                )
+
+                vis[ff, this_pol, :] -= mdl
 
         return data
