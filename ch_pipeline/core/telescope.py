@@ -112,6 +112,9 @@ class CHIME(telescope.PolarisedTelescope):
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
 
+    _ewidth = [0.7]
+    _hwidth = [1.2]
+
     _pickle_keys = ["_feeds"]
 
     #
@@ -197,25 +200,13 @@ class CHIME(telescope.PolarisedTelescope):
     def fwhm_e(self):
         """Full width half max of the E-plane antenna beam."""
 
-        coeff_fwhm_input_Y = np.array(
-            [1.15310483e-07, -2.30462590e-04, 1.50451290e-01, -3.07440520e01]
-        )
-
-        fwhm_freq_Y = np.polyval(coeff_fwhm_input_Y, self.frequencies)
-
-        return fwhm_freq_Y
+        return np.polyval(np.array(self._ewidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     @property
     def fwhm_h(self):
         """Full width half max of the H-plane antenna beam."""
 
-        coeff_fwhm_input_X = np.array(
-            [2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01]
-        )
-
-        fwhm_freq_X = np.polyval(coeff_fwhm_input_X, self.frequencies)
-
-        return fwhm_freq_X
+        return np.polyval(np.array(self._hwidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     # Set the approximate uv feed sizes
     @property
@@ -538,6 +529,32 @@ class CHIME(telescope.PolarisedTelescope):
         beam_mask = np.logical_and(beam_mask, bc_mask)
 
         return beam_map, beam_mask
+
+
+class revisedDriftScan(CHIME):
+    """Driftscan model with revised FWHM for north-south beam.
+
+    Point source beam model was fit to a flat Gaussian at each frequency.
+    Best-fit FWHM as a function of frequency was fit with a cubic
+    polynomial. This class revises coefficients of FWHM from the
+    fit. Detailed comparisons are documented in:
+    https://bao.chimenet.ca/doc/documents/1448
+
+    Note that the optimization was carried out in 585-800 MHz.
+    This model will produce large extrapolation errors if used below that.
+    """
+
+    _ewidth = (
+        3.0
+        / (2 * np.pi)
+        * np.array([1.15310483e-07, -2.30462590e-04, 1.50451290e-01, -3.07440520e01])
+    )
+
+    _hwidth = (
+        3.0
+        / (2 * np.pi)
+        * np.array([2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01])
+    )
 
 
 class CHIMEExternalBeam(CHIME):
