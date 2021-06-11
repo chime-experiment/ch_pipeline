@@ -618,7 +618,8 @@ class QueryInputs(task.MPILoggedTask):
         Parameters
         ----------
         ts : andata.CorrData
-            Timestream container.
+            Timestream container. Also supports TrackBeam with the
+            'transit_time' attribute.
 
         Returns
         -------
@@ -636,7 +637,14 @@ class QueryInputs(task.MPILoggedTask):
         if mpiutil.rank0:
 
             # Get the datetime of the middle of the file
-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+            if "time" in ts._axes:
+                time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+            elif "transit_time" in ts.attrs:
+                time = ephemeris.unix_to_datetime(ts.attrs["transit_time"])
+            else:
+                raise config.CaputConfigError(
+                    f"Could not find a time coordinate in container {type(ts)}."
+                )
             inputs = tools.get_correlator_inputs(time)
 
             inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
