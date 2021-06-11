@@ -5,13 +5,16 @@ from os import path, listdir
 
 import numpy as np
 from scipy import constants
+import h5py
 
 from caput import config, tod, mpiarray, mpiutil
 from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
-from ch_util import tools, layout, holography
+from ch_util import tools, layout, holography, finder
+from ch_util.fluxcat import FluxCatalog
+from ch_util.andata import CalibrationGainData
 from chimedb import data_index as di
 from chimedb.core import connect as connect_database
 
@@ -19,10 +22,17 @@ from chimedb.core import connect as connect_database
 from draco.core import task, io
 from draco.util import regrid
 from draco.analysis.transform import Regridder
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
+from draco.core.containers import (
+    ContainerBase,
+    SiderealStream,
+    TimeStream,
+    TrackBeam,
+    empty_like,
+)
 from draco.util.tools import invert_no_zero
 
 from ..core.containers import TransitFitParams
+from ..core.dataquery import _DEFAULT_NODE_SPOOF
 from .calibration import TransitFit, GainFromTransitFit
 
 
@@ -760,7 +770,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0
@@ -1284,6 +1294,149 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
         self.log.info("Leaving next for task %s" % self.__class__.__name__)
         return files
+
+
+class CorrectCHIMEBeam(task.SingleTask):
+
+    gain_interval = config.Property(proptype=float, default=24 * 3600.0)
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    beam_ratio_file_XX = config.Property(
+        proptype=str, default="/project/rpp-krs/tristpm/aperture/data/sources_XX.h5"
+    )
+    beam_ratio_file_YY = config.Property(
+        proptype=str, default="/project/rpp-krs/tristpm/aperture/data/sources_YY.h5"
+    )
+    ref_source = config.Property(proptype=str, default="CygA")
+
+    def process(self, transit, inputs):
+        transit.redistribute("freq")
+
+        # transit info
+        transit_time = transit.attrs["transit_time"]
+        src = transit.attrs["source_name"]
+
+        # local slice in frequency
+        local_slice = slice(
+            transit.beam.local_offset[0],
+            transit.beam.local_offset[0] + transit.beam.local_shape[0],
+        )
+
+        # find CHIME gain
+        gain_file = None
+        if mpiutil.rank0:
+            f = finder.Finder(node_spoof=self.node_spoof)
+            f.set_time_range(
+                ephem.unix_to_datetime(transit_time - self.gain_interval / 2),
+                ephem.unix_to_datetime(transit_time + self.gain_interval / 2),
+            )
+            f.filter_acqs(
+                (di.ArchiveInst.name == "chime") & (di.AcqType.name == "gain")
+            )
+            res = f.get_results()
+            if len(res) == 0 or len(res[0][0]) == 0:
+                self.log.warn(
+                    f"Could not find CHIME gains for {transit.attrs['tag']}. Skipping."
+                )
+            elif len(res[0][0]) > 1:
+                self.log.warn(
+                    f"Found multiple gain files for {transit.attrs['tag']}. Skipping."
+                )
+            else:
+                gain_file = res[0][0][0]
+        gain_file = mpiutil.world.bcast(gain_file, root=0)
+        if gain_file is None:
+            return None
+
+        # load gain
+        # TODO consider only reading the local frequencies
+        gain = CalibrationGainData.from_acq_h5([gain_file])
+        if len(gain.time[:]) > 1:
+            ti = np.argmin(np.abs(gain.time[:] - transit_time))
+        else:
+            ti = 0
+
+        # apply gain
+        g = gain["gain"][ti][local_slice, np.newaxis, :, np.newaxis]
+        transit.beam[:] *= g
+        transit.weight[:] *= invert_no_zero(np.abs(g) ** 2)
+
+        # correct source flux
+        # normalise units to a reference flux at the first frequency
+        freq = transit.freq[local_slice]
+        ref_flux = FluxCatalog[self.ref_source].predict_flux(transit.freq[0])
+        try:
+            flux = FluxCatalog[src].predict_flux(freq)
+        except KeyError:
+            self.log.warn(f"Source {src} is not in flux catalog. Skipping.")
+            return None
+        transit.beam[:] *= (ref_flux / flux)[:, np.newaxis, np.newaxis, np.newaxis]
+        transit.weight[:] *= ((flux / ref_flux) ** 2)[
+            :, np.newaxis, np.newaxis, np.newaxis
+        ]
+
+        # correct beam ratio
+        pol_files = {"S": self.beam_ratio_file_YY, "E": self.beam_ratio_file_XX}
+        pol = np.array(
+            [i.pol if tools.is_array(i) or tools.is_holographic(i) else "0" for i in inputs]
+        )
+        for p in pol_files:
+            with h5py.File(pol_files[p], mode="r") as fh:
+                src_i = [sname.decode() for sname in fh["index_map/sources"][:]].index(
+                    src.lower()
+                )
+                ratio = fh["voltage_beam_ratio"][src_i, local_slice]
+            ind = np.where(pol == p)[0]
+            transit.beam[:][:, :, ind] *= invert_no_zero(ratio)[
+                :, np.newaxis, np.newaxis, np.newaxis
+            ]
+            transit.weight[:][:, :, ind] *= (np.abs(ratio) ** 2)[
+                :, np.newaxis, np.newaxis, np.newaxis
+            ]
+
+        return transit
+
+
+class EstimateGaltGain(task.SingleTask):
+    def process(self, gain, inputs):
+        # flag inputs
+        galt_ind = [i for i in range(len(inputs)) if tools.is_holographic(inputs[i])]
+        good_inputs = [
+            np.array(
+                [
+                    tools.is_array_on(i)
+                    and (not tools.is_holographic(i))
+                    and (i.pol == inputs[g].pol)
+                    for i in inputs
+                ]
+            )
+            for g in galt_ind
+        ]
+        intersec = (good_inputs[0] * good_inputs[1]).sum()
+        if intersec != 0:
+            raise PipelineRuntimeError(
+                "Lists of good inputs for both Galt pol are not disjoint. "
+                f"They share {intersec} elements."
+            )
+        self.log.debug(
+            f"Found {good_inputs[0].sum()} and {good_inputs[1].sum()} good inputs for each Galt pol."
+        )
+
+        # create new gain container
+        galt_gain = empty_like(gain, input=gain.input[galt_ind])
+        galt_gain.add_dataset("weight")
+
+        # take the mean over inputs
+        for i in range(len(galt_ind)):
+            wgt = gain.weight[:][:, good_inputs[i]]
+            n = np.sum(wgt != 0, axis=1)
+            galt_gain.gain[:, i] = np.sum(
+                gain.gain[:][:, good_inputs[i]], axis=1
+            ) * invert_no_zero(n)
+            galt_gain.weight[:, i] = (
+                invert_no_zero(np.sum(invert_no_zero(wgt), axis=1)) * n ** 2
+            )
+
+        return galt_gain
 
 
 def unwrap_lha(lsa, src_ra):
