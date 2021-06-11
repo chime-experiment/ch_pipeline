@@ -72,12 +72,16 @@ class QueryDatabase(task.MPILoggedTask):
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
-        can be in any format ensure_unix will support, including eg
+        can be in any format ensure_unix will support, including e.g.
         20190116T150323 and 2019-1-16 08:03:23 -7
-    start_csd, end_csd : float
-        Start and end CSDs. Only used if `start_time` is not set.
-    instrument : string (default: 'chimestack')
-        data set to use
+    acqtype : string (default: 'corr')
+        Type of acquisition. Options for acqtype are: 'corr', 'hk', 'weather',
+        'rawadc', 'gain', 'flaginput', 'digitalgain'.
+    instrument : string (optional)
+        Set the instrument name. Common ArchiveInst names are: 'chimeN2',
+        'chimestack', 'chime26m', 'chimetiming', 'chimecal', 'mingun' etc.
+        While acqtype returns all 'corr' data, one must specify the instrument
+        to get e.g. only stacked data (i.e. instrument = 'chimestack')
     source_26m : string (default: None)
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
@@ -116,7 +120,8 @@ class QueryDatabase(task.MPILoggedTask):
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
-    instrument = config.Property(proptype=str, default="chimestack")
+    acqtype = config.Property(proptype=str, default="corr")
+    instrument = config.Property(proptype=str, default=None)
 
     source_26m = config.Property(proptype=str, default=None)
 
@@ -167,8 +172,10 @@ class QueryDatabase(task.MPILoggedTask):
 
             f = finder.Finder(node_spoof=self.node_spoof)
 
-            # should be redundant if an instrument has been specified
-            f.only_corr()
+            f.filter_acqs(di.AcqType.name == self.acqtype)
+
+            if self.instrument is not None:
+                f.filter_acqs(di.ArchiveInst.name == self.instrument)
 
             if self.accept_all_global_flags:
                 f.accept_all_global_flags()
