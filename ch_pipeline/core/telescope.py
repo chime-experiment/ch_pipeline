@@ -216,7 +216,7 @@ class CHIME(telescope.PolarisedTelescope):
         """Full width half max of the E-plane antenna beam."""
 
         return np.polyval(np.array(self._eywidth) * 2.0 * np.pi / 3.0, self.frequencies)
-    
+
     @property
     def fwhm_hy(self):
         """Full width half max of the E-plane antenna beam."""
@@ -429,7 +429,7 @@ class CHIME(telescope.PolarisedTelescope):
                 self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_ey[freq], 
+                self.fwhm_ey[freq],
                 self.fwhm_hy[freq],
                 rot=rot,
             )
@@ -438,7 +438,7 @@ class CHIME(telescope.PolarisedTelescope):
                 self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_ex[freq], 
+                self.fwhm_ex[freq],
                 self.fwhm_hx[freq],
                 rot=rot,
             )
@@ -570,7 +570,8 @@ class revisedDriftScan(CHIME):
         / (2 * np.pi)
         * np.array([2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01])
     )
-    
+
+
 class CHIMEExternalBeam(CHIME):
     """Model telescope for the CHIME.
 
