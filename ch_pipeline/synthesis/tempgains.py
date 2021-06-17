@@ -77,7 +77,8 @@ class SiderealTempGains(gain.BaseGains):
         self.observer = io.get_telescope(bt)
 
         sid_sec_per_day = SOLAR_SEC_PER_DAY *  ephemeris.SIDEREAL_S
-        self.samples_per_file = int(sid_sec_per_day / self.approx_integration_time)
+        self.samples_per_file = len(sstream.ra)
+        #self.samples_per_file = int(sid_sec_per_day / self.approx_integration_time)
         self.integration_time = sid_sec_per_day / self.samples_per_file
 
         # Initialize the current lsd time
@@ -140,6 +141,8 @@ class SiderealTempGains(gain.BaseGains):
         if self.phase:
             gain_phase = self._generate_phase(time, wstream)
 
+        gain_amp = (gain_phase != 0.0)
+
         # Combine into an overall gain fluctuation
         gain_comb = gain_amp * np.exp(1.0J * gain_phase)
 
@@ -149,6 +152,7 @@ class SiderealTempGains(gain.BaseGains):
         gain_data.attrs['lsd'] = current_lsd
         gain_data.attrs['tag'] = 'lsd_%i' % current_lsd
         gain_data.attrs['int_time'] = self.integration_time
+        gain_data.attrs['night_time'] = self.night_time
 
         self.counter += 1
 
@@ -188,7 +192,7 @@ class SiderealTempGains(gain.BaseGains):
         """
         if self.temperror_type == 'delay':
             wtime = wstream.time
-            outtemp = wstream.datasets['outTemp'][:]
+            outtemp = wstream.temperature[:]
 
             # Create start and end times for delayed temperatures
             start_time = time[0] - self.max_temp_delay
@@ -268,13 +272,15 @@ class SiderealTempGains(gain.BaseGains):
         wstream : class
             HKData object."""
         wtime = wstream.time
-        outtemp = wstream.datasets['outTemp'][:]
+        outtemp = wstream.temperature[:]
 
         # Create an interpolation function for temperatures
         f_temp = interpolate.interp1d(wtime, outtemp)
         temp = f_temp(time)
 
         if self.night_time:
+            self.log.info("Night time true")
+            self.log.info(self.sources)
             night_transits = []
             sel_sources = {s: SOURCES[s] for s in self.sources}
 
@@ -338,20 +344,23 @@ class SiderealTempGains(gain.BaseGains):
         # If I am running the first time calculate where to slice the data
         if self._prev_caltemp is None:
 
-            src_list = ['TauA', 'VirA', 'CygA', 'CasA']
-            # src_list =['CygA']
+            # src_list = ['TauA', 'VirA', 'CygA', 'CasA']
+            src_list =['CygA']
             # src_list = ['TauA', 'CygA']
             # Figure out transit times and transit indices.
             trans_times = [ephemeris.transit_times(SOURCES[src], time[0], time[-1])[0] for src in src_list]
+            self.log.info(str(trans_times))
             trans_times.sort()
             idxs = [np.argmin(abs(time - tt)) for tt in trans_times]
             slc = [slice(idxs[i], idxs[i+1]) if i < (len(idxs) -1) else slice(idxs[i], None) for i in range(len(idxs))]
             self.idxs = idxs
             self.slc = slc
             self._prev_caltemp = temp[idxs][0]
+            self.log.info(str(self.idxs))
 
         # Find the calibration temperatures at point source transit.
         caltemps = temp[self.idxs]
+        self.log.info(str(caltemps))
         caltemp_arr = np.ones(temp.shape, dtype=float)
         # Cal temperature until first point source transit is the temperature of last
         # sidereals day calibration
@@ -360,7 +369,7 @@ class SiderealTempGains(gain.BaseGains):
         # Populate caltemp_arr with the temperatures at the time of point source calibration.
         for i in range(caltemps.shape[0]):
             caltemp_arr[self.slc[i]] = caltemps[i]
-            nt = 10
+            nt = 5
             ts = self.idxs[i] - nt
             te = self.idxs[i] + nt
             tshape = caltemp_arr[ts:te].shape[0]
@@ -370,8 +379,8 @@ class SiderealTempGains(gain.BaseGains):
 
         delta_temp = temp - caltemp_arr
 
-        if self.mask_sun:
-            delta_temp = self._mask_sun(time, delta_temp)
+        if self.night_time:
+            delta_temp = self._mask_day(time, delta_temp)
 
         self._prev_caltemp = caltemps[-1]
 
@@ -520,7 +529,7 @@ class CoaxErrors(SiderealTempGains):
         """Generate temperature errors and/or drift temperature for this day"""
 
         # Generate temperature pertubations if we want to simulated temp pertubations.
-        if self.phase_error_temp or self.amp_error_param:
+        if self.phase_error_temp or self.amp_error_temp:
             self.temp_pert = self._generate_temperrors(time, wstream)
 
         # Calculate temperature drift away from calibration temperature.
@@ -536,15 +545,15 @@ class CoaxErrors(SiderealTempGains):
             suscept_errors = _draw_random(ninput, self.delay_suscept_std)
             # Add it to the mean to get a susceptiblity for each cable
             # susceptibilities = self.delay_suscept_mean + suscept_errors
-            susceptibilities = np.load('/project/rpp-krs/cahofer/ch_pipeline/ch_pipeline/synthesis/suscept.npy')
+            #susceptibilities = np.load('/project/rpp-krs/cahofer/ch_pipeline/ch_pipeline/synthesis/suscept.npy')
 
         else:
             suscept_errors = None
-            susceptibilities = None
+            #susceptibilities = None
 
         # Broadcast input description to all ranks
         self._suscept_errors = mpiutil.world.bcast(suscept_errors, root=0)
-        self._susceptibilities = mpiutil.world.bcast(susceptibilities, root=0)
+        #self._susceptibilities = mpiutil.world.bcast(susceptibilities, root=0)
 
 
 class AmplifierErrors(CoaxErrors):
