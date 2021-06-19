@@ -96,7 +96,7 @@ class TimingErrors(gain.BaseGains):
             n_realisations = self.ninput_local
 
             # Generate delay fluctuations
-            self.delay_error = gain.generate_fluctuations(
+            delay_error = gain.generate_fluctuations(
                 time, cf_delay, n_realisations, self._prev_time, self._prev_delay
             )
 
@@ -105,7 +105,7 @@ class TimingErrors(gain.BaseGains):
                 * np.pi
                 * freq[:, np.newaxis, np.newaxis]
                 * 1e6
-                * self.delay_error[np.newaxis, :, :]
+                * delay_error[np.newaxis, :, :]
                 / np.sqrt(self.ndays)
             )
 
@@ -122,6 +122,7 @@ class TimingErrors(gain.BaseGains):
             # Check if random or sinusoidal
             if self.commonmode_type == "random":
 
+
                 if comm.rank == 0:
                     delay_error = gain.generate_fluctuations(
                         time,
@@ -132,16 +133,16 @@ class TimingErrors(gain.BaseGains):
                         )
 
                 else:
-                    delay_error = None
+                    delay_error = np.zeros((n_realisations, ntime), dtype=float)
 
-                self.delay_error = comm.bcast(delay_error, root=0)
+                comm.Bcast(delay_error, root=0)
 
                 phase = (
                     2.0
                     * np.pi
                     * freq[:, np.newaxis, np.newaxis]
                     * 1e6
-                    * self.delay_error[np.newaxis, :, :]
+                    * delay_error[np.newaxis, :, :]
                     / np.sqrt(self.ndays)
                     )
 
@@ -155,6 +156,9 @@ class TimingErrors(gain.BaseGains):
 
                 gain_phase = gain_phase.view(np.ndarray)
 
+                if np.sum(np.isnan(gain_phase)) != 0:
+                    raise RuntimeError("Found nans in gain phase")
+
             elif self.commonmode_type == "sinusoidal":
                 P1 = self.sinusoidal_period[0]
                 P2 = self.sinusoidal_period[1]
@@ -163,13 +167,13 @@ class TimingErrors(gain.BaseGains):
 
                 if comm.rank == 0:
                     delay_error = (
-                        self.sigma_delay
+                        self.sigma_delay * np.sqrt(2)
                         * (np.sin(omega1 * time) - np.sin(omega2 * time))[np.newaxis, :]
                         )
                 else:
-                    delay_error = None
+                    delay_error = np.zeros((1, ntime), dtype=float)
 
-                self.delay_error = comm.bcast(delay_error, root=0)
+                comm.Bcast(delay_error, root=0)
 
                 # If even number of cylinders, put half of the channels in one receiving hut
                 if self.ncyl % 2 == 0:
@@ -190,7 +194,7 @@ class TimingErrors(gain.BaseGains):
                     * np.pi
                     * freq[sfreq:efreq, np.newaxis, np.newaxis]
                     * 1e6
-                    * self.delay_error[np.newaxis, :, :]
+                    * delay_error[np.newaxis, :, :]
                     / np.sqrt(self.ndays)
                     )
 
@@ -199,10 +203,11 @@ class TimingErrors(gain.BaseGains):
                 gain_phase = gain_phase.redistribute(axis=1)
                 gain_phase = gain_phase.view(np.ndarray)
 
-        self._prev_delay = self.delay_error
+        self._prev_delay = delay_error
         self._prev_time = time
 
         return gain_phase
+
 
 
 class SiderealTimingErrors(TimingErrors, gain.SiderealGains):
