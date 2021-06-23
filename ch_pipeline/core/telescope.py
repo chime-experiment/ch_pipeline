@@ -18,7 +18,7 @@ from drift.core import telescope
 from drift.telescope import cylbeam
 
 from ch_util import ephemeris, tools
-
+from caput.cache import cached_property
 
 # Get the logger for the module
 logger = logging.getLogger(__name__)
@@ -199,27 +199,27 @@ class CHIME(telescope.PolarisedTelescope):
     #
 
     # Tweak the following two properties to change the beam width
-    @property
+    @cached_property
     def fwhm_ex(self):
-        """Full width half max of the E-plane antenna beam."""
+        """Full width half max of the E-plane antenna beam for X polarization."""
 
         return np.polyval(np.array(self._exwidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
-    @property
+    @cached_property
     def fwhm_hx(self):
-        """Full width half max of the H-plane antenna beam."""
+        """Full width half max of the H-plane antenna beam for X polarization."""
 
         return np.polyval(np.array(self._hxwidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
-    @property
+    @cached_property
     def fwhm_ey(self):
-        """Full width half max of the E-plane antenna beam."""
+        """Full width half max of the E-plane antenna beam for Y polarization."""
 
         return np.polyval(np.array(self._eywidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
-    @property
+    @cached_property
     def fwhm_hy(self):
-        """Full width half max of the E-plane antenna beam."""
+        """Full width half max of the H-plane antenna beam for Y polarization."""
 
         return np.polyval(np.array(self._hywidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
@@ -546,7 +546,7 @@ class CHIME(telescope.PolarisedTelescope):
         return beam_map, beam_mask
 
 
-class revisedDriftScan(CHIME):
+class CHIMEFitBeam(CHIME):
     """Driftscan model with revised FWHM for north-south beam.
 
     Point source beam model was fit to a flat Gaussian at each frequency.
