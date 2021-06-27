@@ -589,23 +589,42 @@ class SpectroscopicCatalog(BaseInject):
 
             else:
 
-                tracer = catalog.attrs.get("tracer", None)
-                if tracer is None:
-                    for tr in ["ELG", "LRG", "QSO"]:
-                        if tr in catalog.attrs["tag"]:
-                            tracer = tr
-                            break
+                if "tracer" in catalog.index_map["object_id"].dtype.fields:
+                    tracer = catalog.index_map["object_id"]["tracer"][:]
 
-                if tracer is None:
-                    raise RuntimeError(
-                        "To perturb redshifts, must provide "
-                        "the redshift error dataset OR the "
-                        "name of the tracer in the catalog "
-                        "'tracer' or 'tag' attribute."
+                    utracers, uindex = np.unique(tracer, return_inverse=True)
+                    for uu, utracer in enumerate(utracers):
+                        this_tracer = np.flatnonzero(uu == uindex)
+                        self.log.info(
+                            f"Perturbing {this_tracer.size} source redshifts by "
+                            f"{utracer} error distribution."
+                        )
+                        z[this_tracer] = perturb_redshift(
+                            z[this_tracer], tracer=utracer
+                        )
+
+                else:
+
+                    tracer = catalog.attrs.get("tracer", None)
+                    if tracer is None:
+                        for tr in ["ELG", "LRG", "QSO"]:
+                            if tr in catalog.attrs["tag"]:
+                                tracer = tr
+                                break
+
+                    if tracer is None:
+                        raise RuntimeError(
+                            "To perturb redshifts, must provide "
+                            "the redshift error dataset OR the "
+                            "name of the tracer in the catalog "
+                            "'object_id', 'tracer' attribute, "
+                            "or 'tag' attribute."
+                        )
+
+                    self.log.info(
+                        f"Perturbing redshift by {tracer} error distribution."
                     )
-
-                self.log.info(f"Perturbing redshift by {tracer} error distribution.")
-                z = perturb_redshift(z, tracer=tracer)
+                    z = perturb_redshift(z, tracer=tracer)
 
         sfreq = NU21 / (z + 1.0)  # MHz
 
