@@ -86,9 +86,10 @@ def sun_coord(unix_time, deg=True):
 
     coord = np.zeros((ntime, 4), dtype=np.float32)
 
-    planets = skyfield.api.load('de421.bsp')
-    sun = planets['sun']
-
+    planets = ephemeris.skyfield_wrapper.ephemeris
+    # planets = skyfield.api.load('de421.bsp')
+    sun = planets["sun"]
+    
     observer = ephemeris._get_chime().skyfield_obs()
 
     apparent = observer.at(skyfield_time).observe(sun).apparent()
@@ -812,165 +813,6 @@ class SolarClean(task.SingleTask):
         return sstream
 
 
-class SunCalibration(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location.
-    """
-
-    def process(self, sstream, inputmap):
-        """Clean the sun.
-
-        Parameters
-        ----------
-        sstream: andata.CorrData or containers.SiderealStream
-            Timestream collected during the day.
-        inputmap : list of :class:`CorrInput`s
-            A list describing the inputs as they are in the file.
-
-        Returns
-        -------
-        sunstream : containers.SiderealStream
-            Sun's contribution to sidereal stack
-        """
-
-        sstream.redistribute('freq')
-
-        # Get array of CSDs for each sample (ra in degrees)
-        if hasattr(sstream, 'time'):
-            time = sstream.time
-            ra = ephemeris.lsa(time)
-        else:
-            ra = sstream.index_map['ra'][:]
-            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
-            csd = csd + ra / 360.0
-            time = ephemeris.csd_to_unix(csd)
-
-        nprod = len(sstream.index_map['prod'][sstream.index_map['stack']['prod']])
-
-        # Get position of sun at every time sample (in radians)
-        sun_pos = sun_coord(time, deg=False)
-
-        # Get hour angle and dec of sun, in radians
-        ha = sun_pos[:, 0]
-        dec = sun_pos[:, 1]
-        el = sun_pos[:, 2]
-
-        # Construct baseline vector for each visibility
-        feed_pos = tools.get_feed_positions(inputmap)
-        vis_pos = np.array([ feed_pos[fi] - feed_pos[fj] for fi, fj in
-            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
-
-        feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in
-            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]]
-        
-        auto_mask = np.array([ fi != fj for fi, fj in
-            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
-        
-        # Determine polarisation for each visibility
-        pol_ind = np.full(nprod, -1, dtype=np.int)
-        cyl_i = np.full(nprod, -1, dtype=np.int)
-        cyl_j = np.full(nprod, -1, dtype=np.int)
-        good_ind = np.full(nprod, 1, dtype=np.int)
-        
-        for ii, (fi, fj) in enumerate(feed_list):
-            
-            if tools.is_chime(fi) and tools.is_chime(fj):
-                
-                pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
-                
-                if fi.reflector=='cylinder_A':
-                    cyl_i[ii] = 0
-                elif fi.reflector=='cylinder_B':
-                    cyl_i[ii] = 1
-                elif fi.reflector=='cylinder_C':
-                    cyl_i[ii] = 2
-                elif fi.reflector=='cylinder_D':
-                    cyl_i[ii] = 3
-                    
-                if fj.reflector=='cylinder_A':
-                    cyl_j[ii] = 0
-                elif fj.reflector=='cylinder_B':
-                    cyl_j[ii] = 1
-                elif fj.reflector=='cylinder_C':
-                    cyl_j[ii] = 2
-                elif fj.reflector=='cylinder_D':
-                    cyl_j[ii] = 3
-                
-            else:
-                good_ind[ii] = 0
-                
-                # Change vis_pos for non-CHIME feeds from NaN to 0.0
-                vis_pos[ii, :] = 0.0
-        
-        # Indices of intra-cyl baselines
-        intra_cyl = (cyl_i == cyl_j)
-                
-        newprod = [[0, 0],[1,1]]
-
-        newprod = np.array(newprod,dtype=sstream.index_map['prod'].dtype)
-        newstack = np.zeros(len(newprod), dtype=[('prod', '<u4'), ('conjugate', 'u1')])
-        newstack['prod'][:] = np.arange(len(newprod))
-        newstack['conjugate'] = 0
-
-        if isinstance(sstream, containers.SiderealStream):
-            OutputContainer = containers.SiderealStream
-        else:
-            OutputContainer = containers.TimeStream
-
-        sunstream = OutputContainer(prod=newprod, stack=newstack,
-                                    axes_from=sstream, attrs_from=sstream)
-
-        sunstream.redistribute('freq')
-        sunstream.vis[:] = 0.0
-
-        wv = 3e2 / sstream.index_map['freq']['centre']
-
-        # Iterate over frequencies and polarisations to null out the sun
-        for lfi, fi in sstream.vis[:].enumerate(0):
-
-            # Get the baselines in wavelengths
-            u = vis_pos[:, 0] / wv[fi]
-            v = vis_pos[:, 1] / wv[fi]
-
-            # Loop over ra to reduce memory usage
-            for ri in range(len(ra)):
-
-                # Initialize the visiblities matrix
-                vis = sstream.vis[fi, :, ri]
-                weight = sstream.weight[fi, :, ri]
-
-                # Check if sun has set
-                if el[ri] > 0.0:
-
-                    # Calculate the phase that the sun would have using the fringestop routine
-                    sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
-
-                    # Iterate over polarisations to do projection independently for each.
-                    # This is needed because of the different beams for each pol.
-                    for pi, pol in enumerate([0,3]):
-
-                        # Mask out other polarisations in the visibility vector
-                        sun_vis_pol = sun_vis * (pol_ind == pol)
-                        # Mask out autos and other bad (non-chime) visibilities
-                        sun_vis_pol *= auto_mask * good_ind
-                        # Mask out inter-cyl visibilities
-                        sun_vis_pol *= intra_cyl
-                        # Mask out long NS baselines
-                        sun_vis_pol *= (np.abs(vis_pos[:, 1]) <= 10.0)
-
-                        # Calculate various projections
-                        vds = (vis * sun_vis_pol * weight).sum(axis=0)
-                        sds = (sun_vis_pol * sun_vis_pol.conj() * weight).sum(axis=0)
-                        isds = tools.invert_no_zero(sds)
-
-                        sunstream.vis[fi, pi, ri] = vds * isds
-                else:
-
-                    sunstream.vis[fi, :, ri] = 0.0
-
-        # Return the clean sidereal stream
-        return sunstream
-
-
 class SunClean(task.SingleTask):
     """Clean the sun from data by projecting out signal from its location."""
 
@@ -1081,50 +923,180 @@ class SunClean(task.SingleTask):
 
         # Return the clean sidereal stream
         return sscut
+    
 
-
-class SunClean2(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location.
-    This is a two-step verision to use after SunCalibration
+class SunCalibration(task.SingleTask):
+    """Use Sun to measure antenna beam pattern.
+    
+    Attributes
+    ----------
+    ymax: float, default 10.0
+        Do not include baselines with N-S separation
+        greater than ymax to avoid resolving out the Sun.
+        Default is 10.0
+    exclude_intercyl : bool, default True
+        Exclude intercylinder baselines to avoid resolving
+        out the Sun. Default is True  
+    single_cyl : bool, default False
+        Include data from just a single cylinder. Default 
+        is False
+    cyl_id :  int, default 0
+        Cylinder number (0-3) for single cylinder 
+        measurements. Only relevant if exclude_intercyl 
+        and single_cyl are both True. Default is 0.
     """
 
-    def process(self, sstream, sunstream):
-        """Clean the sun.
+    ymax = config.Property(proptype=float, default=10.0)
+    exclude_intercyl = config.Property(proptype=bool, default=True)
+    single_cyl = config.Property(proptype=bool, default=False)
+    cyl_id = config.Property(proptype=int, default=0)
+
+
+    def process(self, sstream, inputmap):
+        """Beamform visibilities to the location of the Sun
 
         Parameters
         ----------
         sstream: andata.CorrData or containers.SiderealStream
             Timestream collected during the day.
-
-        sunstream : containers.SiderealStream or containers.TimeStream
-            Sun's contribution to sidereal stream
+        inputmap : list of :class:`CorrInput`s
+            A list describing the inputs as they are in the file.
 
         Returns
         -------
-        mstream : containers.SiderealStream
-            Sidereal stack with sun projected out.
+        sunstream : containers.SiderealStream
+            Sun's contribution to sidereal stack
         """
 
         sstream.redistribute('freq')
-        sunstream.redistribute('freq')
 
-        # Initialise new container
-        mstream = sstream.__class__(axes_from=sstream, attrs_from=sstream)
-        mstream.redistribute('freq')
+        # Get array of CSDs for each sample (ra in degrees)
+        if hasattr(sstream, 'time'):
+            time = sstream.time
+            ra = ephemeris.lsa(time)
+        else:
+            ra = sstream.index_map['ra'][:]
+            csd = sstream.attrs['lsd'] if 'lsd' in sstream.attrs else sstream.attrs['csd']
+            csd = csd + ra / 360.0
+            time = ephemeris.csd_to_unix(csd)
+
+        nprod = len(sstream.index_map['prod'][sstream.index_map['stack']['prod']])
+
+        # Get position of sun at every time sample (in radians)
+        sun_pos = sun_coord(time, deg=False)
+
+        # Get hour angle and dec of sun, in radians
+        ha = sun_pos[:, 0]
+        dec = sun_pos[:, 1]
+        el = sun_pos[:, 2]
+
+        # Construct baseline vector for each visibility
+        feed_pos = tools.get_feed_positions(inputmap)
+        vis_pos = np.array([ feed_pos[fi] - feed_pos[fj] for fi, fj in
+            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]])
+
+        feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in
+            sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]]
+                
+        # Determine polarisation for each visibility
+        pol_ind = np.full(nprod, -1, dtype=np.int)
+        cyl_i = np.full(nprod, -1, dtype=np.int)
+        cyl_j = np.full(nprod, -1, dtype=np.int)
+        
+        for ii, (fi, fj) in enumerate(feed_list):
+            
+            if tools.is_chime(fi) and tools.is_chime(fj):
+                
+                pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
+                
+                if fi.reflector=='cylinder_A':
+                    cyl_i[ii] = 0
+                elif fi.reflector=='cylinder_B':
+                    cyl_i[ii] = 1
+                elif fi.reflector=='cylinder_C':
+                    cyl_i[ii] = 2
+                elif fi.reflector=='cylinder_D':
+                    cyl_i[ii] = 3
+                    
+                if fj.reflector=='cylinder_A':
+                    cyl_j[ii] = 0
+                elif fj.reflector=='cylinder_B':
+                    cyl_j[ii] = 1
+                elif fj.reflector=='cylinder_C':
+                    cyl_j[ii] = 2
+                elif fj.reflector=='cylinder_D':
+                    cyl_j[ii] = 3
+                
+        # Change vis_pos for non-CHIME feeds from NaN to 0.0
+        vis_pos[(pol_ind == -1), :] = 0.0
+                
+        newprod = [[0, 0],[1,1]]
+
+        newprod = np.array(newprod,dtype=sstream.index_map['prod'].dtype)
+        newstack = np.zeros(len(newprod), dtype=[('prod', '<u4'), ('conjugate', 'u1')])
+        newstack['prod'][:] = np.arange(len(newprod))
+        newstack['conjugate'] = 0
+
+        if isinstance(sstream, containers.SiderealStream):
+            OutputContainer = containers.SiderealStream
+        else:
+            OutputContainer = containers.TimeStream
+
+        sunstream = OutputContainer(prod=newprod, stack=newstack,
+                                    axes_from=sstream, attrs_from=sstream)
+
+        sunstream.redistribute('freq')
+        sunstream.vis[:] = 0.0
+        sunstream.weight[:] = 0.0
+
+        wv = 3e2 / sstream.index_map['freq']['centre']
 
         # Iterate over frequencies and polarisations to null out the sun
         for lfi, fi in sstream.vis[:].enumerate(0):
 
+            # Get the baselines in wavelengths
+            u = vis_pos[:, 0] / wv[fi]
+            v = vis_pos[:, 1] / wv[fi]
+
             # Loop over ra to reduce memory usage
             for ri in range(len(ra)):
 
-                # Copy over the visiblities and weights,
-                # subtracting the contribution from the sun
+                # Initialize the visiblities matrix
                 vis = sstream.vis[fi, :, ri]
-                sun_vis = sunstream.vis[fi, :, ri]
                 weight = sstream.weight[fi, :, ri]
-                mstream.vis[fi, :, ri] = vis - sun_vis
-                mstream.weight[fi, :, ri] = weight
+
+                # Check if sun has set
+                if el[ri] > 0.0:
+
+                    # Calculate the phase that the sun would have using the fringestop routine
+                    sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
+                    
+                    # Mask out the auto-correlations
+                    sun_vis *= np.logical_or(u != 0.0, v != 0.0)
+                    
+                    # Mask out long NS baselines
+                    sun_vis *= (np.abs(vis_pos[:, 1]) <= self.ymax)
+                    
+                    if self.exclude_intercyl:
+                        # Mask out inter-cylinder visibilities
+                        sun_vis *= (cyl_i == cyl_j)
+                        
+                        if self.single_cyl:
+                            sun_vis *= (cyl_i == self.cyl_id)
+
+                    # Iterate over co-pol products
+                    for pi, pol in enumerate([0,3]):
+
+                        # Mask out other polarisations in the visibility vector
+                        sun_vis_pol = sun_vis * (pol_ind == pol) 
+                        
+                        # Beamform to Sun
+                        vds = (vis * sun_vis_pol * weight).sum(axis=0)
+                        sds = (sun_vis_pol.conj() * sun_vis_pol * weight).sum(axis=0)
+                        isds = tools.invert_no_zero(sds)
+
+                        sunstream.vis[fi, pi, ri] = vds * isds
+                        sunstream.weight[fi, pi, ri] = sds
 
         # Return the clean sidereal stream
-        return mstream
+        return sunstream
