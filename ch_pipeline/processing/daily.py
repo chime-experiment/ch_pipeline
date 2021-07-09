@@ -201,7 +201,10 @@ pipeline:
       params:
         samples: 4096
         save: true
-        output_name: "sstream_{{tag}}.h5"
+        output_name: "sstream_{{tag}}.zarr"
+        output_format: zarr
+        output_compression: "bitshuffle"
+        output_compression_opts: [0, "lz4"]
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
@@ -227,8 +230,6 @@ pipeline:
         weight: natural
         exclude_intracyl: false
         include_auto: false
-        save: true
-        output_name: "ringmap_{{tag}}.h5"
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
@@ -241,8 +242,29 @@ pipeline:
         weight: natural
         exclude_intracyl: true
         include_auto: false
+        
+    # Truncate ringmaps before writing to disk
+    - type: draco.core.io.Truncate
+      requires: manager
+      in: ringmap
+      out: ringmap_truncated
+      params:
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.h5"
+        output_name: "ringmap_{{tag}}.zarr"
+        output_format: zarr
+        output_compression: "bitshuffle"
+        output_compression_opts: [0, "lz4"]
+    - type: draco.core.io.Truncate
+      requires: manager
+      in: ringmapint
+      out: ringmapint_truncated
+      params:
+        save: true
+        output_name: "ringmap_intercyl_{{tag}}.zarr"
+        output_format: zarr
+        output_compression: "bitshuffle"
+        output_compression_opts: [0, "lz4"]
+
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
@@ -334,7 +356,7 @@ pipeline:
 
 
 class DailyProcessing(base.ProcessingType):
-    """"""
+    """ """
 
     type_name = "daily"
     tag_pattern = r"\d+"
