@@ -696,7 +696,7 @@ class RingMap(ContainerBase):
             "distributed": True,
             "distributed_axis": "freq",
             "truncate": True,
-            "chunks": (1, 4, 64, 256, 64),
+            "chunks": (1, 4, 128, 256, 128),
         },
         "dirty_beam": {
             "axes": ["beam", "pol", "freq", "ra", "el"],
@@ -705,7 +705,7 @@ class RingMap(ContainerBase):
             "distributed": True,
             "distributed_axis": "freq",
             "truncate": True,
-            "chunks": (1, 4, 64, 256, 64),
+            "chunks": (1, 4, 256, 512, 256),
         },
         "rms": {
             "axes": ["pol", "freq", "ra"],
