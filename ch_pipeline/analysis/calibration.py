@@ -1811,7 +1811,7 @@ class ThermalCalibration(task.SingleTask):
         return gain
 
     def _ra2unix(self, csd, ra):
-        """ csd must be integer """
+        """csd must be integer"""
         return ephemeris.csd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime_result, timestamp, frequency):
