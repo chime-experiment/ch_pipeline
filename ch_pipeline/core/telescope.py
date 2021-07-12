@@ -20,7 +20,7 @@ from drift.telescope import cylbeam
 from draco.core.containers import ContainerBase
 
 from ch_util import ephemeris, tools
-
+from caput.cache import cached_property
 
 # Get the logger for the module
 logger = logging.getLogger(__name__)
@@ -120,6 +120,12 @@ class CHIME(telescope.PolarisedTelescope):
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
 
+    _exwidth = [0.7]
+    _eywidth = _exwidth
+
+    _hxwidth = [1.2]
+    _hywidth = _hxwidth
+
     _pickle_keys = ["_feeds"]
 
     #
@@ -207,15 +213,29 @@ class CHIME(telescope.PolarisedTelescope):
     #
 
     # Tweak the following two properties to change the beam width
-    @property
-    def fwhm_e(self):
-        """Full width half max of the E-plane antenna beam."""
-        return 2.0 * np.pi / 3.0 * 0.7
+    @cached_property
+    def fwhm_ex(self):
+        """Full width half max of the E-plane antenna beam for X polarization."""
 
-    @property
-    def fwhm_h(self):
-        """Full width half max of the H-plane antenna beam."""
-        return 2.0 * np.pi / 3.0 * 1.2
+        return np.polyval(np.array(self._exwidth) * 2.0 * np.pi / 3.0, self.frequencies)
+
+    @cached_property
+    def fwhm_hx(self):
+        """Full width half max of the H-plane antenna beam for X polarization."""
+
+        return np.polyval(np.array(self._hxwidth) * 2.0 * np.pi / 3.0, self.frequencies)
+
+    @cached_property
+    def fwhm_ey(self):
+        """Full width half max of the E-plane antenna beam for Y polarization."""
+
+        return np.polyval(np.array(self._eywidth) * 2.0 * np.pi / 3.0, self.frequencies)
+
+    @cached_property
+    def fwhm_hy(self):
+        """Full width half max of the H-plane antenna beam for Y polarization."""
+
+        return np.polyval(np.array(self._hywidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     # Set the approximate uv feed sizes
     @property
@@ -444,8 +464,8 @@ class CHIME(telescope.PolarisedTelescope):
                 angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_e,
-                self.fwhm_h,
+                self.fwhm_ey[freq],
+                self.fwhm_hy[freq],
                 rot=rot,
             )
         elif tools.is_array_x(feed_obj):
@@ -453,8 +473,8 @@ class CHIME(telescope.PolarisedTelescope):
                 angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_e,
-                self.fwhm_h,
+                self.fwhm_ex[freq],
+                self.fwhm_hx[freq],
                 rot=rot,
             )
         else:
@@ -698,6 +718,32 @@ class CHIMEParameterizedBeam(CHIME):
             beam *= self._beam_normalization[freq, feed, np.newaxis, :]
 
         return beam
+
+
+class CHIMEFitBeam(CHIME):
+    """Driftscan model with revised FWHM for north-south beam.
+
+    Point source beam model was fit to a flat Gaussian at each frequency.
+    Best-fit FWHM as a function of frequency was fit with a cubic
+    polynomial. This class revises coefficients of FWHM from the
+    fit. Detailed comparisons are documented in:
+    https://bao.chimenet.ca/doc/documents/1448
+
+    Note that the optimization was carried out in 585-800 MHz.
+    This model will produce large extrapolation errors if used below that.
+    """
+
+    _eywidth = (
+        3.0
+        / (2 * np.pi)
+        * np.array([1.15310483e-07, -2.30462590e-04, 1.50451290e-01, -3.07440520e01])
+    )
+
+    _hxwidth = (
+        3.0
+        / (2 * np.pi)
+        * np.array([2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01])
+    )
 
 
 class CHIMEExternalBeam(CHIME):
