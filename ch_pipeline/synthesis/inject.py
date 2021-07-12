@@ -946,6 +946,18 @@ class SpectroscopicCatalogWithBeamExternal(BeamExternal, SpectroscopicCatalog):
 
 
 def qso_velocity_error(nsample):
+    """Draw random velocity errors for quasars.
+
+    Parameters
+    ----------
+    nsample: int
+        Number of random numbers to draw.
+
+    Returns
+    -------
+    dv: np.ndarray[nsample,]
+        Velocity errors in km / s.
+    """
 
     QSO_SIG1 = 150.0
     QSO_SIG2 = 1000.0
@@ -963,6 +975,18 @@ def qso_velocity_error(nsample):
 
 
 def lrg_velocity_error(nsample):
+    """Draw random velocity errors for luminous red galaxies.
+
+    Parameters
+    ----------
+    nsample: int
+        Number of random numbers to draw.
+
+    Returns
+    -------
+    dv: np.ndarray[nsample,]
+        Velocity errors in km / s.
+    """
 
     LRG_SIG = 91.8
 
@@ -972,6 +996,18 @@ def lrg_velocity_error(nsample):
 
 
 def elg_velocity_error(nsample):
+    """Draw random velocity errors for emission line galaxies.
+
+    Parameters
+    ----------
+    nsample: int
+        Number of random numbers to draw.
+
+    Returns
+    -------
+    dv: np.ndarray[nsample,]
+        Velocity errors in km / s.
+    """
 
     ELG_SIG = 11.877
     ELG_LAMBDA = -0.4028
@@ -989,6 +1025,26 @@ velocity_error_function_lookup = {
 
 
 def perturb_redshift(z, tracer="QSO"):
+    """Perturb redshifts using a tracer specific velocity error distribution.
+
+    Parameters
+    ----------
+    z: np.ndarray[nsource,]
+        Source redshifts.
+    tracer : {"ELG"|"LRG"|"QSO"}
+        Name of the tracer.
+
+    Returns
+    -------
+    zp: np.ndarray[nsource,]
+        Source redshifts perturbed by a random velocity error.
+    """
+
+    if tracer not in velocity_error_function_lookup:
+        raise ValueError(
+            f"Do not recognize {tracer}.  Must define a method "
+            "for drawing random velocity errors for this tracer."
+        )
 
     err_func = velocity_error_function_lookup[tracer]
 
