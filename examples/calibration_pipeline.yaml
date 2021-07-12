@@ -47,7 +47,7 @@ pipeline:
             out:        qfilelist
             params:
                 node_spoof:
-                    cedar_archive:  '/project/rpp-krs/chime/chime_archive/'
+                    cedar_online:  '/project/rpp-krs/chime/chime_online/'
                 instrument: 'chimecal'
                 start_time: *start_time
                 end_time:   *end_time
