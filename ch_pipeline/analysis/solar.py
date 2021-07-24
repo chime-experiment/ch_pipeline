@@ -933,7 +933,7 @@ class SunCalibration(task.SingleTask):
     ymax: float, default 10.0
         Do not include baselines with N-S separation
         greater than ymax to avoid resolving out the Sun.
-        Default is 10.0
+        Default is 10.0 (meters)
     exclude_intercyl : bool, default True
         Exclude intercylinder baselines to avoid resolving
         out the Sun. Default is True  
