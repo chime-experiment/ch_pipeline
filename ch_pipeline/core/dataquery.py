@@ -68,7 +68,7 @@ class QueryDatabase(task.MPILoggedTask):
     Attributes
     ----------
     node_spoof : dictionary
-        (default: {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'} )
+        (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to

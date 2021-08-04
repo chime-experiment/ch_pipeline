@@ -11,13 +11,16 @@ import logging
 import numpy as np
 import h5py
 import healpy
+from scipy.interpolate import RectBivariateSpline
 
 from caput import config, mpiutil
+
+from cora.util import coord, hputil
 
 from drift.core import telescope
 from drift.telescope import cylbeam
 
-from draco.core.containers import ContainerBase
+from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
 
 from ch_util import ephemeris, tools
 from caput.cache import cached_property
@@ -750,33 +753,80 @@ class CHIMEExternalBeam(CHIME):
     """Model telescope for the CHIME.
 
     This class uses an external beam model that is read in from a file.
+
+    Attributes
+    ----------
+    primary_beam_filename : str
+        Path to the file containing the primary beam. Can either be a Healpix beam or a
+        GridBeam.
+    freq_interp_beam : bool, optional
+        Interpolate between neighbouring frequencies if we don't have a beam for every
+        frequency channel.
+    force_real_beam : bool, optional
+        Ensure the output beam is real, regardless of what the datatype of the beam file
+        is. This can help save memory if the saved beam is complex but you know the
+        imaginary part is zero.
     """
 
     primary_beam_filename = config.Property(proptype=str)
     freq_interp_beam = config.Property(proptype=bool, default=False)
+    force_real_beam = config.Property(proptype=bool, default=False)
 
     def _finalise_config(self):
         """Get the beam file object."""
+
         logger.debug("Reading beam model from {}...".format(self.primary_beam_filename))
         self._primary_beam = ContainerBase.from_file(
             self.primary_beam_filename, mode="r", distributed=False, ondisk=True
         )
 
+        self._is_grid_beam = isinstance(self._primary_beam, GridBeam)
+
         # cache axes
         self._beam_freq = self._primary_beam.freq[:]
-        self._beam_nside = self._primary_beam.nside
+        self._beam_nside = None if self._is_grid_beam else self._primary_beam.nside
+
         # TODO must use bytestring here because conversion doesn't work with ondisk=True
-        self._beam_pol_map = {
-            "X": list(self._primary_beam.pol[:]).index(b"X"),
-            "Y": list(self._primary_beam.pol[:]).index(b"Y"),
-        }
+        if self._is_grid_beam:
+            self._beam_pol_map = {
+                "X": list(self._primary_beam.pol[:]).index(b"XX"),
+                "Y": list(self._primary_beam.pol[:]).index(b"YY"),
+            }
+        else:
+            self._beam_pol_map = {
+                "X": list(self._primary_beam.pol[:]).index(b"X"),
+                "Y": list(self._primary_beam.pol[:]).index(b"Y"),
+            }
 
         if len(self._primary_beam.input) > 1:
             raise ValueError("Per-feed beam model not supported for now.")
 
+        complex_beam = np.issubclass_(
+            self._primary_beam.beam.dtype.type, np.complexfloating
+        )
+        self._output_dtype = (
+            np.complex128 if complex_beam and not self.force_real_beam else np.float64
+        )
+
         super()._finalise_config()
 
     def beam(self, feed, freq_id):
+        """Get the beam pattern.
+
+        Parameters
+        ----------
+        feed : int
+            Feed index.
+        freq_id : int
+            Frequency ID.
+
+        Returns
+        -------
+        beam : np.ndarray[pixel, pol]
+            Return the vector beam response at each point in the Healpix grid. This
+            array is of type `np.float64` if the input beam pattern is real, of
+            `force_real_beam` is set, otherwise is is on type `np.complex128`.
+        """
         feed_obj = self.feeds[feed]
         tel_freq = self.frequencies
         nside = self._nside
@@ -796,31 +846,56 @@ class CHIMEExternalBeam(CHIME):
         freq_sel = _nearest_freq(
             tel_freq, self._beam_freq, freq_id, single=(not self.freq_interp_beam)
         )
-        beam_map = self._primary_beam.beam[freq_sel, pol_ind, 0, :]
+        # Raise an error if we can't find any suitable frequency
+        if len(freq_sel) == 0:
+            raise ValueError(f"No beam model spans frequency {tel_freq[freq_id]}.")
 
-        # check resolution
-        if nside != self._beam_nside:
-            logger.debug(
-                "Resampling external beam from nside {:d} to {:d}".format(
-                    self._beam_nside,
-                    nside,
+        if self._is_grid_beam:
+            # Either we haven't set up interpolation coords yet, or the nside has
+            # changed
+            if (self._beam_nside is None) or (self._beam_nside != nside):
+                self._beam_nside = nside
+                self._setup_gridbeam_interpolation()
+
+            # interpolate gridbeam onto HEALPix
+            beam_map = self._interpolate_gridbeam(freq_sel, pol_ind)
+
+        else:  # Healpix input beam just need to change to the required resolution
+            beam_map = self._primary_beam.beam[freq_sel, pol_ind, 0, :]
+
+            # Check resolution and resample to a better resolution if needed
+            if nside != self._beam_nside:
+
+                if nside > self._beam_nside:
+                    logger.warning(
+                        f"Requested nside={nside} higher than that of "
+                        f"beam {self._beam_nside}"
+                    )
+
+                logger.debug(
+                    "Resampling external beam from nside {:d} to {:d}".format(
+                        self._beam_nside,
+                        nside,
+                    )
                 )
-            )
-            beam_map_new = np.zeros((len(freq_sel), npix), dtype=beam_map.dtype)
-            beam_map_new["Et"] = healpy.ud_grade(beam_map["Et"], nside)
-            beam_map_new["Ep"] = healpy.ud_grade(beam_map["Ep"], nside)
-            beam_map = beam_map_new
+                beam_map_new = np.zeros((len(freq_sel), npix), dtype=beam_map.dtype)
+                beam_map_new["Et"] = healpy.ud_grade(beam_map["Et"], nside)
+                beam_map_new["Ep"] = healpy.ud_grade(beam_map["Ep"], nside)
+                beam_map = beam_map_new
+
+        map_out = np.empty((npix, 2), dtype=self._output_dtype)
+
+        # Pull out the real part of the beam if we are forcing a conversion. This should
+        # do nothing if the array is already real
+        def _conv_real(x):
+            if self.force_real_beam:
+                x = x.real
+            return x
 
         if len(freq_sel) == 1:
             # exact match
-            map_out = np.empty((npix, 2), dtype=beam_map.dtype["Et"])
-            map_out[:, 0] = beam_map["Et"][0]
-            map_out[:, 1] = beam_map["Ep"][0]
-            return map_out
-        elif len(freq_sel) == 0:
-            raise ValueError(
-                "No beam model spans frequency {:.2f}.".format(tel_freq[freq_id])
-            )
+            map_out[:, 0] = _conv_real(beam_map["Et"][0])
+            map_out[:, 1] = _conv_real(beam_map["Ep"][0])
         else:
             # interpolate between pair of frequencies
             freq_high = self._beam_freq[freq_sel[1]]
@@ -830,14 +905,81 @@ class CHIMEExternalBeam(CHIME):
             alpha = (freq_high - freq_int) / (freq_high - freq_low)
             beta = (freq_int - freq_low) / (freq_high - freq_low)
 
-            map_t = beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
-            map_p = beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
+            map_out[:, 0] = _conv_real(
+                beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
+            )
+            map_out[:, 0] = _conv_real(
+                beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
+            )
 
-            map_out = np.empty((npix, 2), dtype=beam_map.dtype["Et"])
-            map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
-            map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
+        return map_out
 
-            return map_out
+    def _setup_gridbeam_interpolation(self):
+        # grid beam coordinates
+        self._x_grid = self._primary_beam.phi[:]
+        self._y_grid = self._primary_beam.theta[:]
+
+        # celestial coordinates
+        angpos = hputil.ang_positions(self._nside)
+        x_cel = coord.sph_to_cart(angpos).T
+
+        # rotate to telescope coords
+        # first align y with N, then polar axis with NCP
+        self._x_tel = cylbeam.rotate_ypr(
+            (1.5 * np.pi, np.radians(90.0 - self.latitude), 0), *x_cel
+        )
+
+        # mask any pixels outside grid
+        x_t, y_t, z_t = self._x_tel
+        self._pix_mask = (
+            (z_t > 0)
+            & (np.abs(x_t) < np.abs(self._x_grid.max()))
+            & (np.abs(y_t) < np.abs(self._y_grid.max()))
+        )
+
+        # pre-compute polarisation pattern
+        # taken from driftscan
+        zenith = np.array([np.pi / 2.0 - np.radians(self.latitude), 0.0])
+        that, phat = coord.thetaphi_plane_cart(zenith)
+        xhat, yhat, zhat = cylbeam.rotate_ypr(
+            [-self.rotation_angle, 0.0, 0.0], phat, -that, coord.sph_to_cart(zenith)
+        )
+
+        self._pvec_x = cylbeam.polpattern(angpos, xhat)
+        self._pvec_y = cylbeam.polpattern(angpos, yhat)
+
+    def _interpolate_gridbeam(self, f_sel, p_ind):
+        x, y = self._x_grid, self._y_grid
+        x_t, y_t, z_t = self._x_tel
+        mask = self._pix_mask
+
+        # interpolation routine requires increasing axes
+        reverse_x = (np.diff(self._x_grid) < 0).any()
+        if reverse_x:
+            x = x[::-1]
+
+        npix = healpy.nside2npix(self._nside)
+        beam_out = np.zeros(
+            (len(f_sel), npix), dtype=HEALPixBeam._dataset_spec["beam"]["dtype"]
+        )
+        for i, fi in enumerate(f_sel):
+            # For now we just use the magnitude. Assumes input is power beam
+            beam = self._primary_beam.beam[fi, p_ind, 0]
+            if reverse_x:
+                beam = beam[:, ::-1]
+            beam_spline = RectBivariateSpline(y, x, np.sqrt(np.abs(beam)))
+
+            # beam amplitude
+            amp = np.zeros(npix, dtype=beam.real.dtype)
+            amp[mask] = beam_spline(y_t[mask], x_t[mask], grid=False)
+
+            # polarisation projection
+            pvec = self._pvec_x if self._beam_pol_map["X"] == p_ind else self._pvec_y
+
+            beam_out[i]["Et"] = amp * pvec[:, 0]
+            beam_out[i]["Ep"] = amp * pvec[:, 1]
+
+        return beam_out
 
 
 def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
