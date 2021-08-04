@@ -100,6 +100,8 @@ def model_extended_sources(
     ntime = timestamp.size
     nbaseline = distance.shape[-1]
 
+    ones = np.ones((nfreq, nbaseline, ntime), dtype=np.float64)
+
     # Calculate baseline distances in wavelengths
     lmbda = speed_of_light * 1e-6 / freq
     u, v = (
@@ -148,9 +150,9 @@ def model_extended_sources(
         # Evaluate polynomial
         aa, bb = source_bound[ss], source_bound[ss + 1]
 
-        H = np.polynomial.hermite.hermvander3d(
-            u * scale[ss, 0], v * scale[ss, 1], ha * scale[ss, 2], poly_deg[ss]
-        )
+        coords = [ax * scale[ss, ii] * ones for ii, ax in enumerate([u, v, ha])]
+
+        H = np.polynomial.hermite.hermvander3d(*coords, poly_deg[ss])
 
         # Calculate the fringestop phase
         phi = tools.fringestop_phase(
@@ -587,7 +589,6 @@ class LPFSourceAmplitude(task.SingleTask):
         """
 
         model.redistribute("pol")
-        opol = model.amplitude.local_offset[1]
         npol = model.amplitude.local_shape[1]
 
         amp = model.amplitude[:].view(np.ndarray)
@@ -1210,7 +1211,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
         for dd, (pw, md) in enumerate(zip(pad_width, mode)):
 
             pws = tuple([pw if ii == dd else (0, 0) for ii in range(2)])
-            print(dd, md, pws)
 
             y_extended = np.pad(y_extended, pws, mode=md)
             flag_extended = np.pad(flag_extended, pws, mode=md)
