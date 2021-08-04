@@ -26,7 +26,7 @@ def model_extended_sources(
     distance,
     timestamp,
     bodies,
-    min_altitude=10.0,
+    min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
     **kwargs
@@ -285,7 +285,7 @@ class SolveSources(task.SingleTask):
     extent = config.Property(proptype=list, default=[1.0, 4.0, 4.0, 7.0])
     scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66])
 
-    min_altitude = config.Property(proptype=float, default=10.0)
+    min_altitude = config.Property(proptype=float, default=5.0)
     max_ha = config.Property(proptype=float, default=0.0)
     min_ha = config.Property(proptype=float, default=0.0)
 
@@ -564,11 +564,11 @@ class LPFSourceAmplitude(task.SingleTask):
         is True.
     """
 
-    window = config.Property(proptype=list, default=[3, 3])
-    niter = config.Property(proptype=list, default=[8, 8])
-    frac_required = config.Property(proptype=float, default=0.80)
+    window = config.Property(proptype=list, default=[3, 5])
+    niter = config.Property(proptype=list, default=[12, 8])
+    frac_required = config.Property(proptype=float, default=0.40)
 
-    ignore_main_lobe = config.Property(proptype=bool, default=False)
+    ignore_main_lobe = config.Property(proptype=bool, default=True)
     main_lobe_threshold = config.Property(proptype=float, default=0.05)
 
     def process(self, model):
