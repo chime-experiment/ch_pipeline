@@ -485,14 +485,14 @@ class PointSourceTransit(StaticGainData):
         return self.index_map["param_cov2"]
 
 
-class SourceModel(ContainerBase):
+class SourceModel(FreqContainer):
     """Container for holding model for visiblities.
 
     Model consists of the sum of the signal from
     multiple (possibly extended) sources.
     """
 
-    _axes = ("freq", "pol", "time", "param", "source")
+    _axes = ("pol", "time", "param", "source")
 
     _dataset_spec = {
         "amplitude": {

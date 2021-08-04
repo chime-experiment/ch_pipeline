@@ -7,9 +7,11 @@ import json
 import numpy as np
 
 from scipy.constants import c as speed_of_light
+import scipy.signal
 
 from caput import config
 from ch_util import andata, ephemeris, tools
+from ch_util.fluxcat import FluxCatalog
 from draco.core import task, io
 
 from ..core import containers
@@ -534,6 +536,90 @@ class SolveSources(task.SingleTask):
         return out
 
 
+class LPFSourceAmplitude(task.SingleTask):
+    """Apply a 2D low-pass filter to the measured source amplitude.
+
+    Attributes
+    ----------
+    window : list
+        The size of the moving average window along the
+        [freq, time] axis.  This sets the cutoff scale of
+        the low-pass filter.
+    niter : list
+        Number of iterations of the moving average filter
+        along the [freq, time] axis.  The peak-to-sidelobe
+        ratio of the filter's transfer function scales
+        roughly as 0.05^niter.
+    frac_required : float
+        The fraction of samples within a window that must be
+        valid (unmasked) in order for the filtered data point
+        to be considered valid.
+    ignore_main_lobe : boolean
+        Do not apply the filter within the main lobe of the
+        primary beam.
+    main_lobe_threshold : float
+        If the source amplitude is greater than this fraction
+        of the source flux than than [freq, RA] is considered
+        within main lobe.  Only relevant when ignore_main_lobe
+        is True.
+    """
+
+    window = config.Property(proptype=list, default=[3, 3])
+    niter = config.Property(proptype=list, default=[8, 8])
+    frac_required = config.Property(proptype=float, default=0.80)
+
+    ignore_main_lobe = config.Property(proptype=bool, default=False)
+    main_lobe_threshold = config.Property(proptype=float, default=0.05)
+
+    def process(self, model):
+        """Low-pass filter the provided source model.
+
+        Parameters
+        ----------
+        model : containers.SourceModel
+            Best-fit parameters of the source model.
+
+        Returns
+        -------
+        model : containers.SourceModel
+            The input container with the amplitude dataset
+            filtered and the weights updated.
+        """
+
+        model.redistribute("pol")
+        opol = model.amplitude.local_offset[1]
+        npol = model.amplitude.local_shape[1]
+
+        amp = model.amplitude[:].view(np.ndarray)
+
+        for ss, src in enumerate(model.source):
+
+            flux = FluxCatalog[src].predict_flux(model.freq)
+            inv_flux = tools.invert_no_zero(flux)[:, np.newaxis]
+
+            for pp in range(npol):
+
+                a = amp[:, pp, :, ss]
+                flag = np.abs(a) > 0
+
+                alpf = apply_kz_lpf_2d(
+                    a,
+                    flag,
+                    window=self.window,
+                    niter=self.niter,
+                    mode=["reflect", "wrap"],
+                    frac_required=self.frac_required,
+                )
+
+                if self.ignore_main_lobe:
+                    use_lpf = np.abs(alpf * inv_flux) < self.main_lobe_threshold
+                    alpf = np.where(use_lpf, alpf, a)
+
+                amp[:, pp, :, ss] = alpf
+
+        return model
+
+
 class SubtractSources(task.SingleTask):
     """Subtract a source model from the visibilities."""
 
@@ -1021,3 +1107,122 @@ class SubtractSourcesWithBeam(task.SingleTask):
                 vis[ff, this_pol, :] -= mdl
 
         return data
+
+
+def kz_coeffs(m, k):
+    """Compute the coefficients for a Kolmogorov-Zurbenko filter.
+
+    Parameters
+    ----------
+    m : int
+        Size of the moving average window.
+    k : int
+        Number of iterations.
+
+    Returns
+    -------
+    coeff : np.ndarray
+        Array of size k * (m - 1) + 1 containing the filter coefficients.
+    """
+
+    # Coefficients at degree one
+    coef = np.ones(m, dtype=np.float64)
+
+    # Iterate k-1 times over coefficients
+    for i in range(1, k):
+
+        t = np.zeros((m, m + i * (m - 1)))
+        for km in range(m):
+            t[km, km : km + coef.size] = coef
+
+        coef = np.sum(t, axis=0)
+
+    assert coef.size == k * (m - 1) + 1
+
+    return coef / m ** k
+
+
+def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80):
+    """Apply a 2D Kolmogorov-Zurbenko filter.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        The data to filter.  Must be two dimensional.
+    flag : np.ndarray
+        Boolean array with the same shape as y where True
+        indicates valid data and False indicates invalid data
+    window : int or list of int
+        The size of the moving average window.  This can either be
+        a 2 element list, in which case a different window size
+        will be used for each dimension, or a single number, in which
+        case the same value will be used for both dimensions.
+    niter : int or list of int
+        Number of iterations of the moving average filter.  This can
+        either be a 2 element list, in which case a  different number of
+        iterations will be used for each dimension, or a single number,
+        in which case the same value will be used for both dimensions.
+    mode : str or list of str
+        The method used to pad the edges of the array.  This can
+        either be a 2 element list, in which case a  different method
+        will be used for each dimension, or a single string, in which
+        case the same method will be used for both dimensions.
+    frac_required : float
+        The fraction of samples within a window that must be valid in
+        order for the filtered data point to be considered valid.
+
+    Returns
+    -------
+    y_lpf : np.ndarray
+        The low-pass filtered data.  The value of the array is set to zero
+        if the data is determined invalid based on frac_required argument.
+    """
+
+    # Parse inputs
+    if np.isscalar(window):
+        window = [window] * 2
+
+    if np.isscalar(niter):
+        niter = [niter] * 2
+
+    window = [w + (not (w % 2)) for w in window]
+    total = [k * (w - 1) + 1 for (w, k) in zip(window, niter)]
+    hwidth = [tt // 2 for tt in total]
+
+    pad_width = tuple([(hw, hw) for hw in hwidth])
+
+    # Get filter coefficients and construct the 2D kernel
+    coeff = [kz_coeffs(w, k) for (w, k) in zip(window, niter)]
+    kernel = np.outer(coeff[0], coeff[1])
+
+    # Pad the array using the requested method
+    y = np.where(flag, y, 0.0)
+
+    if np.isscalar(mode):
+
+        y_extended = np.pad(y, pad_width, mode=mode)
+        flag_extended = np.pad(flag.astype(np.float64), pad_width, mode=mode)
+
+    else:
+        y_extended = y
+        flag_extended = flag.astype(np.float64)
+
+        for dd, (pw, md) in enumerate(zip(pad_width, mode)):
+
+            pws = tuple([pw if ii == dd else (0, 0) for ii in range(2)])
+            print(dd, md, pws)
+
+            y_extended = np.pad(y_extended, pws, mode=md)
+            flag_extended = np.pad(flag_extended, pws, mode=md)
+
+    # Filter the array
+    y_lpf = scipy.signal.convolve(y_extended, kernel, mode="valid")
+
+    # Filter the flags
+    flag_lpf = scipy.signal.convolve(flag_extended, kernel, mode="valid")
+    flag_lpf = flag_lpf * (flag_lpf >= frac_required)
+
+    # Renormalize the low pass filtered data and return
+    y_lpf *= tools.invert_no_zero(flag_lpf)
+
+    return y_lpf
