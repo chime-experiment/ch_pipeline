@@ -1111,7 +1111,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
 
 def kz_coeffs(m, k):
-    """Compute the coefficients for a Kolmogorov-Zurbenko filter.
+    """Compute the coefficients for a Kolmogorov-Zurbenko (KZ) filter.
 
     Parameters
     ----------
@@ -1144,7 +1144,15 @@ def kz_coeffs(m, k):
 
 
 def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80):
-    """Apply a 2D Kolmogorov-Zurbenko filter.
+    """Apply a 2D Kolmogorov-Zurbenko (KZ) filter.
+
+    The KZ filter is an FIR filter that is equivalent to repeated application
+    of a moving average.  The "window" parameter is the size of the moving
+    average window and determines the cut off for the low-pass filter.  The
+    "niter" parameter is the number of times that the moving average is applied
+    and controls the peak-to-sidelobe ratio of the transfer function of the filter.
+    This method pre-computes the coefficients for a given "window" and "niter",
+    and then convolves once with the data.
 
     Parameters
     ----------
