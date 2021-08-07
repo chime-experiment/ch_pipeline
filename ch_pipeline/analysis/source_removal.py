@@ -539,7 +539,7 @@ class SolveSources(task.SingleTask):
 
 
 class LPFSourceAmplitude(task.SingleTask):
-    """Apply a 2D low-pass filter to the measured source amplitude.
+    """Apply a 2D low-pass filter in (freq, time) to the measured source amplitude.
 
     Attributes
     ----------
@@ -574,7 +574,7 @@ class LPFSourceAmplitude(task.SingleTask):
     main_lobe_threshold = config.Property(proptype=float, default=0.05)
 
     def process(self, model):
-        """Low-pass filter the provided source model.
+        """Low-pass filter the provided source amplitudes.
 
         Parameters
         ----------
@@ -585,7 +585,9 @@ class LPFSourceAmplitude(task.SingleTask):
         -------
         model : containers.SourceModel
             The input container with the amplitude dataset
-            filtered and the weights updated.
+            filtered.  Note that amplitudes that were previously
+            zero will be interpolated to a non-zero value if more than
+            frac_required of the nearby data points are non-zero.
         """
 
         model.redistribute("pol")
