@@ -1703,10 +1703,22 @@ class DataFlagger(task.SingleTask):
     Parameters
     ----------
     flag_type : list
-        List of DataFlagType names to apply. Defaults to 'all'
+        List of DataFlagType names to apply. Defaults to the flags representing ranges of time known to be bad
+        that may effect the delay spectrum estimate.
     """
 
-    flag_type = config.Property(proptype=list, default=["all"])
+    flag_type = config.list_type(
+        type_=str,
+        default=[
+            "acjump",
+            "bad_calibration_acquisition_restart",
+            "bad_calibration_fpga_restart",
+            "bad_calibration_gains",
+            "decorrelated_cylinder",
+            "globalflag",
+            "rain1mm",
+        ],
+    )
 
     def setup(self):
         """Query the database for flags of the requested types."""
