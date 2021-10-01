@@ -1317,64 +1317,52 @@ class ComputeHolographicSensitivity(task.SingleTask):
         """
         self.telescope = io.get_telescope(pm)
         self._POL_DICT = {"XX" : 1, "XY" : 2, "YX" : 2, "YY" : 0} # fixed on 8/18/2020 10:25 PM to match measured convention
-        self._26m_POL = [1225, 1521]
+        self._26m_POLid = [1225, 1521]
+        self._26m_POL = ["Y", "X"]
 
     def process(self, transit, ch_data): 
-	# Distribute both datasets over frequency. 
-        #//# self.log.warning("Beginning processing of {}".format(transit.attrs["tag"]))
-
+	# Distribute both datasets over frequency.
         transit.redistribute("freq")
         ch_data.redistribute("freq")
 	
-	# Obtain the shape of the holographic visibilities and load the product map. 
+	# Obtain the shape of the holographic visibilities and load the product map.
         nfreq, npol, ninputs, ntime = transit.beam.local_shape
         index_map = transit.index_map
 
         channels = index_map["input"]["chan_id"][:]
         ha = index_map["pix"]["phi"][:]
 
-        # Obtain the shape of the chimestack data
+        # Obtain the shape of the chimestack data, ignoring frequency
         _, nstack, npix = ch_data.vis.local_shape
 
-	# Get the start and end times for the holography dataset and get the overlapping portion of the chimestack. 
-        unix_time = ephem.csd_to_unix(ephem.csd(transit.attrs["transit_time"]) + ha / 360.) 
+	# Get the per-pixel timestamps of the holography transit, and select only the chimestack overlapping this range
+        unix_time = ephem.csd_to_unix(ephem.csd(transit.attrs["transit_time"]) + ha / 360.)
+        timerange = ((ch_data.time[:] > unix_time[0]) & (ch_data.time[:] < unix_time[-1]))
 
+        # Load the holography weight and flag on where the weight is valid (> 0)
         weight_h = transit.weight[:].view(np.ndarray)
         wflag = (weight_h > 0.0)
-        #//# self.log.warning("Weight has {} good elements on freq {}, {} freqs.".format(np.sum(wflag), transit.beam.local_offset[0], nfreq))
-        #//# valid_pix = np.where(wflag)[-1]
 
-        #//# self.log.warning("Shape of valid_pix is {}".format(valid_pix.shape))
+        # Invert the weights
+        inv_weight = tools.invert_no_zero(weight_h)[:]
 
-        #try:
-        #    start_h, stop_h = valid_pix[0], valid_pix[-1] 
-        #except IndexError:
-        #    self.log.warning("Getting start and stop failed for transit {}".format(transit.attrs["tag"]))
-        start_h, stop_h = 0, ntime
-        #nt = stop_h - start_h
-        nt = ntime
-        pix_sel = self.gridding_factor * nt
-        overlap_slice = slice(0, pix_sel) 
-        
-        #self.log.warning("The start and stop times for the holography are {}->{}".format(hol_start, hol_stop)) # debug
-        timerange = ((ch_data.time[:] > unix_time[start_h]) & (ch_data.time[:] < unix_time[stop_h - 1]))
-        #//# self.log.warning("Overlap is {}".format(np.sum(timerange))) # debug
-
-        zes = ntime * self.gridding_factor - (np.sum(timerange))
-
-        # Dereference the two visibility datasets 
+        # Dereference the two visibility datasets
         vis_h = transit.beam[:].view(np.ndarray)
         vis_s = ch_data.vis[:].view(np.ndarray)
 
-        vis_h = vis_h[..., start_h:stop_h]
+        # The holography cadence will be ``gridding_factor`` smaller than chimestack
+        pix_sel = self.gridding_factor * ntime
+        overlap_slice = slice(0, pix_sel)
+         
+        # ...so select the chimestack visibilities only where they overlap
         vis_s = vis_s[..., timerange][..., overlap_slice]
 
         # Get the gain dataset from the chimestack to calibrate the holographic weights
-        # Also get the fraction of packets lost 
+        # Also get the fraction of packets lost
         gain = ch_data.gain[:].view(np.ndarray)[..., timerange][..., overlap_slice]
         frac_lost = ch_data.flags["frac_lost"][:].view(np.ndarray)[..., timerange][..., overlap_slice]
 
-	# Get the flags for the two co-pol products (we ignore x-pol entirely for flagging purposes).
+	# Get the flags for the two co-pol products (we ignore x-pol entirely for fitting purposes).
         Y_pol_flag = np.where(self.telescope.polarisation == 'Y')[0]
         X_pol_flag = np.where(self.telescope.polarisation == 'X')[0]
 
@@ -1388,26 +1376,25 @@ class ComputeHolographicSensitivity(task.SingleTask):
                 ch_data.stack.size,
 	)[..., timerange][..., overlap_slice]
 
-        # Zero pad the chimestack datasets
+        # The chimestack may not be long enough to be pairwise averaged down to holography, so pad it
+        # TODO: allow the user to select the padding mode with a config parameter
+        zes = ntime * self.gridding_factor - (np.sum(timerange))
+
         if zes > 0:
             vis_s = np.pad(vis_s, ((0, 0), (0, 0), (0, zes)), mode='median')
             gain = np.pad(gain, ((0, 0), (0, 0), (0, zes)), mode='median')
             frac_lost = np.pad(frac_lost, ((0, 0), (0, zes)), mode='median')
             stack_cnt = np.pad(stack_cnt, ((0, 0), (0, zes)), mode='median')
 
-
-        # Pairwise average down the chimestack datasets
-        vis_s = np.mean(vis_s.reshape(nfreq, nstack, nt, self.gridding_factor), axis=-1)
-        gain = np.mean(gain.reshape(nfreq, ninputs, nt, self.gridding_factor), axis=-1)
-        frac_lost = np.mean(frac_lost.reshape(nfreq, nt, self.gridding_factor), axis=-1)
-        stack_cnt = np.mean(stack_cnt.reshape(nstack, nt, self.gridding_factor), axis=-1)
+        # Pairwise average down the chimestack datasets to match processed holography cadence
+        vis_s = np.mean(vis_s.reshape(nfreq, nstack, ntime, self.gridding_factor), axis=-1)
+        gain = np.mean(gain.reshape(nfreq, ninputs, ntime, self.gridding_factor), axis=-1)
+        frac_lost = np.mean(frac_lost.reshape(nfreq, ntime, self.gridding_factor), axis=-1)
+        stack_cnt = np.mean(stack_cnt.reshape(nstack, ntime, self.gridding_factor), axis=-1)
         
-        # Invert the weights
-        inv_weight = tools.invert_no_zero(weight_h)[..., start_h:stop_h] 
-
         # Initialize the variance and counter containers
-        var =  np.zeros((nfreq, npol, nt), dtype=np.float32) 
-        counter = np.zeros((nfreq, npol, nt), dtype=np.float32) 
+        var =  np.zeros((nfreq, npol, ntime), dtype=np.float32)
+        counter = np.zeros((nfreq, npol, ntime), dtype=np.float32)
 
         for ff in range(nfreq):
 
@@ -1418,8 +1405,8 @@ class ComputeHolographicSensitivity(task.SingleTask):
                 else:
                     copols = X_pol_flag
 
-                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, 0, copols, start_h:stop_h] * (np.abs(gain[ff, copols, :]) ** 2) * inv_weight[ff, 0, copols], axis=0)
-                counter[ff, ipol, :] = np.sum(wflag[ff, 0, copols, start_h:stop_h], axis=0)
+                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, 0, copols, :] * (np.abs(gain[ff, copols, :]) ** 2) * inv_weight[ff, 0, copols], axis=0)
+                counter[ff, ipol, :] = np.sum(wflag[ff, 0, copols, :], axis=0)
 
 	# Normalize
         var *= tools.invert_no_zero(counter ** 2)
@@ -1428,40 +1415,34 @@ class ComputeHolographicSensitivity(task.SingleTask):
         prodstack = ch_data.prod[ch_data.stack["prod"]]
         input_a, input_b = prodstack["input_a"], prodstack["input_b"]
 
-        nfreq_st, nstack, _ = ch_data.vis.local_shape
-
         auto_flag_ch = (input_a == input_b)
         auto_stack_id = np.flatnonzero(auto_flag_ch)
         auto_inputs = prodstack[auto_stack_id]["input_a"]
 
-        #auto_pol = np.array([self.telescope.polarisation[ai] for ai in auto_inputs])
+        # Determine the polarization of each auto-correlation
         auto_pol = np.array(["Y" if (ai // 256) % 2 == 0 else "X" for ai in auto_inputs])
 
-        hol_auto_id = [1225, 1521] # Y, X 
-        hol_auto_pol = ["Y", "X"]
-
         # Initialize the radiometer and counter
-        radiometer = np.zeros((nfreq, npol, nt), dtype=np.float32)	
+        radiometer = np.zeros((nfreq, npol, nt), dtype=np.float32)
         radiometer_counter = np.zeros((nfreq, npol, nt), dtype=np.float32)
 
         for ii, (cha, chap) in enumerate(zip(auto_stack_id, auto_pol)):
 
-            for jj, (hoa, hoap) in enumerate(zip(hol_auto_id, hol_auto_pol)):
+            for jj, (hoa, hoap) in enumerate(zip(self._26m_POLid, self._26m_POL)):
 
                 try:
                     pp = self._POL_DICT[chap + hoap]
                 except KeyError:
-                    msg = "Unknown polarization product: {}{}".format(chap, hoap)		
+                    msg = "Unknown polarization product: {}{}".format(chap, hoap)
                     self.log.warning(msg)
 
-                if pp == 2: # Ignore x-pol for now
+                if pp == 2: # Ignore x-pol
                     continue
 
                 radiometer[:, pp, :] += stack_cnt[cha] * vis_s[:, cha, :].real * vis_h[:, 0, hoa, :].real
-                radiometer_counter[:, pp, :] += stack_cnt[cha] 
+                radiometer_counter[:, pp, :] += stack_cnt[cha]
 
         tint = np.abs(np.median(np.diff(unix_time[:])))
-        #//# self.log.warning("Integration time is {}".format(tint))
         dnu = np.abs(np.median(np.diff(transit.freq[:]))) * 1e6
 
         nint = (tint * dnu) * (1.0 - frac_lost.astype(np.float32))
@@ -1470,7 +1451,7 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
         metrics = SystemSensitivity(
             pol=np.array([b"YY", b"XX"]),
-            time=unix_time[start_h:stop_h],
+            time=unix_time,
             axes_from=ch_data,
             attrs_from=transit,
             comm=transit.comm,
@@ -1479,10 +1460,10 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
         metrics.redistribute("freq")
 
-        sq_rad = np.sqrt(2 * radiometer) 
+        sq_rad = np.sqrt(2 * radiometer)
         sq_var = np.sqrt(var)
 
-        # Zero out any nan's 
+        # Zero out any nan's
         sq_rad[np.isnan(sq_rad)] = 0
         sq_var[np.isnan(sq_var)] = 0
 
