@@ -272,7 +272,7 @@ class LoadCorrDataFiles(task.SingleTask):
         # Return timestream
         return ts
 
-class LoadCorrDataFromInput(task.SingleTask)
+class LoadCorrDataFromInput(task.SingleTask):
 
     _file_ptr = 0 
 
@@ -284,7 +284,7 @@ class LoadCorrDataFromInput(task.SingleTask)
 
     only_autos = config.Property(proptype=bool, default=False)
 
-     def setup(self):
+    def setup(self):
         # Set up frequency selection.
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
