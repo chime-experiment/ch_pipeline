@@ -1316,11 +1316,11 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
         """
         self.telescope = io.get_telescope(pm)
-        self._POL_DICT = {"XX" : 1, "XY" : 2, "YX" : 2, "YY" : 0} # fixed on 8/18/2020 10:25 PM to match measured convention
+        self._POL_DICT = {"XX" : 1, "XY" : 2, "YX" : 2, "YY" : 0}
         self._26m_POLid = [1225, 1521]
         self._26m_POL = ["Y", "X"]
 
-    def process(self, transit, ch_data): 
+    def process(self, transit, ch_data):
 	# Distribute both datasets over frequency.
         transit.redistribute("freq")
         ch_data.redistribute("freq")
@@ -1477,52 +1477,45 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
 class ApplyRFIMask(task.SingleTask):
 
-    # Mask type
+    # Following are the two currently supported mask types 
+
     # Mask out entire frequencies, if most time samples are bad
     majority_mask = config.Property(default=True, proptype=bool)
 
-    # Apply the mask with full time resolution, may not interact with fit well
+    # Apply the mask with full time resolution
     full_mask = config.Property(default=False, proptype=bool)
 
     def process(self, transit, mask):
 
+        # Redistribute along the frequency axis
         transit.redistribute("freq")
 
+        # Dereference the beam and weight datasets
         beam = transit.beam[:].view(np.ndarray)
         weight = transit.weight[:].view(np.ndarray)
+
+        # Load the mask and negate it so that 0 = RFI
         ma = (~(mask.mask[:].view(np.ndarray))).astype(np.float32)
 
-        nfreq = transit.beam.local_shape[0]
-        npol = transit.beam.local_shape[1]
-        ninput = transit.beam.local_shape[2]
-        npix = transit.beam.local_shape[3]
+        # Get the beam dataset shape
+        nfreq, npol, ninput, npix = transit.beam.local_shape[:]
 
+        # Examine only the MPI-local frequency slice
         local_slice = slice(
             transit.beam.local_offset[0],
             transit.beam.local_offset[0] + nfreq
         )
 
+        # Mask out the entire frequency if most time samples are bad
         if self.majority_mask:
 
              rfimask1d = np.median(ma, axis=1)
 
              beam *= rfimask1d[local_slice, None, None, None] 
+             weight *= rfimasak1d[local_slice, None, None, None]
 
+        # Multiply the mask against both the beam and weight
         if self.full_mask:
-
-             #beam[:] *= ma[local_slice].reshape((nfreq, 1, 1, npix))
-             #weight[:] *= ma[local_slice].reshape((nfreq, 1, 1, npix))
-
-             #bb = np.mean(abs(beam.reshape((nfreq, npol*ninput, npix))), axis=1) 
-
-             #non0 = np.where(weight > 0)[-1]
-             #st, en = non0.min(), non0.max()
-
-             #drange = 1 * (en - st)
-
-             #reducedmask = np.array([(ma[:, ii] + ma[:, ii + 1]) / 2 for ii in range(0, drange, 2)])
-             #reducedmask[reducedmask < 1.0] = 0.0
-
              beam[..., :] *= ma[local_slice, None, None, :]
              weight[..., :] *= ma[local_slice, None, None, :]
 
