@@ -313,46 +313,24 @@ class QueryLoadFromTransit(task.SingleTask):
 
     _file_ptr = 0 
 
-    freq_physical = config.Property(proptype=list, default=[])
-    channel_range = config.Property(proptype=list, default=[])
-    channel_index = config.Property(proptype=list, default=[])
-    dataset = config.Property(proptype=str)
-
     datasets = config.Property(default=None)
-
-    only_autos = config.Property(proptype=bool, default=False)
-    holography_obs = config.Property(proptype=str)
 
     def setup(self):
         self.node_spoof = {"cedar_online" : "/project/rpp-chime/chime/chime_online"}
         self.accept_all_global_flags = True
-        self.instrument = self.dataset
+        self.instrument = "chimestack"
         self.return_intervals = False
 
-        # Set up frequency selection.
-        if self.freq_physical:
-            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
-            )
-
-        elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = slice(*self.channel_range)
-
-        elif self.channel_index:
-            self.freq_sel = self.channel_index
-
-        else:
-            self.freq_sel = slice(None)
+        self.freq_sel = slice(None)
 
     def process(self, transit):
         transit_time = transit.attrs["transit_time"]
         ha =  transit.index_map["pix"]["phi"][:]
 
-        u_time = ephemeris.csd_to_unix(ephemeris.csd(transit_time) + ha / 360.)
+        unix_time = ephemeris.csd_to_unix(ephemeris.csd(transit_time) + ha / 360.)
 
-        self.start_time = u_time[0]
-        self.end_time = u_time[-1]
+        self.start_time = unix_time[0]
+        self.end_time = unix_time[-1]
 
         files = None
         results = None
@@ -376,65 +354,17 @@ class QueryLoadFromTransit(task.SingleTask):
             # Note: include_time_interval includes the specified time interval
             # Using this instead of set_time_range, which only narrows the interval
             # f.include_time_interval(self.start_time, self.end_time)
-            f.set_time_range(u_time[0], u_time[-1])
-
-            if self.holography_obs is not None:
-                f.include_26m_obs(self.holography_obs)
+            f.set_time_range(self.start_time, self.end_time)
 
             f.filter_acqs(di.ArchiveInst.name == self.instrument)
 
             results = f.get_results()
-            if not self.return_intervals:
-                files = [fname for result in results for fname in result[0]]
-                files.sort()
-            else:
-                files = results
-                files.sort(key=lambda x: x[1][0])
 
         results = mpiutil.world.bcast(results, root=0)
-        #files = mpiutil.world.bcast(files, root=0)
 
         # Make sure all nodes have container before return
         mpiutil.world.Barrier()
-        self.log.warning("Got result {}".format(results))
 
-        #if len(files) == self._file_ptr:
-        #    raise pipeline.PipelineStopIteration
-
-        # Collect garbage to remove any prior CorrData objects
-        #gc.collect()
-
-        # Fetch and remove the first item in the list
-        #file_ = files[self._file_ptr]
-        #self._file_ptr += 1
-#
-        # Set up product selection
-        # NOTE: this probably doesn't work with stacked data
-        #prod_sel = None
-        #print(files)
-
-        ## Load file
-        #if (
-        #    isinstance(self.freq_sel, slice)
-        #    and (prod_sel is None)
-        #    and (self.datasets is None)
-        #):
-        #    self.log.info(
-        #        "Reading file %i of %i. (%s) [fast io]",
-        #        self._file_ptr,
-        #        len(files),
-        #        file_,
-        #    )
-        #    ts = andata.CorrData.from_acq_h5_fast(
-        #        file_, freq_sel=self.freq_sel, comm=self.comm
-        #    )
-        #else:
-        #    self.log.info(
-        #        "Reading file %i of %i. (%s) [slow io]",
-        #        self._file_ptr,
-        #        len(files),
-        #        file_,
-        #    )
         if self.instrument == "chimestack":
             ts = andata.CorrData.from_acq_h5(
                 results[0][0],
@@ -442,30 +372,18 @@ class QueryLoadFromTransit(task.SingleTask):
                 distributed=True,
                 comm=self.comm,
                 freq_sel=self.freq_sel,
-                stack_sel=[0, 1789, 3067, 3834, 12266, 14055, 15333, 16100], 
+                stack_sel=[0, 1789, 3067, 3834, 12266, 14055, 15333, 16100], # Obtain only the chimestack autocorrelations
                 
             )
-            #self.log.warning("Reading file %s (ptr = %i)", file_, self._file_ptr)
-        elif self.instrument == "chime26m":
-            ts = andata.CorrData.from_acq_h5(
-                results[0][0],
-                datasets=self.datasets,
-                distributed=True,
-                comm=self.comm,
-                freq_sel=self.freq_sel,
-            )
-            #self.log.warning("Reading file %s (ptr = %i)", file_, self._file_ptr)
-        
-
         # Store file name
         ts.attrs["filename"] = transit.attrs["filename"]
 
-            # Use a simple incrementing string as the tag
+        # Use a simple incrementing string as the tag
         if "tag" not in ts.attrs:
             tag = "file%03i" % self._file_ptr
             ts.attrs["tag"] = tag
 
-            # Add a weight dataset if needed
+        # Add a weight dataset if needed
         if "vis_weight" not in ts.flags:
             weight_dset = ts.create_flag(
                 "vis_weight",
@@ -482,10 +400,8 @@ class QueryLoadFromTransit(task.SingleTask):
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
 
         # Return timestream
-
         return ts
 
-        #return files
 
 
 class QueryRun(task.MPILoggedTask):
