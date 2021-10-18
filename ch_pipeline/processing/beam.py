@@ -40,7 +40,7 @@ pipeline:
       out: files_wait
       params:
         node_spoof:
-          cedar_archive: /project/rpp-krs/chime/chime_archive
+          cedar_online: /project/rpp-krs/chime/chime_online
         instrument: chime26m
         source_26m: *db_source_name
         start_time: {start_time}

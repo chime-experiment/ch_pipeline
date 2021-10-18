@@ -59,7 +59,7 @@ pipeline:
         end_csd: {csd[1]:.2f}
         accept_all_global_flags: true
         node_spoof:
-          cedar_archive: "/project/rpp-krs/chime/chime_archive/"
+          cedar_online: "/project/rpp-krs/chime/chime_online/"
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
