@@ -1381,6 +1381,7 @@ class ComputeHolographicSensitivity(task.SingleTask):
         zes = ntime * self.gridding_factor - (np.sum(timerange))
 
         if zes > 0:
+            self.log.warning(f"Padding with length {zes}.")
             vis_s = np.pad(vis_s, ((0, 0), (0, 0), (0, zes)), mode='median')
             gain = np.pad(gain, ((0, 0), (0, 0), (0, zes)), mode='median')
             frac_lost = np.pad(frac_lost, ((0, 0), (0, zes)), mode='median')
@@ -1423,8 +1424,8 @@ class ComputeHolographicSensitivity(task.SingleTask):
         auto_pol = np.array(["Y" if (ai // 256) % 2 == 0 else "X" for ai in auto_inputs])
 
         # Initialize the radiometer and counter
-        radiometer = np.zeros((nfreq, npol, nt), dtype=np.float32)
-        radiometer_counter = np.zeros((nfreq, npol, nt), dtype=np.float32)
+        radiometer = np.zeros((nfreq, npol, ntime), dtype=np.float32)
+        radiometer_counter = np.zeros((nfreq, npol, ntime), dtype=np.float32)
 
         for ii, (cha, chap) in enumerate(zip(auto_stack_id, auto_pol)):
 
