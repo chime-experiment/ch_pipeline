@@ -353,21 +353,18 @@ class DailyProcessing(base.ProcessingType):
             # A good looking interval from late 2019 (determined from run
             # notes, dataflags and data availability)
             {"start": "CSD2143", "end": "CSD2148"},
-            ## Runs processed for rev_00
-            # October run
-            {"start": "20181011T140000Z", "end": "20181019T220000Z"},
-            # Winter run periods - as defined by Mateus
-            # Pass A (start trimmed for timing solutions)
-            {"start": "20181223T000000Z", "end": "20181229T000000Z"},
-            # Pass B
-            {"start": "20190111T000000Z", "end": "20190207T000000Z"},
-            # Pass C (end trimmed for timing sols)
-            {"start": "20190210T000000Z", "end": "20190304T000000Z"},
-            # April run
-            {"start": "20190406T000000Z", "end": "20190418T000000Z"},
-            # July run
-            {"start": "20190713T000000Z", "end": "20190723T000000Z"},
         ],
+        # intervals for which we process only one day a week
+        "intervals_weekly": [
+            ## Runs for which dataflags and calibration tables are available for
+            {"start": "20181011T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181012T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181013T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181014T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181015T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181016T140000Z", "end": "20201021T220000Z"},
+            {"start": "20181017T140000Z", "end": "20201021T220000Z"},
+            ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Frequencies to process
@@ -405,8 +402,12 @@ class DailyProcessing(base.ProcessingType):
 
         # Process the intervals
         self._intervals = []
+        self._intervals_weekly = []
         for t in self._revparams["intervals"]:
             self._intervals.append((t["start"], t.get("end", None)))
+        if "intervals_weekly" in self._revparams:
+            self._intervals_weekly = [(t["start"], t.get("end", None)) for t in self._revparams["intervals_weekly"]]
+
         self._padding = self._revparams["padding"]
 
     def _available_tags(self):
@@ -420,12 +421,20 @@ class DailyProcessing(base.ProcessingType):
         # - Need to find all correlator data in the range
         # - Figure out which ones are on cedar
         # - Figure out which sidereal days are covered by this range
+        # - What do we have calibration tables for
 
         csds = []
 
         # For each interval find and add all CSDs that have not already been added
         for interval in self._intervals:
-            csd_i = csds_in_range(*interval)
+            csd_i = csds_in_range(*interval, step=1)
+            csd_set = set(csds)
+            csds += [csd for csd in csd_i if csd not in csd_set]
+
+        # For each intervals_weekly, find and add all CSDs, skipping every 7
+        for interval in self._intervals_weekly:
+            # TODO this only has the first day of the week
+            csd_i = csds_in_range(*interval, step=7)
             csd_set = set(csds)
             csds += [csd for csd in csd_i if csd not in csd_set]
 
@@ -465,7 +474,26 @@ class TestDailyProcessing(DailyProcessing):
     )
 
 
-def csds_in_range(start, end):
+def datetime_to_csd(day):
+    # TODO does this not already exist somewhere?
+    """Convert a day to desired CSD format.
+
+    The start and end parameters must either be strings of the form "CSD\d+"
+    (i.e. CSD followed by an int), which specifies an exact CSD start, or a
+    form that `ephemeris.ensure_unix` understands.
+    """
+    import math
+    from ch_util import ephemeris
+
+    if day.startswith("CSD"):
+        day_csd = int(day[3:])
+    else:
+        day_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(day))
+        day_csd = math.floor(day_csd)
+
+    return day_csd
+
+def csds_in_range(start, end, step=1):
     """Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
@@ -479,29 +507,18 @@ def csds_in_range(start, end):
     end : str or parseable to datetime
         End of interval. If `None` use now. Note that for CSD intervals the
         end is *inclusive* (unlike a `range`).
+    step : int
+        Incrementation. Default is daily.
 
     Returns
     -------
     csds : list of ints
     """
-
-    import math
-    from ch_util import ephemeris
-
     if end is None:
         end = datetime.datetime.utcnow()
 
-    if start.startswith("CSD"):
-        start_csd = int(start[3:])
-    else:
-        start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
-        start_csd = math.floor(start_csd)
+    start_csd = datetime_to_csd(start)
+    end_csd = datetime_to_csd(end)
 
-    if end.startswith("CSD"):
-        end_csd = int(end[3:])
-    else:
-        end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
-        end_csd = math.ceil(end_csd)
-
-    csds = [day for day in range(start_csd, end_csd + 1)]
+    csds = [day for day in range(start_csd, end_csd + 1, step)]
     return csds
