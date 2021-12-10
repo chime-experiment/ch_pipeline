@@ -353,20 +353,15 @@ class DailyProcessing(base.ProcessingType):
             # A good looking interval from late 2019 (determined from run
             # notes, dataflags and data availability)
             {"start": "CSD2143", "end": "CSD2148"},
-            ## Runs processed for rev_00
-            # October run
-            {"start": "20181011T140000Z", "end": "20181019T220000Z"},
-            # Winter run periods - as defined by Mateus
-            # Pass A (start trimmed for timing solutions)
-            {"start": "20181223T000000Z", "end": "20181229T000000Z"},
-            # Pass B
-            {"start": "20190111T000000Z", "end": "20190207T000000Z"},
-            # Pass C (end trimmed for timing sols)
-            {"start": "20190210T000000Z", "end": "20190304T000000Z"},
-            # April run
-            {"start": "20190406T000000Z", "end": "20190418T000000Z"},
-            # July run
-            {"start": "20190713T000000Z", "end": "20190723T000000Z"},
+            # intervals for which we process only one day every 7 days
+            ## dataflags and calibration tables are currently only available until October 2020
+            {"start": "CSD1878", "end": "CSD2539", "step": 7},
+            {"start": "CSD1879", "end": "CSD2539", "step": 7},
+            {"start": "CSD1880", "end": "CSD2539", "step": 7},
+            {"start": "CSD1881", "end": "CSD2539", "step": 7},
+            {"start": "CSD1882", "end": "CSD2539", "step": 7},
+            {"start": "CSD1883", "end": "CSD2539", "step": 7},
+            {"start": "CSD1884", "end": "CSD2539", "step": 7},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
@@ -406,7 +401,9 @@ class DailyProcessing(base.ProcessingType):
         # Process the intervals
         self._intervals = []
         for t in self._revparams["intervals"]:
-            self._intervals.append((t["start"], t.get("end", None)))
+            self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
+
+
         self._padding = self._revparams["padding"]
 
     def _available_tags(self):
@@ -454,7 +451,11 @@ class TestDailyProcessing(DailyProcessing):
     default_params = DailyProcessing.default_params.copy()
     default_params.update(
         {
-            "intervals": [{"start": "20181224T000000Z", "end": "20181228T000000Z"}],
+            "intervals": [
+                {"start": "20181224T000000Z", "end": "20181228T000000Z"},
+                # 1878 and 1885 have files available online
+                {"start": "CSD1878", "end": "CSD1889", "step": 7},
+            ],
             "freq": [400, 416],
             "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
@@ -465,7 +466,7 @@ class TestDailyProcessing(DailyProcessing):
     )
 
 
-def csds_in_range(start, end):
+def csds_in_range(start, end, step=1):
     """Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
@@ -503,5 +504,5 @@ def csds_in_range(start, end):
         end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
         end_csd = math.ceil(end_csd)
 
-    csds = [day for day in range(start_csd, end_csd + 1)]
+    csds = [day for day in range(start_csd, end_csd + 1, step)]
     return csds
