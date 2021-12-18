@@ -55,7 +55,7 @@ class ApplyTimingCorrection(task.SingleTask):
         flags = None
 
         # Query flag database for date ranges that need timing correction
-        if self.rank == 0:
+        if self.comm.rank == 0:
             connect_database()
 
             needs_timing_correction_type = df.DataFlagType.get(
