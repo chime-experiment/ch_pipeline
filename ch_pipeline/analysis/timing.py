@@ -70,7 +70,7 @@ class ApplyTimingCorrection(task.SingleTask):
             # We are extracting the time ranges here from the DataFlag objects
             # to avoid potential issues with non-0 ranks accidentally doing database queries later on
             flags = list(
-                df.DataFlag.select(df.DataFlag.start_time, df.DataFlag.end_time)
+                df.DataFlag.select(df.DataFlag.start_time, df.DataFlag.finish_time)
                 .where(df.DataFlag.type == needs_timing_correction_type)
                 .dicts()
             )
