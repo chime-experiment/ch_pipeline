@@ -475,36 +475,27 @@ class SpectroscopicCatalog(BaseInject):
     nscale : float
         Inject the model for the signal into all frequency bins
         within +/- nscale * scale.
-    perturb_z : float
-        Perturb the redshifts by a random error drawn from a Gaussian
-        with standard deviation equal to the "redshift/z_error" dataset,
-        or if that dataset is entirely zero, from a tracer-specific
-        distribution inferred from the catalog name.
-    filename : str
-        Name of the hdf5 file containing the spectroscopic catalog.
     """
 
     amplitude = config.Property(proptype=float, default=1.0)
     scale = config.Property(proptype=float, default=0.0)
     nscale = config.Property(proptype=float, default=5.0)
-    perturb_z = config.Property(proptype=bool, default=False)
-    filename = config.Property(proptype=str, default="")
 
-    def setup(self, manager):
+    def setup(self, manager, catalog):
         """Save the spectroscopic that will be used by process.
 
         Parameters
         ----------
         manager : ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
-        source_cat : SpectroscopicCatalog
+        catalog : SpectroscopicCatalog
             Catalog of sources with redshift information.
         """
 
         super().setup(manager)
 
         # Save the catalog as attribute
-        self.catalog = containers.SpectroscopicCatalog.from_file(self.filename)
+        self.catalog = catalog
         self.catalog_tag = self.catalog.attrs.get("tag", None)
 
         # Save attributes describing the signal model to the output container
@@ -580,51 +571,6 @@ class SpectroscopicCatalog(BaseInject):
             raise ValueError("Input is missing a required redshift table.")
 
         z = catalog["redshift"]["z"][:]
-
-        if self.perturb_z:
-            zerr = catalog["redshift"]["z_error"][:]
-            if np.any(zerr):
-                self.log.info("Perturbing redshift by error in catalog.")
-                z = z + np.random.normal(scale=zerr)
-
-            else:
-
-                if "tracer" in catalog.index_map["object_id"].dtype.fields:
-                    tracer = catalog.index_map["object_id"]["tracer"][:]
-
-                    utracers, uindex = np.unique(tracer, return_inverse=True)
-                    for uu, utracer in enumerate(utracers):
-                        this_tracer = np.flatnonzero(uu == uindex)
-                        self.log.info(
-                            f"Perturbing {this_tracer.size} source redshifts by "
-                            f"{utracer} error distribution."
-                        )
-                        z[this_tracer] = perturb_redshift(
-                            z[this_tracer], tracer=utracer
-                        )
-
-                else:
-
-                    tracer = catalog.attrs.get("tracer", None)
-                    if tracer is None:
-                        for tr in ["ELG", "LRG", "QSO"]:
-                            if tr in catalog.attrs["tag"]:
-                                tracer = tr
-                                break
-
-                    if tracer is None:
-                        raise RuntimeError(
-                            "To perturb redshifts, must provide "
-                            "the redshift error dataset OR the "
-                            "name of the tracer in the catalog "
-                            "'object_id', 'tracer' attribute, "
-                            "or 'tag' attribute."
-                        )
-
-                    self.log.info(
-                        f"Perturbing redshift by {tracer} error distribution."
-                    )
-                    z = perturb_redshift(z, tracer=tracer)
 
         sfreq = NU21 / (z + 1.0)  # MHz
 
@@ -749,8 +695,6 @@ class Beam(BaseInject):
             [np.argmin(np.abs(nu - self.telescope.frequencies)) for nu in freq]
         )
 
-        p_stokesI = np.array([[1.0, 0.0], [0.0, 1.0]])
-
         angpos = np.array([(0.5 * np.pi - dec) * np.ones_like(ha), ha]).T
 
         primary_beam = np.zeros((freq.size, ha.size), dtype=np.float64)
@@ -764,7 +708,7 @@ class Beam(BaseInject):
             else:
                 bjj = bii
 
-            primary_beam[ff] = np.sum(bii * np.dot(bjj.conjugate(), p_stokesI), axis=1)
+            primary_beam[ff] = np.sum(bii * bjj.conjugate(), axis=1)
 
         return primary_beam
 
@@ -943,116 +887,6 @@ class SpectroscopicCatalogWithBeam(Beam, SpectroscopicCatalog):
 
 class SpectroscopicCatalogWithBeamExternal(BeamExternal, SpectroscopicCatalog):
     """Inject a spectroscopic catalog using an external beam model."""
-
-
-def qso_velocity_error(nsample):
-    """Draw random velocity errors for quasars.
-
-    Parameters
-    ----------
-    nsample: int
-        Number of random numbers to draw.
-
-    Returns
-    -------
-    dv: np.ndarray[nsample,]
-        Velocity errors in km / s.
-    """
-
-    QSO_SIG1 = 150.0
-    QSO_SIG2 = 1000.0
-    QSO_F = 4.478
-
-    dv1 = np.random.normal(scale=QSO_SIG1, size=nsample)
-    dv2 = np.random.normal(scale=QSO_SIG2, size=nsample)
-
-    u = np.random.uniform(size=nsample)
-    flag = u >= (1.0 / (1.0 + QSO_F))
-
-    dv = np.where(flag, dv1, dv2)
-
-    return dv
-
-
-def lrg_velocity_error(nsample):
-    """Draw random velocity errors for luminous red galaxies.
-
-    Parameters
-    ----------
-    nsample: int
-        Number of random numbers to draw.
-
-    Returns
-    -------
-    dv: np.ndarray[nsample,]
-        Velocity errors in km / s.
-    """
-
-    LRG_SIG = 91.8
-
-    dv = np.random.normal(scale=LRG_SIG, size=nsample)
-
-    return dv
-
-
-def elg_velocity_error(nsample):
-    """Draw random velocity errors for emission line galaxies.
-
-    Parameters
-    ----------
-    nsample: int
-        Number of random numbers to draw.
-
-    Returns
-    -------
-    dv: np.ndarray[nsample,]
-        Velocity errors in km / s.
-    """
-
-    ELG_SIG = 11.877
-    ELG_LAMBDA = -0.4028
-
-    dv = scipy.stats.tukeylambda.rvs(ELG_LAMBDA, scale=ELG_SIG, size=nsample)
-
-    return dv
-
-
-velocity_error_function_lookup = {
-    "QSO": qso_velocity_error,
-    "ELG": elg_velocity_error,
-    "LRG": lrg_velocity_error,
-}
-
-
-def perturb_redshift(z, tracer="QSO"):
-    """Perturb redshifts using a tracer specific velocity error distribution.
-
-    Parameters
-    ----------
-    z: np.ndarray[nsource,]
-        Source redshifts.
-    tracer : {"ELG"|"LRG"|"QSO"}
-        Name of the tracer.
-
-    Returns
-    -------
-    zp: np.ndarray[nsource,]
-        Source redshifts perturbed by a random velocity error.
-    """
-
-    if tracer not in velocity_error_function_lookup:
-        raise ValueError(
-            f"Do not recognize {tracer}.  Must define a method "
-            "for drawing random velocity errors for this tracer."
-        )
-
-    err_func = velocity_error_function_lookup[tracer]
-
-    dv = err_func(z.size)
-
-    dz = (1.0 + z) * dv / (C * 1e-3)
-
-    return z + dz
 
 
 def _get_baseline_info(data, telescope):
