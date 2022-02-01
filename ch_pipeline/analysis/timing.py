@@ -6,12 +6,19 @@ import os
 import numpy as np
 
 from ch_util import timing, ephemeris
-from caput import config, pipeline
+from caput import config
+from caput.pipeline import PipelineRuntimeError
 from draco.core import task
+
+# For querying DataFlag database
+from chimedb import dataflag as df
+from chimedb.core import connect as connect_database
 
 
 class ApplyTimingCorrection(task.SingleTask):
     """Apply a timing correction to the visibilities.
+
+    Only runs on days flagged by needs_timing_correction.
 
     Parameters
     ----------
@@ -45,6 +52,37 @@ class ApplyTimingCorrection(task.SingleTask):
             Note that the timing correction must *already* be referenced with respect
             to the times that were used to calibrate if processing stacked data.
         """
+        flags = None
+
+        # Query flag database for date ranges that need timing correction
+        if self.comm.rank == 0:
+            connect_database()
+
+            needs_timing_correction_type = df.DataFlagType.get(
+                name="needs_timing_correction"
+            )
+
+            if needs_timing_correction_type is None:
+                raise RuntimeError(
+                    "Could not find data flag type `needs_timing_correction`"
+                )
+
+            # We are extracting the time ranges here from the DataFlag objects
+            # to avoid potential issues with non-0 ranks accidentally doing database queries later on
+            flags = list(
+                df.DataFlag.select(df.DataFlag.start_time, df.DataFlag.finish_time)
+                .where(df.DataFlag.type == needs_timing_correction_type)
+                .dicts()
+            )
+
+            self.log.debug(
+                f"Queried database and received {len(flags)} needs_timing_correction flags."
+            )
+
+        # Share timing correction flags with other nodes
+        # Save flags to class attribute
+        self.flags = self.comm.bcast(flags, root=0)
+
         if not isinstance(tcorr, list):
             tcorr = [tcorr]
         self.tcorr = tcorr
@@ -82,6 +120,35 @@ class ApplyTimingCorrection(task.SingleTask):
 
         # If requested, extract the input flags
         input_flags = tstream.input_flags[:] if self.use_input_flags else None
+
+        # Check needs_timing_correction flags time ranges to see if input timestream
+        # falls within the interval
+        needs_timing_correction = False
+        for flag in self.flags:
+            if (
+                timestamp[0] >= flag["start_time"]
+                and timestamp[0] <= flag["finish_time"]
+            ):
+                if timestamp[-1] >= flag["finish_time"]:
+                    raise PipelineRuntimeError(
+                        f"Data covering {timestamp[0]} to {timestamp[-1]} partially overlaps "
+                        f"needs_timing_correction DataFlag covering {ephemeris.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
+                        f"to {ephemeris.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}."
+                    )
+                else:
+                    self.log.info(
+                        f"Data covering {timestamp[0]} to {timestamp[-1]} flagged by "
+                        f"needs_timing_correction DataFlag covering {ephemeris.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
+                        f"to {ephemeris.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}. Timing correction will be applied."
+                    )
+                    needs_timing_correction = True
+                    break
+
+        if not needs_timing_correction:
+            self.log.info(
+                f"Data in span {ephemeris.unix_to_datetime(timestamp[0]).strftime('%Y%m%dT%H%M%SZ')} to {ephemeris.unix_to_datetime(timestamp[-1]).strftime('%Y%m%dT%H%M%SZ')} does not need timing correction"
+            )
+            return tstream
 
         # Find the right timing correction
         for tcorr in self.tcorr:
@@ -281,7 +348,7 @@ class ConstructTimingCorrection(task.SingleTask):
             only_correction=True,
             distributed=self.comm.size > 1,
             comm=self.comm,
-            **self.kwargs
+            **self.kwargs,
         )
 
         self.log.info(

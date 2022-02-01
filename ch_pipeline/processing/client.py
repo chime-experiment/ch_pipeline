@@ -72,7 +72,7 @@ PREV = PRev()
 @click.option(
     "--root",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    default="/project/rpp-krs/chime/chime_processed/",  # TODO: put elsewhere
+    default="/project/rpp-chime/chime/chime_processed/",  # TODO: put elsewhere
     help="Set the root directory to save processed data.",
 )
 def cli(root):
@@ -203,7 +203,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
 
     if fairshare or user_fairshare:
         # TODO: find a better way of supplying the account
-        fs = base.slurm_fairshare("rpp-krs_cpu")
+        fs = base.slurm_fairshare("rpp-chime_cpu")
 
     if fairshare and fairshare > fs[0]:
         click.echo(
