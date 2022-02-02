@@ -312,16 +312,32 @@ class BaseInject(task.SingleTask):
             List of slices into the RA/time axis.
         """
 
-        if self.nsigma > 0.0:
-            # Split the ra axis into contiguous groups
-            sigma = SIGMA["XX"] / freq / np.cos(dec)
-            nearby = np.flatnonzero(np.abs(ha) < (self.nsigma * sigma))
-            groups = _find_contiguous_slices(nearby)
+        groups = []
 
-        else:
-            # Find the nearest ra bin
-            sind = np.argmin(np.abs(ha))
-            groups = [slice(sind, sind + 1)]
+        alt = np.arcsin(
+            np.sin(dec) * np.sin(self.latitude)
+            + np.cos(dec) * np.cos(self.latitude) * np.cos(ha)
+        )
+        above_horizon = alt > 0.0
+
+        # Loop over the podal and anti-podal transit
+        for hac in [0.0, np.pi]:
+
+            dha = _correct_phase_wrap(ha - hac)
+
+            if self.nsigma > 0.0:
+                # Split the ra axis into contiguous groups
+                sigma = SIGMA["XX"] / freq / np.cos(dec)
+                nearby = np.flatnonzero(
+                    above_horizon & (np.abs(dha) < (self.nsigma * sigma))
+                )
+                groups += _find_contiguous_slices(nearby)
+
+            else:
+                # Find the nearest ra bin
+                sind = np.argmin(np.abs(dha))
+                if above_horizon[sind]:
+                    groups += [slice(sind, sind + 1)]
 
         return groups
 
