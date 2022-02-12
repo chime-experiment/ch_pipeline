@@ -927,7 +927,7 @@ class CHIMEExternalBeam(CHIME):
             map_out[:, 0] = _conv_real(
                 beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
             )
-            map_out[:, 0] = _conv_real(
+            map_out[:, 1] = _conv_real(
                 beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
             )
 
