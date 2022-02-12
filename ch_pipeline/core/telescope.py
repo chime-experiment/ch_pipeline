@@ -557,7 +557,7 @@ class CHIME(telescope.PolarisedTelescope):
         bl2 = np.around(bl1[..., 0] + 1.0j * bl1[..., 1], self._bl_tol)
 
         # Construct array of baseline lengths
-        blen = np.sum(bl1 ** 2, axis=-1) ** 0.5
+        blen = np.sum(bl1**2, axis=-1) ** 0.5
 
         if self.baseline_masking_type == "total_length":
             # Create mask of included baselines
@@ -631,7 +631,7 @@ class CHIME(telescope.PolarisedTelescope):
                 beam[:, fe, :] = beam_lookup[beamclass]
 
             self._beam_normalization = tools.invert_no_zero(
-                np.sqrt(np.sum(beam ** 2, axis=-1))
+                np.sqrt(np.sum(beam**2, axis=-1))
             )
 
     def _skip_baseline(self, bl_ind):

@@ -199,7 +199,7 @@ class RingMapMaker(task.SingleTask):
         # Estimate rms noise in the ring map by propagating estimates
         # of the variance in the visibilities
         rm.rms[:] = np.sqrt(
-            2 * np.sum(tools.invert_no_zero(invvar) * weight ** 2.0, axis=(-2, -1))
+            2 * np.sum(tools.invert_no_zero(invvar) * weight**2.0, axis=(-2, -1))
         ).transpose(1, 0, 2)
 
         # Dereference datasets
