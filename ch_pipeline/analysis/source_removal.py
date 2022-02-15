@@ -403,7 +403,7 @@ class SolveSources(task.SingleTask):
 
         # Flag out short baselines
         min_distance = np.array(self.min_distance)
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         if min_distance.size == 1:
             baseline_weight = (sep >= min_distance[0]).astype(np.float32)
         else:
@@ -884,7 +884,7 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Flag out short baselines
         min_distance = np.array(self.min_distance)
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         if min_distance.size == 1:
             baseline_weight = (sep >= min_distance[0]).astype(np.float32)
         else:
@@ -1142,7 +1142,7 @@ def kz_coeffs(m, k):
 
     assert coef.size == k * (m - 1) + 1
 
-    return coef / m ** k
+    return coef / m**k
 
 
 def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80):

@@ -906,7 +906,7 @@ class EigenCalibration(task.SingleTask):
                     resp *= np.exp(1.0j * phi0)
 
                 out_vis[ff, feeds, :] = resp
-                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err ** 2)
+                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err**2)
 
         return response
 
