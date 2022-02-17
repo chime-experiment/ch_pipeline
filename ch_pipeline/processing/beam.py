@@ -60,7 +60,7 @@ pipeline:
       params:
         node_spoof:
           cedar_online: /project/rpp-chime/chime/chime_online
-        instrument: chime26m
+        instrument: {inst}
         source_26m: *db_source_name
         start_time: {start_time}
         end_time: {end_time}
@@ -149,6 +149,7 @@ class HolographyFringestop(base.ProcessingType):
     # Parameters of the job processing
     default_params = {
         "sources": {"CygA": "CYG_A", "CasA": "CAS_A"},
+        "gated_sources": {"B0329+54": "B0329+54"},
         "start_time": "20180101T000000",
         "ha_span": 60.0,
         "num_samples": 720,
@@ -167,9 +168,10 @@ class HolographyFringestop(base.ProcessingType):
         # Query database for holography observations of given sources
         start_t = ephem.ensure_unix(self._revparams["start_time"])
         connect_db()
-        for src in self._revparams["sources"]:
+
+        def get_obs(src):
             db_src = holo.HolographySource.get(holo.HolographySource.name == src)
-            db_obs = (
+            return (
                 holo.HolographyObservation.select()
                 .where(
                     (holo.HolographyObservation.source == db_src),
@@ -179,12 +181,27 @@ class HolographyFringestop(base.ProcessingType):
                 )
                 .order_by(holo.HolographyObservation.start_time)
             )
+
+        for src in self._revparams["sources"]:
+            db_obs = get_obs(src)
             for obs in db_obs:
                 tag = f"{src}_{obs.id:0>4d}"
                 self._tags[tag] = {
                     "start": obs.start_time,
                     "end": obs.finish_time,
                     "src_db": src,
+                    "gated": False,
+                }
+
+        for src in self._revparams["gated_sources"]:
+            db_obs = get_obs(src)
+            for obs in db_obs:
+                tag = f"{src}_gated_{obs.id:0>4d}"
+                self._tags[tag] = {
+                    "start": obs.start_time,
+                    "end": obs.finish_time,
+                    "src_db": src,
+                    "gated": True,
                 }
 
         return self._tags.keys()
@@ -199,6 +216,12 @@ class HolographyFringestop(base.ProcessingType):
         # catalog so we need to map from one to the other
         src_db = self._tags[tag]["src_db"]
         jobparams["src_db"] = src_db
-        jobparams["src"] = self._revparams["sources"][src_db]
+        if self._tags[tag]["gated"]:
+            # instrument is different for gated observations
+            jobparams["src"] = self._revparams["gated_sources"][src_db]
+            jobparams["inst"] = "chime26mgated"
+        else:
+            jobparams["src"] = self._revparams["sources"][src_db]
+            jobparams["inst"] = "chime26m"
 
         return jobparams
