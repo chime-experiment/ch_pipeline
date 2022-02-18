@@ -73,7 +73,7 @@ class FringeStop(task.SingleTask):
 
         # Fringestop
         fs_vis = tools.fringestop_time(
-            tstream.vis,
+            tstream.vis[:],
             times=tstream.time,
             freq=freq,
             feeds=feeds,
