@@ -77,6 +77,7 @@ class BaseInject(task.SingleTask):
 
     polarization = config.enum(["full", "copol", "single"], default="single")
     inject = config.Property(proptype=bool, default=False)
+    anti_podal = config.Property(proptype=bool, default=False)
     nsigma = config.Property(proptype=float, default=0.0)
 
     def setup(self, manager):
@@ -90,6 +91,10 @@ class BaseInject(task.SingleTask):
         # Get the TransitTelescope object
         self.telescope = io.get_telescope(manager)
         self.latitude = np.deg2rad(self.telescope.latitude)
+
+        self.transits = [0.0, np.pi] if self.anti_podal else [0.0]
+        self.log.info("Injecting at the following hour angles:  %s" %
+                      str(self.transits))
 
         # Polarizations.
         if self.polarization == "full":
@@ -321,7 +326,7 @@ class BaseInject(task.SingleTask):
         above_horizon = alt > 0.0
 
         # Loop over the podal and anti-podal transit
-        for hac in [0.0, np.pi]:
+        for hac in self.transits:
 
             dha = _correct_phase_wrap(ha - hac)
 
