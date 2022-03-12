@@ -29,7 +29,7 @@ pipeline:
             out:        filelist
             params:
                 node_spoof:
-                    cedar_archive:  '/project/rpp-krs/chime/chime_archive/'
+                    cedar_online:  '/project/rpp-krs/chime/chime_online/'
                 instrument: 'chimetiming'
                 start_time: '20181212T000000'
                 end_time:   '20190305T000000'

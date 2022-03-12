@@ -528,7 +528,7 @@ class TransitResampler(task.SingleTask):
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
-        w = invert_no_zero(np.matmul(invert_no_zero(wgrid), lza ** 2))
+        w = invert_no_zero(np.matmul(invert_no_zero(wgrid), lza**2))
 
         return y, w
 
@@ -823,14 +823,14 @@ class ConstructStackedBeam(task.SingleTask):
 
             # Accumulate variances in quadrature.  Save in the weight dataset.
             ov[:, ss, :] += wss * cross
-            ow[:, ss, :] += wss ** 2 * invert_no_zero(weight)
+            ow[:, ss, :] += wss**2 * invert_no_zero(weight)
 
             # Increment counter
             counter[:, ss, :] += wss
 
         # Divide through by counter to get properly weighted visibility average
         ov[:] *= invert_no_zero(counter)
-        ow[:] = counter ** 2 * invert_no_zero(ow[:])
+        ow[:] = counter**2 * invert_no_zero(ow[:])
 
         return stacked_beam
 
@@ -1080,8 +1080,8 @@ class TransitStacker(task.SingleTask):
                 axes_from=transit, distributed=transit.distributed, comm=transit.comm
             )
 
-            self.stack.add_dataset("observed_variance")
-            self.stack.add_dataset("number_of_observations")
+            self.stack.add_dataset("sample_variance")
+            self.stack.add_dataset("nsample")
             self.stack.redistribute("freq")
 
             self.log.info("Adding %s to stack." % transit.attrs["tag"])
@@ -1105,8 +1105,8 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] = coeff * transit.beam[:]
-            self.stack.weight[:] = (coeff ** 2) * invert_no_zero(transit.weight[:])
-            self.stack.number_of_observations[:] = flag.astype(np.int)
+            self.stack.weight[:] = (coeff**2) * invert_no_zero(transit.weight[:])
+            self.stack.nsample[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1137,8 +1137,8 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] += coeff * transit.beam[:]
-            self.stack.weight[:] += (coeff ** 2) * invert_no_zero(transit.weight[:])
-            self.stack.number_of_observations[:] += flag
+            self.stack.weight[:] += (coeff**2) * invert_no_zero(transit.weight[:])
+            self.stack.nsample[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance += coeff * transit.beam[:] ** 2
@@ -1149,7 +1149,7 @@ class TransitStacker(task.SingleTask):
     def process_finish(self):
         """Normalise the stack and return the result.
 
-        Includes the observed variance between transits within the stack,
+        Includes the sample variance over transits within the stack.
 
         Returns
         -------
@@ -1159,18 +1159,18 @@ class TransitStacker(task.SingleTask):
         # Divide by norm to get average transit
         inv_norm = invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
-        self.stack.weight[:] = invert_no_zero(self.stack.weight[:]) * self.norm ** 2
+        self.stack.weight[:] = invert_no_zero(self.stack.weight[:]) * self.norm**2
 
         self.variance = self.variance * inv_norm - np.abs(self.stack.beam[:]) ** 2
         self.pseudo_variance = self.pseudo_variance * inv_norm - self.stack.beam[:] ** 2
 
         # Calculate the covariance between the real and imaginary component
         # from the accumulated variance and psuedo-variance
-        self.stack.observed_variance[0] = 0.5 * (
+        self.stack.sample_variance[0] = 0.5 * (
             self.variance + self.pseudo_variance.real
         )
-        self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
-        self.stack.observed_variance[2] = 0.5 * (
+        self.stack.sample_variance[1] = 0.5 * self.pseudo_variance.imag
+        self.stack.sample_variance[2] = 0.5 * (
             self.variance - self.pseudo_variance.real
         )
 

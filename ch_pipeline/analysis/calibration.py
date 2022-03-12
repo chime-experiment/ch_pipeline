@@ -906,7 +906,7 @@ class EigenCalibration(task.SingleTask):
                     resp *= np.exp(1.0j * phi0)
 
                 out_vis[ff, feeds, :] = resp
-                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err ** 2)
+                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err**2)
 
         return response
 
@@ -1751,7 +1751,7 @@ class ThermalCalibration(task.SingleTask):
     caltime_path : string
         Full path to file describing the calibration times.
     node_spoof : dictionary
-        (default: {'cedar_archive': '/project/rpp-krs/chime/chime_archive/'} )
+        (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
     """
 

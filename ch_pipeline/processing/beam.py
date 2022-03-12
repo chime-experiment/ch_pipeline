@@ -40,7 +40,7 @@ pipeline:
       out: files_wait
       params:
         node_spoof:
-          cedar_archive: /project/rpp-krs/chime/chime_archive
+          cedar_online: /project/rpp-krs/chime/chime_online
         instrument: chime26m
         source_26m: *db_source_name
         start_time: {start_time}
@@ -102,8 +102,16 @@ pipeline:
         wterm: True
         overwrite: True
 
+    - type: ch_pipeline.analysis.decorrelation.CorrectDecorrelation
+      in: [transits_fs, inputs]
+      out: transits_corr
+      params:
+        source: *source_name
+        wterm: True
+        overwrite: True
+
     - type: ch_pipeline.analysis.beam.TransitRegridder
-      in: transits_fs
+      in: transits_corr
       out: transit_regrid
       params:
         ha_span: *hour_angle
