@@ -232,7 +232,7 @@ pipeline:
           stack_ind: 66
 
     # Make a map of the full dataset
-    - type: draco.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmap
@@ -252,7 +252,7 @@ pipeline:
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
-    - type: draco.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmapint
