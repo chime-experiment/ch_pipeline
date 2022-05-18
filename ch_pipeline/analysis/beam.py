@@ -1464,7 +1464,7 @@ class ComputeHolographicSensitivity(task.SingleTask):
 
         metrics.redistribute("freq")
 
-        sq_rad = np.sqrt(2 * radiometer)
+        sq_rad = np.sqrt(radiometer)
         sq_var = np.sqrt(var)
 
         # Zero out any nan's
