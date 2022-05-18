@@ -1406,7 +1406,10 @@ class ComputeHolographicSensitivity(task.SingleTask):
                 else:
                     copols = X_pol_flag
 
-                var[ff, ipol, :] = np.sum(2.0 * wflag[ff, 0, copols, :] * (np.abs(gain[ff, copols, :]) ** 2) * inv_weight[ff, 0, copols], axis=0)
+                var[ff, ipol, :] = np.sum(
+                    2.0 * wflag[ff, 0, copols, :] * (np.abs(gain[ff, copols, :])**2) * inv_weight[ff, 0, copols],
+                    axis=0,
+                )
                 counter[ff, ipol, :] = np.sum(wflag[ff, 0, copols, :], axis=0)
 
 	# Normalize
@@ -1427,9 +1430,9 @@ class ComputeHolographicSensitivity(task.SingleTask):
         radiometer = np.zeros((nfreq, npol, ntime), dtype=np.float32)
         radiometer_counter = np.zeros((nfreq, npol, ntime), dtype=np.float32)
 
-        for ii, (cha, chap) in enumerate(zip(auto_stack_id, auto_pol)):
+        for (cha, chap) in zip(auto_stack_id, auto_pol):
 
-            for jj, (hoa, hoap) in enumerate(zip(self._26m_POLid, self._26m_POL)):
+            for (hoa, hoap) in zip(self._26m_POLid, self._26m_POL):
 
                 try:
                     pp = self._POL_DICT[chap + hoap]
