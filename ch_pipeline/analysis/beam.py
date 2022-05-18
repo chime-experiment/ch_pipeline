@@ -45,12 +45,15 @@ class TransitGrouper(task.SingleTask):
     db_source: str
         Name of the transiting source as listed in holography database.
         This is a hack until a better solution is implemented.
+    fail_if_missing: bool
+        Raise an exception if no transits are found in the provided data.
     """
 
     ha_span = config.Property(proptype=float, default=180.0)
     min_span = config.Property(proptype=float, default=0.0)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
+    fail_if_missing = config.Property(proptype=bool, default=True)
 
     def setup(self, observer=None):
         """Set the local observers position if not using CHIME.
@@ -78,6 +81,7 @@ class TransitGrouper(task.SingleTask):
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
+        self.n_processed = 0
 
         # Get list of holography observations
         # Only allowed to query database from rank0
@@ -166,15 +170,21 @@ class TransitGrouper(task.SingleTask):
     def _finalize_transit(self):
         """Concatenate grouped time streams for the currrent transit."""
 
-        # Find where transit starts and ends
+        # Check if we successfully processed a transit
         if len(self.tstreams) == 0 or self.cur_transit is None:
-            self.log.info("Did not find any transits.")
+            if self.n_processed == 0:
+                self.log.info("Did not find any transits.")
+                if self.fail_if_missing:
+                    raise PipelineRuntimeError("Did not find any transits.")
             return None
+
         self.log.debug(
             "Finalising transit for {}...".format(
                 ephem.unix_to_datetime(self.cur_transit)
             )
         )
+
+        # Find where transit starts and ends
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
@@ -214,6 +224,7 @@ class TransitGrouper(task.SingleTask):
 
         self.tstreams = []
         self.cur_transit = None
+        self.n_processed += 1
 
         return ts
 

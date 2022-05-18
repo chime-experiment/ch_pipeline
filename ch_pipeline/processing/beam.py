@@ -100,6 +100,7 @@ pipeline:
         source: *source_name
         db_source: *db_source_name
         ha_span: *hour_angle
+        fail_if_missing: True
 
     - type: ch_pipeline.core.dataquery.QueryInputs
       in: transits
