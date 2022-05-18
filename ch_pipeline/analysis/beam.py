@@ -1299,6 +1299,20 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         return files
 
 class ComputeHolographicSensitivity(task.SingleTask):
+    """Compute the sensitivity of the holographic visibilities.
+
+    This is done in two ways: the observed variance in the data is
+    averaged over all holographic baselines, and the expected noise
+    is evaluated from the radiometer equation using the 26m and CHIME
+    autocorrelations.
+
+    Parameters
+    ----------
+    gridding_factor : int
+        The relative sampling cadence between holography and the
+        `chimestack` acquisition.
+
+    """
 
     nan_check = config.Property(default=False, proptype=bool)
     nan_skip = config.Property(default=False, proptype=bool)
@@ -1321,6 +1335,22 @@ class ComputeHolographicSensitivity(task.SingleTask):
         self._26m_POL = ["Y", "X"]
 
     def process(self, transit, ch_data):
+        """Compute the holographic sensitivity.
+
+        Parameters
+        ----------
+        transit : TrackBeam
+            A fringestopped holography transit.
+        ch_data : andata.CorrData
+            The `chimestack` acquisition overlapping the transit.
+
+        Returns
+        -------
+        metrics : SystemSensitivity
+            Container holding a `measured` and `radiometer` estimate
+            of the holographic sensitivity.
+
+        """
 	# Distribute both datasets over frequency.
         transit.redistribute("freq")
         ch_data.redistribute("freq")
@@ -1480,17 +1510,36 @@ class ComputeHolographicSensitivity(task.SingleTask):
         return metrics
 
 class ApplyRFIMask(task.SingleTask):
+    """Apply an RFI mask to a holography transit.
 
-    # Following are the two currently supported mask types 
+    Parameters
+    ----------
+    mask_type : string ('frequency' or 'frequency-time')
+        Whether to resolve the mask in time.
+            'frequency' - flag the entire frequency if a majority
+            of time samples are bad
+            'frequency-time' - use the full 2D mask
 
-    # Mask out entire frequencies, if most time samples are bad
-    majority_mask = config.Property(default=True, proptype=bool)
+    """
 
-    # Apply the mask with full time resolution
-    full_mask = config.Property(default=False, proptype=bool)
+    mask_type = config.enum(["frequency", "frequency-time"])
 
     def process(self, transit, mask):
+        """Apply the mask.
 
+        Parameters
+        ----------
+        transit : TrackBeam
+            The holography transit to mask.
+        mask : RFIMas
+            The mask to apply.
+
+        Returns
+        -------
+        transit : TrackBeam
+            The holography transit, masked in-place.
+
+        """
         # Redistribute along the frequency axis
         transit.redistribute("freq")
 
@@ -1511,7 +1560,7 @@ class ApplyRFIMask(task.SingleTask):
         )
 
         # Mask out the entire frequency if most time samples are bad
-        if self.majority_mask:
+        if self.mask_type == "frequency":
 
              rfimask1d = np.median(ma, axis=1)
 
@@ -1519,7 +1568,7 @@ class ApplyRFIMask(task.SingleTask):
              weight *= rfimasak1d[local_slice, None, None, None]
 
         # Multiply the mask against both the beam and weight
-        if self.full_mask:
+        else:
              beam[..., :] *= ma[local_slice, None, None, :]
              weight[..., :] *= ma[local_slice, None, None, :]
 
