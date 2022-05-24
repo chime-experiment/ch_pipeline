@@ -101,6 +101,7 @@ pipeline:
         db_source: *db_source_name
         ha_span: *hour_angle
         fail_if_missing: True
+        check_dataset_id: {check_dset}
 
     - type: ch_pipeline.core.dataquery.QueryInputs
       in: transits
@@ -159,6 +160,7 @@ class HolographyFringestop(base.ProcessingType):
         "ompnum": 12,
         "time": "0-0:15:00",
         "timing_corr": "/project/rpp-chime/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
+        "check_dset": False,
     }
     default_script = DEFAULT_SCRIPT
 
@@ -221,6 +223,7 @@ class HolographyFringestop(base.ProcessingType):
             # instrument is different for gated observations
             jobparams["src"] = self._revparams["gated_sources"][src_db]
             jobparams["inst"] = "chime26mgated"
+            jobparams["check_dset"] = True
         else:
             jobparams["src"] = self._revparams["sources"][src_db]
             jobparams["inst"] = "chime26m"
