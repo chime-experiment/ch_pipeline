@@ -41,7 +41,7 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
 import os
 
 from caput import mpiutil, config, pipeline
-from draco.core import task
+from draco.core import task, containers
 from chimedb import data_index as di
 from ch_util import tools, ephemeris, finder, layout
 
@@ -652,6 +652,75 @@ class QueryInputs(task.MPILoggedTask):
         mpiutil.world.Barrier()
 
         return inputs
+
+
+class QueryCHIMEGains(task.SingleTask):
+    """Find CHIME gains corresponding to the time of given data.
+
+    Query the database for CHIME gains derived within +/- 12 hours
+    of a time inferred from the given data container.
+
+    Attributes
+    ----------
+    node_spoof : dict
+        Host and directory in which to find data.
+    """
+
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+
+    def process(self, data):
+        """Find the overlapping CHIME gains. If the data container has a `time`
+        axis, will use the first sample as the reference time. Otherwise it will
+        look for a `transit_time` attribute. If that also fails, an exception is
+        raised.
+
+        Parameters
+        ----------
+        data : draco.core.containers.ContainerBase
+            The data to extract a reference time from.
+
+        Returns
+        -------
+        fname : str
+            The filename of the gain data. If no file is found for the given
+            time, an empty string is returned.
+        """
+
+        # figure out reference time from data
+        if "time" in data.index_map:
+            t0 = data.index_map["time"][0]
+        elif "transit_time" in data.attrs:
+            t0 = float(data.attrs["transit_time"])
+        else:
+            raise pipeline.PipelineConfigError(
+                f"Could not find a reference time in data container of type {type(data)}."
+            )
+
+        # make query on one node, then broadcast
+        files = None
+        if self.comm.rank == 0:
+
+            f = finder.Finder(node_spoof=self.node_spoof)
+            f.set_time_range(
+                ephemeris.unix_to_datetime(t0 - 3600 * 12),
+                ephemeris.unix_to_datetime(t0 + 3600 * 12),
+            )
+            f.filter_acqs(
+                (di.ArchiveInst.name == "chime") & (di.AcqType.name == "gain")
+            )
+            files = f.get_results()
+
+        files = self.comm.bcast(files, root=0)
+        self.comm.Barrier()
+
+        # return the filename
+        if len(files) == 0:
+            self.log.warning(f"Did not find CHIME gains for time {t0}.")
+            return ""
+        elif len(files) > 1:
+            self.log.warning(f"Found more than one gain file for time {t0}.")
+
+        return files[0]
 
 
 def finder_from_spec(spec, node_spoof=None):
