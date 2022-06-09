@@ -1286,6 +1286,41 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         return files
 
 
+class ConfirmGainFiles(task.SingleTask):
+    """Confirm that a gain file was found before allowing the transit container
+    through.
+
+    Attributes
+    ----------
+    which_out : str
+        Which of the inputs to pass through. Accepts "gain" or "transit".
+    """
+
+    which_out = config.enum(["gain", "transit"], default="transit")
+
+    def process(self, transit, gain_fname):
+        """Allow transit through only if the gain file is not empty.
+
+        Parameters
+        ----------
+        transit : draco.core.containers.ContainerBase
+            The container to pass along.
+        gain_fname : str
+            Filename for the gain.
+
+        Returns
+        -------
+        output : draco.core.containers.ContainerBase or str
+            Passes along the input container (or the gain filename) if the gain
+            filename was not an empty string, otherwise returns `None`.
+        """
+
+        if gain_fname == "" or gain_fname is None:
+            return None
+
+        return transit if self.which_out == "transit" else gain_fname
+
+
 def unwrap_lha(lsa, src_ra):
     """Convert LSA into HA for a source's RA. Ensures HA is monotonically increasing.
 
