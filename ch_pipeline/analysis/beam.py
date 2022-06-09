@@ -1039,6 +1039,51 @@ class ApplyHolographyGains(task.SingleTask):
         return track
 
 
+class ApplyCHIMEGains(task.SingleTask):
+    """Apply CHIME gains to a processed holgoraphy transit.
+
+    Attributes
+    ----------
+    overwrite : bool
+        If `True`, will apply gains to the input container inplace.
+    """
+
+    overwrite = config.Property(proptype=bool, default=False)
+
+    def process(self, transit, gain):
+        """Apply CHIME gains to the transit.
+
+        Parameters
+        ----------
+        transit : draco.core.containers.TrackBeam
+            The transit to apply gains to.
+        gain : ch_util.andata.CalibrationGainData
+            CHIME gains.
+        """
+
+        # sort gain input axis to match transit
+        input_ind = np.argwhere(
+            transit.input[:, np.newaxis] == gain.input[:],
+            axis=1,
+        )
+
+        # extract gain array
+        g = gain.gain[0][:, input_ind]
+        # make sure we are not modifying the autos
+        g[:, transit.attrs["auto_ind"]] = 1.0
+
+        if self.overwrite:
+            out = transit.copy()
+        else:
+            out = transit
+
+        # apply gain
+        out.beam[:] *= g[:, np.newaxis, :, np.newaxis]
+        out.weight[:] *= invert_no_zero(np.abs(g) ** 2)[:, np.newaxis, :, np.newaxis]
+
+        return out
+
+
 class TransitStacker(task.SingleTask):
     """Stack a number of transits together.
 
