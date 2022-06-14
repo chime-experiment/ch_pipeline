@@ -19,7 +19,14 @@ from chimedb.core import connect as connect_database
 from draco.core import task, io
 from draco.util import regrid
 from draco.analysis.transform import Regridder
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
+from draco.core.containers import (
+    ContainerBase,
+    SiderealStream,
+    TimeStream,
+    TrackBeam,
+    StaticGainData,
+    ContainerArray,
+)
 from draco.util.tools import invert_no_zero
 
 from ..core.containers import TransitFitParams
@@ -1084,6 +1091,173 @@ class ApplyCHIMEGains(task.SingleTask):
         return out
 
 
+class PulsarNLFit(task.SingleTask):
+    """Simultaneously fit for the CHIME beam and daily Galt telescope gains,
+    after averaging over inputs. See doclib:1450 for details and context.
+
+    Attributes
+    ----------
+    n_mode : int
+        Number of Fourier modes to fit for the beam.
+    method : str
+        Non-linear optimisation algorithm to use in `scipy.optimize.least_squares`.
+    """
+
+    n_mode = config.Property(proptype=int, default=16)
+    method = config.Property(proptype=str, default="trf")  # this is the scipy default
+
+    def _model(self, par):
+        # extract gain and beam coefficients
+        g, b = par[: 4 * (self._nt - 1)], par[4 * (self._nt - 1) :]
+        g = np.concatenate(([1.0, 1.0], g[::2] + 1j * g[1::2])).reshape((self._nt, -1))
+        b = (b[::2] + 1j * b[1::2]).reshape((-1, self.n_mode))
+
+        # construct model beam
+        b = np.matmul(self._beam_modes, b[..., np.newaxis])[..., 0]
+        b = b.T[np.newaxis, :, :].reshape((1, self._nh, 2, 2))
+
+        return (
+            g[:, np.newaxis, np.newaxis, :] * b
+        )  # inverse gain multiplying columns of Jones matrix
+
+    def process(self, transits):
+        """Fit a set of transits.
+
+        Parameters
+        ----------
+        transits : ContainerArray of TrackBeam
+            Array of transits to be fit.
+
+        Returns
+        -------
+        gains : ContainerArray of StaticGainData
+            Daily Galt gains resulting from the fit.
+        """
+
+        transits.redistribute("freq")
+
+        # store dimensions
+        self._nt = len(transits.index_map["item"])
+        self._nh = len(transits.index_map["pix"])
+
+        # modes that will be used to fit the beam
+        self._beam_modes = np.exp(
+            2j
+            * np.pi
+            * (np.arange(self.n_mode) - self.n_mode // 2)
+            * (np.arange(self._nh)[:, np.newaxis] - self._nh // 2)
+            / self._nh
+        )
+
+        # we will create a ContainerArray to hold the gains for every day, so
+        # first create a list of containers
+        auto_ind = transits.attrs["sub_attrs"][0]["auto_ind"]
+        gains = [
+            StaticGainData(
+                freq=transits.index_map["freq"],
+                input=transits.index_map["input"][auto_ind],
+            )
+            for i in range(self._nt)
+        ]
+
+        # get input properties from the database
+        pol, corri = None, None
+        if self.comm.rank == 0:
+            t0 = float(transits.attrs["sub_attrs"][0]["transit_time"])
+            corri = tools.get_correlator_inputs(
+                ephem.unix_to_datetime(t0), correlator="chime"
+            )
+            corri = tools.reorder_correlator_inputs(transits.index_map["input"], corri)
+            pol = np.array(
+                [
+                    c.pol
+                    if isinstance(c, (tools.CHIMEAntenna, tools.HolographyAntenna))
+                    else "0"
+                    for c in corri
+                ]
+            )
+        pol = self.comm.bcast(pol, root=0)
+        corri = self.comm.bcast(corri, root=0)
+
+        # sort inputs by feed for each polarisation
+        pol_ind, feeds = _sort_pol_by_feed(corri, pol, auto_ind)
+
+        # perform non-linear fit to beam Fourier modes and gain
+        par0 = np.ones(
+            4 * (self._nt - 1) + 8 * self.nmode
+        )  # 2 complex numbers per gain, 4 per HA
+        for fi in range(transits["beam"].local_shape[1]):
+
+            # arrays to hold data at this frequency
+            sh = (self._nt, self._nh, 4)
+            v = np.zeros(sh, dtype=transits["beam"].dtype)
+            vw = np.zeros(sh, dtype=float)
+            a = np.zeros(sh, dtype=transits["beam"].dtype)
+            aw = np.zeros(sh, dtype=float)
+
+            # sort by polarisation and average over inputs
+            for i in range(len(pol_ind)):
+                # co-pol
+                v_tmp = transits["beam"][:, fi, 0, pol_ind[i]]
+                w_tmp = transits["weight"][:, fi, 0, pol_ind[i]]
+                v[..., i * 3] = np.sum(v_tmp * w_tmp, axis=1) * invert_no_zero(
+                    np.sum(w_tmp), axis=1
+                )
+                vw[..., i * 3] = np.sum(w_tmp, axis=1)
+                a[..., i * 3] = transits["beam"][:, fi, 0, pol_ind_auto[i]]
+                aw[..., i * 3] = transits["weight"][:, fi, 0, pol_ind_auto[i]]
+
+                # cross-pol
+                v_tmp[:] = transits["beam"][:, fi, 1, pol_ind[i]]
+                w_tmp[:] = transits["weight"][:, fi, 1, pol_ind[i]]
+                v[..., i + 1] = np.sum(v_tmp * w_tmp, axis=1) * invert_no_zero(
+                    np.sum(w_tmp), axis=1
+                )
+                vw[..., i + 1] = np.sum(w_tmp, axis=1)
+                a[..., i + 1] = transits["beam"][:, fi, 1, pol_ind_auto[i]]
+                aw[..., i + 1] = transits["weight"][:, fi, 1, pol_ind_auto[i]]
+
+            # reshape to allow matrix operations
+            sh = (self._nt, self.n_h, 2, 2)
+            v = v.reshape(sh)
+            vw = vw.reshape(sh)
+            a = a.reshape(sh)
+            aw = aw.reshape(sh)
+
+            # weights that will be applied to the residuals
+            wgt = np.sqrt(vw)
+
+            # residuals function for this frequency
+            def resid(par):
+                # get model coefficients
+                coeff = self._model(par)
+                r = (v - np.matmul(coeff, a)) * wgt
+
+                return np.concatenate((r.real, r.imag)).flatten()
+
+            # non-linear fit
+            sol = optimize.least_squares(resid, par0, method=self.method)
+
+            if sol.success:
+                out = sol.x[::2] + 1j * sol.x[1::2]
+                # the gains are referenced to the first day
+                g = np.concatenate(([1.0, 1.0], out[: 2 * (self._nt - 1)])).reshape(
+                    (self._nt, 2)
+                )
+                for i in range(self._nt):
+                    gains[i].gain[fi] = g[i]
+                    gains[i].weight = 1.0
+            else:
+                self.log.warning(
+                    f"Fit failed for frequency {fi} ({transits.index_map['freq'][transits['beam'].local_offset[1] + fi]} MHz)."
+                )
+                for i in range(self._nt):
+                    gains[i].gain[fi] = 1.0
+                    gains[i].weight = 0.0
+
+        return ContainerArray(gains)
+
+
 class TransitStacker(task.SingleTask):
     """Stack a number of transits together.
 
@@ -1414,3 +1588,28 @@ def get_holography_obs(src):
         holography.HolographyObservation.source == db_src
     )
     return db_obs
+
+
+def _sort_pol_by_feed(corri, pol, auto_ind):
+    # sort inputs by polarisation, separate autos
+    pol_ind_E, pol_ind_S = (
+        [i for i in np.where(pol == "E")[0] if i not in auto_ind],
+        [i for i in np.where(pol == "S")[0] if i not in auto_ind],
+    )
+    if len(pol_ind_E) != len(pol_ind_S):
+        raise PipelineRuntimeError(
+            f"Did not find the same number of feeds for each polarisation ({len(pol_ind_E)} != {len(pol_ind_S)})."
+        )
+    pol_ind_auto = auto_ind if pol[auto_ind[0]] == "E" else auto_ind[::-1]
+
+    # sort to ensure polarisations are from the same feed
+    ant_E, ant_S = (
+        np.array([corri[i].antenna for i in pol_ind_E]),
+        np.array([corri[i].antenna for i in pol_ind_S]),
+    )
+    try:
+        pol_sort = [np.where(ant_S == a)[0][0] for a in ant_E]
+    except IndexError:
+        raise PipelineRuntimeError(f"Failed to match polarisations to antennas.")
+
+    return (pol_ind_E, pol_ind_S[pol_sort]), ant_E
