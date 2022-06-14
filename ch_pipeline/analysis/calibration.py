@@ -9,6 +9,7 @@ from scipy.constants import c as speed_of_light
 from caput import config, pipeline, memh5
 from caput import mpiarray, mpiutil
 
+from ch_util import andata
 from ch_util import tools
 from ch_util import ephemeris
 from ch_util import ni_utils
@@ -476,7 +477,7 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Copy data into container
         gain_data.gain[:] = gain
-        gain_data.weight[:] = dr
+        gain_data.weight[:] = dr[:, np.newaxis, :]
 
         return gain_data
 
@@ -2087,6 +2088,788 @@ class ThermalCalibration(task.SingleTask):
         wtemp = wtemp[sort_index]
 
         return wtime, wtemp
+
+
+class ApplyDigitalGain(task.SingleTask):
+    """Multiply calibration gains by the digital gains.
+
+    This yields the complex number that was applied
+    to the voltage data by the real-time pipeline.
+
+    Attributes
+    ----------
+    invert: bool
+        Multiply calibration gains by the *inverse* of the
+        digital gains.
+
+    normalize: bool
+        Normalize the digital gains by the median value over
+        input and frequency, so that the overall magnitude of
+        the calibration gains does not change.
+    """
+
+    invert = config.Property(proptype=bool, default=False)
+    normalize = config.Property(proptype=bool, default=False)
+
+    def setup(self, files):
+        """Load digital gain files that cover full span of time to be processed.
+
+        Parameters
+        ----------
+        files: list of str
+            List of paths to files containing the digital gains.
+        """
+        # Load all of the digital gains into a single container
+        digi_gain_data = andata.DigitalGainData.from_acq_h5(files)
+
+        # Save as class attribute
+        self.digi_gain_data = digi_gain_data
+
+        # Extract the gain
+        dg = digi_gain_data.gain[:]
+
+        # If requested, normalize the digital gains by the
+        # median over frequency and input.
+        if self.normalize:
+            self.log.info("Normalizing the digital gains.")
+            med_dg = np.median(np.abs(dg), axis=(1, 2), keepdims=True)
+            dg = dg * tools.invert_no_zero(med_dg)
+
+        # If requested, invert the digital gains.
+        if self.invert:
+            self.log.info("Inverting the digital gains.")
+            dg = tools.invert_no_zero(dg)
+
+        # Save digital gains as class attribute.
+        self.dg = dg
+
+    def process(self, gain):
+        """Lookup and apply the relevant digital gain update.
+
+        Parameters
+        ----------
+        gain: StaticGainData
+            The calibration gains at a particular time.
+
+        Returns
+        -------
+        gain: StaticGainData
+            The input container with the gain and weight dataset
+            scaled by the appropriate digital gains.
+        """
+        gain.redistribute("freq")
+
+        # Find the local frequencies
+        sfreq = gain.gain.local_offset[0]
+        efreq = sfreq + gain.gain.local_shape[0]
+
+        fsel = slice(sfreq, efreq)
+
+        # Look up the most recent digital gain update using
+        # the timestamp in the input container
+        tindex = self.digi_gain_data.search_update_time(gain.attrs["time"])[0]
+
+        # Apply in place
+        dg = self.dg[tindex][fsel]
+
+        gain.gain[:] *= dg
+        gain.weight[:] *= tools.invert_no_zero(np.abs(dg) ** 2)
+
+        # Save digital gain update_id as attribute
+        gain.attrs["digitalgain_update_id"] = self.digi_gain_data.update_id[
+            tindex
+        ].decode()
+
+        # Return the scaled gains
+        return gain
+
+
+class InvertGain(task.SingleTask):
+    """Invert gains."""
+
+    def process(self, gain):
+        """Invert gains.
+
+        Parameters
+        ----------
+        gain: StaticGainData or GainData
+
+        Returns
+        -------
+        gain: StaticGainData or GainData
+            The input container with the gain dataset
+            inverted and the uncertainty contained
+            in the weight dataset propagated appropriately.
+        """
+        g = gain.gain[:]
+        w = gain.weight[:] * np.abs(g) ** 4
+
+        gain.gain[:] = tools.invert_no_zero(g)
+        gain.weight[:] = w
+
+        return gain
+
+
+class BaseCommonMode(task.SingleTask):
+    """Base class for calculating the common-mode gain."""
+
+    use_cylinder = config.Property(proptype=bool, default=True)
+
+    def setup(self, pm):
+        """Use telescope instance to identify groups of similar feeds.
+
+        Parameters
+        ----------
+        pm : ProductManager
+            Object describing the telescope.
+        """
+
+        self.input_map = pm.telescope.feeds
+
+        self._set_groups(self.input_map)
+
+        self.dataset_map = {
+            containers.GainData: "gain",
+            containers.StaticGainMask: "mask",
+            containers.StaticGainData: "gain",
+            containers.TrackBeam: "beam",
+        }
+
+    def _set_groups(self, inputmap):
+        """Group inputs based on their cylinder and polarisation.
+
+        Override to define a different grouping.
+
+        Parameters
+        ----------
+        inputmap: list of CorrInput
+
+        Returns
+        -------
+        gindex: list of np.ndarray
+            Each element of gindex contains the indices of all inputs
+            on a particular cylinder and of a particular polarisation.
+        glookup: dict
+            Dictionary of the format {input_index: group_index}.
+        """
+
+        index = np.flatnonzero([tools.is_chime(inp) for inp in inputmap])
+
+        fmt = "{inp.pol}"
+        if self.use_cylinder:
+            fmt += "-{inp.cyl}"
+
+        idd = np.array([fmt.format(inp=inputmap[ii]) for ii in index])
+
+        self.groups = np.unique(idd)
+        self.gindex = {ug: index[idd == ug] for ug in self.groups}
+        self.glookup = {
+            ii: gg for gg, ug in enumerate(self.groups) for ii in self.gindex[ug]
+        }
+
+
+class ComputeCommonMode(BaseCommonMode):
+    """Compute the common-mode gain amplitude.
+
+    Attributes
+    ----------
+    use_amplitude: bool
+        Take the absolute value before calculating the
+        average/percentile over inputs.
+    use_percentile: bool
+        If False, then calculate the average over inputs.
+        If True, then calculate a percentile over inputs.
+    percentile: float
+        Percentile over inputs to calculate.
+        Only used if use_percentile is True.
+    """
+
+    use_amplitude = config.Property(proptype=bool, default=False)
+    use_percentile = config.Property(proptype=bool, default=True)
+    percentile = config.Property(proptype=float, default=50.0)
+
+    def process(self, data):
+        """Calculate the common-mode gain.
+
+        Parameters
+        ----------
+        data: StaticGainData or GainData
+
+        Returns
+        -------
+        group: StaticGainData or GainData
+            The common-mode gain *amplitude* for the different
+            groups of inputs.
+        """
+
+        # Determine what dataset we are dealing with based on the
+        # input container type and find the input axis of that dataset.
+        dset = self.dataset_map[data.__class__]
+        inp_axis = list(data[dset].attrs["axis"]).index("input")
+
+        data.redistribute("freq")
+
+        # Dereference datasets.
+        vis = data[dset][:].view(np.ndarray)
+        if self.use_amplitude:
+            # If requested use only the amplitude.
+            self.log.info("Taking the amplitude of the gain.")
+            vis = np.abs(vis)
+
+        iscomplex = np.any(np.iscomplex(vis))
+
+        weight = data.weight[:].view(np.ndarray)
+        flag = weight > 0.0
+
+        # Create output container
+        self.log.info(f"There are {len(self.groups):0.0f} groups in total.")
+
+        group = data.__class__(
+            attrs_from=data,
+            axes_from=data,
+            input=self.groups,
+            distributed=data.distributed,
+            comm=data.comm,
+        )
+
+        group.add_dataset("weight")
+        group.redistribute("freq")
+
+        grp_vis = group[dset][:].view(np.ndarray)
+        grp_weight = group.weight[:].view(np.ndarray)
+
+        # Calculate the mean (or percentile) for each group of inputs
+        for gg, glbl in enumerate(self.groups):
+
+            gind = self.gindex[glbl]
+
+            gsi = tuple([slice(None)] * inp_axis + [gind])
+            gso = tuple([slice(None)] * inp_axis + [gg])
+
+            norm = tools.invert_no_zero(np.sum(flag[gsi], axis=inp_axis))
+
+            if self.use_percentile:
+
+                temp_re = np.nanpercentile(
+                    np.where(flag[gsi], vis[gsi].real, np.nan),
+                    self.percentile,
+                    axis=inp_axis,
+                )
+
+                if iscomplex:
+
+                    temp_im = np.nanpercentile(
+                        np.where(flag[gsi], vis[gsi].imag, np.nan),
+                        self.percentile,
+                        axis=inp_axis,
+                    )
+
+                    temp = temp_re + 1.0j * temp_im
+
+                else:
+
+                    temp = temp_re
+
+                grp_vis[gso] = np.where(np.isfinite(temp), temp, 0.0)
+
+                grp_weight[gso] = (norm > 0).astype(np.float32)
+
+            else:
+
+                grp_vis[gso] = np.sum(flag[gsi] * vis[gsi], axis=inp_axis) * norm
+
+                grp_weight[gso] = tools.invert_no_zero(
+                    np.sum(flag[gsi] * tools.invert_no_zero(weight[gsi]), axis=inp_axis)
+                    * norm**2
+                )
+
+        return group
+
+
+class ExpandCommonMode(BaseCommonMode):
+    """Expand the common mode so that it can be applied to the original input axis."""
+
+    def process(self, cmn):
+        """Expand the common mode gain amplitude.
+
+        Parameters
+        ----------
+        cmn: StaticGainData or GainData
+            The common-mode gain *amplitude* for the different
+            groups of inputs.
+
+        Returns
+        -------
+        out: StaticGainData or GainData
+            The common-mode gain amplitude replicated for all inputs
+            in a group.
+        """
+
+        dset = self.dataset_map[cmn.__class__]
+        inp_axis = list(cmn[dset].attrs["axis"]).index("input")
+
+        cmn.redistribute("freq")
+
+        cvis = cmn[dset][:].view(np.ndarray)
+        cweight = cmn.weight[:].view(np.ndarray)
+
+        # Create output container
+        inputs = np.array(
+            [(inp.id, inp.input_sn) for inp in self.input_map],
+            dtype=[("chan_id", "u2"), ("correlator_input", "U32")],
+        )
+        ninput = inputs.size
+
+        out = cmn.__class__(
+            attrs_from=cmn,
+            axes_from=cmn,
+            input=inputs,
+            distributed=cmn.distributed,
+            comm=cmn.comm,
+        )
+
+        if "weight" not in out:
+            out.add_dataset("weight")
+
+        out.redistribute("freq")
+
+        ovis = out[dset][:].view(np.ndarray)
+        oweight = out.weight[:].view(np.ndarray)
+
+        # Loop over local inputs
+        for ii in range(ninput):
+
+            gso = tuple([slice(None)] * inp_axis + [ii])
+
+            try:
+                gg = self.glookup[ii]
+
+            except KeyError:
+                ovis[gso] = 0.0
+                oweight[gso] = 0.0
+                continue
+
+            gsi = tuple([slice(None)] * inp_axis + [gg])
+
+            ovis[gso] = cvis[gsi]
+            oweight[gso] = cweight[gsi]
+
+        # Return
+        return out
+
+
+class IdentifyNarrowbandFeatures(task.SingleTask):
+    """Identify and flag narrowband features in gains.
+
+    Attributes
+    ----------
+    tau_cut: float
+        Cutoff of the high-pass filter in microseconds.
+    epsilon: float
+        Stop-band rejection of the filter.
+    window: int
+        Width of the window, in number of frequency channnels,
+        used to estimate the noise by calculating a local
+        median absolute deviation.
+    threshold: float
+        Number of median absolute deviations beyond which
+        a frequency channel is considered an outlier.
+    nperiter: int
+        Maximum number of frequency channels to flag
+        on any iteration.
+    niter: int
+        Maximum number of iterations.
+    """
+
+    tau_cut = config.Property(proptype=float, default=0.6)
+    epsilon = config.Property(proptype=float, default=1e-10)
+    window = config.Property(proptype=int, default=151)
+    threshold = config.Property(proptype=float, default=6.0)
+    nperiter = config.Property(proptype=int, default=1)
+    niter = config.Property(proptype=int, default=40)
+
+    def process(self, data):
+        """Identify and flag narrowband features in the gain.
+
+        Parameters
+        ----------
+        data: StaticGainData
+            Gain applied to the voltage data.
+
+        Returns
+        -------
+        out: StaticGainMask
+            Mask that is True if a narrowband feature
+            has been identified for that frequency and input
+            and False otherwise.
+        """
+        # Redistribute the data over inputs
+        data.redistribute("input")
+
+        # Create a mask to hold the results
+        out = containers.StaticGainMask(
+            axes_from=data,
+            attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
+        )
+
+        out.redistribute("input")
+        omask = out.mask[:].view(np.ndarray)
+
+        # Dereference datasets and calculate amplitude
+        freq = data.freq
+        amp = np.abs(data.gain[:].view(np.ndarray))
+        weight = data.weight[:].view(np.ndarray)
+
+        nfreq, ninput = amp.shape
+
+        # Flag RFI
+        rfi_flag = ~rfi.frequency_mask(freq)
+        flag = (weight > 0.0) & rfi_flag[:, np.newaxis]
+
+        # Loop over local inputs
+        for ii in range(ninput):
+
+            self.log.debug(f"Processing input {ii} of {ninput}.")
+
+            if not np.any(flag[:, ii]):
+                weight[:, ii] = 0.0
+                continue
+
+            # Generate the mask
+            amp_hpf, flag_hpf, rsigma_hpf = rfi.iterative_hpf_masking(
+                freq,
+                amp[:, ii],
+                flag=flag[:, ii],
+                tau_cut=self.tau_cut,
+                epsilon=self.epsilon,
+                window=self.window,
+                threshold=self.threshold,
+                nperiter=self.nperiter,
+                niter=self.niter,
+            )
+
+            # Update the weight dataset to flag the narrowband features
+            omask[:, ii] = flag[:, ii] & ~flag_hpf
+
+        # Return the original gain container with modified weights
+        return out
+
+
+class ApplyGainMask(task.SingleTask):
+    """Mask the gains for specific frequencies and inputs."""
+
+    def process(self, data, mask):
+        """Set the weight to zero for bad frequencies and inputs.
+
+        Parameters
+        ----------
+        data: StaticGainData
+            Original (unmasked) gains.
+        mask: StaticGainMask
+            Mask identifying the bad frequencies and inputs.
+
+        Returns
+        -------
+        out: StaticGainData
+            The original gains with the logical NOT
+            of the mask applied to the weights.
+        """
+
+        data.redistribute("freq")
+        mask.redistribute("freq")
+
+        # Create output container
+        out = data.copy()
+        out.redistribute("freq")
+
+        flag = ~mask.mask[:]
+        out.weight[:] *= flag.astype(np.float32)
+
+        return out
+
+
+class EstimateNarrowbandGainError(task.SingleTask):
+    """Estimate error in gains due to narrowband features.
+
+    Attributes
+    ----------
+    ignore_rfi: bool
+        Ignore the persistent RFI bands when calculating
+        the gain error.  These bands are specified in
+        ch_util.rfi.frequency_mask.
+    """
+
+    ignore_rfi = config.Property(proptype=bool, default=True)
+
+    def process(self, gain, gain_mask, gain_smooth):
+        """Construct the correction for narrowband gain errors.
+
+        Parameters
+        ----------
+        gain: StaticGainData
+            Original (unmasked) gains.
+        gain_mask: StaticGainMask
+            Mask identifying narrowband features in the gains.
+        gain_smooth: StaticGainData
+            Gains after masking and interpolating
+            over the narrowband features.
+
+        Returns
+        -------
+        out: StaticGainData
+            Here the gain dataset is the ratio of the original gain
+            and a version of the gain where all narrowband feature have
+            been flagged and smoothly interpolated over.  The weight
+            dataset is 1.0 if a narrowband feature was identified at
+            that (freq, input, time) and 0.0 otherwise.
+        """
+        # Redistribute over frequency
+        gain.redistribute("input")
+        gain_mask.redistribute("input")
+        gain_smooth.redistribute("input")
+
+        # Dereference datasets
+        gt = gain.gain[:].view(np.ndarray)
+        gs = gain_smooth.gain[:].view(np.ndarray)
+
+        mask = gain_mask.mask[:].view(np.ndarray)
+
+        # Calculate the ratio of the gain and smooth version of the gain
+        out = containers.StaticGainData(
+            axes_from=gain,
+            attrs_from=gain,
+            distributed=gain.distributed,
+            comm=gain.comm,
+        )
+
+        out.add_dataset("weight")
+        out.redistribute("input")
+
+        out.gain[:] = np.where(mask, gt * tools.invert_no_zero(gs), 1.0)
+        out.weight[:] = mask.astype(np.float32)
+
+        # Return the ratio of gains
+        return out
+
+
+class ConcatenateGains(task.SingleTask):
+    """Repackage a list of StaticGainData into a single GainData container."""
+
+    def process(self, gains):
+        """Concatenate gain updates.
+
+        Parameters
+        ----------
+        gains: list of StaticGainData
+            List of gain updates.
+
+        Returns
+        -------
+        out: GainData
+            The list of gain updates sorted by time and
+            placed in a single container with a time axis.
+        """
+        # Sort by update time
+        update_time = np.array([g.attrs["time"] for g in gains])
+
+        isort = np.argsort(update_time)
+        update_time = update_time[isort]
+
+        g0 = gains[isort[0]]
+        out = containers.GainData(axes_from=g0, time=update_time, comm=g0.comm)
+        out.add_dataset("weight")
+        out.add_dataset("update_id")
+
+        out.redistribute("freq")
+
+        for tt, ss in enumerate(isort):
+
+            g = gains[ss]
+            g.redistribute("freq")
+
+            out.gain[:, :, tt] = g.gain[:]
+            out.weight[:, :, tt] = g.weight[:]
+            out.update_id[tt] = g.attrs["update_id"]
+
+        return out
+
+
+class FlagNarrowbandGainError(task.SingleTask):
+    """Mask frequencies and times where narrowband gain errors were identified.
+
+    Attributes
+    ----------
+    transition: float
+        Duration in seconds over which we transitioned between gains in the
+        real-time pipeline.
+    threshold: float
+        Mask any frequency and time where the fractional gain error is larger
+        than this threshold.
+    ignore_input_flags: bool
+        Ignore the input flags when calculating the average gain error.
+    """
+
+    transition = config.Property(proptype=float, default=600.0)
+    threshold = config.Property(proptype=float, default=1.0e-3)
+    ignore_input_flags = config.Property(proptype=bool, default=False)
+
+    def setup(self, gains):
+        """Prepare the gain errors as a function of time.
+
+        Parameters
+        ----------
+        gains: containers.GainData
+            Narrowband gain errors generated by the
+            EstimateNarrowbandGainError task.
+        """
+
+        gains.redistribute("freq")
+        self.gains = gains
+
+        self.frac_error = gains.gain[:].view(np.ndarray) - 1.0
+
+    def process(self, data):
+        """Look up appropriate gain errors, construct flag, and apply to weights.
+
+        Parameters
+        ----------
+        data: TimeStream or SiderealStream
+            Data to flag.
+
+        Returns
+        -------
+        out: RFIMask or SiderealRFIMask
+            Mask that removes frequencies and times.
+        """
+
+        # The RFIMask in draco is being overwritten by the one in ch_pipeline
+        from draco.core.containers import RFIMask
+
+        # Make sure the frequencies are the same
+        if not np.array_equal(self.gains.freq, data.freq):
+            raise ValueError("Frequencies do not match for gain error and timestream.")
+
+        data.redistribute("freq")
+
+        # Determine the time axis.  This will be an (nlsd, ntime) array.
+        if "ra" in data.index_map:
+            ra = data.ra
+            lsd = np.atleast_1d(
+                data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            )
+
+            timestamp = ephemeris.csd_to_unix(
+                lsd[:, np.newaxis] + ra[np.newaxis, :] / 360.0
+            )
+
+            out = containers.SiderealRFIMask(axes_from=data, attrs_from=data)
+
+        else:
+            # The input container has a time axis.  Use a singleton lsd axis.
+            timestamp = data.time[np.newaxis, :]
+
+            out = RFIMask(time=data.time, axes_from=data, attrs_from=data)
+
+        # Determine dimensions
+        nfreq, ninput, nupdate = self.frac_error.shape
+        nlsd, ntime = timestamp.shape
+
+        ftimestamp = timestamp.flatten()
+        nftime = ftimestamp.size
+
+        # We may want to replace the code below with something
+        # based on the dataset id.  However this time-based look up
+        # should work okay if we allow some reasonable transition window
+        # during which we take the maximum possible error.
+        index = np.zeros((2, nftime), dtype=int)
+
+        index[0] = np.digitize(ftimestamp - self.transition, self.gains.time) - 1
+        index[1] = np.digitize(ftimestamp, self.gains.time) - 1
+
+        before = index[0] < 0
+        if np.any(before):
+            nbefore = np.sum(before)
+            tbefore = np.min(ftimestamp[before] - self.gains.time.min()) / 3600.0
+            raise RuntimeError(
+                f"{nbefore:0.0f} requested timestamps are before the earliest "
+                f"gain update time by as much as {tbefore:0.1f} hours."
+            )
+
+        after = index[1] == (nftime - 1)
+        if np.any(after):
+            nafter = np.sum(after)
+            tafter = np.min(ftimestamp[after] - self.gains.time.max()) / 3600.0
+            self.log.warn(
+                f"{nafter:0.0f} requested timestamps are after the latest"
+                f"gain update time by as much as {tafter:0.1f} hours."
+            )
+
+        # Determine if we have valid input flags
+        try:
+            w = data.input_flags[:].view(np.ndarray)
+        except AttributeError:
+            no_input_flags = True
+        else:
+            if np.any(w):
+                no_input_flags = False
+                w = w.astype(np.float32)
+            else:
+                # The sidereal stacks currently set all input flags to zero.
+                # We want to ignore the input flags in this case.
+                no_input_flags = True
+
+        # Different calculation whether or not we have input flags
+        if self.ignore_input_flags or no_input_flags:
+
+            # We do not have an input flag.  Perform a straight average over all inputs.
+            err = np.mean(self.frac_error, axis=1)
+
+            # Use the gain update with the maximum error for times
+            # where there may have been a transition between two gain updates
+            err_avgi = np.where(
+                np.abs(err[:, index[0]]) > np.abs(err[:, index[1]]),
+                err[:, index[0]],
+                err[:, index[1]],
+            )
+
+        else:
+            w = w * tools.invert_no_zero(np.sum(w, axis=1, keepdims=True))
+            w = w[np.newaxis, :, :]
+
+            # Caculate the average error for the inputs that were
+            # flagged as good at each time.
+            err = np.zeros((2, nfreq, nftime), dtype=self.frac_error.dtype)
+
+            # Loop over the two possible gain updates
+            for ii, ind in enumerate(index):
+
+                for tt, uu in enumerate(ind):
+
+                    # The modulus with the number of times is for the
+                    # sidereal stacks where we have gain errors on
+                    # many days, but a single set of input flags.
+                    err[ii, :, tt] = np.sum(
+                        w[:, :, tt % ntime] * self.frac_error[:, :, uu], axis=1
+                    )
+
+            # Again, during transitions we take the update with the maximum error.
+            err_avgi = np.where(np.abs(err[0]) > np.abs(err[1]), err[0], err[1])
+
+        # Average over sidereal days
+        err_avgi_avgd = np.mean(err_avgi.reshape(nfreq, nlsd, ntime), axis=1)
+
+        # Mask any frequency and time where the magnitude
+        # of the input-averaged fractional gain error is greater
+        # than the specified threshold
+        mask = np.abs(err_avgi_avgd) > self.threshold
+
+        # The RFIMask containers are not distributed.  Perform an allgather to
+        # acquire the mask for all frequencies.
+        out.mask[:] = mpiarray.MPIArray.wrap(mask, 0, comm=data.comm).allgather()
+
+        return out
 
 
 class CalibrationCorrection(task.SingleTask):

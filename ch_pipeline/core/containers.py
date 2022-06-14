@@ -235,6 +235,22 @@ class CorrInputMonitor(ContainerBase):
         return self.index_map["coord"]
 
 
+class StaticGainMask(FreqContainer):
+    """Container for masking narrowband features in the complex gain."""
+
+    _axes = ("input",)
+
+    _dataset_spec = {
+        "mask": {
+            "axes": ["freq", "input"],
+            "dtype": np.bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        }
+    }
+
+
 class SiderealDayFlag(ContainerBase):
     """Container for holding flag that indicates
     good chime sidereal days.
