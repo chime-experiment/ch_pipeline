@@ -767,7 +767,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0
