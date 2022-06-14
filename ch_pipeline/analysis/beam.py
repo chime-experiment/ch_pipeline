@@ -1258,6 +1258,101 @@ class PulsarNLFit(task.SingleTask):
         return ContainerArray(gains)
 
 
+class PulsarEstimateBeam(task.SingleTask):
+
+    def process(self, transits, gains):
+
+        transits.redistribute("freq")
+
+        # dimensions
+        nt, nf, nh = len(transits.index_map["item"]), len(transits["beam"].local_shape[1]), len(transits.index_map["pix"])
+
+        # index of Galt autocorrelations
+        auto_ind = transits.attrs["sub_attrs"][0]["auto_ind"]
+
+        # get input properties from the database
+        pol, corri = None, None
+        if self.comm.rank == 0:
+            t0 = float(transits.attrs["sub_attrs"][0]["transit_time"])
+            corri = tools.get_correlator_inputs(
+                ephem.unix_to_datetime(t0), correlator="chime"
+            )
+            corri = tools.reorder_correlator_inputs(transits.index_map["input"], corri)
+            pol = np.array(
+                [
+                    c.pol
+                    if isinstance(c, (tools.CHIMEAntenna, tools.HolographyAntenna))
+                    else "0"
+                    for c in corri
+                ]
+            )
+        pol = self.comm.bcast(pol, root=0)
+        corri = self.comm.bcast(corri, root=0)
+
+        # sort inputs by feed for each polarisation
+        pol_ind, feeds = _sort_pol_by_feed(corri, pol, auto_ind)
+
+        # arrays to hold the sorted data
+        v = np.zeros((nt, nf, len(pol_ind[0]), nh, 4), dtype=transits["beam"].dtype)
+        sh = (nt, nf, nh, 4)
+        a = np.zeros(sh, dtype=transits["beam"].dtype)
+        aw = np.zeros(sh, dtype=float)
+
+        for i in range(len(pol_ind)):
+            # co-pol
+            v[..., i * 3] = transits["beam"][:, :, 0, pol_ind[i]]
+            a[..., i * 3] = transits["beam"][:, :, 0, pol_ind_auto[i]]
+            aw[..., i * 3] = transits["weight"][:, :, 0, pol_ind_auto[i]]
+
+            # cross-pol
+            v[..., i + 1] = transits["beam"][:, :, 1, pol_ind[i]]
+            a[..., i + 1] = transits["beam"][:, :, 1, pol_ind_auto[i]]
+            aw[..., i + 1] = transits["weight"][:, :, 1, pol_ind_auto[i]]
+
+        # reshape to allow matrix operations
+        v = v.reshape(v.shape[:-1] + (2, 2))
+        a = a.reshape(a.shape[:-1] + (2, 2))
+
+        # apply Galt gain to autos
+        g = gains["gain"][:]
+        a *= g[:, :, np.newaxis, np.newaxis, :]
+
+        # construct inverse noise matrix
+        N = aw
+        var = invert_no_zero(N)
+        for i in (0, 1):
+            N[..., i * 3] = invert_no_zero(var[..., 2 * i] + var[..., 2 * i + 1])
+        N = N[..., [0, 3]] * invert_no_zero(g * g.conj()).real[:, :, np.newaxis, :]  # only keep the diagonal
+
+        # cross-correlate to estimate beam Jones matrix
+        corr = np.sum(
+            np.matmul(v * N, np.moveaxis(a.conj(), -2, -1)),
+            axis=0
+        )
+        denom = np.sum(
+            np.matmul(a * N, np.moveaxis(a.conj(), -2, -1)),
+            axis=0
+        )
+        corr = np.matmul(corr, np.linalg.pinv(denom))
+
+        # package into a container
+        out = TrackBeam(
+            track_type="drift",
+            coords="celestial",
+            input=feeds,
+            pol=["EE", "ES", "SE", "SS"],
+            attrs_from=transits,
+            axes_from=transits,
+            distributed=transits.distributed,
+        )
+
+        out.beam[:] = np.moveaxis(corr.reshape(corr.shape[:-2] + (4,)), -1, 1)
+        # TODO: figure out weights
+        #out.weight[:] = np.moveaxis(corr.reshape(corr.shape[:-2] + (4,)), -1, 1)
+
+        return out
+
+
 class TransitStacker(task.SingleTask):
     """Stack a number of transits together.
 
