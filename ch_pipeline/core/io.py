@@ -219,6 +219,7 @@ class LoadDataFiles(task.SingleTask):
         "gain": andata.CalibrationGainReader,
         "digitalgain": andata.DigitalGainReader,
         "flaginput": andata.FlagInputReader,
+        "hfb": containers.HFBReader,
     }
 
     def setup(self, files):
@@ -255,8 +256,21 @@ class LoadDataFiles(task.SingleTask):
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
+        # Handle file lists including time ranges
+        if isinstance(file_, tuple):
+            time_range = file_[1]
+            file_ = file_[0]
+        else:
+            time_range = (None, None)
+
         # Set up a Reader class
         rd = self._acqtype_reader[self.acqtype](file_)
+
+        # Select time range
+        rd.select_time_range(time_range[0], time_range[1])
+
+        # config parameters: select freq range, beam
+        # support freq, beam selection
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
         ts = rd.read()
