@@ -222,6 +222,9 @@ class LoadDataFiles(task.SingleTask):
         "hfb": containers.HFBReader,
     }
 
+    freq_sel = config.Property(default=None)
+    beam_sel = config.Property(default=None)
+
     def setup(self, files):
         """Set the list of files to load.
 
@@ -269,8 +272,11 @@ class LoadDataFiles(task.SingleTask):
         # Select time range
         rd.select_time_range(time_range[0], time_range[1])
 
-        # config parameters: select freq range, beam
-        # support freq, beam selection
+        # Select frequency range
+        rd.freq_sel(self.freq_sel)
+
+        # Select beams
+        rd.beam_sel(self.beam_sel)
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
         ts = rd.read()
