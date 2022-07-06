@@ -361,6 +361,55 @@ class ProcessingType(object):
 
         return pending
 
+    def completed(self):
+        """Find all jobs which have been run and finished
+        with status "FINISHED" or "CRASHED". This is slow.
+
+        Returns
+        -------
+        finished : list
+            Return the tags of all successful jobs.
+        crashed : list
+            Return the tags of all failed jobs.
+        """
+        base = self.base_path
+        working_path = base / "working"
+        crashed_path = base / "crashed"
+
+        if not base.exists():
+            raise ValueError("Base path %s does not exist." % base)
+
+        file_regex = re.compile("^%s$" % self.tag_pattern)
+
+        def _read_status(path: "Path") -> str:
+            file = path / "job" / "STATUS"
+            with file.open() as fh:
+                return fh.readline().strip()
+
+        # Recursively search the target directory
+        # fmt: off
+        entries = [
+            [path.name, _read_status(path)] 
+            for path in working_path.rglob("*") 
+            if file_regex.match(path.name)
+        ]
+        # fmt: on
+
+        crashed = [name for name, status in entries if status == "CRASHED"]
+        finished = [name for name, status in entries if status == "FINISHED"]
+
+        if crashed_path.exists():
+            # fmt: off
+            additional_crashed = [
+                path.name
+                for path in crashed_path.rglob("*")
+                if file_regex.match(path.name)
+            ]
+            # fmt: on
+            crashed += additional_crashed
+
+        return sorted(finished), sorted(crashed)
+
 
 def find_venv():
     """Get the path of the current virtual environment
