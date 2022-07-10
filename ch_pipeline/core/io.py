@@ -230,21 +230,27 @@ class LoadDataFiles(task.SingleTask):
         self.files = files
 
     def process(self):
-        """Load in each sidereal day.
+        """Load and return the next available file.
+
+        Raises a PipelineStopIteration if there are no more files to load.
 
         Returns
         -------
-        ts : andata.CorrData
-            The timestream of each sidereal day.
+        data : subclass of andata.BaseData
         """
 
-        if len(self.files) == self._file_ptr:
+        return self._load_next_file()
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+
+        if self._file_ptr == len(self.files):
             raise pipeline.PipelineStopIteration
 
         # Collect garbage to remove any prior data objects
         gc.collect()
 
-        # Fetch and remove the first item in the list
+        # Fetch and remove the next item in the list
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
@@ -252,81 +258,66 @@ class LoadDataFiles(task.SingleTask):
         rd = self._acqtype_reader[self.acqtype](file_)
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        ts = rd.read()
+        data = rd.read()
 
-        # Return timestream
-        return ts
+        return data
 
 
-class LoadGainFiles(task.SingleTask):
+class LoadGainUpdates(LoadDataFiles):
     """Iterate over gain updates.
 
     Attributes
     ----------
-    acq: {"gain"|"digitalgain"}
+    acqtype: {"gain"|"digitalgain"}
         Type of acquisition.
     keep_transition: bool
         If this is True, then gain updates that were transitional
         in nature -- i.e., they executed a smooth transition to
-        new gains -- will not be loaded. By default, transitional
+        new gains -- will be loaded. By default, transitional
         gain updates are ignored.
     """
 
-    acq = config.enum(["gain", "digitalgain"], default="gain")
+    gains = None
+
+    acqtype = config.enum(["gain", "digitalgain"], default="gain")
     keep_transition = config.Property(proptype=bool, default=False)
-
-    def setup(self, files):
-        """Save the files that will be iterated over.
-
-        Parameters
-        ----------
-        files: list of str
-            List of paths to files containing the gain updates.
-        """
-        self.files = files
-        self.nfiles = len(self.files)
-
-        self.gain = None
-        self.file_ptr = 0
-
-        if self.acq == "gain":
-            self.Reader = andata.CalibrationGainData
-        else:  # self.acq == "digitalgain"
-            self.Reader = andata.DigitalGainData
 
     def process(self):
         """Load the next available gain update.
 
         Returns
         -------
-        gain: StaticGainUpdate
+        out: StaticGainUpdate
             The next gain update, packaged into a pipeline container.
         """
         # If there are no gains available, then load the next file.
-        if self.gain is None:
-            self._load_next_file()
+        if self.gains is None:
+            self.gains = self._load_next_file()
 
         # Make sure we are not dealing with a transitional gain update
         if not self.keep_transition:
 
-            while "transition" in self.update_id[self.time_ptr]:
+            while "transition" in self.gains.update_id[self._time_ptr].decode():
 
-                self.time_ptr += 1
+                self._time_ptr += 1
 
-                if self.time_ptr == self.gain.ntime:
-                    self._load_next_file()
+                if self._time_ptr == self.gains.ntime:
+                    self.gains = self._load_next_file()
 
         # Create output container
         out = containers.StaticGainData(
-            axes_from=self.gain, attrs_from=self.gain, distributed=True, comm=self.comm
+            axes_from=self.gains,
+            attrs_from=self.gains,
+            distributed=True,
+            comm=self.comm,
         )
 
         out.add_dataset("weight")
         out.redistribute("freq")
 
         # Save the update_time and update_id as attributes
-        out.attrs["time"] = self.gain.time[self.time_ptr]
-        out.attrs["update_id"] = str(self.update_id[self.time_ptr])
+        out.attrs["time"] = self.gains.time[self._time_ptr]
+        out.attrs["update_id"] = self.gains.update_id[self._time_ptr].decode()
         out.attrs["tag"] = out.attrs["update_id"]
 
         # Find the local frequencies
@@ -336,42 +327,30 @@ class LoadGainFiles(task.SingleTask):
         fsel = slice(sfreq, efreq)
 
         # Transfer over the gains and weights for the local frequencies
-        out.gain[:] = self.gain.gain[self.time_ptr][fsel]
+        out.gain[:] = self.gains.gain[self._time_ptr][fsel]
 
-        if "weight" in self.gain:
-            out.weight[:] = self.gain.weight[self.time_ptr][fsel]
+        if "weight" in self.gains:
+            out.weight[:] = self.gains.weight[self._time_ptr][fsel]
         else:
             out.weight[:] = 1.0
 
         # Increment the time pointer
-        self.time_ptr += 1
+        self._time_ptr += 1
 
         # Determine if we need to load a new file on the next iteration
-        if self.time_ptr == self.gain.ntime:
-            self.gain = None
+        if self._time_ptr == self.gains.ntime:
+            self.gains = None
 
         # Output the static gain container
         return out
 
     def _load_next_file(self):
-        """Load the next avaiable file into memory.
+        """Load the next available file into memory."""
 
-        Raises a PipelineStopIteration if there are no more files to load.
-        """
+        gains = super()._load_next_file()
+        self._time_ptr = 0
 
-        if self.file_ptr == self.nfiles:
-            raise pipeline.PipelineStopIteration
-
-        filename = self.files[self.file_ptr]
-
-        self.log.info(f"Loading gain file number {self.file_ptr} of {self.nfiles}.")
-        self.log.info(filename)
-
-        self.gain = self.Reader.from_acq_h5(filename)
-        self.update_id = self.gain.update_id[:].astype(str)
-
-        self.time_ptr = 0
-        self.file_ptr += 1
+        return gains
 
 
 class LoadSetupFile(io.BaseLoadFiles):
