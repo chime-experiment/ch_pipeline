@@ -2230,7 +2230,6 @@ class BaseCommonMode(task.SingleTask):
 
         self.dataset_map = {
             containers.GainData: "gain",
-            containers.StaticGainMask: "mask",
             containers.StaticGainData: "gain",
             containers.TrackBeam: "beam",
         }
@@ -2498,24 +2497,18 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
 
         Returns
         -------
-        out: StaticGainMask
-            Mask that is True if a narrowband feature
-            has been identified for that frequency and input
-            and False otherwise.
+        out: StaticGainData
+            Copy of the input container with the weight
+            dataset set to zero if a narrowband feature
+            has been identified for that frequency and input.
         """
+        # Create a copy of the input container
+        out = data.copy()
+        out.redistribute("input")
+        oweight = out.weight[:].view(np.ndarray)
+
         # Redistribute the data over inputs
         data.redistribute("input")
-
-        # Create a mask to hold the results
-        out = containers.StaticGainMask(
-            axes_from=data,
-            attrs_from=data,
-            distributed=data.distributed,
-            comm=data.comm,
-        )
-
-        out.redistribute("input")
-        omask = out.mask[:].view(np.ndarray)
 
         # Dereference datasets and calculate amplitude
         freq = data.freq
@@ -2551,42 +2544,9 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
             )
 
             # Update the weight dataset to flag the narrowband features
-            omask[:, ii] = flag[:, ii] & ~flag_hpf
+            oweight[:, ii] *= flag_hpf.astype(np.float32)
 
         # Return the original gain container with modified weights
-        return out
-
-
-class ApplyGainMask(task.SingleTask):
-    """Mask the gains for specific frequencies and inputs."""
-
-    def process(self, data, mask):
-        """Set the weight to zero for bad frequencies and inputs.
-
-        Parameters
-        ----------
-        data: StaticGainData
-            Original (unmasked) gains.
-        mask: StaticGainMask
-            Mask identifying the bad frequencies and inputs.
-
-        Returns
-        -------
-        out: StaticGainData
-            The original gains with the logical NOT
-            of the mask applied to the weights.
-        """
-
-        data.redistribute("freq")
-        mask.redistribute("freq")
-
-        # Create output container
-        out = data.copy()
-        out.redistribute("freq")
-
-        flag = ~mask.mask[:]
-        out.weight[:] *= flag.astype(np.float32)
-
         return out
 
 
@@ -2610,8 +2570,8 @@ class EstimateNarrowbandGainError(task.SingleTask):
         ----------
         gain: StaticGainData
             Original (unmasked) gains.
-        gain_mask: StaticGainMask
-            Mask identifying narrowband features in the gains.
+        gain_mask: StaticGainData
+            Gains after masking.
         gain_smooth: StaticGainData
             Gains after masking and interpolating
             over the narrowband features.
@@ -2631,10 +2591,19 @@ class EstimateNarrowbandGainError(task.SingleTask):
         gain_smooth.redistribute("input")
 
         # Dereference datasets
-        gt = gain.gain[:].view(np.ndarray)
+        gm = gain_mask.gain[:].view(np.ndarray)
         gs = gain_smooth.gain[:].view(np.ndarray)
 
-        mask = gain_mask.mask[:].view(np.ndarray)
+        wi = gain.weight[:].view(np.ndarray)
+        wm = gain_mask.weight[:].view(np.ndarray)
+
+        # Create a mask that identifies newly flagged data
+        mask = (wi > 0.0) & (wm == 0.0)
+
+        if self.ignore_rfi:
+            rfi_mask = rfi.frequency_mask(gain.freq)
+
+            mask &= ~rfi_mask[:, np.newaxis]
 
         # Calculate the ratio of the gain and smooth version of the gain
         out = containers.StaticGainData(
@@ -2647,7 +2616,7 @@ class EstimateNarrowbandGainError(task.SingleTask):
         out.add_dataset("weight")
         out.redistribute("input")
 
-        out.gain[:] = np.where(mask, gt * tools.invert_no_zero(gs), 1.0)
+        out.gain[:] = np.where(mask, gm * tools.invert_no_zero(gs), 1.0)
         out.weight[:] = mask.astype(np.float32)
 
         # Return the ratio of gains
