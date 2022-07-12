@@ -186,6 +186,15 @@ def pending(revision):
     "--submit/--no-submit", default=True, help="Submit the jobs to the queue (or not)"
 )
 @click.option(
+    "--profile",
+    is_flag=True,
+    default=False,
+    help=(
+        "Run the job in a profiler. This will output a `profile_<rank>.prof` file per "
+        "MPI rank if using cProfile or `profile_<rank>.txt` file for pyinstrument,"
+    ),
+)
+@click.option(
     "-f",
     "--fairshare",
     type=float,
@@ -198,7 +207,7 @@ def pending(revision):
     default=None,
     help="Only submit jobs if the user LevelFS is above this threshold.",
 )
-def generate(revision, number, max_number, submit, fairshare, user_fairshare):
+def generate(revision, number, max_number, submit, profile, fairshare, user_fairshare):
     """Submit pending jobs for REVISION (given as type:revision)."""
 
     if fairshare or user_fairshare:
@@ -226,7 +235,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
-    revision.generate(max=number_to_submit, submit=submit)
+    revision.generate(max=number_to_submit, submit=submit, profile=profile)
 
 
 def dirstats(path):

@@ -336,7 +336,7 @@ class ProcessingType(object):
         # Create instance and set the revision
         return cls(rev[-1])
 
-    def generate(self, max=10, submit=True):
+    def generate(self, max=10, submit=True, profile=False):
         """Queue up jobs that are available to run.
 
         Parameters
@@ -350,7 +350,7 @@ class ProcessingType(object):
         to_run = self.pending()[:max]
 
         for tag in to_run:
-            queue_job(self.job_script(tag), submit=submit)
+            queue_job(self.job_script(tag), submit=submit, profile=profile)
 
     def pending(self):
         """Jobs available to run."""
@@ -375,7 +375,7 @@ def find_venv():
     return os.environ.get("VIRTUAL_ENV", None)
 
 
-def queue_job(script, submit=True):
+def queue_job(script, submit=True, profile=False):
     """Queue a pipeline script given as a string."""
 
     import os
@@ -389,6 +389,10 @@ def queue_job(script, submit=True):
             cmd = "caput-pipeline queue %s"
         else:
             cmd = "caput-pipeline queue --nosubmit %s"
+        
+        if profile:
+            cmd += " --profile"
+            
         os.system(cmd % fh.name)
 
 
