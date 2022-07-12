@@ -608,7 +608,7 @@ class TestDailyProcessing(DailyProcessing):
             ],
             "freq": [400, 416],
             "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
-            "time": 60,  # How long in minutes?
+            "time": 120,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
             "ompnum": 12,  # Number of OpenMP threads
             "pernode": 4,  # Jobs per node
