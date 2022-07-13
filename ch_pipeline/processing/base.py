@@ -389,10 +389,10 @@ def queue_job(script, submit=True, profile=False):
             cmd = "caput-pipeline queue %s"
         else:
             cmd = "caput-pipeline queue --nosubmit %s"
-        
+
         if profile:
             cmd += " --profile"
-            
+
         os.system(cmd % fh.name)
 
 
