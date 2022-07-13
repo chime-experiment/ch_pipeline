@@ -23,7 +23,8 @@ Tasks
 - :py:class:`MonkeyPatchContainers`
 """
 import posixpath
-from typing import List, Tuple, Union, Any, Optional
+from typing import List, Optional, Union
+from draco.core.task import MPILoggedTask
 
 import numpy as np
 
@@ -1234,21 +1235,39 @@ def make_empty_corrdata(
     return data
 
 
-class MonkeyPatchContainers(pipeline.TaskBase):
+class MonkeyPatchContainers(MPILoggedTask):
     """Patch draco to use CHIME timestream containers.
 
     This task does nothing but perform a monkey patch on `draco.core.containers`
+
+    .. deprecated::
+        This monkey patching scheme is now deprecated. Try to use just use the usual
+        draco infrastructure instead, that is using `draco.core.containers.empty_like`
+        to create a new container and `draco.core.containers.TimeStream` as a generic
+        timestream class and `ch_pipeline.core.containers.CHIMETimeStream` as a slightly
+        more CHIME specific one.
     """
 
     def __init__(self):
+
+        self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
         import ch_pipeline.core.containers as ccontainers
         import draco.core.containers as dcontainers
 
         # Replace the routine for making an empty timestream. This needs to be replaced
         # in both draco and ch_pipeline because of the ways the imports work
-        dcontainers.empty_timestream = ccontainers.make_empty_corrdata
-        ccontainers.empty_timestream = ccontainers.make_empty_corrdata
+
+        def empty_timestream_patch(*args, **kwargs):
+            self.log.warning(
+                "This patching is deprecated. Try using `CHIMETimeStream` instead."
+            )
+            return ccontainers.make_empty_corrdata(*args, **kwargs)
+
+        empty_timestream_patch.__doc__ = ccontainers.make_empty_corrdata.__doc__
+
+        dcontainers.empty_timestream = empty_timestream_patch
+        ccontainers.empty_timestream = empty_timestream_patch
 
         # Save a reference to the original routine
         _make_empty_like = dcontainers.empty_like
@@ -1274,6 +1293,10 @@ class MonkeyPatchContainers(pipeline.TaskBase):
             """
 
             from ch_util import andata
+
+            self.log.warning(
+                "This patching is deprecated. Try using `CHIMETimeStream` instead."
+            )
 
             if isinstance(obj, andata.CorrData):
                 return dcontainers.empty_timestream(
