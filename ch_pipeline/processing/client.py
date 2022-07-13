@@ -190,8 +190,8 @@ def pending(revision):
     is_flag=True,
     default=False,
     help=(
-        "Run the job in a profiler. This will output a `profile_<rank>.prof` file per "
-        "MPI rank if using cProfile or `profile_<rank>.txt` file for pyinstrument,"
+        "Run the job in cProfile. This will output a `profile_<rank>.prof` file per "
+        "MPI rank."
     ),
 )
 @click.option(
