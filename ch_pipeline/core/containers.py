@@ -930,6 +930,66 @@ class HFBData(RawContainer, FreqContainer):
         return self.datasets["flags/hfb_weight"]
 
 
+class CHIMETimeStream(TimeStream, RawContainer):
+    """A container for CHIME visibility data.
+
+    This provides a close analog of the CorrData container but implemented via the draco
+    containers API.
+    """
+
+    # Add in the extra datasets contained within the CHIME corrdata time streams
+    _dataset_spec = {
+        "flags/dataset_id": {
+            "axes": ["freq", "time"],
+            "dtype": "U32",
+            "initialise": False,
+            "distributed": False,
+        },
+        "flags/frac_lost": {
+            "axes": ["freq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+        "flags/inputs": {
+            "axes": ["input", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+    @classmethod
+    def from_corrdata(cls, data: andata.CorrData) -> "CHIMETimeStream":
+        """Turn a CorrData container into a CHIMETimeStream.
+
+        This makes a shallow copy of the input `data`. The internals of `data` will be
+        destroyed during this process and so the container should be discarded.
+
+        Parameters
+        ----------
+        data
+            A CorrData instance to clone. This instance should be discarded after this
+            call.
+
+        Returns
+        -------
+        newdata
+            The correlator data as a CHIMETimeStream object.
+        """
+        # Copy over all the internal data store
+        newdata = cls(data_group=data, distributed=data.distributed, comm=data.comm)
+
+        # Manipulate location of weights as this is the one dataset that has a different
+        # location in CHIMETimeStream compared to CorrData
+        if "/flags/vis_weight" in newdata:
+            storage = newdata._storage_root._get_storage()
+            storage["vis_weight"] = storage["flags"].pop("vis_weight")
+            storage["vis_weight"]._name = "/vis_weight"
+
+        return newdata
+
+
 class HFBReader(tod.Reader):
     """A reader for HFB type data."""
 
