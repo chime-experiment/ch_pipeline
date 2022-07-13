@@ -40,27 +40,30 @@ from ch_util import andata
 
 from draco.core import task, io
 
+from . import containers
+
 
 class LoadCorrDataFiles(task.SingleTask):
-    """Load data from files passed into the setup routine.
+    """Load CHIME correlator data from a file list passed into the setup routine.
 
-    File must be a serialised subclass of :class:`memh5.BasicCont`.
+    File must be a serialised subclass of :class:`ch_util.andata.CorrData`.
 
+    Attributes
+    ----------
     freq_physical : list
-        List of physical frequencies in MHz.
-        Given first priority.
+        List of physical frequencies in MHz. Given highest priority.
     channel_range : list
-        Range of frequency channel indices, either
-        [start, stop, step], [start, stop], or [stop]
-        is acceptable.  Given second priority.
+        Range of frequency channel indices, either `[start, stop, step]`, `[start,
+        stop]`, or `[stop]` is acceptable. Given second priority.
     channel_index : list
-        List of frequency channel indices.
-        Given third priority.
+        List of frequency channel indices. Given third priority.
     datasets : list
-        List of datasets to load.  Defaults to all
-        available datasets.
+        List of datasets to load. Defaults to all available datasets.
     only_autos : bool
         Only load the autocorrelations.
+    use_draco_container : bool
+        Load the data into a draco compatible container rather than CorrData. Defaults
+        to True.
     """
 
     files = None
@@ -74,6 +77,8 @@ class LoadCorrDataFiles(task.SingleTask):
     datasets = config.Property(default=None)
 
     only_autos = config.Property(proptype=bool, default=False)
+
+    use_draco_container = config.Property(proptype=bool, default=True)
 
     def setup(self, files):
         """Set the list of files to load.
@@ -108,8 +113,9 @@ class LoadCorrDataFiles(task.SingleTask):
 
         Returns
         -------
-        ts : andata.CorrData
-            The timestream of each sidereal day.
+        ts : andata.CorrData or containers.CHIMETimeStream
+            The timestream file. Return type depends on the value of
+            `use_draco_container`.
         """
 
         if len(self.files) == self._file_ptr:
@@ -187,6 +193,9 @@ class LoadCorrDataFiles(task.SingleTask):
             weight_dset[:] = np.where(ts.vis[:] == 0.0, 0, 255)
 
         # Return timestream
+        if self.use_draco_container:
+            ts = containers.CHIMETimeStream.from_corrdata(ts)
+
         return ts
 
 
