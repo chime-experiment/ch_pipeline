@@ -27,10 +27,16 @@ from typing import List, Tuple, Union, Any, Optional
 
 import numpy as np
 
-from caput import memh5, pipeline, tod
+from caput import memh5, tod
 from ch_util import andata
 
-from draco.core.containers import *
+from draco.core.containers import (
+    ContainerBase,
+    StaticGainData,
+    TODContainer,
+    FreqContainer,
+    TimeStream,
+)
 
 
 class RFIMask(ContainerBase):
