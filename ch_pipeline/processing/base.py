@@ -361,14 +361,11 @@ class ProcessingType(object):
 
         return pending
 
-    def completed(self):
-        """Find all jobs which have been run and finished
-        with status "FINISHED" or "CRASHED". This is slow.
+    def crashed(self) -> list:
+        """Find all jobs which have crashed.
 
         Returns
         -------
-        finished : list
-            Return the tags of all successful jobs.
         crashed : list
             Return the tags of all failed jobs.
         """
@@ -381,34 +378,38 @@ class ProcessingType(object):
 
         file_regex = re.compile("^%s$" % self.tag_pattern)
 
-        def _read_status(path: "Path") -> str:
-            file = path / "job" / "STATUS"
-            with file.open() as fh:
-                return fh.readline().strip()
-
-        # Recursively search the target directory
-        # fmt: off
-        entries = [
-            [path.name, _read_status(path)] 
-            for path in working_path.rglob("*") 
-            if file_regex.match(path.name)
-        ]
-        # fmt: on
-
-        crashed = [name for name, status in entries if status == "CRASHED"]
-        finished = [name for name, status in entries if status == "FINISHED"]
-
+        # Get all tags in working directory
+        working_tags = {
+            path.name for path in working_path.glob("*") if file_regex.match(path.name)
+        }
+        # Get finished, waiting, and running jobs
+        finished_tags = self.ls()
+        waiting_tags, running_tags = self.queued()
+        # Any tag in the working directory that is not running or
+        # waiting should be considered as crashed. Also consider
+        # finished tags to catch edge case where a tag is in the
+        # process of being moved.
+        crashed_tags = working_tags.difference(
+            waiting_tags + running_tags + finished_tags
+        )
+        # This directory can contain job directories that have
+        # previously crash. They may be re-run without being
+        # removed, so we have to check to include only the
+        # tags that do not exist elsewhere
         if crashed_path.exists():
-            # fmt: off
-            additional_crashed = [
-                path.name
-                for path in crashed_path.rglob("*")
-                if file_regex.match(path.name)
-            ]
-            # fmt: on
-            crashed += additional_crashed
+            # Recursively search the crashed directory. Must
+            # be recursive as there can sometims be sub-folders
+            _crashed_dir = {x[0].split(os.path.sep)[-1] for x in os.walk(crashed_path)}
+            crashed_dir = {x for x in _crashed_dir if file_regex.match(x)}
+            # Get tags in crashed folder that are not also found completed or running
+            unique_crashed_dir = crashed_dir.difference(
+                set(working_tags) | set(finished_tags)
+            )
+            # take union of these sets in place
+            crashed_tags |= unique_crashed_dir
 
-        return sorted(finished), sorted(crashed)
+        # This will cast to a sorted list
+        return sorted(crashed_tags)
 
 
 def find_venv():

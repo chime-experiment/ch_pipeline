@@ -245,7 +245,7 @@ def metrics_list(revision):
     complete = revision.ls()
     available = revision.available()
     waiting, running = revision.queued()
-    failed = revision.completed()
+    failed = revision.crashed()
     # Direct copy from revision.pending method, put here
     # to avoid duplicate calls
     not_pending = set(complete) | set(waiting) | set(running)
