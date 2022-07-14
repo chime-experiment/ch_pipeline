@@ -98,12 +98,6 @@ def item():
     pass
 
 
-@cli.group()
-def metrics():
-    """Information about running processes."""
-    pass
-
-
 @type.command("list")
 @click.option(
     "-a",
@@ -235,7 +229,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     revision.generate(max=number_to_submit, submit=submit)
 
 
-@metrics.command("list")
+@item.command("metrics")
 @click.argument("revision", type=PREV)
 def metrics_list(revision):
     """Show metrics about currently running jobs for
@@ -252,7 +246,6 @@ def metrics_list(revision):
     pending = [job for job in available if job not in not_pending]
 
     click.echo(f"Fairshare: {fs[0]}")
-    click.echo(f"User Fairshare: {fs[1]}")
     click.echo(f"Available: {len(available)}")
     click.echo(f"Pending: {len(pending)}")
     click.echo(f"Waiting: {len(waiting)}")
