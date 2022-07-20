@@ -18,8 +18,11 @@ def __getattr__(name: str):
     if name == "__version__":
         # No need to re-get __version__ if it already exists
         v = globals().get(name, None)
-        from ._version import get_versions
+        if not v:
+            from ._version import get_versions
 
-        return v if v else get_versions()["version"]
+            v = get_versions()["version"]
+            globals()[name] = v
+        return v
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
