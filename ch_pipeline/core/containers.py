@@ -824,6 +824,64 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
+class AveragedHolographyBeam(FreqContainer):
+    _axes = ("freq", "pol", "pix")
+
+    _dataset_spec = {
+       "beam": {
+           "axes": ["freq", "pol", "pix"],
+           "dtype": np.complex64,
+           "initialise": True,
+           "distributed": True,
+           "distributed_axis": "freq",
+        },
+        "weight": {
+           "axes": ["freq", "pol", "pix"],
+           "dtype": np.float64,
+           "initialise": True,
+           "distributed": True,
+           "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def beam(self):
+        return self.datasets["beam"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
+
+
+class GaltAutocorrelation(FreqContainer):
+    _axes = ("freq", "pol", "pix")
+
+    _dataset_spec = {
+        "auto": {
+            "axes": ["freq", "pol", "pix"]
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+           "axes": ["freq", "pol", "pix"],
+           "dtype": np.float64,
+           "initialise": True,
+           "distributed": True,
+           "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def auto(self):
+        return self.datasets["auto"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
+
+
 def make_empty_corrdata(
     freq=None,
     input=None,
