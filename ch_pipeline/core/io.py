@@ -641,3 +641,42 @@ class FilterExisting(task.MPILoggedTask):
         )
 
         return sorted(list(new_files))
+
+class SaveGaltAutoCorrelation(task.SingleTask):
+    """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
+
+    _galt_prods = [2450, 2746, 3568]
+
+    def process(self, data):
+        """Extract the Galt autocorrelations and write them to disk.
+
+        Parameters
+        ----------
+        data: TimeStream
+            A TimeStream container holding a raw holography acquisition.
+
+        Returns
+        -------
+        autocorrelation: containers.GaltAutocorrelation
+            A GaltAutocorrelation container holding the extracted Galt autos
+            as a function of frequency, polarization product, and time.
+        """
+        # Dereference beam and weight datasets
+        beam = data.vis[:].view(np.ndarray)
+        weight = data.weight[:].view(np.ndarray)
+
+        # Load only the data corresponding to the Galt inputs
+        galt_auto = beam[:, self._galt_prods, :]
+        galt_weight = weight[:, self._galt_prods, :]
+
+        # Initialize the auto container
+        autocorrelation = GaltAutocorrelation(
+            pol=["YY", "YX", "XX"],
+            attrs_from=data,
+            time=data.time,
+        )
+
+        autocorrelation.auto = galt_auto
+        autocorrelation.weight = galt_weight
+
+        return autocorrelation

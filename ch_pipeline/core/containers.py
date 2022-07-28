@@ -853,19 +853,19 @@ class AveragedHolographyBeam(FreqContainer):
         return self.datasets["weight"]
 
 
-class GaltAutocorrelation(FreqContainer):
-    _axes = ("freq", "pol", "pix")
+class GaltAutocorrelation(FreqContainer, TODContainer):
+    _axes = ("freq", "pol", "time")
 
     _dataset_spec = {
         "auto": {
-            "axes": ["freq", "pol", "pix"]
+            "axes": ["freq", "pol", "time"],
             "dtype": np.complex64,
-            "initialise": False,
+            "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "weight": {
-           "axes": ["freq", "pol", "pix"],
+           "axes": ["freq", "pol", "time"],
            "dtype": np.float64,
            "initialise": True,
            "distributed": True,
