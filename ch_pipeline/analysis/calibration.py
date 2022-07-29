@@ -2201,6 +2201,9 @@ class CalibrationCorrection(task.SingleTask):
                 prod["input_a"][cj],
             )
 
+        # Dereference dataset
+        ssv = sstream.vis[:]
+
         # Loop over flags again
         for flag in self.flags:
 
@@ -2236,7 +2239,7 @@ class CalibrationCorrection(task.SingleTask):
                     )
                     correction[:, do_not_apply, :] = 1.0 + 0.0j
 
-                sstream.vis[:, :, in_range] *= correction
+                ssv.local_array[:, :, in_range] *= correction
 
         # Return input container with phase correction applied
         return sstream

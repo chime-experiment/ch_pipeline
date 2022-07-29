@@ -883,7 +883,7 @@ class ApplyCorrInputMask(task.SingleTask):
 
         # Extract input mask and weight array
         weight = timestream.weight[:]
-        mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
+        mask = cmask.mask[:].astype(weight.dtype)
 
         # Expand mask to same dimension as weight array
         mask = mask[tuple(slc)]
@@ -1805,7 +1805,7 @@ class DataFlagger(task.SingleTask):
         local_bin = np.array([np.argmin(np.abs(ff - basefreq)) for ff in local_freq])
 
         # Initiate weight mask (1 means not flagged)
-        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=np.bool)
+        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=bool)
 
         # Loop over flags of requested types
         for flag_type, flag_list in self.flags.items():
@@ -1855,7 +1855,7 @@ class DataFlagger(task.SingleTask):
         weight_mask = weight_mask.astype(weight.dtype)
         if stacked:
             # Apply same mask to all products
-            weight *= weight_mask
+            weight.local_array[:] *= weight_mask
         else:
             # Use apply_gain function to apply mask based on product map
             products = timestream.index_map["prod"][
