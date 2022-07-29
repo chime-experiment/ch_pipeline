@@ -944,19 +944,13 @@ class CHIMETimeStream(TimeStream, RawContainer):
             "axes": ["freq", "time"],
             "dtype": "U32",
             "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
         "flags/frac_lost": {
             "axes": ["freq", "time"],
             "dtype": np.float32,
             "initialise": False,
-            "distributed": False,
-        },
-        "flags/inputs": {
-            "axes": ["input", "time"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
     }
 
@@ -983,12 +977,34 @@ class CHIMETimeStream(TimeStream, RawContainer):
 
         # Manipulate location of weights as this is the one dataset that has a different
         # location in CHIMETimeStream compared to CorrData
+        storage = newdata._storage_root._get_storage()
+
         if "/flags/vis_weight" in newdata:
-            storage = newdata._storage_root._get_storage()
             storage["vis_weight"] = storage["flags"].pop("vis_weight")
             storage["vis_weight"]._name = "/vis_weight"
 
+        if "/flags/inputs" in newdata:
+            storage["input_flags"] = storage["flags"].pop("inputs")
+            storage["input_flags"]._name = "/input_flags"
+
         return newdata
+
+    @property
+    def frac_lost(self):
+        """Get the input flags dataset."""
+        return self.datasets["flags/frac_lost"]
+
+    @property
+    def flags(self):
+        """Get the flags group."""
+        flags_group = dict(self["flags"])
+
+        # Alias the groups back in for maximum compatibility with CHIME Andata
+        # based code
+        flags_group["vis_weight"] = self["vis_weight"]
+        flags_group["input_flags"] = self["input_flags"]
+
+        return flags_group
 
 
 class HFBReader(tod.Reader):
@@ -1249,6 +1265,8 @@ class MonkeyPatchContainers(MPILoggedTask):
     """
 
     def __init__(self):
+
+        super().__init__()
 
         self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
