@@ -17,10 +17,10 @@ from ch_util import fluxcat
 from ch_util import finder
 from ch_util import rfi
 
-from draco.core import task
+from draco.core import task, containers
 from draco.util import _fast_tools
 
-from ..core import containers
+from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
 
@@ -1007,7 +1007,7 @@ class TransitFit(task.SingleTask):
 
         Returns
         -------
-        fit : containers.TransitFitParams
+        fit : ccontainers.TransitFitParams
             Parameters of the model fit and their covariance.
         """
         # Ensure that we are distributed over frequency
@@ -1076,7 +1076,7 @@ class TransitFit(task.SingleTask):
         model.fit(ha, vis, err, width=sigma, **self.fit_kwargs)
 
         # Create an output container
-        fit = containers.TransitFitParams(
+        fit = ccontainers.TransitFitParams(
             param=model.parameter_names,
             component=model.component,
             axes_from=response,
@@ -1126,7 +1126,7 @@ class GainFromTransitFit(task.SingleTask):
 
         Parameters
         ----------
-        fit : containers.TransitFitParams
+        fit : ccontainers.TransitFitParams
             Parameters of the model fit and their covariance.
             Must also contain 'model_class' and 'model_kwargs'
             attributes that can be used to evaluate the model.
@@ -1503,7 +1503,7 @@ class SiderealCalibration(task.SingleTask):
             Rigidized sidereal timestream to calibrate.
         inputmap : list of :class:`CorrInput`
             List describing the inputs as they are in the file.
-        inputmask : containers.CorrInputMask
+        inputmask : ccontainers.CorrInputMask
             Mask indicating which correlator inputs to use in the
             eigenvalue decomposition.
 
@@ -1657,7 +1657,7 @@ class SiderealCalibration(task.SingleTask):
                         )
 
             # Create container to hold results of fit
-            gain_data = containers.PointSourceTransit(
+            gain_data = ccontainers.PointSourceTransit(
                 ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream
             )
 
