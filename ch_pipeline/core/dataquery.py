@@ -49,12 +49,12 @@ from ch_util import tools, ephemeris, finder, layout
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
 
 
-def _force_list(val):
+def _force_list(val) -> list:
     """Ensure configuration property is a list."""
     if val is None:
         return []
     elif hasattr(val, "__iter__"):
-        return val
+        return list(val)
     else:
         return [val]
 
