@@ -661,6 +661,8 @@ class SaveGaltAutoCorrelation(task.SingleTask):
             A GaltAutocorrelation container holding the extracted Galt autos
             as a function of frequency, polarization product, and time.
         """
+        from containers import GaltAutocorrelation
+
         # Dereference beam and weight datasets
         beam = data.vis[:].view(np.ndarray)
         weight = data.weight[:].view(np.ndarray)
