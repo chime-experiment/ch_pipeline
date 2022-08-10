@@ -645,6 +645,7 @@ class FilterExisting(task.MPILoggedTask):
 class SaveGaltAutoCorrelation(task.SingleTask):
     """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
 
+    # YY, YX, XX
     _galt_prods = [2450, 2746, 3568]
 
     def process(self, data):
@@ -663,6 +664,9 @@ class SaveGaltAutoCorrelation(task.SingleTask):
         """
         from containers import GaltAutocorrelation
 
+        # Redistribute over freq
+        data.redistribute("freq")
+
         # Dereference beam and weight datasets
         beam = data.vis[:].view(np.ndarray)
         weight = data.weight[:].view(np.ndarray)
@@ -676,7 +680,12 @@ class SaveGaltAutoCorrelation(task.SingleTask):
             pol=["YY", "YX", "XX"],
             attrs_from=data,
             time=data.time,
+            comm=data.comm,
+            distributed=data.distributed,
         )
+
+        # Redistribute output container over frequency
+        autocorrelation.redistribute("freq")
 
         autocorrelation.auto = galt_auto
         autocorrelation.weight = galt_weight
