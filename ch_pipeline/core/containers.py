@@ -881,6 +881,10 @@ class GaltAutocorrelation(ContainerBase):
     def weight(self):
         return self.datasets["weight"]
 
+    @property
+    def fpga_count(self):
+        return self.index_map["time"]["fpga_count"]
+
 
 def make_empty_corrdata(
     freq=None,
