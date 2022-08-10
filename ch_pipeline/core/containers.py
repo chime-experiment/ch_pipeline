@@ -824,7 +824,7 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
-class AveragedHolographyBeam(FreqContainer):
+class AveragedHolographyBeam(ContainerBase):
     _axes = ("freq", "pol", "pix")
 
     _dataset_spec = {
@@ -853,7 +853,7 @@ class AveragedHolographyBeam(FreqContainer):
         return self.datasets["weight"]
 
 
-class GaltAutocorrelation(FreqContainer, TODContainer):
+class GaltAutocorrelation(ContainerBase):
     _axes = ("freq", "pol", "time")
 
     _dataset_spec = {
