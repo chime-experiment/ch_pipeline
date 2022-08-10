@@ -1515,7 +1515,7 @@ class ApplyRFIMask(task.SingleTask):
     Parameters
     ----------
     mask_type : string ('frequency' or 'frequency-time')
-        Whether to resolve the mask in time.
+        Sets whether to resolve the mask in time.
             'frequency' - flag the entire frequency if a majority
             of time samples are bad
             'frequency-time' - use the full 2D mask
@@ -1568,9 +1568,13 @@ class ApplyRFIMask(task.SingleTask):
              weight *= rfimasak1d[local_slice, None, None, None]
 
         # Multiply the mask against both the beam and weight
-        else:
+        elif self.mask_type == "frequency-time":
              beam[..., :] *= ma[local_slice, None, None, :]
              weight[..., :] *= ma[local_slice, None, None, :]
+
+        else:
+            msg = "No valid mask type specified. Returning unmasked data."
+            self.log.warning(msg)
 
         transit.beam[:] = beam
         transit.weight[:] = weight
