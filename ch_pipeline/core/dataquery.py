@@ -53,7 +53,7 @@ def _force_list(val) -> list:
     """Ensure configuration property is a list."""
     if val is None:
         return []
-    elif hasattr(val, "__iter__"):
+    elif hasattr(val, "__iter__") and not isinstance(val, str):
         return list(val)
     else:
         return [val]
