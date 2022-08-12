@@ -214,15 +214,14 @@ pipeline:
     # flagged regions
     - type: draco.analysis.flagging.ThresholdVisWeight
       in: sstream
-      out: sstream_threshold
+      out: weight_mask
       params:
-          relative_threshold: 0.5
+          relative_threshold: 0.7
 
-    - type: draco.analysis.flagging.RFIMask
-      in: sstream_threshold
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream, weight_mask]
       out: sstream_mask
-      params:
-          stack_ind: 66
 
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
