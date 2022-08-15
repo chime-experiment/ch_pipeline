@@ -199,7 +199,7 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadDataFiles(task.SingleTask):
+class LoadDataFiles(io.BaseLoadFiles):
     """Load general CHIME data from files passed into the setup routine.
 
     This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
@@ -222,9 +222,6 @@ class LoadDataFiles(task.SingleTask):
         "hfb": containers.HFBReader,
     }
 
-    freq_sel = config.Property(default=None)
-    beam_sel = config.Property(default=None)
-
     def setup(self, files):
         """Set the list of files to load.
 
@@ -232,6 +229,9 @@ class LoadDataFiles(task.SingleTask):
         ----------
         files : list
         """
+        # Call the baseclass setup to resolve any selections
+        super().setup()
+
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
 
@@ -273,10 +273,12 @@ class LoadDataFiles(task.SingleTask):
         rd.select_time_range(time_range[0], time_range[1])
 
         # Select frequency range
-        rd.freq_sel = self.freq_sel
+        if self._sel and "freq_sel" in self._sel:
+            rd.freq_sel = self._sel["freq_sel"]
 
         # Select beams
-        rd.beam_sel = self.beam_sel
+        if self._sel and "beam_sel" in self._sel:
+            rd.beam_sel = self._sel["beam_sel"]
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
         ts = rd.read()
