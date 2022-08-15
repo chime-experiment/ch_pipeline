@@ -273,10 +273,10 @@ class LoadDataFiles(task.SingleTask):
         rd.select_time_range(time_range[0], time_range[1])
 
         # Select frequency range
-        rd.freq_sel(self.freq_sel)
+        rd.freq_sel = self.freq_sel
 
         # Select beams
-        rd.beam_sel(self.beam_sel)
+        rd.beam_sel = self.beam_sel
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
         ts = rd.read()
