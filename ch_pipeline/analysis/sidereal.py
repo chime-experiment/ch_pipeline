@@ -321,17 +321,17 @@ class SiderealMean(task.SingleTask):
         self.body = []
         if self.mask_sources:
             for src, body in ephemeris.source_dictionary.items():
-                if (
-                    fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
-                    > self.flux_threshold
-                ) and (body.dec.degrees > self.dec_threshold):
+                if src in fluxcat.FluxCatalog:
+                    if (
+                        fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
+                        > self.flux_threshold
+                    ) and (body.dec.degrees > self.dec_threshold):
 
-                    self.log.info(
-                        "Will mask %s prior to calculating sidereal %s."
-                        % (src, self._name_of_statistic)
-                    )
-
-                    self.body.append(body)
+                        self.log.info(
+                            "Will mask %s prior to calculating sidereal %s."
+                            % (src, self._name_of_statistic)
+                        )
+                        self.body.append(body)
 
     def process(self, sstream):
         """Calculate the mean(median) over the sidereal day.
