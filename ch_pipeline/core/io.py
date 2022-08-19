@@ -40,7 +40,6 @@ from ch_util import andata
 
 from draco.core import task, io
 
-
 class LoadCorrDataFiles(task.SingleTask):
     """Load data from files passed into the setup routine.
 
@@ -473,3 +472,52 @@ class FilterExisting(task.MPILoggedTask):
         )
 
         return sorted(list(new_files))
+
+class SaveGaltAutoCorrelation(task.SingleTask):
+    """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
+
+    # YY, YX, XX
+    _galt_prods = [2450, 2746, 3568]
+
+    def process(self, data):
+        """Extract the Galt autocorrelations and write them to disk.
+        Parameters
+        ----------
+        data: TimeStream
+            A TimeStream container holding a raw holography acquisition.
+        Returns
+        -------
+        autocorrelation: containers.GaltAutocorrelation
+            A GaltAutocorrelation container holding the extracted Galt autos
+            as a function of frequency, polarization product, and time.
+        """
+        from .containers import GaltAutocorrelation
+
+        # Redistribute over freq
+        data.redistribute("freq")
+
+        # Dereference beam and weight datasets
+        beam = data.vis[:].view(np.ndarray)
+        weight = data.weight[:].view(np.ndarray)
+
+        # Load only the data corresponding to the Galt inputs
+        galt_auto = beam[:, self._galt_prods, :]
+        galt_weight = weight[:, self._galt_prods, :]
+
+        # Initialize the auto container
+        autocorrelation = GaltAutocorrelation(
+            pol=np.array([b"YY", b"YX", b"XX"]),
+            attrs_from=data,
+            freq=data.freq,
+            time=data.index_map["time"],
+            comm=data.comm,
+            distributed=data.distributed,
+        )
+
+        # Redistribute output container over frequency
+        autocorrelation.redistribute("freq")
+
+        autocorrelation.auto[:] = galt_auto
+        autocorrelation.weight[:] = galt_weight
+
+        return autocorrelation

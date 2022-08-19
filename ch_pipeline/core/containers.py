@@ -802,6 +802,39 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
+class GaltAutocorrelation(ContainerBase):
+    _axes = ("freq", "pol", "time")
+
+    _dataset_spec = {
+        "auto": {
+            "axes": ["freq", "pol", "time"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+           "axes": ["freq", "pol", "time"],
+           "dtype": np.float64,
+           "initialise": True,
+           "distributed": True,
+           "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def auto(self):
+        return self.datasets["auto"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
+
+    @property
+    def fpga_count(self):
+        return self.index_map["time"]["fpga_count"]
+
+
 def make_empty_corrdata(
     freq=None,
     input=None,
