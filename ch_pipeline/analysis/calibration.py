@@ -2364,3 +2364,60 @@ def _calculate_uv(freq, prod, inputmap):
     uv = dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
 
     return uv
+
+class ExtractGaltAutoCorrelation(task.SingleTask):
+    """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
+
+    _galt_inputs = [1225, 1521]
+
+    def process(self, data):
+        """Extract the Galt autocorrelations and write them to disk.
+        Parameters
+        ----------
+        data: TimeStream
+            A TimeStream container holding a raw holography acquisition.
+        Returns
+        -------
+        autocorrelation: containers.GaltAutocorrelation
+            A GaltAutocorrelation container holding the extracted Galt autos
+            as a function of frequency, polarization product, and time.
+        """
+        # Redistribute over freq
+        data.redistribute("freq")
+
+        # Get the product map and inputs
+        prodmap = data.prod
+        ina, inb = prodmap["input_a"], prodmap["input_b"]
+
+        # Locate the Galt autocorrelations and cross-pol correlation
+        flag_YY = np.where((ina == self._galt_inputs[0]) & (inb == self._galt_inputs[0]), 1, 0)
+        flag_YX = np.where((ina == self._galt_inputs[0]) & (inb == self._galt_inputs[1]), 1, 0)
+        flag_XX = np.where((ina == self._galt_inputs[1]) & (inb == self._galt_inputs[1]), 1, 0)
+
+        auto_flag = (flag_YY + flag_YX + flag_XX).astype(bool)
+
+        # Dereference beam and weight datasets
+        beam = data.vis[:].local_array
+        weight = data.weight[:].local_array
+
+        # Load only the data corresponding to the Galt inputs
+        galt_auto = beam[:, auto_flag, :]
+        galt_weight = weight[:, auto_flag, :]
+
+        # Initialize the auto container
+        autocorrelation = containers.GaltAutocorrelation(
+            pol=np.array([b"YY", b"YX", b"XX"]),
+            attrs_from=data,
+            freq=data.freq,
+            time=data.index_map["time"],
+            comm=data.comm,
+            distributed=data.distributed,
+        )
+
+        # Redistribute output container over frequency
+        autocorrelation.redistribute("freq")
+
+        autocorrelation.auto[:].local_array[:] = galt_auto
+        autocorrelation.weight[:].local_array[:] = galt_weight
+
+        return autocorrelation

@@ -802,7 +802,7 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
-class GaltAutocorrelation(ContainerBase):
+class GaltAutocorrelation(FreqContainer, TODContainer):
     _axes = ("freq", "pol", "time")
 
     _dataset_spec = {
