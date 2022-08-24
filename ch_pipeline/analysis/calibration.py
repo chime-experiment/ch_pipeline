@@ -16,6 +16,7 @@ from ch_util import cal_utils
 from ch_util import fluxcat
 from ch_util import finder
 from ch_util import rfi
+from ch_util import layout
 
 from draco.core import task
 from draco.util import _fast_tools
@@ -2368,8 +2369,6 @@ def _calculate_uv(freq, prod, inputmap):
 class ExtractGaltAutoCorrelation(task.SingleTask):
     """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
 
-    _galt_inputs = [1225, 1521]
-
     def process(self, data):
         """Extract the Galt autocorrelations and write them to disk.
         Parameters
@@ -2385,14 +2384,21 @@ class ExtractGaltAutoCorrelation(task.SingleTask):
         # Redistribute over freq
         data.redistribute("freq")
 
+        # Locate the holographic indices
+        layout_graph = layout.graph.from_db(data.time[0])
+
+        galt_inputs = get_holographic_index(
+            get_correlator_inputs(layout_graph, correlator="chime")
+        )
+
         # Get the product map and inputs
         prodmap = data.prod
         ina, inb = prodmap["input_a"], prodmap["input_b"]
 
         # Locate the Galt autocorrelations and cross-pol correlation
-        flag_YY = np.where((ina == self._galt_inputs[0]) & (inb == self._galt_inputs[0]), 1, 0)
-        flag_YX = np.where((ina == self._galt_inputs[0]) & (inb == self._galt_inputs[1]), 1, 0)
-        flag_XX = np.where((ina == self._galt_inputs[1]) & (inb == self._galt_inputs[1]), 1, 0)
+        flag_YY = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[0]), 1, 0)
+        flag_YX = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[1]), 1, 0)
+        flag_XX = np.where((ina == galt_inputs[1]) & (inb == galt_inputs[1]), 1, 0)
 
         auto_flag = (flag_YY + flag_YX + flag_XX).astype(bool)
 
