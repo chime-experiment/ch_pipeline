@@ -130,7 +130,7 @@ pipeline:
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: sensitivity
       params:
         exclude_intracyl: true
@@ -138,7 +138,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: tstream_col
       params:
         weight: "natural"
