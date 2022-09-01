@@ -1030,7 +1030,7 @@ class SunCalibration(task.SingleTask):
         # Change vis_pos for non-CHIME feeds from NaN to 0.0
         vis_pos[(pol_ind == -1), :] = 0.0
                 
-        newprod = [[0, 0],[1,1]]
+        newprod = [[0, 0],[0, 1],[1,0],[1,1]]
 
         newprod = np.array(newprod,dtype=sstream.index_map['prod'].dtype)
         newstack = np.zeros(len(newprod), dtype=[('prod', '<u4'), ('conjugate', 'u1')])
@@ -1085,7 +1085,7 @@ class SunCalibration(task.SingleTask):
                             sun_vis *= (cyl_i == self.cyl_id)
 
                     # Iterate over co-pol products
-                    for pi, pol in enumerate([0,3]):
+                    for pi, pol in enumerate([0,1,2,3]):
 
                         # Mask out other polarisations in the visibility vector
                         sun_vis_pol = sun_vis * (pol_ind == pol) 
