@@ -60,8 +60,8 @@ class ConvertRingmap(task.SingleTask):
             rmap_out.dirty_beam[:] = rmap_in.dirty_beam[:]
 
         return rmap_out
-    
-    
+
+
 class RingMapMaker(task.SingleTask):
     """A simple and quick map-maker that forms a series of beams on the meridian.
 
