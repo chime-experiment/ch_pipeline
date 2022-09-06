@@ -17,6 +17,50 @@ from ch_util import ephemeris
 from ..core import containers
 
 
+class ConvertRingmap(task.SingleTask):
+    """ Covert a ch_pipeline RingMap to a draco RingMap.
+    
+    The ch_pipeline RingMap container has an rms dataset instead of
+    a weight dataset. This task converts rms to weight and stores the
+    result in a draco RingMap container.
+    """
+
+    def process(self, rmap_in):
+        """Convert a ch_pipline RingMap to a draco RingMap.
+
+        Parameters
+        ----------
+        rmap_in : ch_pipeline.core.containers.RingMap
+            input map to convert
+
+        Returns
+        -------
+        rmap_out : draco.core.containers.RingMap
+            converted ringmap.
+        """
+
+        from draco.core.containers import RingMap
+        rmap_in.redistribute("freq")
+
+        rmap_out = RingMap(
+            axes_from=rmap_in,
+            attrs_from=rmap_in,
+            distributed=rmap_in.distributed,
+            comm=rmap_in.comm,
+        )
+
+        rmap_out.redistribute("freq")
+
+        rmap_out.map[:] = rmap_in.map[:]
+        rmap_out.weight[:] = tools.invert_no_zero(rmap_in.rms[:][..., np.newaxis] ** 2)
+
+        if "dirty_beam" in rmap_in.datasets:
+            rmap_out.add_dataset("dirty_beam")
+            rmap_out.dirty_beam[:] = rmap_in.dirty_beam[:]
+
+        return rmap_out
+    
+    
 class RingMapMaker(task.SingleTask):
     """A simple and quick map-maker that forms a series of beams on the meridian.
 
