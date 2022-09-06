@@ -130,7 +130,7 @@ pipeline:
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: sensitivity
       params:
         exclude_intracyl: true
@@ -138,7 +138,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: tstream_col
       params:
         weight: "natural"
@@ -224,7 +224,7 @@ pipeline:
           stack_ind: 66
 
     # Make a map of the full dataset
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmap
@@ -238,7 +238,7 @@ pipeline:
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmapint
