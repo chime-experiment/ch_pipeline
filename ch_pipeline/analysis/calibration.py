@@ -1423,9 +1423,12 @@ class InterpolateGainOverFrequency(task.SingleTask):
     ----------
     interp_scale : float
         Correlation length of the gain with frequency in MHz.
+    in_place: bool
+        Save the interpolated gains to the input container.
     """
 
     interp_scale = config.Property(proptype=float, default=30.0)
+    in_place = config.Property(proptype=bool, default=False)
 
     def process(self, gain):
         """Interpolate the gain over the frequency axis.
@@ -1457,14 +1460,27 @@ class InterpolateGainOverFrequency(task.SingleTask):
             gain.freq[:], g, w, flag=flag, length_scale=self.interp_scale
         )
 
+        if self.in_place:
+            out = gain
+        else:
+            out = containers.StaticGainData(
+                axes_from=gain,
+                attrs_from=gain,
+                distributed=gain.distributed,
+                comm=gain.comm,
+            )
+            out.add_dataset("weight")
+            out.redistribute("input")
+            gain.redistribute("freq")
+
         # Replace the gain and weight datasets with the interpolated arrays
         # Note that the gain and weight for non-flagged frequencies have not changed
-        gain.gain[:] = ginterp
-        gain.weight[:] = winterp
+        out.gain[:] = ginterp
+        out.weight[:] = winterp
 
-        gain.redistribute("freq")
+        out.redistribute("freq")
 
-        return gain
+        return out
 
 
 class SiderealCalibration(task.SingleTask):
@@ -2432,6 +2448,7 @@ class ExpandCommonMode(BaseCommonMode):
 
         out.redistribute("freq")
 
+        # Dereference datasets
         ovis = out[dset][:].view(np.ndarray)
         oweight = out.weight[:].view(np.ndarray)
 
@@ -2444,14 +2461,14 @@ class ExpandCommonMode(BaseCommonMode):
                 gg = self.glookup[ii]
 
             except KeyError:
-                ovis[gso] = 0.0
+                ovis[gso] = 1.0
                 oweight[gso] = 0.0
-                continue
 
-            gsi = tuple([slice(None)] * inp_axis + [gg])
+            else:
+                gsi = tuple([slice(None)] * inp_axis + [gg])
 
-            ovis[gso] = cvis[gsi]
-            oweight[gso] = cweight[gsi]
+                ovis[gso] = cvis[gsi]
+                oweight[gso] = cweight[gsi]
 
         # Return
         return out
@@ -2502,18 +2519,18 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
             dataset set to zero if a narrowband feature
             has been identified for that frequency and input.
         """
-        # Create a copy of the input container
+        # Create output container.  Problems with copy when distributed over inputs.
+        data.redistribute("freq")
         out = data.copy()
         out.redistribute("input")
-        oweight = out.weight[:].view(np.ndarray)
-
-        # Redistribute the data over inputs
         data.redistribute("input")
 
         # Dereference datasets and calculate amplitude
         freq = data.freq
         amp = np.abs(data.gain[:].view(np.ndarray))
         weight = data.weight[:].view(np.ndarray)
+
+        oweight = out.weight[:].view(np.ndarray)
 
         nfreq, ninput = amp.shape
 
@@ -2527,24 +2544,30 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
             self.log.debug(f"Processing input {ii} of {ninput}.")
 
             if not np.any(flag[:, ii]):
-                weight[:, ii] = 0.0
+                oweight[:, ii] = 0.0
                 continue
 
             # Generate the mask
-            amp_hpf, flag_hpf, rsigma_hpf = rfi.iterative_hpf_masking(
-                freq,
-                amp[:, ii],
-                flag=flag[:, ii],
-                tau_cut=self.tau_cut,
-                epsilon=self.epsilon,
-                window=self.window,
-                threshold=self.threshold,
-                nperiter=self.nperiter,
-                niter=self.niter,
-            )
-
-            # Update the weight dataset to flag the narrowband features
-            oweight[:, ii] *= flag_hpf.astype(np.float32)
+            try:
+                amp_hpf, flag_hpf, rsigma_hpf = rfi.iterative_hpf_masking(
+                    freq,
+                    amp[:, ii],
+                    flag=flag[:, ii],
+                    tau_cut=self.tau_cut,
+                    epsilon=self.epsilon,
+                    window=self.window,
+                    threshold=self.threshold,
+                    nperiter=self.nperiter,
+                    niter=self.niter,
+                )
+            except np.linalg.LinAlgError as exc:
+                self.log.warning(
+                    f"Failed to create delay filter for input {ii} (of {ninput}): {exc}"
+                )
+                oweight[:, ii] = 0.0
+            else:
+                # Update the weight dataset to flag the narrowband features
+                oweight[:, ii] *= flag_hpf.astype(np.float32)
 
         # Return the original gain container with modified weights
         return out
@@ -2585,7 +2608,7 @@ class EstimateNarrowbandGainError(task.SingleTask):
             dataset is 1.0 if a narrowband feature was identified at
             that (freq, input, time) and 0.0 otherwise.
         """
-        # Redistribute over frequency
+        # Redistribute over input
         gain.redistribute("input")
         gain_mask.redistribute("input")
         gain_smooth.redistribute("input")
@@ -2618,6 +2641,9 @@ class EstimateNarrowbandGainError(task.SingleTask):
 
         out.gain[:] = np.where(mask, gm * tools.invert_no_zero(gs), 1.0)
         out.weight[:] = mask.astype(np.float32)
+
+        # Set the weight to zero for bad inputs
+        out.weight[:] *= np.any(wi > 0.0, axis=0, keepdims=True).astype(np.float32)
 
         # Return the ratio of gains
         return out
@@ -2697,6 +2723,12 @@ class FlagNarrowbandGainError(task.SingleTask):
         gains.redistribute("freq")
         self.gains = gains
 
+        # Identify the bad inputs when the gains were generated
+        self.weight = np.any(
+            gains.weight[:].view(np.ndarray) > 0.0, axis=0, keepdims=True
+        )
+
+        # Compute the fractional error in the gain
         self.frac_error = gains.gain[:].view(np.ndarray) - 1.0
 
     def process(self, data):
@@ -2792,8 +2824,10 @@ class FlagNarrowbandGainError(task.SingleTask):
         # Different calculation whether or not we have input flags
         if self.ignore_input_flags or no_input_flags:
 
-            # We do not have an input flag.  Perform a straight average over all inputs.
-            err = np.mean(self.frac_error, axis=1)
+            # We do not have an input flag.  Perform a straight average over all good inputs.
+            err = np.sum(self.weight * self.frac_error, axis=1) * tools.invert_no_zero(
+                np.sum(self.weight, axis=1)
+            )
 
             # Use the gain update with the maximum error for times
             # where there may have been a transition between two gain updates
@@ -2819,9 +2853,11 @@ class FlagNarrowbandGainError(task.SingleTask):
                     # The modulus with the number of times is for the
                     # sidereal stacks where we have gain errors on
                     # many days, but a single set of input flags.
+                    wit = w[:, :, tt % ntime] * self.weight[:, :, uu]
+
                     err[ii, :, tt] = np.sum(
-                        w[:, :, tt % ntime] * self.frac_error[:, :, uu], axis=1
-                    )
+                        wit * self.frac_error[:, :, uu], axis=1
+                    ) * tools.invert_no_zero(np.sum(wit, axis=1))
 
             # Again, during transitions we take the update with the maximum error.
             err_avgi = np.where(np.abs(err[0]) > np.abs(err[1]), err[0], err[1])

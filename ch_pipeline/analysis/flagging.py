@@ -1976,7 +1976,7 @@ class ApplyInputFlag(task.SingleTask):
 
 class SetInputFlag(ApplyInputFlag):
     """Set input flags dataset based on values from the real-time pipeline at the time.
-    
+
     This is useful for holographic observations or SiderealStreams, neither of which
     have their input_flags dataset populated.
     """
