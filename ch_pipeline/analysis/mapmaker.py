@@ -18,8 +18,8 @@ from ..core import containers
 
 
 class ConvertRingmap(task.SingleTask):
-    """ Covert a ch_pipeline RingMap to a draco RingMap.
-    
+    """Covert a ch_pipeline RingMap to a draco RingMap.
+
     The ch_pipeline RingMap container has an rms dataset instead of
     a weight dataset. This task converts rms to weight and stores the
     result in a draco RingMap container.
@@ -40,6 +40,7 @@ class ConvertRingmap(task.SingleTask):
         """
 
         from draco.core.containers import RingMap
+
         rmap_in.redistribute("freq")
 
         rmap_out = RingMap(
