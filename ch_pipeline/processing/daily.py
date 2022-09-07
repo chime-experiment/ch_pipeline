@@ -173,12 +173,13 @@ pipeline:
         freq_width: 10.0
         time_width: 420.0
         threshold_mad: 6.0
+        use_draco_container: true
         save: true
         output_name: "rfi_mask_{{tag}}.h5"
         nan_check: false
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: ch_pipeline.analysis.flagging.ApplyCorrInputMask
+    - type: draco.analysis.flagging.ApplyRFIMask
       in: [tstream_day, rfimask]
       out: tstream_day_rfi
 
