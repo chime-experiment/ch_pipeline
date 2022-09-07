@@ -216,11 +216,25 @@ pipeline:
       in: sstream
       out: weight_mask
       params:
-          relative_threshold: 0.7
+        relative_threshold: 0.7
+
+    # Apply the mask to remove regions with too low sensitivity
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream, weight_mask]
+      out: sstream_weight_mask
+
+    # Generate the second RFI mask using targetted knowledge of the instrument
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream_weight_mask
+      out: rfimask2
+      params:
+        stack_ind: 66
+        save: true
+        output_name: "rfi_mask2_{{tag}}.h5"
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream, weight_mask]
+      in: [sstream_weight_mask, rfimask2]
       out: sstream_mask
 
     # Make a map of the full dataset
