@@ -68,6 +68,11 @@ class RingMapMaker(task.SingleTask):
         tel : TransitTelescope
         """
 
+        self.log.warning(
+            "This task is deprecated.  Please use "
+            "draco.analysis.ringmapmaker.RingMapMaker instead."
+        )
+
         if self.weight not in ["natural", "uniform", "inverse_variance"]:
             KeyError("Do not recognize weight = %s" % self.weight)
 
