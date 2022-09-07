@@ -13,9 +13,9 @@ from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
-from draco.core import task, io
+from draco.core import task, io, containers
 
-from ..core import containers
+from ..core import containers as ccontainers
 
 
 class RFIFilter(task.SingleTask):
@@ -76,7 +76,7 @@ class RFIFilter(task.SingleTask):
 
         Returns
         -------
-        out : core.containers.RFIMask
+        out : ccontainers.RFIMask
             Boolean mask that can be applied to a timestream container
             with the task `ApplyCorrInputMask` to mask contaminated
             frequencies and time samples.
@@ -113,7 +113,7 @@ class RFIFilter(task.SingleTask):
         mask = np.logical_not(mask)
 
         # Create container to hold output
-        out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+        out = ccontainers.RFIMask(input=minput, axes_from=data, attrs_from=data)
         if self.keep_ndev:
             out.add_dataset("ndev")
         if self.keep_auto:
@@ -414,19 +414,19 @@ class MonitorCorrInput(task.SingleTask):
 
         Returns
         -------
-        input_monitor : containers.CorrInputMonitor
+        input_monitor : ccontainers.CorrInputMonitor
             Saved for each sidereal day.  Contains the
             correlator input mask and frequency mask.
             Note that this is not output to the pipeline.  It is an
             ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        csd_flag : container.SiderealDayFlag
+        csd_flag : ccontainer.SiderealDayFlag
             Contains a mask that indicates bad sidereal days, determined as
             days that contribute a large number of unique bad correlator
             inputs.  Note that this is not output to the pipeline.
             It is ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        input_monitor_all : containers.CorrInputMask
+        input_monitor_all : ccontainers.CorrInputMask
             Contains the correlator input mask obtained from taking AND
             of the masks from the (good) sidereal days.
         """
@@ -472,7 +472,7 @@ class MonitorCorrInput(task.SingleTask):
             if self.save:
 
                 # Create a container to hold the results
-                input_mon = containers.CorrInputMonitor(
+                input_mon = ccontainers.CorrInputMonitor(
                     freq=self.freq, input=self.input_map, distributed=False
                 )
 
@@ -539,7 +539,7 @@ class MonitorCorrInput(task.SingleTask):
         if self.save:
 
             # Create container
-            csd_flag = containers.SiderealDayFlag(
+            csd_flag = ccontainers.SiderealDayFlag(
                 csd=np.array([tmap[0] for tmap in self.timemap])
             )
 
@@ -555,7 +555,7 @@ class MonitorCorrInput(task.SingleTask):
         input_mask = np.all(input_mask_all[good_day_flag_all, :], axis=0)
 
         # Create a container to hold the results for the entire pass
-        input_mon = containers.CorrInputMask(input=self.input_map)
+        input_mon = ccontainers.CorrInputMask(input=self.input_map)
 
         # Place the results for the entire pass in a container
         input_mon.input_mask[:] = input_mask
@@ -628,7 +628,7 @@ class TestCorrInput(task.SingleTask):
 
         Returns
         -------
-        corr_input_test : container.CorrInputTest
+        corr_input_test : ccontainer.CorrInputTest
             Container with the results of all tests and a
             input mask that combines all tests and frequencies.
         """
@@ -731,7 +731,7 @@ class TestCorrInput(task.SingleTask):
         input_mask = np.prod(input_mask_all[:, self.use_test], axis=-1)
 
         # Create container to hold results
-        corr_input_test = containers.CorrInputTest(
+        corr_input_test = ccontainers.CorrInputTest(
             freq=freqmap, test=self.test, axes_from=timestream, attrs_from=timestream
         )
 
@@ -776,7 +776,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Parameters
         ----------
-        corr_input_mask : container.CorrInputMask
+        corr_input_mask : ccontainer.CorrInputMask
         """
 
         if not self._accumulated_input_mask:
@@ -794,7 +794,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Returns
         --------
-        corr_input_mask : container.CorrInputMask
+        corr_input_mask : ccontainer.CorrInputMask
         """
         ncsd = len(self._csd)
 
@@ -826,7 +826,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         if self.save:
 
             # Create container
-            csd_flag = containers.SiderealDayFlag(csd=np.array(self._csd))
+            csd_flag = ccontainers.SiderealDayFlag(csd=np.array(self._csd))
 
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag
@@ -840,7 +840,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         input_mask = np.all(input_mask_all[good_day_flag, :], axis=0)
 
         # Create container to hold results
-        corr_input_mask = containers.CorrInputMask(input=self.input)
+        corr_input_mask = ccontainers.CorrInputMask(input=self.input)
 
         corr_input_mask.attrs["tag"] = "for_pass"
 
@@ -860,7 +860,7 @@ class ApplyCorrInputMask(task.SingleTask):
         ----------
         timestream : andata.CorrData or containers.SiderealStream
 
-        cmask : containers.RFIMask, containers.CorrInputMask, etc.
+        cmask : ccontainers.RFIMask, ccontainers.CorrInputMask, etc.
 
         Returns
         -------

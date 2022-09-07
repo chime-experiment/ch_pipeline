@@ -8,6 +8,7 @@ from ch_util.andata import CorrData
 import numpy as np
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
+from mpi4py import MPI
 
 from caput import config, pipeline, memh5
 from caput import mpiarray, mpiutil
@@ -98,7 +99,7 @@ def solve_gain(data, feeds=None, norm=None):
         Error on the gain solution for each feed, time, and frequency
     """
     # Turn into numpy array to avoid any unfortunate indexing issues
-    data = data[:].view(np.ndarray)
+    data = data[:].local_array
 
     # Calcuate the number of feeds in the data matrix
     tfeed = int((2 * data.shape[1]) ** 0.5)
@@ -444,31 +445,32 @@ class GatedNoiseCalibration(task.SingleTask):
 
         # Get the norm matrix
         if self.norm == "gated":
-            norm_array = _extract_diagonal(ts.datasets["gated_vis0"][:]) ** 0.5
+            norm_array = (
+                _extract_diagonal(ts.datasets["gated_vis0"][:].local_array) ** 0.5
+            )
             norm_array = tools.invert_no_zero(norm_array)
         elif self.norm == "off":
-            norm_array = _extract_diagonal(ts.vis[:]) ** 0.5
+            norm_array = _extract_diagonal(ts.vis[:].local_array) ** 0.5
             norm_array = tools.invert_no_zero(norm_array)
 
             # Extract the points with zero weight (these will get zero norm)
-            w = _extract_diagonal(ts.weight[:]) > 0
+            w = _extract_diagonal(ts.weight[:].local_array) > 0
             w[:, noise_channel] = True  # Make sure we keep the noise channel though!
 
             norm_array *= w
 
         elif self.norm == "none":
             norm_array = np.ones(
-                [ts.vis[:].shape[0], ts.ninput, ts.ntime], dtype=np.uint8
+                (ts.vis[:].local_shape[0], ts.ninput, ts.ntime), dtype=np.uint8
             )
         else:
             raise RuntimeError("Value of norm not recognised.")
 
         # Take a view now to avoid some MPI issues
-        gate_view = ts.datasets["gated_vis0"][:].view(np.ndarray)
-        norm_view = norm_array[:].view(np.ndarray)
+        gate_view = ts.datasets["gated_vis0"][:].local_array
 
         # Find gains with the eigenvalue method
-        evalue, gain = solve_gain(gate_view, norm=norm_view)[0:2]
+        evalue, gain = solve_gain(gate_view, norm=norm_array)[0:2]
         dr = evalue[:, -1, :] * tools.invert_no_zero(evalue[:, -2, :])
 
         # Normalise by the noise source channel
@@ -622,7 +624,6 @@ class EigenCalibration(task.SingleTask):
         response : containers.SiderealStream
             Response of each feed to the point source.
         """
-        from mpi4py import MPI
 
         # Ensure that we are distributed over frequency
         data.redistribute("freq")
@@ -631,10 +632,7 @@ class EigenCalibration(task.SingleTask):
         nfreq, neigen, ninput, ntime = data.datasets["evec"].local_shape
 
         # Find the local frequencies
-        sfreq = data.vis.local_offset[0]
-        efreq = sfreq + nfreq
-
-        freq = data.freq[sfreq:efreq]
+        freq = data.freq[data.vis[:].local_bounds]
 
         # Determine source name.  If not provided as config property, then check data attributes.
         source_name = self.source or data.attrs.get("source_name", None)
@@ -678,11 +676,11 @@ class EigenCalibration(task.SingleTask):
         lat = np.radians(ephemeris.CHIMELATITUDE)
 
         # Dereference datasets
-        evec = data.datasets["evec"][:].view(np.ndarray)
-        evalue = data.datasets["eval"][:].view(np.ndarray)
-        erms = data.datasets["erms"][:].view(np.ndarray)
-        vis = data.datasets["vis"][:].view(np.ndarray)
-        weight = data.flags["vis_weight"][:].view(np.ndarray)
+        evec = data.datasets["evec"][:].local_array
+        evalue = data.datasets["eval"][:].local_array
+        erms = data.datasets["erms"][:].local_array
+        vis = data.datasets["vis"][:].local_array
+        weight = data.flags["vis_weight"][:].local_array
 
         # Check for negative autocorrelations (bug observed in older data)
         negative_auto = vis.real < 0.0
@@ -1022,10 +1020,7 @@ class TransitFit(task.SingleTask):
         nfreq, ninput, nra = response.vis.local_shape
 
         # Find the local frequencies
-        sfreq = response.vis.local_offset[0]
-        efreq = sfreq + nfreq
-
-        freq = response.freq[sfreq:efreq]
+        freq = response.freq[response.vis[:].local_bounds]
 
         # Calculate the hour angle using the source and transit time saved to attributes
         source_obj = ephemeris.source_dictionary[response.attrs["source_name"]]
@@ -1063,8 +1058,8 @@ class TransitFit(task.SingleTask):
             )[:, np.newaxis]
 
         # Dereference datasets
-        vis = response.vis[:].view(np.ndarray)
-        weight = response.weight[:].view(np.ndarray)
+        vis = response.vis[:].local_array
+        weight = response.weight[:].local_array
         err = np.sqrt(tools.invert_no_zero(weight))
 
         # Flag data that is outside the fit window set by nsigma config parameter
@@ -1159,10 +1154,10 @@ class GainFromTransitFit(task.SingleTask):
         out.add_dataset("weight")
 
         # Dereference datasets
-        param = fit.parameter[:].view(np.ndarray)
-        param_cov = fit.parameter_cov[:].view(np.ndarray)
-        chisq = fit.chisq[:].view(np.ndarray)
-        ndof = fit.ndof[:].view(np.ndarray)
+        param = fit.parameter[:].local_array
+        param_cov = fit.parameter_cov[:].local_array
+        chisq = fit.chisq[:].local_array
+        ndof = fit.ndof[:].local_array
 
         chisq_per_dof = chisq * tools.invert_no_zero(ndof.astype(np.float32))
 
@@ -1271,7 +1266,6 @@ class FlagAmplitude(task.SingleTask):
         gain : containers.StaticGainData
             The input gain container with modified weights.
         """
-        from mpi4py import MPI
 
         # Distribute over frequency
         gain.redistribute("freq")
@@ -1282,8 +1276,8 @@ class FlagAmplitude(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Dereference datasets
-        flag = gain.weight[:].view(np.ndarray) > 0.0
-        amp = np.abs(gain.gain[:].view(np.ndarray))
+        flag = gain.weight[:].local_array > 0.0
+        amp = np.abs(gain.gain[:].local_array)
 
         # Determine x and y pol index
         xfeeds = np.array(
@@ -1453,8 +1447,8 @@ class InterpolateGainOverFrequency(task.SingleTask):
         gain.redistribute("input")
 
         # Deference datasets
-        g = gain.gain[:].view(np.ndarray)
-        w = gain.weight[:].view(np.ndarray)
+        g = gain.gain[:].local_array
+        w = gain.weight[:].local_array
 
         # Determine flagged frequencies
         flag = w > 0.0
@@ -1538,13 +1532,9 @@ class SiderealCalibration(task.SingleTask):
         # Ensure that we are distributed over frequency
         sstream.redistribute("freq")
 
-        # Find the local frequencies
-        nfreq = sstream.vis.local_shape[0]
-        sfreq = sstream.vis.local_offset[0]
-        efreq = sfreq + nfreq
-
         # Get the local frequency axis
-        freq = sstream.freq["centre"][sfreq:efreq]
+        nfreq = sstream.vis.local_shape[0]
+        freq = sstream.freq["centre"][sstream.vis[:].local_bounds]
 
         # Fetch source
         source = ephemeris.source_dictionary[self.source]
@@ -2079,10 +2069,7 @@ class ApplyDigitalGain(task.SingleTask):
         gain.redistribute("freq")
 
         # Find the local frequencies
-        sfreq = gain.gain.local_offset[0]
-        efreq = sfreq + gain.gain.local_shape[0]
-
-        fsel = slice(sfreq, efreq)
+        fsel = gain.gain[:].local_bounds
 
         # Look up the most recent digital gain update using
         # the timestamp in the input container
@@ -2091,8 +2078,8 @@ class ApplyDigitalGain(task.SingleTask):
         # Apply in place
         dg = self.dg[tindex][fsel]
 
-        gain.gain[:] *= dg
-        gain.weight[:] *= tools.invert_no_zero(np.abs(dg) ** 2)
+        gain.gain[:].local_array[:] *= dg
+        gain.weight[:].local_array[:] *= tools.invert_no_zero(np.abs(dg) ** 2)
 
         # Save digital gain update_id as attribute
         gain.attrs["digitalgain_update_id"] = self.digi_gain_data.update_id[
@@ -2162,11 +2149,15 @@ class BaseCommonMode(task.SingleTask):
         ----------
         inputmap: list of CorrInput
 
-        Returns
-        -------
-        gindex: list of np.ndarray
-            Each element of gindex contains the indices of all inputs
-            on a particular cylinder and of a particular polarisation.
+        Attributes
+        ----------
+        groups: np.ndarray[ngroup,]
+            Names of the groups that will be averaged over.
+        gindex: dict
+            Dictionary of the format {group_id: group_indices}.
+            Each entry in gindex contains the indices of all inputs
+            of a particular polarisation and (optionally) on a
+            particular cylinder.
         glookup: dict
             Dictionary of the format {input_index: group_index}.
         """
@@ -2228,7 +2219,7 @@ class ComputeCommonMode(BaseCommonMode):
         data.redistribute("freq")
 
         # Dereference datasets.
-        vis = data[dset][:].view(np.ndarray)
+        vis = data[dset][:].local_array
         if self.use_amplitude:
             # If requested use only the amplitude.
             self.log.info("Taking the amplitude of the gain.")
@@ -2236,7 +2227,7 @@ class ComputeCommonMode(BaseCommonMode):
 
         iscomplex = np.any(np.iscomplex(vis))
 
-        weight = data.weight[:].view(np.ndarray)
+        weight = data.weight[:].local_array
         flag = weight > 0.0
 
         # Create output container
@@ -2253,8 +2244,8 @@ class ComputeCommonMode(BaseCommonMode):
         group.add_dataset("weight")
         group.redistribute("freq")
 
-        grp_vis = group[dset][:].view(np.ndarray)
-        grp_weight = group.weight[:].view(np.ndarray)
+        grp_vis = group[dset][:].local_array
+        grp_weight = group.weight[:].local_array
 
         # Calculate the mean (or percentile) for each group of inputs
         for gg, glbl in enumerate(self.groups):
@@ -2328,8 +2319,8 @@ class ExpandCommonMode(BaseCommonMode):
 
         cmn.redistribute("freq")
 
-        cvis = cmn[dset][:].view(np.ndarray)
-        cweight = cmn.weight[:].view(np.ndarray)
+        cvis = cmn[dset][:].local_array
+        cweight = cmn.weight[:].local_array
 
         # Create output container
         inputs = np.array(
@@ -2352,8 +2343,8 @@ class ExpandCommonMode(BaseCommonMode):
         out.redistribute("freq")
 
         # Dereference datasets
-        ovis = out[dset][:].view(np.ndarray)
-        oweight = out.weight[:].view(np.ndarray)
+        ovis = out[dset][:].local_array
+        oweight = out.weight[:].local_array
 
         # Loop over local inputs
         for ii in range(ninput):
@@ -2430,10 +2421,10 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
 
         # Dereference datasets and calculate amplitude
         freq = data.freq
-        amp = np.abs(data.gain[:].view(np.ndarray))
-        weight = data.weight[:].view(np.ndarray)
+        amp = np.abs(data.gain[:].local_array)
+        weight = data.weight[:].local_array
 
-        oweight = out.weight[:].view(np.ndarray)
+        oweight = out.weight[:].local_array
 
         nfreq, ninput = amp.shape
 
@@ -2517,11 +2508,11 @@ class EstimateNarrowbandGainError(task.SingleTask):
         gain_smooth.redistribute("input")
 
         # Dereference datasets
-        gm = gain_mask.gain[:].view(np.ndarray)
-        gs = gain_smooth.gain[:].view(np.ndarray)
+        gm = gain_mask.gain[:].local_array
+        gs = gain_smooth.gain[:].local_array
 
-        wi = gain.weight[:].view(np.ndarray)
-        wm = gain_mask.weight[:].view(np.ndarray)
+        wi = gain.weight[:].local_array
+        wm = gain_mask.weight[:].local_array
 
         # Create a mask that identifies newly flagged data
         mask = (wi > 0.0) & (wm == 0.0)
@@ -2546,7 +2537,9 @@ class EstimateNarrowbandGainError(task.SingleTask):
         out.weight[:] = mask.astype(np.float32)
 
         # Set the weight to zero for bad inputs
-        out.weight[:] *= np.any(wi > 0.0, axis=0, keepdims=True).astype(np.float32)
+        out.weight[:].local_array[:] *= np.any(wi > 0.0, axis=0, keepdims=True).astype(
+            np.float32
+        )
 
         # Return the ratio of gains
         return out
@@ -2627,12 +2620,12 @@ class FlagNarrowbandGainError(task.SingleTask):
         self.gains = gains
 
         # Identify the bad inputs when the gains were generated
-        self.weight = np.any(
-            gains.weight[:].view(np.ndarray) > 0.0, axis=0, keepdims=True
-        )
+        weight_local = np.any(gains.weight[:].local_array > 0.0, axis=0, keepdims=True)
+        self.weight = np.zeros_like(weight_local)
+        self.comm.Allreduce(weight_local, self.weight, op=MPI.LOR)
 
         # Compute the fractional error in the gain
-        self.frac_error = gains.gain[:].view(np.ndarray) - 1.0
+        self.frac_error = gains.gain[:].local_array - 1.0
 
     def process(self, data):
         """Look up appropriate gain errors, construct flag, and apply to weights.
@@ -2712,7 +2705,7 @@ class FlagNarrowbandGainError(task.SingleTask):
 
         # Determine if we have valid input flags
         try:
-            w = data.input_flags[:].view(np.ndarray)
+            w = data.input_flags[:].local_array
         except AttributeError:
             no_input_flags = True
         else:
@@ -2872,10 +2865,7 @@ class CalibrationCorrection(task.SingleTask):
         nfreq, nstack, ntime = sstream.vis.local_shape
 
         # Find the local frequencies
-        sfreq = sstream.vis.local_offset[0]
-        efreq = sfreq + nfreq
-
-        freq = sstream.freq[sfreq:efreq]
+        freq = sstream.freq[sstream.vis[:].local_bounds]
 
         # Extract representative products for the stacked visibilities
         stack_new, stack_flag = tools.redefine_stack_index_map(
