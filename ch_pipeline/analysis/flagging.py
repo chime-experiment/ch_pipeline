@@ -4,7 +4,7 @@ Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
-
+from typing import Union
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
@@ -14,6 +14,7 @@ from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
 from draco.core import task, io
+from draco.core import containers as dcontainers
 
 from ..core import containers
 
@@ -50,6 +51,9 @@ class RFIFilter(task.SingleTask):
         Time interval in *seconds* to compare across.
     threshold_mad : float
         Threshold above which we mask the data.
+    use_draco_container : bool
+        If True, output container is a nondistributed draco RFIMask.
+        Otherwise, return a distributed RFIMask from ch_pipeline
     """
 
     stack = config.Property(proptype=bool, default=False)
@@ -62,8 +66,9 @@ class RFIFilter(task.SingleTask):
     freq_width = config.Property(proptype=float, default=10.0)
     time_width = config.Property(proptype=float, default=420.0)
     threshold_mad = config.Property(proptype=float, default=6.0)
+    use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data):
+    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
         """Creates a mask by identifying outliers in the
         autocorrelation data.  This mask can be used to zero out
         frequencies and time samples that are contaminated by RFI.
@@ -109,26 +114,26 @@ class RFIFilter(task.SingleTask):
         # increase in measured power relative to the local median.
         mask = ndev > self.threshold_mad
 
-        # Change flag convention
-        mask = np.logical_not(mask)
-
         # Create container to hold output
-        out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
-        if self.keep_ndev:
-            out.add_dataset("ndev")
-        if self.keep_auto:
-            out.add_dataset("auto")
+        if self.use_draco_container:
+            # draco RFIMask container is not distributed
+            out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()[:, 0, :]
+        else:
+            out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+            out.redistribute("freq")
+            # Change flag convention
+            mask = np.logical_not(mask)
 
-        out.redistribute("freq")
+            if self.keep_ndev:
+                out.add_dataset("ndev")
+                out.ndev[:] = ndev
+            if self.keep_auto:
+                out.add_dataset("auto")
+                out.auto[:] = auto
 
         # Save mask to output container
         out.mask[:] = mask
-
-        if self.keep_ndev:
-            out.ndev[:] = ndev
-
-        if self.keep_auto:
-            out.auto[:] = auto
 
         # Return output container
         return out
