@@ -1,0 +1,108 @@
+cff-version: 1.2.0
+title: ch_pipeline
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+doi: "10.5281/zenodo.5846378"
+repository-code: "https://github.com/chime-experiment/ch_pipeline"
+abstract: >-
+  The CHIME data analysis pipeline.
+license: MIT
+authors:
+
+- given-names: "J. Richard"
+  family-names: "Shaw"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0002-4543-4588"
+
+- given-names: "Kiyoshi"
+  family-names: "Masui"
+  affiliation: "MIT"
+  orcid: "https://orcid.org/0000-0002-4279-6946"
+
+- given-names: "Adam D."
+  family-names: "Hincks"
+  affiliation: "University of Toronto"
+  orcid: "https://orcid.org/0000-0003-1690-6678"
+
+- given-names: "Seth R."
+  family-names: "Siegel"
+  affiliation: "McGill University"
+  orcid: "https://orcid.org/0000-0003-2631-6217"
+
+- given-names: "Mateus"
+  family-names: "Fandino"
+  affiliation: "Thompson Rivers University"
+  orcid: "https://orcid.org/0000-0002-6899-1176"
+
+- given-names: "Donald V."
+  family-names: "Wiebe"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0003-2631-6217"
+
+- given-names: "Rick"
+  family-names: "Nitsche"
+  affiliation: "University of British Columbia"
+
+- given-names: "Tristan"
+  family-names: "Pinsonneault-Marotte"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0002-9516-3245"
+
+- given-names: "Alex S."
+  family-names: "Hill"
+  affiliation: "University of British Columbia, Okanagan Campus"
+  orcid: "https://orcid.org/0000-0002-0772-9326"
+
+- given-names: "Juan Mena"
+  family-names: "Parra"
+  affiliation: "MIT"
+  orcid: "https://orcid.org/0000-0002-0772-9326"
+
+- given-names: "Carolin"
+  family-names: "Höfer"
+  affiliation: "University of British Columbia"
+
+- given-names: "Anja"
+  family-names: "Boskovic"
+  affiliation: "University of British Columbia"
+
+- given-names: "Greg"
+  family-names: "Davis"
+  affiliation: "University of British Columbia"
+
+- given-names: "Davor"
+  family-names: "Cubranic"
+  affiliation: "University of British Columbia"
+
+- given-names: "Liam"
+  family-names: "Gray"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0003-3986-954X"
+
+- given-names: "Rick"
+  family-names: "Smegal"
+  affiliation: "University of British Columbia"
+
+- given-names: "Philippe"
+  family-names: "Berger"
+  affiliation: "University of Toronto"
+
+- given-names: "Calvin"
+  family-names: "Leung"
+  affiliation: "MIT"
+
+- given-names: "Meiling"
+  family-names: "Deng"
+  affiliation: "Dominion Radio Astrophysical Observatory"
+  orcid: "https://orcid.org/0000-0001-8123-7322"
+
+- given-names: "Simon"
+  family-names: "Foreman"
+  affiliation: "Arizona State University"
+  orcid: "https://orcid.org/0000-0002-0190-2271"
+
+- given-names: "James S."
+  family-names: "Willis"
+  affiliation: "University of Toronto"
