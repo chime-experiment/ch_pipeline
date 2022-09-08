@@ -347,8 +347,9 @@ pipeline:
       in: sstream_blend2
       params:
         freq_zero: 800.0
-        nfreq: 1025
+        nfreq: {nfreq_delay}
         nsamp: 40
+        complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
 """
@@ -409,9 +410,9 @@ class DailyProcessing(base.ProcessingType):
         ],
         # Delay spectrum estimation
         "blend_stack_file": (
-            "/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/"
-            "sidereal_stack.h5"
+            "/project/rpp-chime/chime/chime_processed/stacks/rev_03/all/sstack.h5"
         ),
+        "nfreq_delay": 1025,
         # Job params
         "time": 180,  # How long in minutes?
         "nodes": 16,  # Number of nodes to use.
@@ -625,6 +626,7 @@ class TestDailyProcessing(DailyProcessing):
                 {"start": "CSD1878", "end": "CSD1889", "step": 7},
             ],
             "freq": [400, 416],
+            "nfreq_delay": 17,
             "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
