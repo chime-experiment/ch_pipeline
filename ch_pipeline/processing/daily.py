@@ -50,7 +50,6 @@ pipeline:
     - mpi4py
 
   tasks:
-    - type: ch_pipeline.core.containers.MonkeyPatchContainers
 
     - type: draco.core.task.SetMPILogging
       params:
