@@ -1,6 +1,6 @@
 cluster:
     directory:          $SCRATCH/chime/pipeline/test/data_flagger
-    venv:               my_venv
+    venv:               /home/ssiegel/ch_pipeline_master/venv
 
     ## Cluster configuration (ignored unless on a cluster)
     name:               dataflagger             # Jobname
@@ -27,9 +27,9 @@ pipeline:
             out:        filelist
             params:
                 files:
-                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00000000_*.h5"
-                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00040716_*.h5"
-                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/01603203_*.h5"
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00000000_0000.h5"
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/00040716_0000.h5"
+                    -   "/project/rpp-krs/chime/chime_online/20181220T235142Z_chimestack_corr/01603203_0000.h5"
 
         -   type:       ch_pipeline.core.io.LoadCorrDataFiles
             requires:   filelist

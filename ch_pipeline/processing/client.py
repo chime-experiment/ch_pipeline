@@ -3,7 +3,6 @@ import click
 from . import base
 from . import daily
 from . import beam
-from . import quarterstack
 
 click.disable_unicode_literals_warning = True
 
@@ -72,7 +71,7 @@ PREV = PRev()
 @click.option(
     "--root",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    default="/project/rpp-chime/chime/chime_processed/",  # TODO: put elsewhere
+    default="/project/rpp-krs/chime/chime_processed/",  # TODO: put elsewhere
     help="Set the root directory to save processed data.",
 )
 def cli(root):
@@ -203,7 +202,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
 
     if fairshare or user_fairshare:
         # TODO: find a better way of supplying the account
-        fs = base.slurm_fairshare("rpp-chime_cpu")
+        fs = base.slurm_fairshare("rpp-krs_cpu")
 
     if fairshare and fairshare > fs[0]:
         click.echo(
@@ -218,40 +217,13 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
         )
         return
 
-    number_in_queue, number_running = [len(l) for l in revision.queued()]
-    number_to_submit = max(
-        min(number, max_number - number_in_queue - number_running), 0
-    )
+    number_in_queue = len(revision.queued()[0])
+    number_to_submit = min(number, max_number - number_in_queue)
 
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
     revision.generate(max=number_to_submit, submit=submit)
-
-
-@item.command("metrics")
-@click.argument("revision", type=PREV)
-def metrics_list(revision):
-    """Show metrics about currently running jobs for
-    REVISION (given as (type:revision)."""
-
-    fs = base.slurm_fairshare("rpp-chime_cpu")
-    complete = revision.ls()
-    available = revision.available()
-    waiting, running = revision.queued()
-    failed = revision.crashed()
-    # Direct copy from revision.pending method, put here
-    # to avoid duplicate calls
-    not_pending = set(complete) | set(waiting) | set(running)
-    pending = [job for job in available if job not in not_pending]
-
-    click.echo(f"Fairshare: {fs[0]}")
-    click.echo(f"Available: {len(available)}")
-    click.echo(f"Pending: {len(pending)}")
-    click.echo(f"Waiting: {len(waiting)}")
-    click.echo(f"Running: {len(running)}")
-    click.echo(f"Successful: {len(complete)}")
-    click.echo(f"Failed: {len(failed)}")
 
 
 def dirstats(path):

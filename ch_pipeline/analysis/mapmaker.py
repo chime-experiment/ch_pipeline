@@ -1,6 +1,19 @@
-"""Map making tasks
+"""
+========================================================
+Map making tasks (:mod:`~ch_pipeline.analysis.mapmaker`)
+========================================================
+
+.. currentmodule:: ch_pipeline.analysis.mapmaker
 
 Tools for making maps from CHIME data.
+
+Tasks
+=====
+
+.. autosummary::
+    :toctree: generated/
+
+    RingMapMaker
 """
 
 import numpy as np
@@ -67,11 +80,6 @@ class RingMapMaker(task.SingleTask):
         ----------
         tel : TransitTelescope
         """
-
-        self.log.warning(
-            "This task is deprecated.  Please use "
-            "draco.analysis.ringmapmaker.RingMapMaker instead."
-        )
 
         if self.weight not in ["natural", "uniform", "inverse_variance"]:
             KeyError("Do not recognize weight = %s" % self.weight)
@@ -142,7 +150,7 @@ class RingMapMaker(task.SingleTask):
         invvar = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
         weight = np.zeros((nfreq, npol, nra, ncyl, nvis_1d), dtype=np.float64)
 
-        # If natural or uniform weighting was chosen, then calculate the
+        # If natural or uniform weighting was choosen, then calculate the
         # redundancy of the collated visibilities.
         if self.weight != "inverse_variance":
             redundancy = tools.calculate_redundancy(
@@ -204,7 +212,7 @@ class RingMapMaker(task.SingleTask):
         # Estimate rms noise in the ring map by propagating estimates
         # of the variance in the visibilities
         rm.rms[:] = np.sqrt(
-            2 * np.sum(tools.invert_no_zero(invvar) * weight**2.0, axis=(-2, -1))
+            2 * np.sum(tools.invert_no_zero(invvar) * weight ** 2.0, axis=(-2, -1))
         ).transpose(1, 0, 2)
 
         # Dereference datasets
@@ -237,8 +245,7 @@ class RingMapMaker(task.SingleTask):
             bfm_y[:] = np.matmul(weight[lfi] * vis[lfi], pa)
             sb_y[:] = np.matmul(weight[lfi], pa)
             if self.single_beam:
-                # Only need the 0th term if the irfft, equivalent to adding in EW
-                # direction
+                # Only need the 0th term if the irfft, equivalent to adding in EW direction
                 bfm[:] = np.sum(bfm_y, axis=2)[:, :, np.newaxis, ...]
                 sb[:] = np.sum(sb_y, axis=2)[:, :, np.newaxis, ...]
             else:
@@ -266,48 +273,3 @@ class RingMapMaker(task.SingleTask):
             )
 
         return rm
-
-
-class ConvertRingMap(task.SingleTask):
-    """Covert a ch_pipeline RingMap to a draco RingMap.
-
-    The ch_pipeline RingMap container has an rms dataset instead of
-    a weight dataset. This task converts rms to weight and stores the
-    result in a draco RingMap container.
-    """
-
-    def process(self, rmap_in):
-        """Convert a ch_pipline RingMap to a draco RingMap.
-
-        Parameters
-        ----------
-        rmap_in : ch_pipeline.core.containers.RingMap
-            input map to convert
-
-        Returns
-        -------
-        rmap_out : draco.core.containers.RingMap
-            converted ringmap.
-        """
-
-        from draco.core.containers import RingMap
-
-        rmap_in.redistribute("freq")
-
-        rmap_out = RingMap(
-            axes_from=rmap_in,
-            attrs_from=rmap_in,
-            distributed=rmap_in.distributed,
-            comm=rmap_in.comm,
-        )
-
-        rmap_out.redistribute("freq")
-
-        rmap_out.map[:] = rmap_in.map[:]
-        rmap_out.weight[:] = tools.invert_no_zero(rmap_in.rms[:][..., np.newaxis] ** 2)
-
-        if "dirty_beam" in rmap_in.datasets:
-            rmap_out.add_dataset("dirty_beam")
-            rmap_out.dirty_beam[:] = rmap_in.dirty_beam[:]
-
-        return rmap_out

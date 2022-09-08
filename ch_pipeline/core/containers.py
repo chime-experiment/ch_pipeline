@@ -1,4 +1,9 @@
-"""Parallel data containers
+"""
+==============================================================
+Parallel data containers (:mod:`~ch_pipeline.core.containers`)
+==============================================================
+
+.. currentmodule:: ch_pipeline.core.containers
 
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
@@ -6,38 +11,36 @@ containers which are imported into this module.
 
 Containers
 ==========
-- :py:class:`RFIMask`
-- :py:class:`CorrInputMask`
-- :py:class:`CorrInputTest`
-- :py:class:`CorrInputMonitor`
-- :py:class:`SiderealDayFlag`
-- :py:class:`TransitFitParams`
-- :py:class:`PointSourceTransit`
-- :py:class:`SourceModel`
-- :py:class:`SunTransit`
-- :py:class:`RingMap`
-- :py:class:`Photometry`
+
+.. autosummary::
+    :toctree: generated/
+
+    RFIMask
+    CorrInputMask
+    CorrInputTest
+    CorrInputMonitor
+    SiderealDayFlag
+    TransitFitParams
+    PointSourceTransit
+    SourceModel
+    SunTransit
+    RingMap
+    Photometry
 
 Tasks
 =====
-- :py:class:`MonkeyPatchContainers`
+
+.. autosummary::
+    :toctree: generated/
+
+    MonkeyPatchContainers
 """
-import posixpath
-from typing import List, Optional, Union
-from draco.core.task import MPILoggedTask
 
 import numpy as np
 
-from caput import memh5, tod
-from ch_util import andata
+from caput import memh5, pipeline
 
-from draco.core.containers import (
-    ContainerBase,
-    StaticGainData,
-    TODContainer,
-    FreqContainer,
-    TimeStream,
-)
+from draco.core.containers import *
 
 
 class RFIMask(ContainerBase):
@@ -495,54 +498,6 @@ class PointSourceTransit(StaticGainData):
         return self.index_map["param_cov2"]
 
 
-class SourceModel(FreqContainer):
-    """Container for holding model for visiblities.
-
-    Model consists of the sum of the signal from
-    multiple (possibly extended) sources.
-    """
-
-    _axes = ("pol", "time", "param", "source")
-
-    _dataset_spec = {
-        "amplitude": {
-            "axes": ["freq", "pol", "time", "source"],
-            "dtype": np.complex64,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "coeff": {
-            "axes": ["freq", "pol", "param"],
-            "dtype": np.complex64,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-    }
-
-    @property
-    def amplitude(self):
-        return self.datasets["amplitude"]
-
-    @property
-    def coeff(self):
-        return self.datasets["coeff"]
-
-    @property
-    def param(self):
-        return self.index_map["param"]
-
-    @property
-    def source(self):
-        return self.index_map["source"]
-
-    @property
-    def source_index(self):
-        src = list(self.source)
-        return np.array([src.index(par) for par in self.param["source"]])
-
-
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a solar transit.
     """
@@ -591,72 +546,89 @@ class SunTransit(ContainerBase):
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit."""
 
-    _axes = ("freq", "input", "time", "pol_x", "pol_y", "coord", "param")
+    _axes = ('freq', 'input', 'time', 'pol', 'eigen', 'good_input1', 'good_input2',
+             'udegree', 'vdegree', 'coord', 'param')
 
     _dataset_spec = {
-        "coord": {
-            "axes": ["time", "coord"],
-            "dtype": np.float64,
-            "initialise": True,
-            "distributed": False,
+        'coord': {
+            'axes': ['time', 'coord'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': False,
         },
-        "evalue_x": {
-            "axes": ["freq", "pol_x", "time"],
-            "dtype": np.float64,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'evalue1': {
+            'axes': ['freq', 'good_input1', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "evalue_y": {
-            "axes": ["freq", "pol_y", "time"],
-            "dtype": np.float64,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'evalue2': {
+            'axes': ['freq', 'good_input2', 'time'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "response": {
-            "axes": ["freq", "input", "time"],
-            "dtype": np.complex128,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'response': {
+            'axes': ['freq', 'input', 'time', 'eigen'],
+            'dtype': np.complex128,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "response_error": {
-            "axes": ["freq", "input", "time"],
-            "dtype": np.float64,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'response_error': {
+            'axes': ['freq', 'input', 'time', 'eigen'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "flag": {
-            "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'coeff': {
+            'axes': ['freq', 'pol', 'time', 'udegree', 'vdegree'],
+            'dtype': np.complex128,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "parameter": {
-            "axes": ["freq", "input", "param"],
-            "dtype": np.float64,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'is_sun': {
+            'axes': ['freq', 'pol', 'time'],
+            'dtype': np.float64,
+            'initialise': True,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
-        "parameter_cov": {
-            "axes": ["freq", "input", "param", "param"],
-            "dtype": np.float64,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
+        'flag': {
+            'axes': ['freq', 'input', 'time'],
+            'dtype': np.bool,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
         },
+        'parameter': {
+            'axes': ['freq', 'input', 'param'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        },
+        'parameter_cov': {
+            'axes': ['freq', 'input', 'param', 'param'],
+            'dtype': np.float64,
+            'initialise': False,
+            'distributed': True,
+            'distributed_axis': 'freq'
+        }
     }
 
     def __init__(self, *args, **kwargs):
 
-        kwargs["param"] = np.array(
-            ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
-        )
-        kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
+
+        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm',
+                                    'phase_intercept', 'phase_slope',
+                                    'phase_quad', 'phase_cube',
+                                    'phase_quart', 'phase_quint'])
+        kwargs['coord'] = np.array(['ha', 'dec', 'alt', 'az'])
 
         super(SunTransit, self).__init__(*args, **kwargs)
 
@@ -665,12 +637,20 @@ class SunTransit(ContainerBase):
         return self.datasets["coord"]
 
     @property
+    def evalue1(self):
+        return self.datasets['evalue1']
+
+    @property
+    def evalue2(self):
+        return self.datasets['evalue2']
+
+    @property
     def evalue_x(self):
-        return self.datasets["evalue_x"]
+        return self.datasets['evalue1']
 
     @property
     def evalue_y(self):
-        return self.datasets["evalue_y"]
+        return self.datasets['evalue2']
 
     @property
     def response(self):
@@ -679,6 +659,14 @@ class SunTransit(ContainerBase):
     @property
     def response_error(self):
         return self.datasets["response_error"]
+
+    @property
+    def coeff(self):
+        return self.datasets['coeff']
+
+    @property
+    def is_sun(self):
+        return self.datasets['is_sun']
 
     @property
     def flag(self):
@@ -857,292 +845,6 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
-class RawContainer(TODContainer):
-    """Base class for using raw CHIME data via the draco containers API.
-
-    This modifies the set of allowed group/dataset names to allow access to the
-    flags group.
-    """
-
-    _allowed_groups = ["flags"]
-
-    def group_name_allowed(self, name: str) -> bool:
-        """Allow access to the flags group."""
-
-        # Strip leading and trailing "/"
-        name = name.strip("/")
-
-        return name in self._allowed_groups
-
-    def dataset_name_allowed(self, name: str) -> bool:
-        """Allow access to datasets under both / and /flags."""
-
-        parent_name, name = posixpath.split(name)
-        return parent_name == "/" or self.group_name_allowed(parent_name)
-
-    @classmethod
-    def from_acq_h5(
-        cls,
-        acq_files: Union[str, List[str]],
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
-        **kwargs,
-    ) -> "RawContainer":
-        """Load from an HDF5 file on disk.
-
-        This is a thin wrapper around `from_file` to support the
-        `andata.BaseData.from_acq_h5` API. The main difference is supporting
-        the `start` and `stop` parameters. All other parameters are passed
-        straight into `from_file`.
-
-        .. note:: This does not support loading in a distributed manner as the archive
-            files don't have the correct hints set, but that should be added into this
-            routine by using the information given in the `_dataset_spec` of derived
-            classes.
-
-        Parameters
-        ----------
-        acq_files
-            Path or glob to files (or list of).
-        start, stop
-            Indices into the full set of files to select.
-
-        Returns
-        -------
-        cont
-            A single container instance.
-        """
-
-        if start is None and stop is None:
-            pass
-        elif start is not None and stop is not None:
-            kwargs["time_sel"] = slice(start, stop)
-        else:
-            raise ValueError(
-                f"Got mixed types for start ({type(start)}) and stop ({type(stop)})"
-            )
-
-        return cls.from_file(acq_files, **kwargs)
-
-
-class HFBData(RawContainer, FreqContainer):
-    """A container for HFB data.
-
-    This attempts to wrap the HFB archive format.
-
-    .. note:: This does not yet support distributed loading of HDF5 archive
-       files.
-    """
-
-    _axes = ("subfreq", "beam")
-
-    _dataset_spec = {
-        "hfb": {
-            "axes": ["freq", "subfreq", "beam", "time"],
-            "dtype": np.float32,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "flags/hfb_weight": {
-            "axes": ["freq", "subfreq", "beam", "time"],
-            "dtype": np.float32,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "flags/dataset_id": {
-            "axes": ["freq", "time"],
-            "dtype": "U32",
-            "initialise": True,
-            "distributed": False,
-        },
-        "flags/frac_lost": {
-            "axes": ["freq", "time"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": False,
-        },
-    }
-
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
-
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self.datasets["flags/hfb_weight"]
-
-
-class CHIMETimeStream(TimeStream, RawContainer):
-    """A container for CHIME visibility data.
-
-    This provides a close analog of the CorrData container but implemented via the draco
-    containers API.
-    """
-
-    # Add in the extra datasets contained within the CHIME corrdata time streams
-    _dataset_spec = {
-        "flags/dataset_id": {
-            "axes": ["freq", "time"],
-            "dtype": "U32",
-            "initialise": False,
-            "distributed": True,
-        },
-        "flags/frac_lost": {
-            "axes": ["freq", "time"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": True,
-        },
-    }
-
-    @classmethod
-    def from_corrdata(cls, data: andata.CorrData) -> "CHIMETimeStream":
-        """Turn a CorrData container into a CHIMETimeStream.
-
-        This makes a shallow copy of the input `data`. The internals of `data` will be
-        destroyed during this process and so the container should be discarded.
-
-        Parameters
-        ----------
-        data
-            A CorrData instance to clone. This instance should be discarded after this
-            call.
-
-        Returns
-        -------
-        newdata
-            The correlator data as a CHIMETimeStream object.
-        """
-        # Copy over all the internal data store
-        newdata = cls(data_group=data, distributed=data.distributed, comm=data.comm)
-
-        # Manipulate location of weights as this is the one dataset that has a different
-        # location in CHIMETimeStream compared to CorrData
-        storage = newdata._storage_root._get_storage()
-
-        if "/flags/vis_weight" in newdata:
-            storage["vis_weight"] = storage["flags"].pop("vis_weight")
-            storage["vis_weight"]._name = "/vis_weight"
-
-        if "/flags/inputs" in newdata:
-            storage["input_flags"] = storage["flags"].pop("inputs")
-            storage["input_flags"]._name = "/input_flags"
-
-        return newdata
-
-    @property
-    def frac_lost(self):
-        """Get the input flags dataset."""
-        return self.datasets["flags/frac_lost"]
-
-    @property
-    def flags(self):
-        """Get the flags group."""
-        flags_group = dict(self["flags"])
-
-        # Alias the groups back in for maximum compatibility with CHIME Andata
-        # based code
-        flags_group["vis_weight"] = self["vis_weight"]
-        flags_group["input_flags"] = self["input_flags"]
-
-        return flags_group
-
-
-class HFBReader(tod.Reader):
-    """A reader for HFB type data."""
-
-    data_class = HFBData
-
-    _freq_sel = None
-
-    @property
-    def freq_sel(self) -> Union[int, list, slice]:
-        """Get the current frequency selection.
-
-        Returns
-        -------
-        freq_sel
-            A frequency selection.
-        """
-
-        return self._freq_sel
-
-    @freq_sel.setter
-    def freq_sel(self, value: Union[int, list, slice]):
-        """Set a frequency selection.
-
-        Parameters
-        ----------
-        value
-            Any type accepted by h5py is valid.
-        """
-        self._freq_sel = andata._ensure_1D_selection(value)
-
-    _beam_sel = None
-
-    @property
-    def beam_sel(self):
-        """Get the current beam selection.
-
-        Returns
-        -------
-        beam_sel
-            The current beam selection.
-        """
-
-        return self._beam_sel
-
-    @beam_sel.setter
-    def beam_sel(self, value):
-        """Set a beam selection.
-
-        Parameters
-        ----------
-        value
-            Any type accepted by h5py is valid.
-        """
-        self._beam_sel = andata._ensure_1D_selection(value)
-
-    def read(self, out_group=None):
-        """Read the selected data.
-
-        Parameters
-        ----------
-        out_group : `h5py.Group`, hdf5 filename or `memh5.Group`
-            Underlying hdf5 like container that will store the data for the
-            BaseData instance.
-
-        Returns
-        -------
-        data : :class:`TOData`
-            Data read from :attr:`~Reader.files` based on the selections made
-            by user.
-
-        """
-        kwargs = {}
-
-        if self._freq_sel is not None:
-            kwargs["freq_sel"] = self._freq_sel
-
-        if self._beam_sel is not None:
-            kwargs["beam_sel"] = self._beam_sel
-
-        kwargs["ondisk"] = False
-
-        return self.data_class.from_mult_files(
-            self.files,
-            data_group=out_group,
-            start=self.time_sel[0],
-            stop=self.time_sel[1],
-            datasets=self.dataset_sel,
-            **kwargs,
-        )
-
-
 def make_empty_corrdata(
     freq=None,
     input=None,
@@ -1296,41 +998,21 @@ def make_empty_corrdata(
     return data
 
 
-class MonkeyPatchContainers(MPILoggedTask):
+class MonkeyPatchContainers(pipeline.TaskBase):
     """Patch draco to use CHIME timestream containers.
 
     This task does nothing but perform a monkey patch on `draco.core.containers`
-
-    .. deprecated::
-        This monkey patching scheme is now deprecated. Try to use just use the usual
-        draco infrastructure instead, that is using `draco.core.containers.empty_like`
-        to create a new container and `draco.core.containers.TimeStream` as a generic
-        timestream class and `ch_pipeline.core.containers.CHIMETimeStream` as a slightly
-        more CHIME specific one.
     """
 
     def __init__(self):
-
-        super().__init__()
-
-        self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
         import ch_pipeline.core.containers as ccontainers
         import draco.core.containers as dcontainers
 
         # Replace the routine for making an empty timestream. This needs to be replaced
         # in both draco and ch_pipeline because of the ways the imports work
-
-        def empty_timestream_patch(*args, **kwargs):
-            self.log.warning(
-                "This patching is deprecated. Try using `CHIMETimeStream` instead."
-            )
-            return ccontainers.make_empty_corrdata(*args, **kwargs)
-
-        empty_timestream_patch.__doc__ = ccontainers.make_empty_corrdata.__doc__
-
-        dcontainers.empty_timestream = empty_timestream_patch
-        ccontainers.empty_timestream = empty_timestream_patch
+        dcontainers.empty_timestream = ccontainers.make_empty_corrdata
+        ccontainers.empty_timestream = ccontainers.make_empty_corrdata
 
         # Save a reference to the original routine
         _make_empty_like = dcontainers.empty_like
@@ -1356,10 +1038,6 @@ class MonkeyPatchContainers(MPILoggedTask):
             """
 
             from ch_util import andata
-
-            self.log.warning(
-                "This patching is deprecated. Try using `CHIMETimeStream` instead."
-            )
 
             if isinstance(obj, andata.CorrData):
                 return dcontainers.empty_timestream(

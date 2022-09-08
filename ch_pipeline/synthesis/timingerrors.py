@@ -1,4 +1,13 @@
-"""Tasks for simulating timing distribution errors."""
+"""Tasks for simulating timing distribution errors.
+
+Tasks
+=====
+
+.. autosummary::
+    :toctree:
+
+    TimingErrors
+"""
 
 
 import numpy as np

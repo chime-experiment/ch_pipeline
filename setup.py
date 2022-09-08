@@ -17,5 +17,4 @@ setup(
     url="http://github.com/chime-experiment/ch_pipeline/",
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
-    license="MIT",
 )

@@ -40,7 +40,7 @@ pipeline:
       out: files_wait
       params:
         node_spoof:
-          cedar_online: /project/rpp-krs/chime/chime_online
+          cedar_archive: /project/rpp-krs/chime/chime_archive
         instrument: chime26m
         source_26m: *db_source_name
         start_time: {start_time}
@@ -102,16 +102,8 @@ pipeline:
         wterm: True
         overwrite: True
 
-    - type: ch_pipeline.analysis.decorrelation.CorrectDecorrelation
-      in: [transits_fs, inputs]
-      out: transits_corr
-      params:
-        source: *source_name
-        wterm: True
-        overwrite: True
-
     - type: ch_pipeline.analysis.beam.TransitRegridder
-      in: transits_corr
+      in: transits_fs
       out: transit_regrid
       params:
         ha_span: *hour_angle
@@ -129,7 +121,7 @@ pipeline:
 
 
 class HolographyFringestop(base.ProcessingType):
-    """ """
+    """"""
 
     type_name = "holo_fstop"
     # tag by name of source and processing run

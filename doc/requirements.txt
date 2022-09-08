@@ -1,3 +1,10 @@
-Sphinx >= 4.0, < 5.0
-sphinx_rtd_theme
-docutils==0.17
+# This is from requirements.txt:
+caput @ git+https://github.com/radiocosmology/caput
+ch_util @ git+ssh://git@github.com/chime-experiment/ch_util.git
+cora @ git+https://github.com/radiocosmology/cora
+driftscan @ git+https://github.com/radiocosmology/driftscan
+draco @ git+https://github.com/radiocosmology/draco
+
+# needed to build docs
+sphinx
+numpydoc

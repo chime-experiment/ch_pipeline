@@ -1,7 +1,7 @@
 cluster:
     name:               tcorr
     directory:          $SCRATCH/timing/
-    venv:               my_venv
+    venv:               /home/ssiegel/ch_pipeline/venv
 
     ## Cluster configuration (ignored unless on a cluster)
     name:               tcorr                   # Jobname
@@ -29,7 +29,7 @@ pipeline:
             out:        filelist
             params:
                 node_spoof:
-                    cedar_online:  '/project/rpp-krs/chime/chime_online/'
+                    cedar_archive:  '/project/rpp-krs/chime/chime_archive/'
                 instrument: 'chimetiming'
                 start_time: '20181212T000000'
                 end_time:   '20190305T000000'
@@ -41,17 +41,13 @@ pipeline:
             in:         filelist
             out:        tcorr
             params:
-                min_frac_kept: 0.85
+                check_amp: True
+                check_sig: True
+                nsigma: 5.0
                 threshold: 0.50
+                nparam: 2
                 min_freq: 420.0
                 max_freq: 600.0
-                mask_rfi: True
-                max_iter_weight:
-                check_amp: False
-                nsigma_amp: [1000.0, 500.0, 200.0, 100.0, 50.0, 20.0, 10.0, 5.0]
-                check_phi: True
-                nsigma_phi: [1000.0, 500.0, 200.0, 100.0, 50.0, 20.0, 10.0, 5.0]
-                nparam: 2
                 input_sel: [46, 142, 688, 960, 1058, 1166, 1543, 2032]
                 output_suffix: 'chimetiming_delay'
                 save:   Yes

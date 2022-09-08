@@ -1,9 +1,21 @@
 """
-Pathfinder/CHIME Telescope Model
+====================================================================
+Pathfinder/CHIME Telescope Model (:mod:`ch_pipeline.core.telescope`)
+====================================================================
+
+.. currentmodule:: ch_pipeline.core.telescope
 
 A model for both CHIME and Pathfinder telescopes. This attempts to query the
 configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
+
+Classes
+=======
+
+.. autosummary::
+    :toctree: generated/
+
+    CHIME
 """
 
 import logging
@@ -11,19 +23,14 @@ import logging
 import numpy as np
 import h5py
 import healpy
-from scipy.interpolate import RectBivariateSpline
 
 from caput import config, mpiutil
-
-from cora.util import coord, hputil
 
 from drift.core import telescope
 from drift.telescope import cylbeam
 
-from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
-
 from ch_util import ephemeris, tools
-from caput.cache import cached_property
+
 
 # Get the logger for the module
 logger = logging.getLogger(__name__)
@@ -69,23 +76,16 @@ class CHIME(telescope.PolarisedTelescope):
         Select a reduced set of feeds to use. Useful for generating small
         subsets of the data.
     baseline_masking_type : string, optional
-        Select a subset of baselines.  `total_length` selects baselines according to
-        their total length. Need to specify `minlength` and `maxlength` properties
-        (defined in baseclass).  `individual_length` selects baselines according to
-        their seperation in the North-South (specify `minlength_ns` and `maxlength_ns`)
-        or the East-West (specify `minlength_ew` and `maxlength_ew`).
-    minlength_ns, maxlength_ns : float
+        Select a subset of baselines.
+        `total_length` selects baselines according to their total length. Need to
+        specifiy `minlength` and `maxlength` properties (defined in baseclass).
+        `individual_length` selects baselines according to their seperation
+        in the North-South (specify `minlength_ns` and `maxlength_ns`) or
+        the East-West (specify `minlength_ew` and `maxlength_ew`).
+    minlength_ns, maxlength_ns : scalar
         Minimum and maximum North-South baseline lengths to include (in metres)
-    minlength_ew, maxlength_ew: float
+    minlength_ew, maxlength_ew:
         Minimum and maximum East-West baseline lengths to include (in metres)
-    dec_normalized: float, optional
-        Normalize the beam by its magnitude at transit at this declination
-        in degrees.
-    skip_pol_pair : list
-        List of antenna polarisation pairs to skip. Valid entries are "XX", "XY", "YX"
-        or "YY". Like the skipped frequencies these pol pairs will have entries
-        generated but their beam transfer matrices are implicitly zero and thus not
-        calculated.
     """
 
     # Configure which feeds and layout to use
@@ -120,20 +120,9 @@ class CHIME(telescope.PolarisedTelescope):
     # Auto-correlations setting (overriding default in baseclass)
     auto_correlations = config.Property(proptype=bool, default=True)
 
-    # Beam normalization
-    dec_normalized = config.Property(proptype=float, default=None)
-    # Skipping frequency/baseline parameters
-    skip_pol_pair = config.list_type(type_=str, maxlength=4, default=[])
-
     # Fix base properties
     cylinder_width = 20.0
     cylinder_spacing = tools._PF_SPACE
-
-    _exwidth = [0.7]
-    _eywidth = _exwidth
-
-    _hxwidth = [1.2]
-    _hywidth = _hxwidth
 
     _pickle_keys = ["_feeds"]
 
@@ -153,9 +142,6 @@ class CHIME(telescope.PolarisedTelescope):
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
-
-        # Set the overall normalization of the beam
-        self._set_beam_normalization()
 
     @classmethod
     def from_layout(cls, layout, correlator=None, skip=False):
@@ -214,37 +200,20 @@ class CHIME(telescope.PolarisedTelescope):
             logger.debug("Loading layout: %s", str(self.layout))
             self._load_layout()
 
-        # Set the overall normalization of the beam
-        self._set_beam_normalization()
-
     #
     # === Redefine properties of the base class ===
     #
 
     # Tweak the following two properties to change the beam width
-    @cached_property
-    def fwhm_ex(self):
-        """Full width half max of the E-plane antenna beam for X polarization."""
+    @property
+    def fwhm_e(self):
+        """Full width half max of the E-plane antenna beam."""
+        return 2.0 * np.pi / 3.0 * 0.7
 
-        return np.polyval(np.array(self._exwidth) * 2.0 * np.pi / 3.0, self.frequencies)
-
-    @cached_property
-    def fwhm_hx(self):
-        """Full width half max of the H-plane antenna beam for X polarization."""
-
-        return np.polyval(np.array(self._hxwidth) * 2.0 * np.pi / 3.0, self.frequencies)
-
-    @cached_property
-    def fwhm_ey(self):
-        """Full width half max of the E-plane antenna beam for Y polarization."""
-
-        return np.polyval(np.array(self._eywidth) * 2.0 * np.pi / 3.0, self.frequencies)
-
-    @cached_property
-    def fwhm_hy(self):
-        """Full width half max of the H-plane antenna beam for Y polarization."""
-
-        return np.polyval(np.array(self._hywidth) * 2.0 * np.pi / 3.0, self.frequencies)
+    @property
+    def fwhm_h(self):
+        """Full width half max of the H-plane antenna beam."""
+        return 2.0 * np.pi / 3.0 * 1.2
 
     # Set the approximate uv feed sizes
     @property
@@ -419,29 +388,13 @@ class CHIME(telescope.PolarisedTelescope):
     # === Setup the primary beams ===
     #
 
-    def beam(self, feed, freq, angpos=None):
+    def beam(self, feed, freq):
         """Primary beam implementation for the CHIME/Pathfinder.
 
         This only supports normal CHIME cylinder antennas. Asking for the beams
         for other types of inputs will cause an exception to be thrown. The
         beams from this routine are rotated by `self.rotation_angle` to account
-        for the CHIME/Pathfinder rotation.
-
-        Parameters
-        ----------
-        feed : int
-            Index for the feed.
-        freq : int
-            Index for the frequency.
-        angpos : np.ndarray[nposition, 2], optional
-            Angular position on the sky (in radians).
-            If not provided, default to the _angpos
-            class attribute.
-
-        Returns
-        -------
-        beam : np.ndarray[nposition, 2]
-            Amplitude vector of beam at each position on the sky.
+        for the Pathfinder rotation, and are not rotated for CHIME.
         """
         # # Fetch beam parameters out of config database.
 
@@ -454,11 +407,6 @@ class CHIME(telescope.PolarisedTelescope):
         if not tools.is_array(feed_obj):
             raise ValueError("Requested feed is not a CHIME antenna.")
 
-        # If the angular position was not provided, then use the values in the
-        # class attribute.
-        if angpos is None:
-            angpos = self._angpos
-
         # Get the beam rotation parameters.
         yaw = -self.rotation_angle
         pitch = 0.0
@@ -469,33 +417,27 @@ class CHIME(telescope.PolarisedTelescope):
         # We can only support feeds angled parallel or perp to the cylinder
         # axis. Check for these and throw exception for anything else.
         if tools.is_array_y(feed_obj):
-            beam = cylbeam.beam_y(
-                angpos,
+            return cylbeam.beam_y(
+                self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_ey[freq],
-                self.fwhm_hy[freq],
+                self.fwhm_e,
+                self.fwhm_h,
                 rot=rot,
             )
         elif tools.is_array_x(feed_obj):
-            beam = cylbeam.beam_x(
-                angpos,
+            return cylbeam.beam_x(
+                self._angpos,
                 self.zenith,
                 self.cylinder_width / self.wavelengths[freq],
-                self.fwhm_ex[freq],
-                self.fwhm_hx[freq],
+                self.fwhm_e,
+                self.fwhm_h,
                 rot=rot,
             )
         else:
             raise RuntimeError(
                 "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
             )
-
-        # Normalize the beam
-        if self._beam_normalization is not None:
-            beam *= self._beam_normalization[freq, feed, np.newaxis, :]
-
-        return beam
 
     #
     # === Override methods determining the feed pairs we should calculate ===
@@ -557,7 +499,7 @@ class CHIME(telescope.PolarisedTelescope):
         bl2 = np.around(bl1[..., 0] + 1.0j * bl1[..., 1], self._bl_tol)
 
         # Construct array of baseline lengths
-        blen = np.sum(bl1**2, axis=-1) ** 0.5
+        blen = np.sum(bl1 ** 2, axis=-1) ** 0.5
 
         if self.baseline_masking_type == "total_length":
             # Create mask of included baselines
@@ -595,257 +537,26 @@ class CHIME(telescope.PolarisedTelescope):
 
         return beam_map, beam_mask
 
-    def _set_beam_normalization(self):
-        """Determine the beam normalization for each feed and frequency.
-
-        The beam will be normalized by its value at transit at the declination
-        provided in the dec_normalized config parameter.  If this config parameter
-        is set to None, then there is no additional normalization applied.
-        """
-
-        self._beam_normalization = None
-
-        if self.dec_normalized is not None:
-
-            angpos = np.array(
-                [(0.5 * np.pi - np.radians(self.dec_normalized)), 0.0]
-            ).reshape(1, -1)
-
-            beam = np.ones((self.nfreq, self.nfeed, 2), dtype=np.float64)
-
-            beam_lookup = {}
-
-            for fe, feed in enumerate(self.feeds):
-
-                if not tools.is_array(feed):
-                    continue
-
-                beamclass = self.beamclass[fe]
-
-                if beamclass not in beam_lookup:
-
-                    beam_lookup[beamclass] = np.ones((self.nfreq, 2), dtype=np.float64)
-                    for fr in range(self.nfreq):
-                        beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[0]
-
-                beam[:, fe, :] = beam_lookup[beamclass]
-
-            self._beam_normalization = tools.invert_no_zero(
-                np.sqrt(np.sum(beam**2, axis=-1))
-            )
-
-    def _skip_baseline(self, bl_ind):
-        """Override to skip baselines based on which polarisation pair they are."""
-
-        # Pull in baseline skip choice from parent class
-        skip_bl = super()._skip_baseline(bl_ind)
-
-        pol_i, pol_j = self.polarisation[self.uniquepairs[bl_ind]]
-        pol_pair = pol_i + pol_j
-
-        skip_pol = pol_pair in self.skip_pol_pair
-
-        return skip_bl or skip_pol
-
-
-def _flat_top_gauss6(x, A, sig, x0):
-    """Flat-top gaussian. Power of 6."""
-    return A * np.exp(-abs((x - x0) / sig) ** 6)
-
-
-def _flat_top_gauss3(x, A, sig, x0):
-    """Flat-top gaussian. Power of 3."""
-    return A * np.exp(-abs((x - x0) / sig) ** 3)
-
-
-class CHIMEParameterizedBeam(CHIME):
-    """CHIME telescope that uses a parameterized fit to the driftscan beam.
-
-    This speeds up evaluation of the beam model.
-    """
-
-    SIGMA_EW = [14.87857614, 9.95746878]
-
-    FUNC_NS = [_flat_top_gauss6, _flat_top_gauss3]
-    PARAM_NS = np.array(
-        [[9.97981768e-01, 1.29544939e00, 0.0], [9.86421047e-01, 8.10213326e-01, 0.0]]
-    )
-
-    def _sigma(self, pol_index, freq_index, dec):
-        """Width of the power beam in the EW direction."""
-        return self.SIGMA_EW[pol_index] / self.frequencies[freq_index] / np.cos(dec)
-
-    def _beam_amplitude(self, pol_index, dec):
-        """Amplitude of the power beam at meridian."""
-        return self.FUNC_NS[pol_index](
-            dec - np.radians(self.latitude), *self.PARAM_NS[pol_index]
-        )
-
-    def beam(self, feed, freq, angpos=None):
-        """Parameterized fit to driftscan cylinder beam model for CHIME telescope.
-
-        Parameters
-        ----------
-        feed : int
-            Index for the feed.
-        freq : int
-            Index for the frequency.
-        angpos : np.ndarray[nposition, 2], optional
-            Angular position on the sky (in radians).
-            If not provided, default to the _angpos
-            class attribute.
-
-        Returns
-        -------
-        beam : np.ndarray[nposition, 2]
-            Amplitude vector of beam at each position on the sky.
-        """
-
-        feed_obj = self.feeds[feed]
-
-        # Check that feed exists and is a CHIME cylinder antenna
-        if feed_obj is None:
-            raise ValueError("Craziness. The requested feed doesn't seem to exist.")
-
-        if not tools.is_array(feed_obj):
-            raise ValueError("Requested feed is not a CHIME antenna.")
-
-        # If the angular position was not provided, then use the values in the
-        # class attribute.
-        if angpos is None:
-            angpos = self._angpos
-
-        dec = 0.5 * np.pi - angpos[:, 0]
-        ha = angpos[:, 1]
-
-        # We can only support feeds angled parallel or perp to the cylinder
-        # axis. Check for these and throw exception for anything else.
-        if tools.is_array_x(feed_obj):
-            pol = 0
-        elif tools.is_array_y(feed_obj):
-            pol = 1
-        else:
-            raise RuntimeError(
-                "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
-            )
-
-        beam = np.zeros((angpos.shape[0], 2), dtype=np.float64)
-        beam[:, 0] = np.sqrt(
-            self._beam_amplitude(pol, dec)
-            * np.exp(-((ha / self._sigma(pol, freq, dec)) ** 2))
-        )
-
-        # Normalize the beam
-        if self._beam_normalization is not None:
-            beam *= self._beam_normalization[freq, feed, np.newaxis, :]
-
-        return beam
-
-
-class CHIMEFitBeam(CHIME):
-    """Driftscan model with revised FWHM for north-south beam.
-
-    Point source beam model was fit to a flat Gaussian at each frequency.
-    Best-fit FWHM as a function of frequency was fit with a cubic
-    polynomial. This class revises coefficients of FWHM from the
-    fit. Detailed comparisons are documented in:
-    https://bao.chimenet.ca/doc/documents/1448
-
-    Note that the optimization was carried out in 585-800 MHz.
-    This model will produce large extrapolation errors if used below that.
-    """
-
-    _eywidth = (
-        3.0
-        / (2 * np.pi)
-        * np.array([1.15310483e-07, -2.30462590e-04, 1.50451290e-01, -3.07440520e01])
-    )
-
-    _hxwidth = (
-        3.0
-        / (2 * np.pi)
-        * np.array([2.97495306e-07, -6.00582101e-04, 3.99949759e-01, -8.66733249e01])
-    )
-
 
 class CHIMEExternalBeam(CHIME):
     """Model telescope for the CHIME.
 
     This class uses an external beam model that is read in from a file.
-
-    Attributes
-    ----------
-    primary_beam_filename : str
-        Path to the file containing the primary beam. Can either be a Healpix beam or a
-        GridBeam.
-    freq_interp_beam : bool, optional
-        Interpolate between neighbouring frequencies if we don't have a beam for every
-        frequency channel.
-    force_real_beam : bool, optional
-        Ensure the output beam is real, regardless of what the datatype of the beam file
-        is. This can help save memory if the saved beam is complex but you know the
-        imaginary part is zero.
     """
 
-    primary_beam_filename = config.Property(proptype=str)
-    freq_interp_beam = config.Property(proptype=bool, default=False)
-    force_real_beam = config.Property(proptype=bool, default=False)
+    primary_beamx_filename = config.Property(
+        proptype=str,
+        default="/project/k/krs/cahofer/pass1/beams/beamx_400_800_nfreq200.hdf5",
+    )
 
-    def _finalise_config(self):
-        """Get the beam file object."""
-
-        logger.debug("Reading beam model from {}...".format(self.primary_beam_filename))
-        self._primary_beam = ContainerBase.from_file(
-            self.primary_beam_filename, mode="r", distributed=False, ondisk=True
-        )
-
-        self._is_grid_beam = isinstance(self._primary_beam, GridBeam)
-
-        # cache axes
-        self._beam_freq = self._primary_beam.freq[:]
-        self._beam_nside = None if self._is_grid_beam else self._primary_beam.nside
-
-        # TODO must use bytestring here because conversion doesn't work with ondisk=True
-        if self._is_grid_beam:
-            self._beam_pol_map = {
-                "X": list(self._primary_beam.pol[:]).index(b"XX"),
-                "Y": list(self._primary_beam.pol[:]).index(b"YY"),
-            }
-        else:
-            self._beam_pol_map = {
-                "X": list(self._primary_beam.pol[:]).index(b"X"),
-                "Y": list(self._primary_beam.pol[:]).index(b"Y"),
-            }
-
-        if len(self._primary_beam.input) > 1:
-            raise ValueError("Per-feed beam model not supported for now.")
-
-        complex_beam = np.issubclass_(
-            self._primary_beam.beam.dtype.type, np.complexfloating
-        )
-        self._output_dtype = (
-            np.complex128 if complex_beam and not self.force_real_beam else np.float64
-        )
-
-        super()._finalise_config()
+    primary_beamy_filename = config.Property(
+        proptype=str,
+        default="/project/k/krs/cahofer/pass1/beams/beamy_400_800_nfreq200.hdf5",
+    )
 
     def beam(self, feed, freq_id):
-        """Get the beam pattern.
+        # Fetch beam parameters out of config database.
 
-        Parameters
-        ----------
-        feed : int
-            Feed index.
-        freq_id : int
-            Frequency ID.
-
-        Returns
-        -------
-        beam : np.ndarray[pixel, pol]
-            Return the vector beam response at each point in the Healpix grid. This
-            array is of type `np.float64` if the input beam pattern is real, of
-            `force_real_beam` is set, otherwise is is on type `np.complex128`.
-        """
         feed_obj = self.feeds[feed]
         tel_freq = self.frequencies
         nside = self._nside
@@ -855,155 +566,47 @@ class CHIMEExternalBeam(CHIME):
             raise ValueError("The requested feed doesn't seem to exist.")
 
         if tools.is_array_x(feed_obj):
-            pol_ind = self._beam_pol_map["X"]
+            fname = self.primary_beamx_filename
+
         elif tools.is_array_y(feed_obj):
-            pol_ind = self._beam_pol_map["Y"]
+            fname = self.primary_beamy_filename
+
         else:
             raise ValueError("Polarisation not supported by this feed", feed_obj)
+        try:
+            logger.debug("Attempting to read beam file from disk...")
+            with h5py.File(fname, "r") as f:
+                map_freq = f["freq"][:]
+                freq_sel = _nearest_freq(tel_freq, map_freq, freq_id)
+                beam_map = f["beam"][freq_sel, :]
 
-        # find nearest frequency
-        freq_sel = _nearest_freq(
-            tel_freq, self._beam_freq, freq_id, single=(not self.freq_interp_beam)
-        )
-        # Raise an error if we can't find any suitable frequency
-        if len(freq_sel) == 0:
-            raise ValueError(f"No beam model spans frequency {tel_freq[freq_id]}.")
-
-        if self._is_grid_beam:
-            # Either we haven't set up interpolation coords yet, or the nside has
-            # changed
-            if (self._beam_nside is None) or (self._beam_nside != nside):
-                self._beam_nside = nside
-                self._setup_gridbeam_interpolation()
-
-            # interpolate gridbeam onto HEALPix
-            beam_map = self._interpolate_gridbeam(freq_sel, pol_ind)
-
-        else:  # Healpix input beam just need to change to the required resolution
-            beam_map = self._primary_beam.beam[freq_sel, pol_ind, 0, :]
-
-            # Check resolution and resample to a better resolution if needed
-            if nside != self._beam_nside:
-
-                if nside > self._beam_nside:
-                    logger.warning(
-                        f"Requested nside={nside} higher than that of "
-                        f"beam {self._beam_nside}"
-                    )
-
-                logger.debug(
-                    "Resampling external beam from nside {:d} to {:d}".format(
-                        self._beam_nside,
-                        nside,
-                    )
-                )
-                beam_map_new = np.zeros((len(freq_sel), npix), dtype=beam_map.dtype)
-                beam_map_new["Et"] = healpy.ud_grade(beam_map["Et"], nside)
-                beam_map_new["Ep"] = healpy.ud_grade(beam_map["Ep"], nside)
-                beam_map = beam_map_new
-
-        map_out = np.empty((npix, 2), dtype=self._output_dtype)
-
-        # Pull out the real part of the beam if we are forcing a conversion. This should
-        # do nothing if the array is already real
-        def _conv_real(x):
-            if self.force_real_beam:
-                x = x.real
-            return x
+        except IOError:
+            raise IOError("Could not load beams from disk [path: %s]." % fname)
 
         if len(freq_sel) == 1:
-            # exact match
-            map_out[:, 0] = _conv_real(beam_map["Et"][0])
-            map_out[:, 1] = _conv_real(beam_map["Ep"][0])
+            return beam_map
+
         else:
-            # interpolate between pair of frequencies
-            freq_high = self._beam_freq[freq_sel[1]]
-            freq_low = self._beam_freq[freq_sel[0]]
+            freq_high = map_freq[freq_sel[1]]
+            freq_low = map_freq[freq_sel[0]]
             freq_int = tel_freq[freq_id]
 
             alpha = (freq_high - freq_int) / (freq_high - freq_low)
             beta = (freq_int - freq_low) / (freq_high - freq_low)
 
-            map_out[:, 0] = _conv_real(
-                beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
-            )
-            map_out[:, 1] = _conv_real(
-                beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
-            )
+            map_t = beam_map["Et"][0] * alpha + beam_map["Et"][1] * beta
+            map_p = beam_map["Ep"][0] * alpha + beam_map["Ep"][1] * beta
 
-        return map_out
+            map_out = np.empty((npix, 2), dtype=np.complex128)
+            map_out[:, 0] = healpy.pixelfunc.ud_grade(map_t, nside)
+            map_out[:, 1] = healpy.pixelfunc.ud_grade(map_p, nside)
 
-    def _setup_gridbeam_interpolation(self):
-        # grid beam coordinates
-        self._x_grid = self._primary_beam.phi[:]
-        self._y_grid = self._primary_beam.theta[:]
-
-        # celestial coordinates
-        angpos = hputil.ang_positions(self._nside)
-        x_cel = coord.sph_to_cart(angpos).T
-
-        # rotate to telescope coords
-        # first align y with N, then polar axis with NCP
-        self._x_tel = cylbeam.rotate_ypr(
-            (1.5 * np.pi, np.radians(90.0 - self.latitude), 0), *x_cel
-        )
-
-        # mask any pixels outside grid
-        x_t, y_t, z_t = self._x_tel
-        self._pix_mask = (
-            (z_t > 0)
-            & (np.abs(x_t) < np.abs(self._x_grid.max()))
-            & (np.abs(y_t) < np.abs(self._y_grid.max()))
-        )
-
-        # pre-compute polarisation pattern
-        # taken from driftscan
-        zenith = np.array([np.pi / 2.0 - np.radians(self.latitude), 0.0])
-        that, phat = coord.thetaphi_plane_cart(zenith)
-        xhat, yhat, zhat = cylbeam.rotate_ypr(
-            [-self.rotation_angle, 0.0, 0.0], phat, -that, coord.sph_to_cart(zenith)
-        )
-
-        self._pvec_x = cylbeam.polpattern(angpos, xhat)
-        self._pvec_y = cylbeam.polpattern(angpos, yhat)
-
-    def _interpolate_gridbeam(self, f_sel, p_ind):
-        x, y = self._x_grid, self._y_grid
-        x_t, y_t, z_t = self._x_tel
-        mask = self._pix_mask
-
-        # interpolation routine requires increasing axes
-        reverse_x = (np.diff(self._x_grid) < 0).any()
-        if reverse_x:
-            x = x[::-1]
-
-        npix = healpy.nside2npix(self._nside)
-        beam_out = np.zeros(
-            (len(f_sel), npix), dtype=HEALPixBeam._dataset_spec["beam"]["dtype"]
-        )
-        for i, fi in enumerate(f_sel):
-            # For now we just use the magnitude. Assumes input is power beam
-            beam = self._primary_beam.beam[fi, p_ind, 0]
-            if reverse_x:
-                beam = beam[:, ::-1]
-            beam_spline = RectBivariateSpline(y, x, np.sqrt(np.abs(beam)))
-
-            # beam amplitude
-            amp = np.zeros(npix, dtype=beam.real.dtype)
-            amp[mask] = beam_spline(y_t[mask], x_t[mask], grid=False)
-
-            # polarisation projection
-            pvec = self._pvec_x if self._beam_pol_map["X"] == p_ind else self._pvec_y
-
-            beam_out[i]["Et"] = amp * pvec[:, 0]
-            beam_out[i]["Ep"] = amp * pvec[:, 1]
-
-        return beam_out
+            return map_out
 
 
-def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
-    """Find nearest neighbor frequencies. Assumes map frequencies
-    are uniformly spaced.
+def _nearest_freq(tel_freq, map_freq, freq_id):
+
+    """Find nearest neighbor frequencies.
 
     Parameters
     ----------
@@ -1013,8 +616,6 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
         frequencies from beam map file.
     freq_id : int
         frequency selection.
-    single : bool
-        Only return the single nearest neighbour.
 
     Returns
     -------
@@ -1023,9 +624,6 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
     """
 
     diff_freq = abs(map_freq - tel_freq[freq_id])
-    if single:
-        return np.array([np.argmin(diff_freq)])
-
     map_freq_width = abs(map_freq[1] - map_freq[0])
     match_mask = diff_freq < map_freq_width
 

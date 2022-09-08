@@ -1,4 +1,23 @@
-"""Tasks for beam measurement processing"""
+""" Tasks for beam measurement processing.
+
+    Tasks
+    =====
+
+    .. autosummary::
+        :toctree:
+
+        TransitGrouper
+        TransitRegridder
+        EdgeFlagger
+        TransitResampler
+        MakeHolographyBeam
+        ConstructStackedBeam
+        HolographyTransitFit
+        DetermineHolographyGainsFromFits
+        ApplyHolographyGains
+        TransitStacker
+        FilterHolographyProcessed
+"""
 import json
 import yaml
 from os import path, listdir
@@ -7,7 +26,7 @@ import numpy as np
 from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
-from caput.pipeline import PipelineRuntimeError
+from caput.pipeline import PipelineConfigError, PipelineRuntimeError
 from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
@@ -59,13 +78,9 @@ class TransitGrouper(task.SingleTask):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
-
-        Raises
-        ------
-        `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = ephem.chime_observer() if observer is None else observer
+        self.sky_obs = wrap_observer(self.observer)
         try:
             self.src = ephem.source_dictionary[self.source]
         except KeyError:
@@ -74,7 +89,7 @@ class TransitGrouper(task.SingleTask):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise PipelineConfigError(msg)
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -105,6 +120,9 @@ class TransitGrouper(task.SingleTask):
         # Redistribute if needed
         tstream.redistribute("freq")
 
+        # Update observer time
+        self.sky_obs.date = tstream.time[0]
+
         # placeholder for finalized transit when it is ready
         final_ts = None
 
@@ -119,14 +137,7 @@ class TransitGrouper(task.SingleTask):
 
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
-            tr_time = self.observer.transit_times(self.src, tstream.time[0])
-            if len(tr_time) != 1:
-                raise ValueError(
-                    "Didn't find exactly one transit time. Found {:d}.".format(
-                        len(tr_time)
-                    )
-                )
-            self.cur_transit = tr_time[0]
+            self.cur_transit = self.sky_obs.next_transit(self.src)
             self._transit_bounds()
 
         # check if we've accumulated enough past the transit
@@ -195,10 +206,8 @@ class TransitGrouper(task.SingleTask):
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = self.tstreams[0]
-            _, dec = ephem.object_coords(
-                self.src, all_t[0], deg=True, obs=self.observer
-            )
-            ts.attrs["dec"] = dec
+            _, dec = self.sky_obs.radec(self.src)
+            ts.attrs["dec"] = dec._degrees
             ts.attrs["source_name"] = self.source
             ts.attrs["transit_time"] = self.cur_transit
             ts.attrs["observation_id"] = self.obs_id
@@ -277,13 +286,9 @@ class TransitRegridder(Regridder):
         ----------
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
-
-        Raises
-        ------
-        `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = ephem.chime_observer() if observer is None else observer
+        self.sky_obs = wrap_observer(self.observer)
 
         # Setup bounds for interpolation grid
         self.start = -self.ha_span / 2
@@ -297,7 +302,7 @@ class TransitRegridder(Regridder):
                 "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise PipelineConfigError(msg)
 
     def process(self, data):
         """Regrid visibility data onto a regular grid in hour angle.
@@ -320,13 +325,18 @@ class TransitRegridder(Regridder):
         weight = data.weight[:].view(np.ndarray)
         vis_data = data.vis[:].view(np.ndarray)
 
+        # Update observer time
+        self.sky_obs.date = data.time[0]
+
         # Get apparent source RA, including precession effects
-        ra, _ = ephem.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
+        ra, _ = self.sky_obs.cirs_radec(self.src)
+        ra = ra._degrees
         # Get catalogue RA for reference
-        ra_icrs, _ = ephem.object_coords(self.src, deg=True, obs=self.observer)
+        ra_icrs, _ = self.sky_obs.radec(self.src)
+        ra_icrs = ra_icrs._degrees
 
         # Convert input times to hour angle
-        lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
+        lha = unwrap_lha(self.sky_obs.unix_to_lsa(data.time), ra)
 
         # perform regridding
         success = 1
@@ -443,7 +453,8 @@ class TransitResampler(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = ephem.chime_observer() if observer is None else observer
+        self.sky_obs = wrap_observer(self.observer)
 
     def process(self, beam, data):
         """Resample the measured beam at arbitrary RA by convolving with a Lanczos kernel.
@@ -475,7 +486,7 @@ class TransitResampler(task.SingleTask):
         if "ra" in data.index_map:
             ra = data.index_map["ra"][:]
         elif "time" in data.index_map:
-            ra = self.observer.unix_to_lsa(data.time)
+            ra = self.sky_obs.unix_to_lsa(data.time)
         else:
             raise RuntimeError("Unable to extract RA from input container.")
 
@@ -528,7 +539,7 @@ class TransitResampler(task.SingleTask):
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
-        w = invert_no_zero(np.matmul(invert_no_zero(wgrid), lza**2))
+        w = invert_no_zero(np.matmul(invert_no_zero(wgrid), lza ** 2))
 
         return y, w
 
@@ -823,14 +834,14 @@ class ConstructStackedBeam(task.SingleTask):
 
             # Accumulate variances in quadrature.  Save in the weight dataset.
             ov[:, ss, :] += wss * cross
-            ow[:, ss, :] += wss**2 * invert_no_zero(weight)
+            ow[:, ss, :] += wss ** 2 * invert_no_zero(weight)
 
             # Increment counter
             counter[:, ss, :] += wss
 
         # Divide through by counter to get properly weighted visibility average
         ov[:] *= invert_no_zero(counter)
-        ow[:] = counter**2 * invert_no_zero(ow[:])
+        ow[:] = counter ** 2 * invert_no_zero(ow[:])
 
         return stacked_beam
 
@@ -1080,8 +1091,8 @@ class TransitStacker(task.SingleTask):
                 axes_from=transit, distributed=transit.distributed, comm=transit.comm
             )
 
-            self.stack.add_dataset("sample_variance")
-            self.stack.add_dataset("nsample")
+            self.stack.add_dataset("observed_variance")
+            self.stack.add_dataset("number_of_observations")
             self.stack.redistribute("freq")
 
             self.log.info("Adding %s to stack." % transit.attrs["tag"])
@@ -1105,8 +1116,8 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] = coeff * transit.beam[:]
-            self.stack.weight[:] = (coeff**2) * invert_no_zero(transit.weight[:])
-            self.stack.nsample[:] = flag.astype(np.int)
+            self.stack.weight[:] = (coeff ** 2) * invert_no_zero(transit.weight[:])
+            self.stack.number_of_observations[:] = flag.astype(np.int)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1137,8 +1148,8 @@ class TransitStacker(task.SingleTask):
                 coeff = flag.astype(np.float32)
 
             self.stack.beam[:] += coeff * transit.beam[:]
-            self.stack.weight[:] += (coeff**2) * invert_no_zero(transit.weight[:])
-            self.stack.nsample[:] += flag
+            self.stack.weight[:] += (coeff ** 2) * invert_no_zero(transit.weight[:])
+            self.stack.number_of_observations[:] += flag
 
             self.variance += coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance += coeff * transit.beam[:] ** 2
@@ -1149,7 +1160,7 @@ class TransitStacker(task.SingleTask):
     def process_finish(self):
         """Normalise the stack and return the result.
 
-        Includes the sample variance over transits within the stack.
+        Includes the observed variance between transits within the stack,
 
         Returns
         -------
@@ -1159,18 +1170,18 @@ class TransitStacker(task.SingleTask):
         # Divide by norm to get average transit
         inv_norm = invert_no_zero(self.norm)
         self.stack.beam[:] *= inv_norm
-        self.stack.weight[:] = invert_no_zero(self.stack.weight[:]) * self.norm**2
+        self.stack.weight[:] = invert_no_zero(self.stack.weight[:]) * self.norm ** 2
 
         self.variance = self.variance * inv_norm - np.abs(self.stack.beam[:]) ** 2
         self.pseudo_variance = self.pseudo_variance * inv_norm - self.stack.beam[:] ** 2
 
         # Calculate the covariance between the real and imaginary component
         # from the accumulated variance and psuedo-variance
-        self.stack.sample_variance[0] = 0.5 * (
+        self.stack.observed_variance[0] = 0.5 * (
             self.variance + self.pseudo_variance.real
         )
-        self.stack.sample_variance[1] = 0.5 * self.pseudo_variance.imag
-        self.stack.sample_variance[2] = 0.5 * (
+        self.stack.observed_variance[1] = 0.5 * self.pseudo_variance.imag
+        self.stack.observed_variance[2] = 0.5 * (
             self.variance - self.pseudo_variance.real
         )
 
@@ -1284,6 +1295,28 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
         self.log.info("Leaving next for task %s" % self.__class__.__name__)
         return files
+
+
+def wrap_observer(obs):
+    """Wrap a `ch_util.ephemeris.chime_observer()` with the
+    `ch_util.ephemeris.SkyfieldObserverWrapper` class.
+
+    Parameters
+    ----------
+    obs: caput.time.Observer
+        CHIME observer.
+
+    Returns
+    -------
+    obs: ch_util.ephemeris.SkyfieldObserverWrapper
+        Wrapped observer.
+    """
+    return ephem.SkyfieldObserverWrapper(
+        lon=obs.longitude,
+        lat=obs.latitude,
+        alt=obs.altitude,
+        lsd_start=obs.lsd_start_day,
+    )
 
 
 def unwrap_lha(lsa, src_ra):

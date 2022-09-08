@@ -1,10 +1,40 @@
-"""Tasks for Flagging Data
+"""
+===============================================================
+Tasks for Flagging Data (:mod:`~ch_pipeline.analysis.flagging`)
+===============================================================
+
+.. currentmodule:: ch_pipeline.analysis.flagging
 
 Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
+
+Tasks
+=====
+
+.. autosummary::
+    :toctree: generated/
+
+    RFIFilter
+    ChannelFlagger
+    MonitorCorrInput
+    TestCorrInput
+    AccumulateCorrInputMask
+    ApplyCorrInputMask
+    ApplySiderealDayFlag
+    NanToNum
+    RadiometerWeight
+    BadNodeFlagger
+    MaskDay
+    MaskSource
+    MaskSun
+    MaskMoon
+    MaskRA
+    MaskData
+    MaskCHIMEData
+    DataFlagger
 """
-from typing import Union
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline
@@ -14,7 +44,6 @@ from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
 from draco.core import task, io
-from draco.core import containers as dcontainers
 
 from ..core import containers
 
@@ -51,9 +80,6 @@ class RFIFilter(task.SingleTask):
         Time interval in *seconds* to compare across.
     threshold_mad : float
         Threshold above which we mask the data.
-    use_draco_container : bool
-        If True, output container is a nondistributed draco RFIMask.
-        Otherwise, return a distributed RFIMask from ch_pipeline
     """
 
     stack = config.Property(proptype=bool, default=False)
@@ -66,9 +92,8 @@ class RFIFilter(task.SingleTask):
     freq_width = config.Property(proptype=float, default=10.0)
     time_width = config.Property(proptype=float, default=420.0)
     threshold_mad = config.Property(proptype=float, default=6.0)
-    use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
+    def process(self, data):
         """Creates a mask by identifying outliers in the
         autocorrelation data.  This mask can be used to zero out
         frequencies and time samples that are contaminated by RFI.
@@ -114,26 +139,26 @@ class RFIFilter(task.SingleTask):
         # increase in measured power relative to the local median.
         mask = ndev > self.threshold_mad
 
-        # Create container to hold output
-        if self.use_draco_container:
-            # draco RFIMask container is not distributed
-            out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
-            mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()[:, 0, :]
-        else:
-            out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
-            out.redistribute("freq")
-            # Change flag convention
-            mask = np.logical_not(mask)
+        # Change flag convention
+        mask = np.logical_not(mask)
 
-            if self.keep_ndev:
-                out.add_dataset("ndev")
-                out.ndev[:] = ndev
-            if self.keep_auto:
-                out.add_dataset("auto")
-                out.auto[:] = auto
+        # Create container to hold output
+        out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+        if self.keep_ndev:
+            out.add_dataset("ndev")
+        if self.keep_auto:
+            out.add_dataset("auto")
+
+        out.redistribute("freq")
 
         # Save mask to output container
         out.mask[:] = mask
+
+        if self.keep_ndev:
+            out.ndev[:] = ndev
+
+        if self.keep_auto:
+            out.auto[:] = auto
 
         # Return output container
         return out
@@ -628,7 +653,7 @@ class TestCorrInput(task.SingleTask):
         ----------
         timestream : andata.CorrData
             Apply series of tests to this timestream.
-        inputmap : list of :class:`CorrInput`
+        inputmap : list of :class:`CorrInput`s
             A list of describing the inputs as they are in timestream.
 
         Returns
@@ -888,7 +913,7 @@ class ApplyCorrInputMask(task.SingleTask):
 
         # Extract input mask and weight array
         weight = timestream.weight[:]
-        mask = cmask.mask[:].astype(weight.dtype)
+        mask = cmask.mask[:].view(np.ndarray).astype(weight.dtype)
 
         # Expand mask to same dimension as weight array
         mask = mask[tuple(slc)]
@@ -1280,13 +1305,13 @@ def transit_flag(body, time, nsigma=2.0):
         and False otherwise.
     """
     time = np.atleast_1d(time)
-    obs = ephemeris.chime
+    obs = ephemeris._get_chime()
 
     # Create boolean flag
     flag = np.zeros(time.size, dtype=np.bool)
 
     # Find transit times
-    transit_times = obs.transit_times(
+    transit_times = ephemeris.transit_times(
         body, time[0] - 24.0 * 3600.0, time[-1] + 24.0 * 3600.0
     )
 
@@ -1294,11 +1319,9 @@ def transit_flag(body, time, nsigma=2.0):
     for ttrans in transit_times:
 
         # Compute source coordinates
-        sf_time = ephemeris.unix_to_skyfield_time(ttrans)
-        pos = obs.skyfield_obs().at(sf_time).observe(body)
-
-        alt = pos.apparent().altaz()[0]
-        dec = pos.cirs_radec(sf_time)[1]
+        obs.date = ttrans
+        alt, az = obs.altaz(body)
+        ra, dec = obs.cirs_radec(body)
 
         # Make sure body is above horizon
         if alt.radians > 0.0:
@@ -1582,7 +1605,7 @@ class MaskRA(task.SingleTask):
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask**2
+        sstream.weight[:] *= mask ** 2
 
         return sstream
 
@@ -1708,22 +1731,10 @@ class DataFlagger(task.SingleTask):
     Parameters
     ----------
     flag_type : list
-        List of DataFlagType names to apply. Defaults to the flags representing ranges of time known to be bad
-        that may effect the delay spectrum estimate.
+        List of DataFlagType names to apply. Defaults to 'all'
     """
 
-    flag_type = config.list_type(
-        type_=str,
-        default=[
-            "acjump",
-            "bad_calibration_acquisition_restart",
-            "bad_calibration_fpga_restart",
-            "bad_calibration_gains",
-            "decorrelated_cylinder",
-            "globalflag",
-            "rain1mm",
-        ],
-    )
+    flag_type = config.Property(proptype=list, default=["all"])
 
     def setup(self):
         """Query the database for flags of the requested types."""
@@ -1810,7 +1821,7 @@ class DataFlagger(task.SingleTask):
         local_bin = np.array([np.argmin(np.abs(ff - basefreq)) for ff in local_freq])
 
         # Initiate weight mask (1 means not flagged)
-        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=bool)
+        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=np.bool)
 
         # Loop over flags of requested types
         for flag_type, flag_list in self.flags.items():
@@ -1860,7 +1871,7 @@ class DataFlagger(task.SingleTask):
         weight_mask = weight_mask.astype(weight.dtype)
         if stacked:
             # Apply same mask to all products
-            weight.local_array[:] *= weight_mask
+            weight *= weight_mask
         else:
             # Use apply_gain function to apply mask based on product map
             products = timestream.index_map["prod"][

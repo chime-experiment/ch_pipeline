@@ -28,17 +28,7 @@ Please describe the purpose/changes of this revision here.
 
 
 class ProcessingType(object):
-    """Baseclass for a pipeline processing type.
-
-    Parameters
-    ----------
-    revision : str
-        Revision to use.
-    create : bool, optional
-        Create the revision if it isn't found.
-    root_path : str, optional
-        Override the path to the processing root.
-    """
+    """Baseclass for a pipeline processing type."""
 
     # Must be set externally before using
     root_path = None
@@ -47,12 +37,9 @@ class ProcessingType(object):
     default_params = {}
     default_script = DEFAULT_SCRIPT
 
-    def __init__(self, revision, create=False, root_path=None):
+    def __init__(self, revision, create=False):
 
         self.revision = revision
-
-        if root_path:
-            self.root_path = root_path
 
         # Run the create hook if specified
         if create:
@@ -63,9 +50,6 @@ class ProcessingType(object):
 
     def _create(self):
         """Save default parameters and pipeline config for this revision."""
-
-        # Subclass hook
-        self._create_hook()
 
         # Write default configuration into directory
         with (self.revconfig_path).open("w") as fh:
@@ -88,11 +72,11 @@ class ProcessingType(object):
             fh.write(DESC_HEAD.format(self.revision, self.type_name))
         os.system(r"${EDITOR:-vi} " + str(desc_path))
 
-    def _create_hook(self):
-        """Implement to add custom behaviour when a revision is created.
+        # Subclass hook
+        self._create_hook()
 
-        This is called *before* the revision configuration is written out.
-        """
+    def _create_hook(self):
+        """Implement to add custom behaviour when a revision is created."""
         pass
 
     def _load(self):
@@ -110,10 +94,7 @@ class ProcessingType(object):
         self._load_hook()
 
     def _load_hook(self):
-        """Implement to add custom behaviour when a revision is loaded.
-
-        This is called *after* the object has had it's configuration loaded.
-        """
+        """Implement to add custom behaviour when a revision is loaded."""
         pass
 
     def job_script(self, tag):
@@ -125,7 +106,6 @@ class ProcessingType(object):
                 "jobname": self.job_name(tag),
                 "dir": str(self.base_path / tag),
                 "tempdir": str(self.workdir_path / tag),
-                "tag": tag,
             }
         )
 
@@ -360,56 +340,6 @@ class ProcessingType(object):
         pending = [job for job in self.available() if job not in not_pending]
 
         return pending
-
-    def crashed(self) -> list:
-        """Find all jobs which have crashed.
-
-        Returns
-        -------
-        crashed : list
-            Return the tags of all failed jobs.
-        """
-        base = self.base_path
-        working_path = base / "working"
-        crashed_path = base / "crashed"
-
-        if not base.exists():
-            raise ValueError("Base path %s does not exist." % base)
-
-        file_regex = re.compile("^%s$" % self.tag_pattern)
-
-        # Get all tags in working directory
-        working_tags = {
-            path.name for path in working_path.glob("*") if file_regex.match(path.name)
-        }
-        # Get finished, waiting, and running jobs
-        finished_tags = self.ls()
-        waiting_tags, running_tags = self.queued()
-        # Any tag in the working directory that is not running or
-        # waiting should be considered as crashed. Also consider
-        # finished tags to catch edge case where a tag is in the
-        # process of being moved.
-        crashed_tags = working_tags.difference(
-            waiting_tags + running_tags + finished_tags
-        )
-        # This directory can contain job directories that have
-        # previously crash. They may be re-run without being
-        # removed, so we have to check to include only the
-        # tags that do not exist elsewhere
-        if crashed_path.exists():
-            # Recursively search the crashed directory. Must
-            # be recursive as there can sometims be sub-folders
-            _crashed_dir = {x[0].split(os.path.sep)[-1] for x in os.walk(crashed_path)}
-            crashed_dir = {x for x in _crashed_dir if file_regex.match(x)}
-            # Get tags in crashed folder that are not also found completed or running
-            unique_crashed_dir = crashed_dir.difference(
-                set(working_tags) | set(finished_tags)
-            )
-            # take union of these sets in place
-            crashed_tags |= unique_crashed_dir
-
-        # This will cast to a sorted list
-        return sorted(crashed_tags)
 
 
 def find_venv():
