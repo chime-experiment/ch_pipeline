@@ -2641,9 +2641,6 @@ class FlagNarrowbandGainError(task.SingleTask):
             Mask that removes frequencies and times.
         """
 
-        # The RFIMask in draco is being overwritten by the one in ch_pipeline
-        from draco.core.containers import RFIMask
-
         # Make sure the frequencies are the same
         if not np.array_equal(self.gains.freq, data.freq):
             raise ValueError("Frequencies do not match for gain error and timestream.")
@@ -2667,7 +2664,7 @@ class FlagNarrowbandGainError(task.SingleTask):
             # The input container has a time axis.  Use a singleton lsd axis.
             timestamp = data.time[np.newaxis, :]
 
-            out = RFIMask(time=data.time, axes_from=data, attrs_from=data)
+            out = containers.RFIMask(time=data.time, axes_from=data, attrs_from=data)
 
         # Determine dimensions
         nfreq, ninput, nupdate = self.frac_error.shape
@@ -2688,7 +2685,7 @@ class FlagNarrowbandGainError(task.SingleTask):
         before = index[0] < 0
         if np.any(before):
             nbefore = np.sum(before)
-            tbefore = np.min(ftimestamp[before] - self.gains.time.min()) / 3600.0
+            tbefore = np.max(self.gains.time.min() - ftimestamp[before]) / 3600.0
             raise RuntimeError(
                 f"{nbefore:0.0f} requested timestamps are before the earliest "
                 f"gain update time by as much as {tbefore:0.1f} hours."
@@ -2697,7 +2694,7 @@ class FlagNarrowbandGainError(task.SingleTask):
         after = index[1] == (nftime - 1)
         if np.any(after):
             nafter = np.sum(after)
-            tafter = np.min(ftimestamp[after] - self.gains.time.max()) / 3600.0
+            tafter = np.max(ftimestamp[after] - self.gains.time.max()) / 3600.0
             self.log.warn(
                 f"{nafter:0.0f} requested timestamps are after the latest"
                 f"gain update time by as much as {tafter:0.1f} hours."
@@ -2769,6 +2766,13 @@ class FlagNarrowbandGainError(task.SingleTask):
         # The RFIMask containers are not distributed.  Perform an allgather to
         # acquire the mask for all frequencies.
         out.mask[:] = mpiarray.MPIArray.wrap(mask, 0, comm=data.comm).allgather()
+
+        # Print the total fraction of data flagged
+        frac_masked = np.sum(out.mask[:]) / float(out.mask[:].size)
+        self.log.info(
+            f"Flagging {100 * frac_masked:0.2f}% "
+            "of data due to narrow band gain errors."
+        )
 
         return out
 
