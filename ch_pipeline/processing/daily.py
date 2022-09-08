@@ -394,7 +394,7 @@ class DailyProcessing(base.ProcessingType):
         # Calibration times for thermal correction
         "caltimes_file": (
             "/project/rpp-krs/chime/chime_processed/gain/calibration_times/"
-            "20180902_20200404_calibration_times.h5"
+            "20180902_20201230_calibration_times.h5"
         ),
         # File for the timing correction
         "timing_file": (
