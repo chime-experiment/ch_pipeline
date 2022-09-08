@@ -13,9 +13,8 @@ Tasks
     SolarGrouper
     SolarCalibration
     SolarClean
-    SunCalibration
-    SunClean
-    SunClean2
+    SolarCleanProject
+    SolarBeamform
 
 Usage
 =====
@@ -89,7 +88,7 @@ def sun_coord(unix_time, deg=True):
     planets = ephemeris.skyfield_wrapper.ephemeris
     # planets = skyfield.api.load('de421.bsp')
     sun = planets["sun"]
-    
+
     observer = ephemeris._get_chime().skyfield_obs()
 
     apparent = observer.at(skyfield_time).observe(sun).apparent()
@@ -813,8 +812,9 @@ class SolarClean(task.SingleTask):
         return sstream
 
 
-class SunClean(task.SingleTask):
-    """Clean the sun from data by projecting out signal from its location."""
+class SolarCleanProject(task.SingleTask):
+    """Clean the sun from data by projecting out signal from its location.
+       Formerly called SunClean."""
 
     def process(self, sstream, inputmap):
         """Clean the sun.
@@ -923,11 +923,12 @@ class SunClean(task.SingleTask):
 
         # Return the clean sidereal stream
         return sscut
-    
 
-class SunCalibration(task.SingleTask):
-    """Use Sun to measure antenna beam pattern.
-    
+
+class SolarBeamform(task.SingleTask):
+    """Beamform to the location of the Sun.
+       Formerly called SunCalibration.
+
     Attributes
     ----------
     ymax: float, default 10.0
@@ -936,13 +937,13 @@ class SunCalibration(task.SingleTask):
         Default is 10.0 (meters)
     exclude_intercyl : bool, default True
         Exclude intercylinder baselines to avoid resolving
-        out the Sun. Default is True  
+        out the Sun. Default is True
     single_cyl : bool, default False
-        Include data from just a single cylinder. Default 
+        Include data from just a single cylinder. Default
         is False
     cyl_id :  int, default 0
-        Cylinder number (0-3) for single cylinder 
-        measurements. Only relevant if exclude_intercyl 
+        Cylinder number (0-3) for single cylinder
+        measurements. Only relevant if exclude_intercyl
         and single_cyl are both True. Default is 0.
     """
 
@@ -997,18 +998,18 @@ class SunCalibration(task.SingleTask):
 
         feed_list = [ (inputmap[fi], inputmap[fj]) for fi, fj in
             sstream.index_map['prod'][sstream.index_map['stack']['prod']][:]]
-                
+
         # Determine polarisation for each visibility
         pol_ind = np.full(nprod, -1, dtype=np.int)
         cyl_i = np.full(nprod, -1, dtype=np.int)
         cyl_j = np.full(nprod, -1, dtype=np.int)
-        
+
         for ii, (fi, fj) in enumerate(feed_list):
-            
+
             if tools.is_chime(fi) and tools.is_chime(fj):
-                
+
                 pol_ind[ii] = 2 * tools.is_array_y(fi) + tools.is_array_y(fj)
-                
+
                 if fi.reflector=='cylinder_A':
                     cyl_i[ii] = 0
                 elif fi.reflector=='cylinder_B':
@@ -1017,7 +1018,7 @@ class SunCalibration(task.SingleTask):
                     cyl_i[ii] = 2
                 elif fi.reflector=='cylinder_D':
                     cyl_i[ii] = 3
-                    
+
                 if fj.reflector=='cylinder_A':
                     cyl_j[ii] = 0
                 elif fj.reflector=='cylinder_B':
@@ -1026,10 +1027,10 @@ class SunCalibration(task.SingleTask):
                     cyl_j[ii] = 2
                 elif fj.reflector=='cylinder_D':
                     cyl_j[ii] = 3
-                
+
         # Change vis_pos for non-CHIME feeds from NaN to 0.0
         vis_pos[(pol_ind == -1), :] = 0.0
-                
+
         newprod = [[0, 0],[0, 1],[1,0],[1,1]]
 
         newprod = np.array(newprod,dtype=sstream.index_map['prod'].dtype)
@@ -1070,17 +1071,17 @@ class SunCalibration(task.SingleTask):
 
                     # Calculate the phase that the sun would have using the fringestop routine
                     sun_vis = tools.fringestop_phase(ha[ri], np.radians(ephemeris.CHIMELATITUDE), dec[ri], u, v)
-                    
+
                     # Mask out the auto-correlations
                     sun_vis *= np.logical_or(u != 0.0, v != 0.0)
-                    
+
                     # Mask out long NS baselines
                     sun_vis *= (np.abs(vis_pos[:, 1]) <= self.ymax)
-                    
-                    if self.exclude_intercyl:
+
+		    if self.exclude_intercyl:
                         # Mask out inter-cylinder visibilities
                         sun_vis *= (cyl_i == cyl_j)
-                        
+
                         if self.single_cyl:
                             sun_vis *= (cyl_i == self.cyl_id)
 
@@ -1088,8 +1089,8 @@ class SunCalibration(task.SingleTask):
                     for pi, pol in enumerate([0,1,2,3]):
 
                         # Mask out other polarisations in the visibility vector
-                        sun_vis_pol = sun_vis * (pol_ind == pol) 
-                        
+                        sun_vis_pol = sun_vis * (pol_ind == pol)
+
                         # Beamform to Sun
                         vds = (vis * sun_vis_pol * weight).sum(axis=0)
                         sds = (sun_vis_pol.conj() * sun_vis_pol * weight).sum(axis=0)
