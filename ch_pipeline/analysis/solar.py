@@ -1078,7 +1078,7 @@ class SolarBeamform(task.SingleTask):
                     # Mask out long NS baselines
                     sun_vis *= (np.abs(vis_pos[:, 1]) <= self.ymax)
 
-		    if self.exclude_intercyl:
+                    if self.exclude_intercyl:
                         # Mask out inter-cylinder visibilities
                         sun_vis *= (cyl_i == cyl_j)
 
