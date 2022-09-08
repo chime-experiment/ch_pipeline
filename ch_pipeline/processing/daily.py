@@ -283,6 +283,7 @@ pipeline:
         - "{catalogs[0]}"
         - "{catalogs[1]}"
         - "{catalogs[2]}"
+        - "{catalogs[3]}"
 
     # Measure the observed fluxes of the point sources in the catalogs
     - type: draco.analysis.beamform.BeamFormCat
@@ -399,11 +400,14 @@ class DailyProcessing(base.ProcessingType):
             "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
         ),
-        "catalogs": (
+        # Catalogs to extract fluxes of
+        "catalogs": [
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5",
-        ),
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_requested.h5",
+        ],
+        # Delay spectrum estimation
         "blend_stack_file": (
             "/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/"
             "sidereal_stack.h5"
