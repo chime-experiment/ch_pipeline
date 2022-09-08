@@ -621,9 +621,10 @@ class TestDailyProcessing(DailyProcessing):
     default_params.update(
         {
             "intervals": [
-                {"start": "20181224T000000Z", "end": "20181228T000000Z"},
                 # 1878 and 1885 have files available online
                 {"start": "CSD1878", "end": "CSD1889", "step": 7},
+                {"start": "CSD3000", "end": "CSD3014", "step": 7},
+                {"start": "20181224T000000Z", "end": "20181228T000000Z"},
             ],
             "freq": [400, 416],
             "nfreq_delay": 17,
