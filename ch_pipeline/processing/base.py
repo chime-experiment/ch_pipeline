@@ -73,6 +73,7 @@ class ProcessingType(object):
                 self.default_params,
                 encoding="utf-8",
                 allow_unicode=True,
+                sort_keys=False,
                 stream=fh,
             )
         with (self.jobtemplate_path).open("w") as fh:
