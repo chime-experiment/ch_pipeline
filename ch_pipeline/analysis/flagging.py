@@ -1605,7 +1605,7 @@ class MaskRA(task.SingleTask):
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask ** 2
+        sstream.weight[:] *= mask**2
 
         return sstream
 

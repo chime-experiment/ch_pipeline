@@ -499,8 +499,7 @@ class PointSourceTransit(StaticGainData):
 
 
 class SunTransit(ContainerBase):
-    """Parallel container for holding the results of a fit to a solar transit.
-    """
+    """Parallel container for holding the results of a fit to a solar transit."""
 
     _axes = ("pol", "time", "param", "source")
 
@@ -546,89 +545,108 @@ class SunTransit(ContainerBase):
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit."""
 
-    _axes = ('freq', 'input', 'time', 'pol', 'eigen', 'good_input1', 'good_input2',
-             'udegree', 'vdegree', 'coord', 'param')
+    _axes = (
+        "freq",
+        "input",
+        "time",
+        "pol",
+        "eigen",
+        "good_input1",
+        "good_input2",
+        "udegree",
+        "vdegree",
+        "coord",
+        "param",
+    )
 
     _dataset_spec = {
-        'coord': {
-            'axes': ['time', 'coord'],
-            'dtype': np.float64,
-            'initialise': True,
-            'distributed': False,
+        "coord": {
+            "axes": ["time", "coord"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
         },
-        'evalue1': {
-            'axes': ['freq', 'good_input1', 'time'],
-            'dtype': np.float64,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "evalue1": {
+            "axes": ["freq", "good_input1", "time"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'evalue2': {
-            'axes': ['freq', 'good_input2', 'time'],
-            'dtype': np.float64,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "evalue2": {
+            "axes": ["freq", "good_input2", "time"],
+            "dtype": np.float64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'response': {
-            'axes': ['freq', 'input', 'time', 'eigen'],
-            'dtype': np.complex128,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "response": {
+            "axes": ["freq", "input", "time", "eigen"],
+            "dtype": np.complex128,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'response_error': {
-            'axes': ['freq', 'input', 'time', 'eigen'],
-            'dtype': np.float64,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "response_error": {
+            "axes": ["freq", "input", "time", "eigen"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'coeff': {
-            'axes': ['freq', 'pol', 'time', 'udegree', 'vdegree'],
-            'dtype': np.complex128,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "coeff": {
+            "axes": ["freq", "pol", "time", "udegree", "vdegree"],
+            "dtype": np.complex128,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'is_sun': {
-            'axes': ['freq', 'pol', 'time'],
-            'dtype': np.float64,
-            'initialise': True,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "is_sun": {
+            "axes": ["freq", "pol", "time"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'flag': {
-            'axes': ['freq', 'input', 'time'],
-            'dtype': np.bool,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "flag": {
+            "axes": ["freq", "input", "time"],
+            "dtype": np.bool,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'parameter': {
-            'axes': ['freq', 'input', 'param'],
-            'dtype': np.float64,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
+        "parameter": {
+            "axes": ["freq", "input", "param"],
+            "dtype": np.float64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
         },
-        'parameter_cov': {
-            'axes': ['freq', 'input', 'param', 'param'],
-            'dtype': np.float64,
-            'initialise': False,
-            'distributed': True,
-            'distributed_axis': 'freq'
-        }
+        "parameter_cov": {
+            "axes": ["freq", "input", "param", "param"],
+            "dtype": np.float64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
     }
 
     def __init__(self, *args, **kwargs):
 
-
-        kwargs['param'] = np.array(['peak_amplitude', 'centroid', 'fwhm',
-                                    'phase_intercept', 'phase_slope',
-                                    'phase_quad', 'phase_cube',
-                                    'phase_quart', 'phase_quint'])
-        kwargs['coord'] = np.array(['ha', 'dec', 'alt', 'az'])
+        kwargs["param"] = np.array(
+            [
+                "peak_amplitude",
+                "centroid",
+                "fwhm",
+                "phase_intercept",
+                "phase_slope",
+                "phase_quad",
+                "phase_cube",
+                "phase_quart",
+                "phase_quint",
+            ]
+        )
+        kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
         super(SunTransit, self).__init__(*args, **kwargs)
 
@@ -638,19 +656,19 @@ class SunTransit(ContainerBase):
 
     @property
     def evalue1(self):
-        return self.datasets['evalue1']
+        return self.datasets["evalue1"]
 
     @property
     def evalue2(self):
-        return self.datasets['evalue2']
+        return self.datasets["evalue2"]
 
     @property
     def evalue_x(self):
-        return self.datasets['evalue1']
+        return self.datasets["evalue1"]
 
     @property
     def evalue_y(self):
-        return self.datasets['evalue2']
+        return self.datasets["evalue2"]
 
     @property
     def response(self):
@@ -662,11 +680,11 @@ class SunTransit(ContainerBase):
 
     @property
     def coeff(self):
-        return self.datasets['coeff']
+        return self.datasets["coeff"]
 
     @property
     def is_sun(self):
-        return self.datasets['is_sun']
+        return self.datasets["is_sun"]
 
     @property
     def flag(self):

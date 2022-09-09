@@ -362,7 +362,7 @@ class SolveSources(task.SingleTask):
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         baseline_weight = (sep > self.min_distance).astype(np.float32)
 
         # Calculate polarisation products, determine unique values
@@ -730,7 +730,7 @@ class SolveSourcesWithBeam(SolveSources):
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         baseline_weight = (sep > self.min_distance).astype(np.float32)
 
         # Calculate polarisation products, determine unique values

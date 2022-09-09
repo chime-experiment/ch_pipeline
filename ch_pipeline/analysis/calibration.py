@@ -934,7 +934,7 @@ class EigenCalibration(task.SingleTask):
                     resp *= np.exp(1.0j * phi0)
 
                 out_vis[ff, feeds, :] = resp
-                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err ** 2)
+                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err**2)
 
         return response
 
@@ -1839,7 +1839,7 @@ class ThermalCalibration(task.SingleTask):
         return gain
 
     def _ra2unix(self, csd, ra):
-        """ csd must be integer """
+        """csd must be integer"""
         return ephemeris.csd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime_result, timestamp, frequency):
