@@ -1085,11 +1085,11 @@ class SolarBeamform(task.SingleTask):
                         if self.single_cyl:
                             sun_vis *= (cyl_i == self.cyl_id)
 
-                    # Iterate over co-pol products
-                    for pi, pol in enumerate([0,1,2,3]):
+                    # Iterate over polarizations
+                    for pi in range(4):
 
                         # Mask out other polarisations in the visibility vector
-                        sun_vis_pol = sun_vis * (pol_ind == pol)
+                        sun_vis_pol = sun_vis * (pol_ind == pi)
 
                         # Beamform to Sun
                         vds = (vis * sun_vis_pol * weight).sum(axis=0)
