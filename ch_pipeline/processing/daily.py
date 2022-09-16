@@ -206,6 +206,21 @@ pipeline:
       out: sstream
       params:
         samples: 4096
+
+    # Precision truncate the sidereal stream data and write it out
+    - type: draco.core.io.Truncate
+      in: sstream
+      params:
+        dataset:
+          vis:
+            weight_dataset: vis_weight
+            variance_increase: 1.0e-3
+          vis_weight: 1.0e-5
+        compression:
+          vis:
+            chunks: [32, 512, 512]
+          vis_weight:
+            chunks: [32, 512, 512]
         save: true
         output_name: "sstream_{{tag}}.zarr"
 
@@ -246,6 +261,23 @@ pipeline:
         weight: natural
         exclude_intracyl: false
         include_auto: false
+
+    # Precision truncate and write out the chunked normal ringmap
+    - type: draco.core.io.Truncate
+      in: ringmap
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-3
+          weight: 1.0e-5
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_{{tag}}.zarr"
 
@@ -254,12 +286,31 @@ pipeline:
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
-      out: ringmapint
+      out: ringmap_int
       params:
         single_beam: true
         weight: natural
         exclude_intracyl: true
         include_auto: false
+
+    # Precision truncate and write out the chunked intercylinder ringmap
+    # NOTE: this cannot be combined with the above Truncate task as it would
+    # result in both ringmaps existing in memory at the same time.
+    - type: draco.core.io.Truncate
+      in: ringmap_int
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-3
+          weight: 1.0e-5
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_{{tag}}.zarr"
 
