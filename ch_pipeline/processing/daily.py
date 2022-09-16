@@ -415,25 +415,34 @@ class DailyProcessing(base.ProcessingType):
     default_params = {
         # Time range(s) to process
         "intervals": [
-            ## Priority days to reprocess
-            # Good ranges from rev_00
+            # Two short intervals either side of the caltime change in order to
+            # have a few good test days at the very start
+            {"start": "CSD1878", "end": "CSD1879"},
+            {"start": "CSD3000", "end": "CSD3001"},
+            # Good short ranges from rev_00, these are spread over the year and
+            # quickly cover the full sky
             {"start": "CSD1868", "end": "CSD1875"},
             {"start": "CSD1927", "end": "CSD1935"},
             {"start": "CSD1973", "end": "CSD1977"},
             {"start": "CSD2071", "end": "CSD2080"},
             {"start": "CSD2162", "end": "CSD2166"},
-            # A good looking interval from late 2019 (determined from run
-            # notes, dataflags and data availability)
-            {"start": "CSD2143", "end": "CSD2148"},
-            # intervals for which we process only one day every 7 days
-            ## dataflags and calibration tables are currently only available until October 2020
-            {"start": "CSD1878", "end": "CSD2539", "step": 7},
-            {"start": "CSD1879", "end": "CSD2539", "step": 7},
-            {"start": "CSD1880", "end": "CSD2539", "step": 7},
-            {"start": "CSD1881", "end": "CSD2539", "step": 7},
-            {"start": "CSD1882", "end": "CSD2539", "step": 7},
-            {"start": "CSD1883", "end": "CSD2539", "step": 7},
-            {"start": "CSD1884", "end": "CSD2539", "step": 7},
+            # Intervals covering the days used in the stacking analysis
+            {"start": "CSD1878", "end": "CSD1939"},
+            {"start": "CSD1958", "end": "CSD1990"},
+            {"start": "CSD2012", "end": "CSD2013"},
+            {"start": "CSD2029", "end": "CSD2046"},
+            {"start": "CSD2059", "end": "CSD2060"},
+            {"start": "CSD2072", "end": "CSD2143"},
+            # Intervals for which we process only one day every 7 days, this
+            # will slowly build up coverage over the whole timespan up to
+            # October 2022
+            {"start": "CSD1878", "end": "CSD3250", "step": 7},
+            {"start": "CSD1879", "end": "CSD3250", "step": 7},
+            {"start": "CSD1880", "end": "CSD3250", "step": 7},
+            {"start": "CSD1881", "end": "CSD3250", "step": 7},
+            {"start": "CSD1882", "end": "CSD3250", "step": 7},
+            {"start": "CSD1883", "end": "CSD3250", "step": 7},
+            {"start": "CSD1884", "end": "CSD3250", "step": 7},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
@@ -482,9 +491,11 @@ class DailyProcessing(base.ProcessingType):
 
     def _available_files(self, start_csd, end_csd):
         """
-        Return chimestack files available in cedar_online between start_csd and end_csd, if all of the files for that period are available online.
+        Return chimestack files available in cedar_online between start_csd and
+        end_csd, if all of the files for that period are available online.
 
-        Return an empty list if files between start_csd and end_csd are only partially available online.
+        Return an empty list if files between start_csd and end_csd are only
+        partially available online.
 
         Total file count is verified by checking files that exist everywhere.
 
@@ -498,8 +509,8 @@ class DailyProcessing(base.ProcessingType):
         Returns
         -------
         list
-            List contains the chimestack files available in the timespan, if all of them are available online
-
+            List contains the chimestack files available in the timespan, if
+            all of them are available online
         """
 
         # Connect to databases
