@@ -64,7 +64,7 @@ pipeline:
         end_csd: {csd[1]:.2f}
         accept_all_global_flags: true
         node_spoof:
-          cedar_online: "/project/rpp-krs/chime/chime_online/"
+          cedar_online: "/project/rpp-chime/chime/chime_online/"
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -449,23 +449,23 @@ class DailyProcessing(base.ProcessingType):
         # Frequencies to process
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
-        "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # Calibration times for thermal correction
         "caltimes_file": (
-            "/project/rpp-krs/chime/chime_processed/gain/calibration_times/"
+            "/project/rpp-chime/chime/chime_processed/gain/calibration_times/"
             "20180902_20201230_calibration_times.h5"
         ),
         # File for the timing correction
         "timing_file": (
-            "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
+            "/project/rpp-chime/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
         ),
         # Catalogs to extract fluxes of
         "catalogs": [
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_requested.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_OVRO.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_requested.h5",
         ],
         # Delay spectrum estimation
         "blend_stack_file": (
@@ -689,7 +689,7 @@ class TestDailyProcessing(DailyProcessing):
             ],
             "freq": [400, 416],
             "nfreq_delay": 17,
-            "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
+            "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
             "ompnum": 12,  # Number of OpenMP threads
