@@ -2369,12 +2369,14 @@ def _calculate_uv(freq, prod, inputmap):
 class ExtractGaltAutoCorrelation(task.SingleTask):
     """Extract the autocorrelations of the Galt telescope from a holography acquisition."""
 
-    def process(self, data):
+    def process(self, data, input_map):
         """Extract the Galt autocorrelations and write them to disk.
+
         Parameters
         ----------
         data: TimeStream
             A TimeStream container holding a raw holography acquisition.
+
         Returns
         -------
         autocorrelation: containers.GaltAutocorrelation
@@ -2385,22 +2387,25 @@ class ExtractGaltAutoCorrelation(task.SingleTask):
         data.redistribute("freq")
 
         # Locate the holographic indices
-        layout_graph = layout.graph.from_db(data.time[0])
-
-        galt_inputs = get_holographic_index(
-            get_correlator_inputs(layout_graph, correlator="chime")
-        )
+        galt_inputs = np.array(tools.get_holographic_index(input_map))
 
         # Get the product map and inputs
         prodmap = data.prod
         ina, inb = prodmap["input_a"], prodmap["input_b"]
 
         # Locate the Galt autocorrelations and cross-pol correlation
-        flag_YY = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[0]), 1, 0)
-        flag_YX = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[1]), 1, 0)
-        flag_XX = np.where((ina == galt_inputs[1]) & (inb == galt_inputs[1]), 1, 0)
+        flag_cp1 = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[0]), 1, 0)
+        flag_xp = np.where((ina == galt_inputs[0]) & (inb == galt_inputs[1]), 1, 0)
+        flag_cp2 = np.where((ina == galt_inputs[1]) & (inb == galt_inputs[1]), 1, 0)
 
-        auto_flag = (flag_YY + flag_YX + flag_XX).astype(bool)
+        auto_flag = (flag_cp1 + flag_xp + flag_cp2).astype(bool)
+
+        # Construct the prod axis of the output container, and the corresponding pols
+        galt_auto_prod = prodmap[auto_flag]
+
+        galt_auto_prod_pol = np.array(
+            [input_map[aa].pol + input_map[bb].pol for (aa, bb) in galt_auto_prod]
+        )
 
         # Dereference beam and weight datasets
         beam = data.vis[:].local_array
@@ -2411,11 +2416,12 @@ class ExtractGaltAutoCorrelation(task.SingleTask):
         galt_weight = weight[:, auto_flag, :]
 
         # Initialize the auto container
-        autocorrelation = containers.GaltAutocorrelation(
-            pol=np.array([b"YY", b"YX", b"XX"]),
+        autocorrelation = containers.TimeStream(
             attrs_from=data,
-            freq=data.freq,
-            time=data.index_map["time"],
+            axes_from=data,
+            stack=galt_auto_prod,
+            input=galt_inputs,
+            prod=galt_auto_prod,
             comm=data.comm,
             distributed=data.distributed,
         )
@@ -2423,7 +2429,11 @@ class ExtractGaltAutoCorrelation(task.SingleTask):
         # Redistribute output container over frequency
         autocorrelation.redistribute("freq")
 
-        autocorrelation.auto[:].local_array[:] = galt_auto
+        autocorrelation.vis[:].local_array[:] = galt_auto
         autocorrelation.weight[:].local_array[:] = galt_weight
+
+        # Save attributes describing the polarizations of the saved products
+        autocorrelation.attrs["prod_pol"] = galt_auto_prod_pol
+        autocorrelation.attrs["pol"] = np.array([input_map[ii].pol for ii in galt_inputs])
 
         return autocorrelation

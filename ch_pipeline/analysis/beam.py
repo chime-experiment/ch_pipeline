@@ -328,8 +328,6 @@ class TransitRegridder(Regridder):
         # Convert input times to hour angle
         lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
 
-        self.log.warning(f"The starting and ending hour angles are {lha.min():.2f} and {lha.max():.2f}.")
-
         # perform regridding
         success = 1
         try:

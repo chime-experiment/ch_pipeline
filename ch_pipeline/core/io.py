@@ -472,4 +472,3 @@ class FilterExisting(task.MPILoggedTask):
         )
 
         return sorted(list(new_files))
-
