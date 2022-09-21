@@ -339,11 +339,24 @@ pipeline:
       in: sstream_blend1
       out: sstream_blend2
 
+    # Mask out small RFI chunks in the blended data which came from the daily data
+    # This should give a slightly nicer delay spectrum
+    - type: draco.analysis.flagging.MaskFreq
+      in: sstream_blend2
+      out: sstream_blend_mask
+      params:
+        factorize: true
+
+    # Apply the freq mask
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_blend2, sstream_blend_mask]
+      out: sstream_blend3
+
     # Estimate the delay power spectrum of the data. This is a good diagnostic
     # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_blend2
+      in: sstream_blend3
       params:
         freq_zero: 800.0
         nfreq: {nfreq_delay}
