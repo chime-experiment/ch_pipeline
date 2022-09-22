@@ -93,8 +93,9 @@ class BaseInject(task.SingleTask):
         self.latitude = np.deg2rad(self.telescope.latitude)
 
         self.transits = [0.0, np.pi] if self.anti_podal else [0.0]
-        self.log.info("Injecting at the following hour angles:  %s" %
-                      str(self.transits))
+        self.log.info(
+            "Injecting at the following hour angles:  %s" % str(self.transits)
+        )
 
         # Polarizations.
         if self.polarization == "full":
@@ -878,15 +879,22 @@ class BeamExternal(BaseInject):
             at the sources declination for the requested polarisation.
         """
 
+        podal = np.abs(ha) <= (0.5 * np.pi)
+
+        ha = np.where(podal, ha, ((ha + 2.0 * np.pi) % (2.0 * np.pi)) - np.pi)
+        dec = np.where(podal, dec, np.pi - dec)
+
         index_freq = np.array([np.argmin(np.abs(nu - self._beam_freq)) for nu in freq])
 
         pp = self._beam_pol.index(pol)
 
-        primay_beam = np.array([self._beam[ff][pp](dec, ha)[0] for ff in index_freq])
+        primay_beam = np.array(
+            [self._beam[ff][pp](dec, ha, grid=False) for ff in index_freq]
+        )
 
         flag = np.array(
             [
-                np.abs(self._beam_flag[ff][pp](dec, ha)[0] - 1.0) < 0.01
+                np.abs(self._beam_flag[ff][pp](dec, ha, grid=False) - 1.0) < 0.01
                 for ff in index_freq
             ]
         )
