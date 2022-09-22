@@ -1,6 +1,9 @@
 """Tasks for calibrating the data."""
 
+from datetime import datetime
 import json
+from typing import List
+from ch_util.andata import CorrData
 
 import numpy as np
 from scipy import interpolate
@@ -16,11 +19,12 @@ from ch_util import cal_utils
 from ch_util import fluxcat
 from ch_util import finder
 from ch_util import rfi
+from ch_util import cal_utils
 
-from draco.core import task
+from draco.core import task, containers
 from draco.util import _fast_tools
 
-from ..core import containers
+from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
 
@@ -906,7 +910,7 @@ class EigenCalibration(task.SingleTask):
                     resp *= np.exp(1.0j * phi0)
 
                 out_vis[ff, feeds, :] = resp
-                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err ** 2)
+                out_weight[ff, feeds, :] = tools.invert_no_zero(resp_err**2)
 
         return response
 
@@ -1007,7 +1011,7 @@ class TransitFit(task.SingleTask):
 
         Returns
         -------
-        fit : containers.TransitFitParams
+        fit : ccontainers.TransitFitParams
             Parameters of the model fit and their covariance.
         """
         # Ensure that we are distributed over frequency
@@ -1076,7 +1080,7 @@ class TransitFit(task.SingleTask):
         model.fit(ha, vis, err, width=sigma, **self.fit_kwargs)
 
         # Create an output container
-        fit = containers.TransitFitParams(
+        fit = ccontainers.TransitFitParams(
             param=model.parameter_names,
             component=model.component,
             axes_from=response,
@@ -1126,7 +1130,7 @@ class GainFromTransitFit(task.SingleTask):
 
         Parameters
         ----------
-        fit : containers.TransitFitParams
+        fit : ccontainers.TransitFitParams
             Parameters of the model fit and their covariance.
             Must also contain 'model_class' and 'model_kwargs'
             attributes that can be used to evaluate the model.
@@ -1503,7 +1507,7 @@ class SiderealCalibration(task.SingleTask):
             Rigidized sidereal timestream to calibrate.
         inputmap : list of :class:`CorrInput`
             List describing the inputs as they are in the file.
-        inputmask : containers.CorrInputMask
+        inputmask : ccontainers.CorrInputMask
             Mask indicating which correlator inputs to use in the
             eigenvalue decomposition.
 
@@ -1657,7 +1661,7 @@ class SiderealCalibration(task.SingleTask):
                         )
 
             # Create container to hold results of fit
-            gain_data = containers.PointSourceTransit(
+            gain_data = ccontainers.PointSourceTransit(
                 ra=ra_slice, pol_x=xfeeds, pol_y=yfeeds, axes_from=sstream
             )
 
@@ -1758,9 +1762,7 @@ class ThermalCalibration(task.SingleTask):
     caltime_path = config.Property(proptype=str)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
 
-    def setup(self):
-        """Load calibration times."""
-        self.caltime_file = memh5.MemGroup.from_hdf5(self.caltime_path)
+    caltime_file = None
 
     def process(self, data):
         """Determine thermal calibration for a sidereal stream or time stream.
@@ -1773,7 +1775,8 @@ class ThermalCalibration(task.SingleTask):
         Returns
         -------
         gain : Either `containers.SiderealGainData` or `containers.GainData`
-            The type depends on the type of `data`.
+            The type depends on the type of `data`. Returns `None` if a thermal
+            correction could not be determined.
 
         """
         # Frequencies and RA/time
@@ -1794,11 +1797,52 @@ class ThermalCalibration(task.SingleTask):
         lo = gain.gain.local_offset[0]
         ls = gain.gain.local_shape[0]
 
-        # Find refference times for each timestamp.
+        # Find reference times for each timestamp.
         # This is the time of the transit from which the gains
         # applied to the data were derived.
-        self.log.info("Getting refference times")
-        reftime_result = self._get_reftime(timestamp, self.caltime_file)
+        self.log.info("Getting reference times")
+
+        reftime_result = None
+
+        # Try and lookup the cal times. Only do this on rank = 0, and then broadcast the
+        # results
+        try:
+            # First attempt to group all dataset_ids for all frequencies on
+            # rank=0 so it can do the full lookup
+            dataset_ids = data.flags["dataset_id"][:].gather(rank=0)
+
+            if self.comm.rank == 0:
+                # Try to use the dataset ID scheme in here, if the time range passed won't
+                # work an exception will be raised...
+                reftime_result = cal_utils.get_reference_times_dataset_id(
+                    timestamp, dataset_ids, logger=self.log
+                )
+
+        # ... catch it and then try to load a calibration time file
+        except (ValueError, KeyError):
+            if self.comm.rank == 0:
+                self.log.debug(
+                    "Could not get cal times via dataset IDs, trying caltime file."
+                )
+
+                if self.caltime_file is None:
+                    self._load_cal_file()
+
+                if timestamp[0] > self._file_start and timestamp[-1] < self._file_end:
+                    reftime_result = cal_utils.get_reference_times_file(
+                        timestamp, self.caltime_file, logger=self.log
+                    )
+                else:
+                    self.log.error("Cal time file does not cover the period requested.")
+
+        reftime_result = self.comm.bcast(reftime_result, root=0)
+
+        if reftime_result is None:
+            self.log.error(
+                "Could not find cal time for incoming data. Check the logs for rank=0 "
+                "to see why."
+            )
+            return None
 
         # Compute gain corrections
         self.log.info("Computing gains corrections")
@@ -1806,9 +1850,14 @@ class ThermalCalibration(task.SingleTask):
 
         # Copy data into container
         gain.gain[:] = g[:]
-        # gain.weight[:] = dr
 
         return gain
+
+    def _load_cal_file(self):
+        """Load the cal time file."""
+        self.caltime_file = memh5.MemGroup.from_hdf5(self.caltime_path)
+        self._file_start = self.caltime_file["tstart"][0]
+        self._file_end = self.caltime_file["tend"][-1]
 
     def _ra2unix(self, csd, ra):
         """csd must be integer"""
@@ -1900,152 +1949,6 @@ class ThermalCalibration(task.SingleTask):
     def _interpolate_temperature(self, temperature_time, temperature_data, times):
         # Interpolate temperatures
         return np.interp(times, temperature_time, temperature_data)
-
-    def _get_reftime(self, times, cal_file):
-        """
-        Parameters
-        ----------
-        times : array of foats
-            Unix time of data points to be calibrated
-        cal_file : memh5.MemGroup object
-            File which containes the reference times
-            for calibration source transits.
-
-        Returns
-        -------
-        reftime : array of floats
-            Unix time of same length as `times'. Reference times of transit of the
-            source used to calibrate the data at each time in `times'. Returns `NaN'
-            for times without a reference.
-        """
-        # Data from calibration file.
-        is_restart = cal_file["is_restart"][:]
-        tref = cal_file["tref"][:]
-        tstart = cal_file["tstart"][:]
-        tend = cal_file["tend"][:]
-        # Length of calibration file and of data points
-        n_cal_file = len(tstart)
-        ntimes = len(times)
-
-        # Len of times, indices in cal_file.
-        last_start_index = np.searchsorted(tstart, times, side="right") - 1
-        # Len of times, indices in cal_file.
-        last_end_index = np.searchsorted(tend, times, side="right") - 1
-        # Check for times before first update or after last update.
-        too_early = last_start_index < 0
-        n_too_early = np.sum(too_early)
-        if n_too_early > 0:
-            msg = (
-                "{0} out of {1} time entries have no reference update."
-                + "Cannot correct gains for those entries."
-            )
-            self.log.warning(msg.format(n_too_early, ntimes))
-        # Fot times after the last update, I cannot be sure the calibration is valid
-        # (could be that the cal file is incomplete. To be conservative, raise warning.)
-        too_late = (last_start_index >= (n_cal_file - 1)) & (
-            last_end_index >= (n_cal_file - 1)
-        )
-        n_too_late = np.sum(too_late)
-        if n_too_late > 0:
-            msg = (
-                "{0} out of {1} time entries are beyond calibration file time values."
-                + "Cannot correct gains for those entries."
-            )
-            self.log.warning(msg.format(n_too_late, ntimes))
-
-        # Array to contain reference times for each entry.
-        # NaN for entries with no reference time.
-        reftime = np.full(ntimes, np.nan, dtype=np.float)
-        # Array to hold reftimes of previous updates
-        # (for entries that need interpolation).
-        reftime_prev = np.full(ntimes, np.nan, dtype=np.float)
-        # Arrays to hold start and stop times of gain transition
-        # (for entries that need interpolation).
-        interp_start = np.full(ntimes, np.nan, dtype=np.float)
-        interp_stop = np.full(ntimes, np.nan, dtype=np.float)
-
-        # Acquisition restart. We load an old gain.
-        acqrestart = is_restart[last_start_index] == 1
-        reftime[acqrestart] = tref[last_start_index][acqrestart]
-
-        # FPGA restart. Data not calibrated.
-        # There shouldn't be any time points here. Raise a warning if there are.
-        fpga_restart = is_restart[last_start_index] == 2
-        n_fpga_restart = np.sum(fpga_restart)
-        if n_fpga_restart > 0:
-            msg = (
-                "{0} out of {1} time entries are after an FPGA restart but before the "
-                + "next kotekan restart. Cannot correct gains for those entries."
-            )
-            self.log.warning(msg.format(n_fpga_restart, ntimes))
-
-        # This is a gain update
-        gainupdate = is_restart[last_start_index] == 0
-
-        # This is the simplest case. Last update was a gain update and
-        # it is finished. No need to interpolate.
-        calrange = (last_start_index == last_end_index) & gainupdate
-        reftime[calrange] = tref[last_start_index][calrange]
-
-        # The next cases might need interpolation. Last update was a gain
-        # update and it is *NOT* finished. Update is in transition.
-        gaintrans = last_start_index == (last_end_index + 1)
-
-        # This update is in gain transition and previous update was an
-        # FPGA restart. Just use new gain, no interpolation.
-        prev_is_fpga = is_restart[last_start_index - 1] == 2
-        prev_is_fpga = prev_is_fpga & gaintrans & gainupdate
-        reftime[prev_is_fpga] = tref[last_start_index][prev_is_fpga]
-
-        # The next two cases need interpolation of gain corrections.
-        # It's not possible to correct interpolated gains because the
-        # products have been stacked. Just interpolate the gain
-        # corrections to avoide a sharp transition.
-
-        # This update is in gain transition and previous update was a
-        # Kotekan restart. Need to interpolate gain corrections.
-        prev_is_kotekan = is_restart[last_start_index - 1] == 1
-        to_interpolate = prev_is_kotekan & gaintrans & gainupdate
-
-        # This update is in gain transition and previous update was a
-        # gain update. Need to interpolate.
-        prev_is_gain = is_restart[last_start_index - 1] == 0
-        to_interpolate = to_interpolate | (prev_is_gain & gaintrans & gainupdate)
-
-        # Reference time of this update
-        reftime[to_interpolate] = tref[last_start_index][to_interpolate]
-        # Reference time of previous update
-        reftime_prev[to_interpolate] = tref[last_start_index - 1][to_interpolate]
-        # Start and stop times of gain transition.
-        interp_start[to_interpolate] = tstart[last_start_index][to_interpolate]
-        interp_stop[to_interpolate] = tend[last_start_index][to_interpolate]
-
-        # For times too early or too late, don't correct gain.
-        # This might mean we don't correct gains right after the last update
-        # that could in principle be corrected. But there is no way to know
-        # If the calibration file is up-to-date and the last update applies
-        # to all entries that come after it.
-        reftime[too_early | too_late] = np.nan
-
-        # Test for un-identified NaNs
-        known_bad_times = (too_early) | (too_late) | (fpga_restart)
-        n_bad_times = np.sum(~np.isfinite(reftime[~known_bad_times]))
-        if n_bad_times > 0:
-            msg = (
-                "{0} out of {1} time entries don't have a reference calibration time "
-                + "without an identifiable cause. Cannot correct gains for those entries."
-            )
-            self.log.warning(msg.format(n_bad_times, ntimes))
-
-        # Bundle result in dictionary
-        result = {
-            "reftime": reftime,
-            "reftime_prev": reftime_prev,
-            "interp_start": interp_start,
-            "interp_stop": interp_stop,
-        }
-
-        return result
 
     def _load_weather(self, time_ranges):
         """Load the chime_weather acquisitions covering the input time ranges."""
@@ -2201,6 +2104,9 @@ class CalibrationCorrection(task.SingleTask):
                 prod["input_a"][cj],
             )
 
+        # Dereference dataset
+        ssv = sstream.vis[:]
+
         # Loop over flags again
         for flag in self.flags:
 
@@ -2236,7 +2142,7 @@ class CalibrationCorrection(task.SingleTask):
                     )
                     correction[:, do_not_apply, :] = 1.0 + 0.0j
 
-                sstream.vis[:, :, in_range] *= correction
+                ssv.local_array[:, :, in_range] *= correction
 
         # Return input container with phase correction applied
         return sstream

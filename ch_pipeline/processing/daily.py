@@ -50,7 +50,6 @@ pipeline:
     - mpi4py
 
   tasks:
-    - type: ch_pipeline.core.containers.MonkeyPatchContainers
 
     - type: draco.core.task.SetMPILogging
       params:
@@ -130,7 +129,7 @@ pipeline:
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: sensitivity
       params:
         exclude_intracyl: true
@@ -138,7 +137,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_corr
+      in: tstream
       out: tstream_col
       params:
         weight: "natural"
@@ -173,12 +172,13 @@ pipeline:
         freq_width: 10.0
         time_width: 420.0
         threshold_mad: 6.0
+        use_draco_container: true
         save: true
         output_name: "rfi_mask_{{tag}}.h5"
         nan_check: false
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: ch_pipeline.analysis.flagging.ApplyCorrInputMask
+    - type: draco.analysis.flagging.ApplyRFIMask
       in: [tstream_day, rfimask]
       out: tstream_day_rfi
 
@@ -207,24 +207,37 @@ pipeline:
       params:
         samples: 4096
         save: true
-        output_name: "sstream_{{tag}}.h5"
+        output_name: "sstream_{{tag}}.zarr"
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
     - type: draco.analysis.flagging.ThresholdVisWeight
       in: sstream
-      out: sstream_threshold
+      out: weight_mask
       params:
-          relative_threshold: 0.5
+        relative_threshold: 0.7
 
+    # Apply the mask to remove regions with too low sensitivity
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream, weight_mask]
+      out: sstream_weight_mask
+
+    # Generate the second RFI mask using targetted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
-      in: sstream_threshold
-      out: sstream_mask
+      in: sstream_weight_mask
+      out: rfimask2
       params:
-          stack_ind: 66
+        stack_ind: 66
+        save: true
+        output_name: "rfi_mask2_{{tag}}.h5"
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_weight_mask, rfimask2]
+      out: sstream_mask
 
     # Make a map of the full dataset
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmap
@@ -234,11 +247,11 @@ pipeline:
         exclude_intracyl: false
         include_auto: false
         save: true
-        output_name: "ringmap_{{tag}}.h5"
+        output_name: "ringmap_{{tag}}.zarr"
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
+    - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
       out: ringmapint
@@ -248,7 +261,7 @@ pipeline:
         exclude_intracyl: true
         include_auto: false
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.h5"
+        output_name: "ringmap_intercyl_{{tag}}.zarr"
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
@@ -269,6 +282,7 @@ pipeline:
         - "{catalogs[0]}"
         - "{catalogs[1]}"
         - "{catalogs[2]}"
+        - "{catalogs[3]}"
 
     # Measure the observed fluxes of the point sources in the catalogs
     - type: draco.analysis.beamform.BeamFormCat
@@ -332,8 +346,9 @@ pipeline:
       in: sstream_blend2
       params:
         freq_zero: 800.0
-        nfreq: 1025
+        nfreq: {nfreq_delay}
         nsamp: 40
+        complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
 """
@@ -378,22 +393,25 @@ class DailyProcessing(base.ProcessingType):
         # Calibration times for thermal correction
         "caltimes_file": (
             "/project/rpp-krs/chime/chime_processed/gain/calibration_times/"
-            "20180902_20200404_calibration_times.h5"
+            "20180902_20201230_calibration_times.h5"
         ),
         # File for the timing correction
         "timing_file": (
             "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
         ),
-        "catalogs": (
+        # Catalogs to extract fluxes of
+        "catalogs": [
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
             "/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5",
-        ),
+            "/project/rpp-krs/chime/chime_processed/catalogs/ps_requested.h5",
+        ],
+        # Delay spectrum estimation
         "blend_stack_file": (
-            "/project/rpp-krs/chime/chime_processed/seth_tmp/stacks/rev_00/all/"
-            "sidereal_stack.h5"
+            "/project/rpp-chime/chime/chime_processed/stacks/rev_03/all/sstack.h5"
         ),
+        "nfreq_delay": 1025,
         # Job params
         "time": 180,  # How long in minutes?
         "nodes": 16,  # Number of nodes to use.
@@ -602,11 +620,13 @@ class TestDailyProcessing(DailyProcessing):
     default_params.update(
         {
             "intervals": [
-                {"start": "20181224T000000Z", "end": "20181228T000000Z"},
                 # 1878 and 1885 have files available online
                 {"start": "CSD1878", "end": "CSD1889", "step": 7},
+                {"start": "CSD3000", "end": "CSD3014", "step": 7},
+                {"start": "20181224T000000Z", "end": "20181228T000000Z"},
             ],
             "freq": [400, 416],
+            "nfreq_delay": 17,
             "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
