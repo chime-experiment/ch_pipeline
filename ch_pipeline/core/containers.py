@@ -22,12 +22,22 @@ Tasks
 =====
 - :py:class:`MonkeyPatchContainers`
 """
+import posixpath
+from typing import List, Optional, Union
+from draco.core.task import MPILoggedTask
 
 import numpy as np
 
-from caput import memh5, pipeline
+from caput import memh5, tod
+from ch_util import andata
 
-from draco.core.containers import *
+from draco.core.containers import (
+    ContainerBase,
+    StaticGainData,
+    TODContainer,
+    FreqContainer,
+    TimeStream,
+)
 
 
 class MultiSiderealStream(SiderealStream):
@@ -924,6 +934,292 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
+class RawContainer(TODContainer):
+    """Base class for using raw CHIME data via the draco containers API.
+
+    This modifies the set of allowed group/dataset names to allow access to the
+    flags group.
+    """
+
+    _allowed_groups = ["flags"]
+
+    def group_name_allowed(self, name: str) -> bool:
+        """Allow access to the flags group."""
+
+        # Strip leading and trailing "/"
+        name = name.strip("/")
+
+        return name in self._allowed_groups
+
+    def dataset_name_allowed(self, name: str) -> bool:
+        """Allow access to datasets under both / and /flags."""
+
+        parent_name, name = posixpath.split(name)
+        return parent_name == "/" or self.group_name_allowed(parent_name)
+
+    @classmethod
+    def from_acq_h5(
+        cls,
+        acq_files: Union[str, List[str]],
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
+        **kwargs,
+    ) -> "RawContainer":
+        """Load from an HDF5 file on disk.
+
+        This is a thin wrapper around `from_file` to support the
+        `andata.BaseData.from_acq_h5` API. The main difference is supporting
+        the `start` and `stop` parameters. All other parameters are passed
+        straight into `from_file`.
+
+        .. note:: This does not support loading in a distributed manner as the archive
+            files don't have the correct hints set, but that should be added into this
+            routine by using the information given in the `_dataset_spec` of derived
+            classes.
+
+        Parameters
+        ----------
+        acq_files
+            Path or glob to files (or list of).
+        start, stop
+            Indices into the full set of files to select.
+
+        Returns
+        -------
+        cont
+            A single container instance.
+        """
+
+        if start is None and stop is None:
+            pass
+        elif start is not None and stop is not None:
+            kwargs["time_sel"] = slice(start, stop)
+        else:
+            raise ValueError(
+                f"Got mixed types for start ({type(start)}) and stop ({type(stop)})"
+            )
+
+        return cls.from_file(acq_files, **kwargs)
+
+
+class HFBData(RawContainer, FreqContainer):
+    """A container for HFB data.
+
+    This attempts to wrap the HFB archive format.
+
+    .. note:: This does not yet support distributed loading of HDF5 archive
+       files.
+    """
+
+    _axes = ("subfreq", "beam")
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "subfreq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "flags/hfb_weight": {
+            "axes": ["freq", "subfreq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "flags/dataset_id": {
+            "axes": ["freq", "time"],
+            "dtype": "U32",
+            "initialise": True,
+            "distributed": False,
+        },
+        "flags/frac_lost": {
+            "axes": ["freq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        return self.datasets["flags/hfb_weight"]
+
+
+class CHIMETimeStream(TimeStream, RawContainer):
+    """A container for CHIME visibility data.
+
+    This provides a close analog of the CorrData container but implemented via the draco
+    containers API.
+    """
+
+    # Add in the extra datasets contained within the CHIME corrdata time streams
+    _dataset_spec = {
+        "flags/dataset_id": {
+            "axes": ["freq", "time"],
+            "dtype": "U32",
+            "initialise": False,
+            "distributed": True,
+        },
+        "flags/frac_lost": {
+            "axes": ["freq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+        },
+    }
+
+    @classmethod
+    def from_corrdata(cls, data: andata.CorrData) -> "CHIMETimeStream":
+        """Turn a CorrData container into a CHIMETimeStream.
+
+        This makes a shallow copy of the input `data`. The internals of `data` will be
+        destroyed during this process and so the container should be discarded.
+
+        Parameters
+        ----------
+        data
+            A CorrData instance to clone. This instance should be discarded after this
+            call.
+
+        Returns
+        -------
+        newdata
+            The correlator data as a CHIMETimeStream object.
+        """
+        # Copy over all the internal data store
+        newdata = cls(data_group=data, distributed=data.distributed, comm=data.comm)
+
+        # Manipulate location of weights as this is the one dataset that has a different
+        # location in CHIMETimeStream compared to CorrData
+        storage = newdata._storage_root._get_storage()
+
+        if "/flags/vis_weight" in newdata:
+            storage["vis_weight"] = storage["flags"].pop("vis_weight")
+            storage["vis_weight"]._name = "/vis_weight"
+
+        if "/flags/inputs" in newdata:
+            storage["input_flags"] = storage["flags"].pop("inputs")
+            storage["input_flags"]._name = "/input_flags"
+
+        return newdata
+
+    @property
+    def frac_lost(self):
+        """Get the input flags dataset."""
+        return self.datasets["flags/frac_lost"]
+
+    @property
+    def flags(self):
+        """Get the flags group."""
+        flags_group = dict(self["flags"])
+
+        # Alias the groups back in for maximum compatibility with CHIME Andata
+        # based code
+        flags_group["vis_weight"] = self["vis_weight"]
+        flags_group["input_flags"] = self["input_flags"]
+
+        return flags_group
+
+
+class HFBReader(tod.Reader):
+    """A reader for HFB type data."""
+
+    data_class = HFBData
+
+    _freq_sel = None
+
+    @property
+    def freq_sel(self) -> Union[int, list, slice]:
+        """Get the current frequency selection.
+
+        Returns
+        -------
+        freq_sel
+            A frequency selection.
+        """
+
+        return self._freq_sel
+
+    @freq_sel.setter
+    def freq_sel(self, value: Union[int, list, slice]):
+        """Set a frequency selection.
+
+        Parameters
+        ----------
+        value
+            Any type accepted by h5py is valid.
+        """
+        self._freq_sel = andata._ensure_1D_selection(value)
+
+    _beam_sel = None
+
+    @property
+    def beam_sel(self):
+        """Get the current beam selection.
+
+        Returns
+        -------
+        beam_sel
+            The current beam selection.
+        """
+
+        return self._beam_sel
+
+    @beam_sel.setter
+    def beam_sel(self, value):
+        """Set a beam selection.
+
+        Parameters
+        ----------
+        value
+            Any type accepted by h5py is valid.
+        """
+        self._beam_sel = andata._ensure_1D_selection(value)
+
+    def read(self, out_group=None):
+        """Read the selected data.
+
+        Parameters
+        ----------
+        out_group : `h5py.Group`, hdf5 filename or `memh5.Group`
+            Underlying hdf5 like container that will store the data for the
+            BaseData instance.
+
+        Returns
+        -------
+        data : :class:`TOData`
+            Data read from :attr:`~Reader.files` based on the selections made
+            by user.
+
+        """
+        kwargs = {}
+
+        if self._freq_sel is not None:
+            kwargs["freq_sel"] = self._freq_sel
+
+        if self._beam_sel is not None:
+            kwargs["beam_sel"] = self._beam_sel
+
+        kwargs["ondisk"] = False
+
+        return self.data_class.from_mult_files(
+            self.files,
+            data_group=out_group,
+            start=self.time_sel[0],
+            stop=self.time_sel[1],
+            datasets=self.dataset_sel,
+            **kwargs,
+        )
+
+
 def make_empty_corrdata(
     freq=None,
     input=None,
@@ -1077,21 +1373,41 @@ def make_empty_corrdata(
     return data
 
 
-class MonkeyPatchContainers(pipeline.TaskBase):
+class MonkeyPatchContainers(MPILoggedTask):
     """Patch draco to use CHIME timestream containers.
 
     This task does nothing but perform a monkey patch on `draco.core.containers`
+
+    .. deprecated::
+        This monkey patching scheme is now deprecated. Try to use just use the usual
+        draco infrastructure instead, that is using `draco.core.containers.empty_like`
+        to create a new container and `draco.core.containers.TimeStream` as a generic
+        timestream class and `ch_pipeline.core.containers.CHIMETimeStream` as a slightly
+        more CHIME specific one.
     """
 
     def __init__(self):
+
+        super().__init__()
+
+        self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
         import ch_pipeline.core.containers as ccontainers
         import draco.core.containers as dcontainers
 
         # Replace the routine for making an empty timestream. This needs to be replaced
         # in both draco and ch_pipeline because of the ways the imports work
-        dcontainers.empty_timestream = ccontainers.make_empty_corrdata
-        ccontainers.empty_timestream = ccontainers.make_empty_corrdata
+
+        def empty_timestream_patch(*args, **kwargs):
+            self.log.warning(
+                "This patching is deprecated. Try using `CHIMETimeStream` instead."
+            )
+            return ccontainers.make_empty_corrdata(*args, **kwargs)
+
+        empty_timestream_patch.__doc__ = ccontainers.make_empty_corrdata.__doc__
+
+        dcontainers.empty_timestream = empty_timestream_patch
+        ccontainers.empty_timestream = empty_timestream_patch
 
         # Save a reference to the original routine
         _make_empty_like = dcontainers.empty_like
@@ -1117,6 +1433,10 @@ class MonkeyPatchContainers(pipeline.TaskBase):
             """
 
             from ch_util import andata
+
+            self.log.warning(
+                "This patching is deprecated. Try using `CHIMETimeStream` instead."
+            )
 
             if isinstance(obj, andata.CorrData):
                 return dcontainers.empty_timestream(
