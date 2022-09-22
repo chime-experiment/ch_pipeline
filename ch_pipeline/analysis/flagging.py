@@ -1008,6 +1008,8 @@ class ApplySiderealDayFlag(task.SingleTask):
 class NanToNum(task.SingleTask):
     """Finds NaN and replaces with 0."""
 
+    dataset = config.Property(proptype=str, default="vis")
+
     def process(self, timestream):
         """Converts any NaN in the vis dataset and weight dataset
         to the value 0.0.
@@ -1025,12 +1027,12 @@ class NanToNum(task.SingleTask):
         timestream.redistribute("freq")
 
         # Loop over frequencies to reduce memory usage
-        for lfi, fi in timestream.vis[:].enumerate(0):
+        for lfi, fi in timestream.datasets[self.dataset][:].enumerate(0):
 
             # Set non-finite values of the visibility equal to zero
-            flag = ~np.isfinite(timestream.vis[fi])
+            flag = ~np.isfinite(timestream.datasets[self.dataset][fi])
             if np.any(flag):
-                timestream.vis[fi][flag] = 0.0
+                timestream.datasets[self.dataset][fi][flag] = 0.0
                 timestream.weight[fi][
                     flag
                 ] = 0.0  # Also set weights to zero so we don't trust values
@@ -1577,7 +1579,7 @@ class MaskRA(task.SingleTask):
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask ** 2
+        sstream.weight[:] *= tools.invert_no_zero(mask**2)
 
         return sstream
 

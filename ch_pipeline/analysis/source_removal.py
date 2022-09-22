@@ -26,10 +26,11 @@ def model_extended_sources(
     distance,
     timestamp,
     bodies,
+    nstream=1,
     min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
-    **kwargs
+    **kwargs,
 ):
     """Generate a model for the visibilities.
 
@@ -79,11 +80,29 @@ def model_extended_sources(
         The model for source `i` is given by the parameters
         between `source_bound[i]` and `source_bound[i+1]`.
     """
+
+    def interleave(x, n):
+        return np.array([val for tup in zip(*([x] * n)) for val in tup])
+
     nsource = len(bodies)
 
     # Parse input parameters
-    scale_x = np.radians(np.array(kwargs["scale_x"]) / 60.0)
-    scale_y = np.radians(np.array(kwargs["scale_y"]) / 60.0)
+    degree_x = np.array(kwargs["degree_x"])
+    degree_y = np.array(kwargs["degree_y"])
+    degree_t = np.array(kwargs.get("degree_t", [0] * nsource))
+
+    expand_x = kwargs.get("expand_x", False)
+    if expand_x:
+        scale_x = np.ones(nsource)
+    else:
+        scale_x = np.radians(np.array(kwargs["scale_x"]) / 60.0)
+
+    expand_y = kwargs.get("expand_y", False)
+    if expand_y:
+        scale_y = np.ones(nsource)
+    else:
+        scale_y = np.radians(np.array(kwargs["scale_y"]) / 60.0)
+
     scale_t = np.array(kwargs.get("scale_t", [0.66] * nsource))
 
     degree_x = np.array(kwargs["degree_x"])
@@ -120,9 +139,9 @@ def model_extended_sources(
     ncoeff_y = degree_y + 1
     ncoeff_t = degree_t + 1
     ncoeff = ncoeff_x * ncoeff_y * ncoeff_t
-    nparam = np.sum(ncoeff)
+    nparam = np.sum(nstream * ncoeff)
 
-    source_bound = np.concatenate(([0], np.cumsum(ncoeff)))
+    source_bound = np.concatenate(([0], np.cumsum(interleave(ncoeff, nstream))))
 
     S = np.zeros((nfreq, nbaseline, ntime, nparam), dtype=np.complex64)
 
@@ -148,9 +167,17 @@ def model_extended_sources(
             weight &= np.abs(ha) >= (np.radians(min_ha) / np.cos(dec))
 
         # Evaluate polynomial
-        aa, bb = source_bound[ss], source_bound[ss + 1]
-
         coords = [ax * scale[ss, ii] * ones for ii, ax in enumerate([u, v, ha])]
+
+        if expand_x:
+            eta = -np.pi * np.cos(dec) * np.sin(ha)
+            coords[0] = eta[np.newaxis, np.newaxis, :] * coords[0]
+
+        if expand_y:
+            eta = np.pi * (
+                np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(ha)
+            )
+            coords[1] = eta[np.newaxis, np.newaxis, :] * coords[1]
 
         H = np.polynomial.hermite.hermvander3d(*coords, poly_deg[ss])
 
@@ -159,9 +186,14 @@ def model_extended_sources(
             ha[np.newaxis, np.newaxis, :], lat, dec[np.newaxis, np.newaxis, :], u, v
         ).conj()
 
-        S[..., aa:bb] = (
-            H * phi[..., np.newaxis] * weight[np.newaxis, np.newaxis, :, np.newaxis]
-        )
+        model = H * phi[..., np.newaxis] * weight[np.newaxis, np.newaxis, :, np.newaxis]
+
+        for st in range(nstream):
+            aa, bb = (
+                source_bound[ss * nstream + st],
+                source_bound[ss * nstream + st + 1],
+            )
+            S[..., aa:bb] = model
 
     return S, source_bound
 
@@ -287,6 +319,9 @@ class SolveSources(task.SingleTask):
     extent = config.Property(proptype=list, default=[1.0, 4.0, 4.0, 7.0])
     scale_t = config.Property(proptype=list, default=[0.66, 0.66, 0.66, 0.66])
 
+    expand_x = config.Property(proptype=bool, default=False)
+    expand_y = config.Property(proptype=bool, default=False)
+
     min_altitude = config.Property(proptype=float, default=5.0)
     max_ha = config.Property(proptype=float, default=0.0)
     min_ha = config.Property(proptype=float, default=0.0)
@@ -322,6 +357,8 @@ class SolveSources(task.SingleTask):
             "scale_x": [1] * self.nsources,
             "scale_y": [1] * self.nsources,
             "scale_t": [1] * self.nsources,
+            "expand_x": self.expand_x,
+            "expand_y": self.expand_y,
             "min_altitude": self.min_altitude,
             "max_ha": self.max_ha,
             "min_ha": self.min_ha,
@@ -335,6 +372,8 @@ class SolveSources(task.SingleTask):
                 "scale_x": self.extent,
                 "scale_y": self.extent,
                 "scale_t": self.scale_t,
+                "expand_x": self.expand_x,
+                "expand_y": self.expand_y,
                 "min_altitude": self.min_altitude,
                 "max_ha": self.max_ha,
                 "min_ha": self.min_ha,
@@ -387,7 +426,7 @@ class SolveSources(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -403,7 +442,7 @@ class SolveSources(task.SingleTask):
 
         # Flag out short baselines
         min_distance = np.array(self.min_distance)
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         if min_distance.size == 1:
             baseline_weight = (sep >= min_distance[0]).astype(np.float32)
         else:
@@ -429,8 +468,10 @@ class SolveSources(task.SingleTask):
                 * (self.degree_t[ss] + 1)
             )
             for ii in range(npar):
-                param_name.append((src, ii))
-        param_name = np.array(param_name, dtype=[("source", "U32"), ("coeff", "u2")])
+                param_name.append((src, 0, ii))
+        param_name = np.array(
+            param_name, dtype=[("source", "U32"), ("stream", "u2"), ("coeff", "u2")]
+        )
 
         # Create output container
         out = containers.SourceModel(
@@ -496,7 +537,7 @@ class SolveSources(task.SingleTask):
                         dist_pol,
                         timestamp,
                         self.bodies,
-                        **self.extended_source_kwargs
+                        **self.extended_source_kwargs,
                     )
                     ext_model = ext_model[0]
 
@@ -696,7 +737,7 @@ class SubtractSources(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -785,6 +826,9 @@ class SolveSourcesWithBeam(SolveSources):
     and a hermite polynomial in time to account for common mode drift in the gain.
     """
 
+    time_variable = config.Property(proptype=bool, default=False)
+    joint_pol = config.Property(proptype=bool, default=False)
+
     def setup(self, tel):
         """Set up the source model.
 
@@ -812,10 +856,22 @@ class SolveSourcesWithBeam(SolveSources):
             "scale_x": self.extent,
             "scale_y": self.extent,
             "scale_t": self.scale_t,
+            "expand_x": self.expand_x,
+            "expand_y": self.expand_y,
             "min_altitude": self.min_altitude,
             "max_ha": self.max_ha,
             "min_ha": self.min_ha,
         }
+
+        # Check if we are allowing the amplitude to vary as a function of time
+        # and define the appropriate solver
+        if self.time_variable:
+            assert not any(self.degree_x)
+            assert not any(self.degree_y)
+            assert not any(self.degree_t)
+            self.solver = solve_single_time
+        else:
+            self.solver = solve_multiple_times
 
     def process(self, data, beams):
         """Fit source model to visibilities.
@@ -841,6 +897,12 @@ class SolveSourcesWithBeam(SolveSources):
         # Determine local dimensions
         nfreq, nstack, ntime = data.vis.local_shape
 
+        nstream = np.unique([len(val.index_map["stream"][:]) for val in beams.values()])
+        if len(nstream) > 1:
+            raise RuntimeError("All sources must have the same number of streams.")
+        else:
+            nstream = int(nstream[0])
+
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
         efreq = sfreq + nfreq
@@ -848,12 +910,35 @@ class SolveSourcesWithBeam(SolveSources):
         freq = data.freq[sfreq:efreq]
 
         # Calculate time
+        bmatch = {}
         if "ra" in data.index_map:
+
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+
+            for key, val in beams.items():
+                imatch = np.searchsorted(data.ra, val.ra)
+                if np.array_equal(data.ra[imatch], val.ra):
+                    bmatch[key] = imatch
+                else:
+                    raise RuntimeError(
+                        f"The beam for {key} is not sampled at the correct RAs."
+                    )
+
         elif "time" in data.index_map:
+
             timestamp = data.time
+
+            for key, val in beams.items():
+                imatch = np.searchsorted(data.time, val.time)
+                if np.array_equal(data.time[imatch], val.time):
+                    bmatch[key] = imatch
+                else:
+                    raise RuntimeError(
+                        f"The beam for {key} is not sampled at the correct RAs."
+                    )
+
         else:
             raise RuntimeError("Unable to extract time from input container.")
 
@@ -868,7 +953,7 @@ class SolveSourcesWithBeam(SolveSources):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -884,7 +969,7 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Flag out short baselines
         min_distance = np.array(self.min_distance)
-        sep = np.sqrt(np.sum(distance ** 2, axis=0))
+        sep = np.sqrt(np.sum(distance**2, axis=0))
         if min_distance.size == 1:
             baseline_weight = (sep >= min_distance[0]).astype(np.float32)
         else:
@@ -894,12 +979,27 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Calculate polarisation products, determine unique values
         feedpol = tools.get_feed_polarisations(self.inputmap)
-        pol = np.core.defchararray.add(
-            feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
-        )
 
-        upol = np.unique(pol)
-        npol = len(upol)
+        # Determine polarisation axis
+        if self.joint_pol:
+            # Jointly fit all polarisation products
+            upol = np.array(["co", "cross"], dtype="<U8")
+            apol, bpol = feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
+            pol_index = [np.flatnonzero(apol == bpol), np.flatnonzero(apol != bpol)]
+            pol_conj = [np.flatnonzero(apol[pind] > bpol[pind]) for pind in pol_index]
+
+            self.log.info("Fitting all polarisations jointly.")
+
+        else:
+            pol = np.core.defchararray.add(
+                feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
+            )
+
+            upol = np.unique(pol)
+            pol_index = [np.flatnonzero(pol == upp) for upp in upol]
+            pol_conj = [np.array([]) for upp in upol]
+
+            self.log.info(f"Fitting each polarisation ({', '.join(upol)}) separately.")
 
         # Determine parameter names
         param_name = []
@@ -909,9 +1009,12 @@ class SolveSourcesWithBeam(SolveSources):
                 * (self.degree_y[ss] + 1)
                 * (self.degree_t[ss] + 1)
             )
-            for ii in range(npar):
-                param_name.append((src, ii))
-        param_name = np.array(param_name, dtype=[("source", "U32"), ("coeff", "u2")])
+            for st in range(nstream):
+                for ii in range(npar):
+                    param_name.append((src, st, ii))
+        param_name = np.array(
+            param_name, dtype=[("source", "U32"), ("stream", "u2"), ("coeff", "u2")]
+        )
 
         # Create output container
         out = containers.SourceModel(
@@ -923,23 +1026,33 @@ class SolveSourcesWithBeam(SolveSources):
             attrs_from=data,
         )
 
-        out.add_dataset("coeff")
+        source_kwargs = self.source_kwargs.copy()
+        source_kwargs["nstream"] = nstream
+        out.attrs["source_model_kwargs"] = json.dumps(source_kwargs)
 
-        out.attrs["source_model_kwargs"] = json.dumps(self.source_kwargs)
+        if self.time_variable:
+            out.add_dataset("amplitude")
+            out.redistribute("freq")
+            out_dset = out.amplitude[:].view(np.ndarray)
+        else:
+            out.add_dataset("coeff")
+            out.redistribute("freq")
+            out_dset = out.coeff[:].view(np.ndarray)
 
-        self.log.info("Beams contain following sources: %s" % str(list(beams.keys())))
+        out_dset[:] = 0.0
 
         # Dereference datasets
         all_vis = data.vis[:].view(np.ndarray)
         all_weight = data.weight[:].view(np.ndarray)
 
-        out.redistribute("freq")
-        out_coeff = out.coeff[:].view(np.ndarray)
+        bvis, bweight = {}, {}
+        for key, val in beams.items():
+            val.redistribute("freq")
+            bvis[key] = val.vis[:].view(np.ndarray)
+            bweight[key] = val.weight[:].view(np.ndarray)
 
         # Loop over polarisations
-        for pp, upp in enumerate(upol):
-
-            this_pol = np.flatnonzero(pol == upp)
+        for pp, this_pol in enumerate(pol_index):
 
             dist_pol = distance[:, this_pol]
             bweight_pol = baseline_weight[this_pol, np.newaxis]
@@ -947,26 +1060,66 @@ class SolveSourcesWithBeam(SolveSources):
             # Loop over frequencies
             for ff, nu in enumerate(freq):
 
+                # Extract datasets for this polarisation and frequency
+                vis = all_vis[ff, this_pol, :].copy()
+                weight = all_weight[ff, this_pol, :] * bweight_pol
+
+                # Only process times where we have a beam
+                flag_beam = np.zeros((self.nsources, ntime), dtype=bool)
+                for ss, src in enumerate(self.sources):
+                    flag_beam[ss, bmatch[src]] = np.any(
+                        bweight[src][ff] > 0.0, axis=(0, 1)
+                    )
+
+                valid_time = np.flatnonzero(np.any(flag_beam, axis=0))
+                self.log.info(
+                    f"There are {valid_time.size} valid times for frequency {ff}."
+                )
+                if valid_time.size == 0:
+                    continue
+
+                vis = vis[:, valid_time]
+                weight = weight[:, valid_time]
+
                 # Determine extended source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp, self.bodies, **self.source_kwargs
+                    nu,
+                    dist_pol,
+                    timestamp[valid_time],
+                    self.bodies,
+                    nstream=nstream,
+                    **self.source_kwargs,
                 )
                 source_model = source_model[0]
 
                 # Multipy source model by the effective beam
                 for ss, src in enumerate(self.sources):
-                    this_beam = beams[src].vis[ff][this_pol].view(np.ndarray) * (
-                        beams[src].weight[ff][this_pol].view(np.ndarray) > 0.0
-                    ).astype(np.float32)
-                    source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[
-                        ..., np.newaxis
-                    ]
 
-                # Extract datasets for this polarisation and frequency
-                vis = all_vis[ff, this_pol, :]
-                weight = all_weight[ff, this_pol, :] * bweight_pol
+                    valid_in = np.flatnonzero(flag_beam[ss, bmatch[src]])
+                    valid_out = np.flatnonzero(flag_beam[ss, valid_time])
 
-                out_coeff[ff, pp, :] = solve_multiple_times(vis, weight, source_model)
+                    for st in range(nstream):
+
+                        aa, bb = sedge[ss * nstream + st], sedge[ss * nstream + st + 1]
+
+                        this_flag = (
+                            bweight[src][ff, :, st, :][this_pol][:, valid_in] > 0.0
+                        ).astype(np.float32)
+                        this_beam = (
+                            bvis[src][ff, :, st, :][this_pol][:, valid_in] * this_flag
+                        )
+                        source_model[..., valid_out, aa:bb] *= this_beam[
+                            ..., np.newaxis
+                        ]
+
+                # Conjugate if necessary.
+                to_conj = pol_conj[pp]
+                if to_conj.size > 0:
+                    vis[to_conj] = vis[to_conj].conj()
+                    source_model[to_conj] = source_model[to_conj].conj()
+
+                # Solve for the coefficients
+                out_dset[ff, pp] = self.solver(vis, weight, source_model)
 
         # Save a few attributes necessary to interpret the data
         out.attrs["min_distance"] = min_distance
@@ -977,6 +1130,10 @@ class SolveSourcesWithBeam(SolveSources):
 
 class SubtractSourcesWithBeam(task.SingleTask):
     """Subtract a source model from the visibilities."""
+
+    save_model = config.Property(proptype=bool, default=False)
+    min_ha = config.Property(proptype=float, default=None)
+    max_ha = config.Property(proptype=float, default=None)
 
     def setup(self, tel):
         """Extract inputmap from the telescope instance provided.
@@ -1010,8 +1167,18 @@ class SubtractSourcesWithBeam(task.SingleTask):
         """
         # Extract various arguments describing the model from the attributes of the model container
         sources = model.index_map["source"]
+        nsources = sources.size
         telescope_rotation = model.attrs["telescope_rotation"]
         source_model_kwargs = json.loads(model.attrs["source_model_kwargs"])
+        nstream = source_model_kwargs["nstream"]
+
+        if self.min_ha is not None:
+            source_model_kwargs["min_ha"] = self.min_ha
+            self.log.info(f"Resetting min_ha to {self.min_ha:0.1f}.")
+
+        if self.max_ha is not None:
+            source_model_kwargs["max_ha"] = self.max_ha
+            self.log.info(f"Resetting max_ha to {self.max_ha:0.1f}.")
 
         bodies = [
             ephemeris.source_dictionary[src]
@@ -1034,12 +1201,35 @@ class SubtractSourcesWithBeam(task.SingleTask):
         freq = data.freq[sfreq:efreq]
 
         # Calculate time
+        bmatch = {}
         if "ra" in data.index_map:
+
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+
+            for key, val in beams.items():
+                imatch = np.searchsorted(data.ra, val.ra)
+                if np.array_equal(data.ra[imatch], val.ra):
+                    bmatch[key] = imatch
+                else:
+                    raise RuntimeError(
+                        f"The beam for {key} is not sampled at the correct RAs."
+                    )
+
         elif "time" in data.index_map:
+
             timestamp = data.time
+
+            for key, val in beams.items():
+                imatch = np.searchsorted(data.time, val.time)
+                if np.array_equal(data.time[imatch], val.time):
+                    bmatch[key] = imatch
+                else:
+                    raise RuntimeError(
+                        f"The beam for {key} is not sampled at the correct RAs."
+                    )
+
         else:
             raise RuntimeError("Unable to extract time from input container.")
 
@@ -1054,7 +1244,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -1070,46 +1260,114 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # Calculate polarisation products, determine unique values
         feedpol = tools.get_feed_polarisations(self.inputmap)
-        pol = np.array(
-            [feedpol[pn["input_a"]] + feedpol[pn["input_b"]] for pn in prod_new]
-        )
+        upol = model.index_map["pol"]
+        if "co" in upol:
+            # Jointly fit all polarisation products
+            apol, bpol = feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
+            pol_index = [np.flatnonzero(apol == bpol), np.flatnonzero(apol != bpol)]
+            pol_conj = [np.flatnonzero(apol[pind] > bpol[pind]) for pind in pol_index]
+
+        else:
+            # Calculate polarisation products, determine unique values
+            pol = np.core.defchararray.add(
+                feedpol[prod_new["input_a"]], feedpol[prod_new["input_b"]]
+            )
+            pol_index = [np.flatnonzero(pol == upp) for upp in upol]
+            pol_conj = [np.array([]) for upp in upol]
+
+        # If requested, create output container.
+        if self.save_model:
+            out = containers.empty_like(data)
+            out.redistribute("freq")
+            out.vis[:] = 0.0
+            out.weight[:] = data.weight[:].copy()
+        else:
+            out = data
+
+        ovis = out.vis[:].view(np.ndarray)
 
         # Dereference dataset
-        vis = data.vis[:].view(np.ndarray)
-        coeff = model.coeff[:].view(np.ndarray)
+        try:
+            coeff = model.coeff[:].view(np.ndarray)
+        except KeyError:
+            coeff = model.amplitude[:].view(np.ndarray)
+        else:
+            coeff = coeff[:, :, np.newaxis, :]
+
+        bvis, bweight = {}, {}
+        for key, val in beams.items():
+            val.redistribute("freq")
+            bvis[key] = val.vis[:].view(np.ndarray)
+            bweight[key] = val.weight[:].view(np.ndarray)
 
         # Subtract source model
-        for pp, upp in enumerate(model.index_map["pol"]):
+        for pp, this_pol in enumerate(pol_index):
 
-            this_pol = np.flatnonzero(pol == upp)
             dist_pol = distance[:, this_pol]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
 
+                # Only process times where we have a beam
+                flag_beam = np.zeros((nsources, ntime), dtype=bool)
+                for ss, src in enumerate(sources):
+                    flag_beam[ss, bmatch[src]] = np.any(
+                        bweight[src][ff] > 0.0, axis=(0, 1)
+                    )
+
+                valid_time = np.flatnonzero(np.any(flag_beam, axis=0))
+                self.log.info(
+                    f"There are {valid_time.size} valid times for frequency {ff}."
+                )
+                if valid_time.size == 0:
+                    continue
+
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp, bodies, **source_model_kwargs
+                    nu, dist_pol, timestamp[valid_time], bodies, **source_model_kwargs
                 )
                 source_model = source_model[0]
 
                 # Multipy source model by the effective beam
                 for ss, src in enumerate(sources):
-                    this_beam = beams[src].vis[ff][this_pol].view(np.ndarray) * (
-                        beams[src].weight[ff][this_pol].view(np.ndarray) > 0.0
-                    ).astype(np.float32)
-                    source_model[..., sedge[ss] : sedge[ss + 1]] *= this_beam[
-                        ..., np.newaxis
-                    ]
+
+                    valid_in = np.flatnonzero(flag_beam[ss, bmatch[src]])
+                    valid_out = np.flatnonzero(flag_beam[ss, valid_time])
+
+                    for st in range(nstream):
+
+                        aa, bb = sedge[ss * nstream + st], sedge[ss * nstream + st + 1]
+
+                        this_flag = (
+                            bweight[src][ff, :, st, :][this_pol][:, valid_in] > 0.0
+                        ).astype(np.float32)
+                        this_beam = (
+                            bvis[src][ff, :, st, :][this_pol][:, valid_in] * this_flag
+                        )
+                        source_model[..., valid_out, aa:bb] *= this_beam[
+                            ..., np.newaxis
+                        ]
+
+                to_conj = pol_conj[pp]
+                if to_conj.size > 0:
+                    source_model[to_conj] = source_model[to_conj].conj()
 
                 mdl = np.sum(
-                    coeff[ff, pp, np.newaxis, np.newaxis, :] * source_model,
+                    coeff[ff, pp, np.newaxis, :, :] * source_model,
                     axis=-1,
                 )
 
-                vis[ff, this_pol, :] -= mdl
+                if to_conj.size > 0:
+                    mdl[to_conj] = mdl[to_conj].conj()
 
-        return data
+                if self.save_model:
+                    for ii, vt in enumerate(valid_time):
+                        ovis[ff, this_pol, vt] = mdl[..., ii]
+                else:
+                    for ii, vt in enumerate(valid_time):
+                        ovis[ff, this_pol, vt] -= mdl[..., ii]
+
+        return out
 
 
 def kz_coeffs(m, k):
@@ -1142,7 +1400,7 @@ def kz_coeffs(m, k):
 
     assert coef.size == k * (m - 1) + 1
 
-    return coef / m ** k
+    return coef / m**k
 
 
 def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80):

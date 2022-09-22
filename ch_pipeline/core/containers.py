@@ -30,6 +30,128 @@ from caput import memh5, pipeline
 from draco.core.containers import *
 
 
+class MultiSiderealStream(SiderealStream):
+    """A container for holding a visibility dataset in sidereal time.
+
+    Parameters
+    ----------
+    ra : int
+        The number of points to divide the RA axis up into.
+    """
+
+    _axes = ("stream",)
+
+    _dataset_spec = {
+        "vis": {
+            "axes": ["freq", "stack", "stream", "ra"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 256, 128, 1),
+        },
+        "vis_weight": {
+            "axes": ["freq", "stack", "stream", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 256, 128, 1),
+        },
+        "input_flags": {
+            "axes": ["input", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "gain": {
+            "axes": ["freq", "input", "ra"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    def __init__(self, stream=None, *args, **kwargs):
+
+        # Set up stream
+        if stream is not None:
+            if isinstance(stream, int):
+                stream = np.arange(stream, dtype=np.int)
+        else:
+            stream = np.arange(2, dtype=np.int)
+
+        kwargs["stream"] = stream
+
+        super(MultiSiderealStream, self).__init__(*args, **kwargs)
+
+
+class MultiTimeStream(TimeStream):
+    """A container for holding a visibility dataset in sidereal time.
+
+    Parameters
+    ----------
+    ra : int
+        The number of points to divide the RA axis up into.
+    """
+
+    _axes = ("stream",)
+
+    _dataset_spec = {
+        "vis": {
+            "axes": ["freq", "stack", "stream", "time"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 256, 128, 1),
+        },
+        "vis_weight": {
+            "axes": ["freq", "stack", "stream", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 256, 128, 1),
+        },
+        "input_flags": {
+            "axes": ["input", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "gain": {
+            "axes": ["freq", "input", "time"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    def __init__(self, stream=None, *args, **kwargs):
+
+        # Set up stream
+        if stream is not None:
+            if isinstance(stream, int):
+                stream = np.arange(stream, dtype=np.int)
+        else:
+            stream = np.arange(2, dtype=np.int)
+
+        kwargs["stream"] = stream
+
+        super(MultiTimeStream, self).__init__(*args, **kwargs)
+
+
 class RFIMask(ContainerBase):
     """Container for holding a mask that indicates
     data that is free of RFI events.
@@ -496,7 +618,7 @@ class SourceModel(FreqContainer):
 
     _dataset_spec = {
         "amplitude": {
-            "axes": ["freq", "pol", "time", "source"],
+            "axes": ["freq", "pol", "time", "param"],
             "dtype": np.complex64,
             "initialise": False,
             "distributed": True,

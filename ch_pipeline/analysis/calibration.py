@@ -951,13 +951,14 @@ class TransitFit(task.SingleTask):
     """
 
     model = config.enum(
-        ["gauss_amp_poly_phase", "poly_log_amp_poly_phase"],
+        ["gauss_amp_poly_phase", "poly_log_amp_poly_phase", "poly_real_poly_imag"],
         default="gauss_amp_poly_phase",
     )
     nsigma = config.Property(
         proptype=(lambda x: x if x is None else float(x)), default=0.60
     )
     absolute_sigma = config.Property(proptype=bool, default=False)
+
     poly_type = config.Property(proptype=str, default="standard")
     poly_deg_amp = config.Property(proptype=int, default=5)
     poly_deg_phi = config.Property(proptype=int, default=5)
@@ -965,6 +966,10 @@ class TransitFit(task.SingleTask):
     moving_window = config.Property(
         proptype=(lambda x: x if x is None else float(x)), default=0.30
     )
+
+    poly_deg = config.Property(proptype=int, default=5)
+    even = config.Property(proptype=bool, default=False)
+    odd = config.Property(proptype=bool, default=False)
 
     def setup(self):
         """Define model to fit to transit."""
@@ -987,6 +992,15 @@ class TransitFit(task.SingleTask):
             self.fit_kwargs.update(
                 {"niter": self.niter, "moving_window": self.moving_window}
             )
+
+        elif self.model == "poly_real_poly_imag":
+            self.ModelClass = cal_utils.FitPolyRealPolyImag
+            self.model_kwargs = {
+                "poly_type": self.poly_type,
+                "poly_deg": self.poly_deg,
+                "even": self.even,
+                "odd": self.odd,
+            }
 
         else:
             raise ValueError(
@@ -1118,6 +1132,7 @@ class GainFromTransitFit(task.SingleTask):
     """
 
     evaluate = config.enum(["transit", "peak"], default="transit")
+    deriv = config.Property(proptype=bool, default=False)
     chisq_per_dof_threshold = config.Property(proptype=float, default=20.0)
     alpha = config.Property(proptype=float, default=0.32)
 
@@ -1181,7 +1196,12 @@ class GainFromTransitFit(task.SingleTask):
                 elementwise = False
 
             # Predict model and uncertainty at desired hour angle
-            g = model.predict(ha, elementwise=elementwise)
+            if self.deriv:
+                self.log.info("Evaluating derivative of model.")
+                g = model.deriv(ha)
+            else:
+                self.log.info("Evaluating model.")
+                g = model.predict(ha, elementwise=elementwise)
 
             gerr = model.uncertainty(ha, alpha=self.alpha, elementwise=elementwise)
 
