@@ -364,6 +364,31 @@ pipeline:
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
+
+    # Apply delay filter to stream
+    - type: draco.analysis.delay.DelayFilter
+      requires: manager
+      in: sstream_blend3
+      out: sstream_dfilter
+      params:
+        delay_cut: 0.1
+        za_cut: 0.0
+        window: true
+        save: true
+        output_name: "sstream_dfilter.h5"
+
+    # Estimate the delay power spectrum of the data after applying
+    # the delay filter
+    - type: draco.analysis.delay.DelaySpectrumEstimator
+      requires: manager
+      in: sstream_dfilter
+      params:
+        freq_zero: 800.0
+        nfreq: {nfreq_delay}
+        nsamp: 40
+        complex_timedomain: true
+        save: true
+        output_name: "delayspectrum_dfilter_{{tag}}.h5"
 """
 
 
