@@ -399,11 +399,24 @@ pipeline:
       in: sstream_blend1
       out: sstream_blend2
 
+    # Try and derive an optimal time-freq factorizable mask that covers the
+    # existing masked entries
+    - type: draco.analysis.flagging.MaskFreq
+      in: sstream_blend2
+      out: factmask
+      params:
+        factorize: true
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_blend2, factmask]
+      out: sstream_blend3
+
     # Estimate the delay power spectrum of the data. This is a good diagnostic
     # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_blend2
+      in: sstream_blend3
       params:
         freq_zero: 800.0
         nfreq: {nfreq_delay}
