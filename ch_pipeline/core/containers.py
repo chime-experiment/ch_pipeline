@@ -6,6 +6,7 @@ containers which are imported into this module.
 
 Containers
 ==========
+- :py:class:`FrequencyMap`
 - :py:class:`RFIMask`
 - :py:class:`CorrInputMask`
 - :py:class:`CorrInputTest`
@@ -38,6 +39,39 @@ from draco.core.containers import (
     FreqContainer,
     TimeStream,
 )
+
+
+class FrequencyMap(FreqContainer, TODContainer):
+    """Map between frequency bin and FPGA stream (GPU node) as a function of time."""
+
+    _axes = ("level",)
+
+    _dataset_spec = {
+        "stream": {
+            "axes": ["time", "freq", "level"],
+            "dtype": int,
+            "initialise": True,
+            "distributed": False,
+        },
+        "node": {
+            "axes": ["time", "freq"],
+            "dtype": "<U5",
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def level(self):
+        return self.index_map["level"]
+
+    @property
+    def stream(self):
+        return self.datasets["stream"]
+
+    @property
+    def node(self):
+        return self.datasets["node"]
 
 
 class RFIMask(ContainerBase):
