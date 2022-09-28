@@ -1114,7 +1114,7 @@ class SolarBeamform(task.SingleTask):
                 :
             ]
         ]
-
+        
         # Determine polarisation for each visibility
         pol_ind = np.full(nprod, -1, dtype=np.int)
         cyl_i = np.full(nprod, -1, dtype=np.int)
