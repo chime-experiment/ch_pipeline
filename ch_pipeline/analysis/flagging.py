@@ -1738,8 +1738,8 @@ class MaskDecorrelatedCylinder(task.SingleTask):
     def process(self, data, inputmap):
         """Create the mask.
 
-        Parmeters
-        ---------
+        Parameters
+        ----------
         data : TimeStream
             Visibilites before averaging over cylinders.
         inputmap : list of :class:`CorrInput`
