@@ -134,10 +134,24 @@ pipeline:
       params:
         exclude_intracyl: true
 
+    # Identify individual baselines with much lower weights than expected and
+    # mask out the entire time-freq sample
+    - type: draco.analysis.flagging.ThresholdVisWeightTime
+      in: tstream
+      out: bad_baseline_mask
+      params:
+        output_name: "bad_baseline_mask_{{tag}}.h5"
+        save: true
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream, bad_baseline_mask]
+      out: tstream_bbm
+
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream
+      in: tstream_bbm
       out: tstream_col
       params:
         weight: "natural"
