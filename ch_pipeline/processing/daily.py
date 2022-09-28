@@ -240,29 +240,24 @@ pipeline:
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeight
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       in: sstream
-      out: weight_mask
+      out: sstream_tvwb
       params:
-        relative_threshold: 0.7
+        relative_threshold: 0.5
 
-    # Apply the mask to remove regions with too low sensitivity
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream, weight_mask]
-      out: sstream_weight_mask
-
-    # Generate the second RFI mask using targetted knowledge of the instrument
+    # Generate the second RFI mask using targeted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
-      in: sstream_weight_mask
+      in: sstream_tvwb
       out: rfimask2
       params:
         stack_ind: 66
-        save: true
         output_name: "rfi_mask2_{{tag}}.h5"
+        save: true
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_weight_mask, rfimask2]
+      in: [sstream_tvwb, rfimask2]
       out: sstream_mask
 
     # Make a map of the full dataset
