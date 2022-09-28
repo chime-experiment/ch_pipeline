@@ -460,9 +460,11 @@ class DailyProcessing(base.ProcessingType):
     default_params = {
         # Time range(s) to process
         "intervals": [
-            # Two short intervals either side of the caltime change in order to
-            # have a few good test days at the very start
+            # Two short intervals either side of the caltime change, and one
+            # with the weird 4 baseline issue in order to have a few good test
+            # days at the very start
             {"start": "CSD1878", "end": "CSD1879"},
+            {"start": "CSD1912", "end": "CSD1913"},
             {"start": "CSD3000", "end": "CSD3001"},
             # Good short ranges from rev_00, these are spread over the year and
             # quickly cover the full sky
@@ -518,7 +520,7 @@ class DailyProcessing(base.ProcessingType):
         ),
         "nfreq_delay": 1025,
         # Job params
-        "time": 180,  # How long in minutes?
+        "time": 120,  # How long in minutes?
         "nodes": 16,  # Number of nodes to use.
         "ompnum": 6,  # Number of OpenMP threads
         "pernode": 8,  # Jobs per node
