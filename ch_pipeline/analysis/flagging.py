@@ -1793,7 +1793,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         prodstack["input_a"] = np.where(conj, t["input_b"], t["input_a"])
         prodstack["input_b"] = np.where(conj, t["input_a"], t["input_b"])
 
-        # Calculate baseline distance, polarisation pair, cylinder pair
+        # Calculate baseline distance and polarisation pair
         index_a = prodstack["input_a"]
         index_b = prodstack["input_b"]
 
@@ -1818,7 +1818,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
 
         isort = np.argsort(index)
 
-        # Determine boundaries of unique pol/baselines.
+        # Determine boundaries of unique pol/baselines
         bnd = np.concatenate(
             ([0], np.flatnonzero(np.diff(index[isort]) > 0) + 1, [index.size])
         )
@@ -1856,7 +1856,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         flag = (data.weight[:].local_array[:] > 0.0)[:, pindex, :]
 
         # Define slices that will expand both the coefficients and data
-        # to the correct shape for broadcasting against each other.
+        # to the correct shape for broadcasting against each other
         cslc = (slice(None), slice(None), slice(None), None)
         dslc = (None, slice(None), slice(None), slice(None))
 
