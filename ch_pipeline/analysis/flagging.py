@@ -1705,6 +1705,27 @@ class MaskCHIMEMisc(task.SingleTask):
 class MaskDecorrelatedCylinder(task.SingleTask):
     """Identify and mask frequencies and times where a cylinder decorrelated.
 
+    If the error rate is high on a backplane link in the second stage shuffle
+    of the F-engine corner turn, then on rare occassions (few times per year)
+    the data streams being handled by that FPGA can become misaligned or
+    desynchronized with the rest of the data streams.  The 512 correlator inputs
+    on the cylinder corresponding to that pair of FPGA crates will have negligible
+    correlation with all other inputs for the 64 frequencies received by that
+    FPGA during the second stage shuffle.  This will persist until the data streams
+    are re-synchronized with a correlator restart.
+
+    This task identifies times and frequencies affected by these misalignment events
+    by examining, for each cylinder, the ratio of 1-cylinder-separation, co-polar
+    visibilities acquired by redundant baselines that do not contain the cylinder
+    to those that do contain the cylinder.  This ratio will be close to 1 under
+    normal operations since the baselines are largely redundant, however it will
+    become very large after a cylinder becomes misaligned since there is no
+    correlation and the denominator drops to near zero.
+
+    Additionally, if provided the mapping between frequency channel and FPGA,
+    this task will ensure that when there is evidence of a decorrelated cylinder,
+    all 64 frequencies handled by the problematic FPGA are masked.
+
     Parameters
     ----------
     threshold: int
@@ -1764,10 +1785,8 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         pos = tools.get_feed_positions(inputmap)
 
         # Get cylinder each feed is on
-        cyl = np.array(
-            [chr(63 + inp.cyl) if tools.is_chime(inp) else "0" for inp in inputmap]
-        )
-        ucyl = np.unique(cyl[cyl != "0"])
+        cyl = np.array([inp.cyl if tools.is_chime(inp) else -1 for inp in inputmap])
+        ucyl = np.unique(cyl[cyl >= 0])
         ncyl = ucyl.size
 
         # Make sure that none of our typical products reference non-array feeds
@@ -1843,9 +1862,9 @@ class MaskDecorrelatedCylinder(task.SingleTask):
             pi = ico[isort[bnd[bb] : bnd[bb + 1]]]
             pindex[cc] = valid_stack[pi]
 
-            flag_with[:, cc, :] = np.char.equal(
-                ucyl[:, np.newaxis], cyl[index_a[pi]][np.newaxis, :]
-            ) | np.char.equal(ucyl[:, np.newaxis], cyl[index_b[pi]][np.newaxis, :])
+            flag_with[:, cc, :] = (
+                ucyl[:, np.newaxis] == cyl[index_a[pi]][np.newaxis, :]
+            ) | (ucyl[:, np.newaxis] == cyl[index_b[pi]][np.newaxis, :])
 
             cc += 1
 
