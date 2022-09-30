@@ -1906,8 +1906,14 @@ class MaskDecorrelatedCylinder(task.SingleTask):
 
             valid = (norm_with > 0.0) & (norm_without > 0.0)
 
+            # If all entries along axis=1 are invalid then the following
+            # nanmedian will throw a warning if we just fill the invalid
+            # positions with NaN's. Instead fill samples where all axis=1 is
+            # invalid with zeros which will still fail the following comparison
+            # to generate the mask
+            fill = np.where(valid.any(axis=1), np.nan, 0)[:, np.newaxis, ...]
             # Take the median of the ratio over all unique baselines
-            med = np.nanmedian(np.where(valid, ratio, np.nan), axis=1)
+            med = np.nanmedian(np.where(valid, ratio, fill), axis=1)
 
             # Mask any time where the median was greater than some threshold
             mask[ff] = np.any(med > self.threshold, axis=0)
