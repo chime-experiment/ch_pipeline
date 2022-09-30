@@ -492,6 +492,17 @@ pipeline:
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
+
+    # Zip up the zarr outputs. This doesn't actually need the sstream input
+    # it's just to guarantee this task doesn't start too early
+    - type: draco.core.io.ZipZarrContainers
+      requires: sstream_dfilter
+      params:
+        containers:
+          - "sstream_lsd_{tag}.zarr"
+          - "ringmap_lsd_{tag}.zarr"
+          - "ringmap_intercyl_lsd_{tag}.zarr"
+        remove: true
 """
 
 
