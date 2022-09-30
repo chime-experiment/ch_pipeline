@@ -1920,7 +1920,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         # transmitted by that motherboard slot.  The cylinder decorrelation is
         # expected to affect all of these frequencies.  This step is only possible
         # if the frequency map as a function of time has been provided on setup.
-        if self.freq_map is not None:
+        if self.freq_map is not None and len(data.freq) == 1024:
 
             grouper, slot_index = self._get_slot_freqs(data.time[0])
 
