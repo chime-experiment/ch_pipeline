@@ -80,6 +80,13 @@ pipeline:
         files: "{timing_file}"
         distributed: false
 
+    # Load the frequency map
+    - type: ch_pipeline.core.io.LoadSetupFile
+      out: freqmap
+      params:
+        filename: "{freqmap_file}"
+        distributed: false
+
     - type: draco.core.misc.AccumulateList
       in: tcorr
       out: tcorrlist
@@ -139,19 +146,20 @@ pipeline:
     - type: draco.analysis.flagging.ThresholdVisWeightTime
       in: tstream
       out: bad_baseline_mask
-      params:
-        output_name: "bad_baseline_mask_{{tag}}.h5"
-        save: true
 
-    # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [tstream, bad_baseline_mask]
-      out: tstream_bbm
+    # Identify decorrelated cylinders
+    - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
+      requires: freqmap
+      in: [tstream, inputmap]
+      out: decorr_cyl_mask
+      params:
+        threshold: 5.0
+        max_frac_freq: 0.1
 
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_bbm
+      in: tstream
       out: tstream_col
       params:
         weight: "natural"
@@ -172,9 +180,46 @@ pipeline:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
 
+    # Concatenate together all the masks for bad baselines
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: bad_baseline_mask
+      out: bad_baseline_mask_day
+      params:
+        save: true
+        output_name: "bad_baseline_mask_{{tag}}.h5"
+
+    # Concatenate together all the decorrelated cylinder masks
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: decorr_cyl_mask
+      out: decorr_cyl_mask_day
+
+    # Expand the decorrelated cylinder mask along the time axis
+    - type: ch_pipeline.analysis.flagging.ExpandMask
+      in: decorr_cyl_mask_day
+      out: decorr_cyl_mask_day_exp
+      params:
+        nexpand: 6
+        in_place: true
+        save: true
+        output_name: "decorrelated_cylinder_mask_expanded_{{tag}}.h5"
+
+    # Apply the mask from the bad baselines. This will modify the data in
+    # place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream_day, bad_baseline_mask_day]
+      out: tstream_bbm
+
+    # Apply the mask from the decorrelated cylinders. This will modify the data
+    # in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream_bbm, decorr_cyl_mask_day_exp]
+      out: tstream_dcm
+
     # Calculate the RFI mask from the autocorrelation data
     - type: ch_pipeline.analysis.flagging.RFIFilter
-      in: tstream_day
+      in: tstream_dcm
       out: rfimask
       params:
         stack: true
@@ -193,7 +238,7 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [tstream_day, rfimask]
+      in: [tstream_dcm, rfimask]
       out: tstream_day_rfi
 
     # Calculate the thermal gain correction
@@ -461,12 +506,14 @@ class DailyProcessing(base.ProcessingType):
         # Time range(s) to process
         "intervals": [
             # Two short intervals either side of the caltime change (1878,
-            # 3000), one with the weird 4 baseline issue (1912), and one with a
-            # single baseline-freq issue (1960) in order to have a few good
-            # test days at the very start
+            # 3000), one with the weird 4 baseline issue (1912), one with a
+            # single baseline-freq issue (1960), and one with a decorrelated
+            # cylinder (2325) in order to have a few good test days at the very
+            # start
             {"start": "CSD1878", "end": "CSD1879"},
-            {"start": "CSD1912", "end": "CSD1913"},
+            {"start": "CSD1912", "end": "CSD1912"},
             {"start": "CSD1960", "end": "CSD1960"},
+            {"start": "CSD2325", "end": "CSD2325"},
             {"start": "CSD3000", "end": "CSD3001"},
             # Good short ranges from rev_00, these are spread over the year and
             # quickly cover the full sky
@@ -508,6 +555,11 @@ class DailyProcessing(base.ProcessingType):
         "timing_file": (
             "/project/rpp-chime/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
+        ),
+        # File containing the freq map being used for processing the data
+        "freqmap_file": (
+            "/project/rpp-chime/chime/chime_processed/freq_map/"
+            "20180902_20220927_freq_map.h5"
         ),
         # Catalogs to extract fluxes of
         "catalogs": [
@@ -574,9 +626,10 @@ class DailyProcessing(base.ProcessingType):
         online_node = di.StorageNode.get(name="cedar_online", active=True)
         chimestack_inst = di.ArchiveInst.get(name="chimestack")
 
-        # TODO if the time range is so small that it’s completely contained within a single file, nothing will be returned
-        # have to special-case it by looking for files which start before the start time and end after the end time).
-
+        # TODO: if the time range is so small that it’s completely contained
+        # within a single file, nothing will be returned have to special-case
+        # it by looking for files which start before the start time and end
+        # after the end time).
         archive_files = (
             di.ArchiveFileCopy.select(
                 di.CorrFileInfo.start_time,
@@ -589,7 +642,6 @@ class DailyProcessing(base.ProcessingType):
         )
 
         # chimestack files available online which include between start and end_time
-
         files_that_exist = archive_files.where(
             di.ArchiveAcq.inst
             == chimestack_inst,  # specifically looking for chimestack files
