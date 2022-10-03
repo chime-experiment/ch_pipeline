@@ -220,7 +220,7 @@ class ProcessingType(object):
 
         return cls(new_rev, create=True)
 
-    def queued(self):
+    def queued(self, user=None):
         """Get the queued and running jobs of this type.
 
         Returns
@@ -234,7 +234,7 @@ class ProcessingType(object):
         job_regex = re.compile("^%s$" % self.job_name(self.tag_pattern))
 
         # Find matching jobs
-        jobs = [job for job in slurm_jobs() if job_regex.match(job["NAME"])]
+        jobs = [job for job in slurm_jobs(user=user) if job_regex.match(job["NAME"])]
 
         running = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "R"]
         waiting = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "PD"]
@@ -353,16 +353,16 @@ class ProcessingType(object):
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
 
-    def pending(self):
+    def pending(self, user=None):
         """Jobs available to run."""
 
-        waiting, running = self.queued()
+        waiting, running = self.queued(user)
         not_pending = set(self.ls()) | set(waiting) | set(running)
         pending = [job for job in self.available() if job not in not_pending]
 
         return pending
 
-    def crashed(self) -> list:
+    def crashed(self, user=None) -> list:
         """Find all jobs which have crashed.
 
         Returns
@@ -385,7 +385,7 @@ class ProcessingType(object):
         }
         # Get finished, waiting, and running jobs
         finished_tags = self.ls()
-        waiting_tags, running_tags = self.queued()
+        waiting_tags, running_tags = self.queued(user)
         # Any tag in the working directory that is not running or
         # waiting should be considered as crashed. Also consider
         # finished tags to catch edge case where a tag is in the
