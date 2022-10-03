@@ -231,14 +231,21 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
 
 @item.command("metrics")
 @click.argument("revision", type=PREV)
-def metrics_list(revision):
+@click.option(
+    "-u",
+    "--user",
+    type=str,
+    default=None,
+    help="User to check jobs for.",
+)
+def metrics_list(revision, user):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
     complete = revision.ls()
     available = revision.available()
-    waiting, running = revision.queued()
+    waiting, running = revision.queued(user)
     failed = revision.crashed()
     # Direct copy from revision.pending method, put here
     # to avoid duplicate calls
