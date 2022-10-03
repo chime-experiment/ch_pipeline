@@ -235,7 +235,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     "-u",
     "--user",
     type=str,
-    default=None,
+    default="chime",
     help="User to check jobs for.",
 )
 def metrics_list(revision, user):
