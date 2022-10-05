@@ -362,13 +362,16 @@ class ProcessingType(object):
 
         return pending
 
-    def crashed(self, user=None) -> list:
-        """Find all jobs which have crashed.
+    def status(self, user=None) -> dict:
+        """Find the status of running jobs. This duplicates
+        some other methods for individual status values, but
+        reduces repeated method (and slurm) calls.
 
         Returns
         -------
-        crashed : list
-            Return the tags of all failed jobs.
+        status : dict
+            Return the tags associated with each status line: Available,
+            Pending, Waiting, Running, Successful, Failed
         """
         base = self.base_path
         working_path = base / "working"
@@ -383,9 +386,13 @@ class ProcessingType(object):
         working_tags = {
             path.name for path in working_path.glob("*") if file_regex.match(path.name)
         }
-        # Get finished, waiting, and running jobs
+        # Get available, finished, waiting, and running jobs
+        available_tags = self.available()
         finished_tags = self.ls()
         waiting_tags, running_tags = self.queued(user)
+        # Get pending jobs
+        not_pending = set(finished_tags) | set(waiting_tags) | set(running_tags)
+        pending_tags = [job for job in available_tags if job not in not_pending]
         # Any tag in the working directory that is not running or
         # waiting should be considered as crashed. Also consider
         # finished tags to catch edge case where a tag is in the
@@ -409,8 +416,17 @@ class ProcessingType(object):
             # take union of these sets in place
             crashed_tags |= unique_crashed_dir
 
-        # This will cast to a sorted list
-        return sorted(crashed_tags)
+        # Return a dict of all status values
+        tags = {
+            "Available": available_tags,
+            "Pending": pending_tags,
+            "Waiting": waiting_tags,
+            "Running": running_tags,
+            "Successful": finished_tags,
+            "Failed": sorted(crashed_tags),
+        }
+
+        return tags
 
 
 def find_venv():

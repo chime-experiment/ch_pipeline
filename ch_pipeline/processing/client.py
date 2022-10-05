@@ -243,22 +243,11 @@ def metrics_list(revision, user):
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
-    complete = revision.ls()
-    available = revision.available()
-    waiting, running = revision.queued(user)
-    failed = revision.crashed(user)
-    # Direct copy from revision.pending method, put here
-    # to avoid duplicate calls
-    not_pending = set(complete) | set(waiting) | set(running)
-    pending = [job for job in available if job not in not_pending]
+    tag_status = revision.status(user)
 
     click.echo(f"Fairshare: {fs[0]}")
-    click.echo(f"Available: {len(available)}")
-    click.echo(f"Pending: {len(pending)}")
-    click.echo(f"Waiting: {len(waiting)}")
-    click.echo(f"Running: {len(running)}")
-    click.echo(f"Successful: {len(complete)}")
-    click.echo(f"Failed: {len(failed)}")
+    for key, value in tag_status.items():
+        click.echo(f"{key}: {len(value)}")
 
 
 def dirstats(path):
