@@ -962,7 +962,7 @@ class HFBData(RawContainer, FreqContainer):
     @property
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
-        return self.datasets["flags/hfb_weight"]
+        return self["flags/hfb_weight"]
 
 
 class CHIMETimeStream(TimeStream, RawContainer):
@@ -1026,7 +1026,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     @property
     def frac_lost(self):
         """Get the input flags dataset."""
-        return self.datasets["flags/frac_lost"]
+        return self["flags/frac_lost"]
 
     @property
     def flags(self):
