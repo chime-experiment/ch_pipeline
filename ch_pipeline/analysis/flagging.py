@@ -2241,3 +2241,70 @@ class DataFlagger(task.SingleTask):
         )
 
         return timestream
+
+
+class HFBRNTMask(task.SingleTask):
+    """Identify RFI in HFB data using the radiometer noise test, averaging over beams.
+
+    Attributes
+    ----------
+    threshold : float
+        The desired threshold for the RFI fliter. Data with sensitivity metric
+        values above this thershold will be considered RFI.
+    keep_sens : bool
+        Save the sensitivity metric data that were used to construct
+        the mask in the output container.
+    """
+
+    threshold = config.Property(proptype=float, default=1.6)
+    keep_sens = config.Property(proptype=bool, default=False)
+
+    def process(self, stream):
+        """Derive an RFI mask.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBRFIMask
+            Boolean mask that can be applied to an HFB data container
+            with the task `ApplyHFBInputMask` to mask contaminated
+            frequencies, subfrequencies and time samples.
+        """
+
+        # Extract data and weight arrays, averaging over beams
+        data = np.mean(stream.hfb[:], axis=2)
+        weight = np.mean(stream.weight[:], axis=2)
+
+        # Number of samples per data point in the HFB data:
+        # N_S = Delta nu * Delta t, where Delta nu is the frequency resolution
+        # (390.625 kHz / 128) and Delta t the integration time (10 s)
+        # NOTE: SHould this be extracted from the container attributes? In that
+        # case this information needs to be added to the attributes upstream.
+        N_SAMP = 390625.0 / 128.0 * 10.0
+
+        # Ideal radiometer equation
+        radiometer = data**2 / N_SAMP
+
+        # Radiometer noise test: the sensitivity metric would be unity for
+        # an ideal radiometer, it would be higher for data with RFI
+        sensitivity_metric = 2.0 / (radiometer * weight)
+
+        # Boolean mask idicating data that are (relatively) free from RFI
+        mask = sensitivity_metric < self.threshold
+
+        # Create container to hold output
+        out = containers.HFBRFIMask(axes_from=stream, attrs_from=stream)
+
+        if self.keep_sens:
+            out.add_dataset("sens")
+            out.sens[:] = sensitivity_metric
+
+        # Save mask to output container
+        out.mask[:] = mask
+
+        # Return output container
+        return out
