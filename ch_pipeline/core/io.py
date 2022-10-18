@@ -41,6 +41,7 @@ from ch_util import andata
 from draco.core import task, io
 
 from . import containers
+from ..hfb import io as hfbio
 
 
 class LoadCorrDataFiles(task.SingleTask):
@@ -219,7 +220,7 @@ class LoadDataFiles(io.BaseLoadFiles):
         "gain": andata.CalibrationGainReader,
         "digitalgain": andata.DigitalGainReader,
         "flaginput": andata.FlagInputReader,
-        "hfb": containers.HFBReader,
+        "hfb": hfbio.HFBReader,
     }
 
     def setup(self, files):
