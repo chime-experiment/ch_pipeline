@@ -2293,8 +2293,8 @@ class HFBRNTMask(task.SingleTask):
         # an ideal radiometer, it would be higher for data with RFI
         sensitivity_metric = 2.0 / (radiometer * weight)
 
-        # Boolean mask idicating data that are (relatively) free from RFI
-        mask = sensitivity_metric < self.threshold
+        # Boolean mask idicating data that are contaminated by RFI
+        mask = sensitivity_metric > self.threshold
 
         # Create container to hold output
         out = containers.HFBRFIMask(axes_from=stream, attrs_from=stream)
