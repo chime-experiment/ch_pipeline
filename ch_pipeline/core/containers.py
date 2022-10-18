@@ -580,7 +580,19 @@ class SourceModel(FreqContainer):
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit."""
 
-    _axes = ("freq", "input", "time", "pol_x", "pol_y", "coord", "param")
+    _axes = (
+        "freq",
+        "input",
+        "time",
+        "pol",
+        "eigen",
+        "good_input1",
+        "good_input2",
+        "udegree",
+        "vdegree",
+        "coord",
+        "param",
+    )
 
     _dataset_spec = {
         "coord": {
@@ -589,29 +601,43 @@ class SunTransit(ContainerBase):
             "initialise": True,
             "distributed": False,
         },
-        "evalue_x": {
-            "axes": ["freq", "pol_x", "time"],
+        "evalue1": {
+            "axes": ["freq", "good_input1", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "evalue_y": {
-            "axes": ["freq", "pol_y", "time"],
+        "evalue2": {
+            "axes": ["freq", "good_input2", "time"],
             "dtype": np.float64,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
             "dtype": np.complex128,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response_error": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "coeff": {
+            "axes": ["freq", "pol", "time", "udegree", "vdegree"],
+            "dtype": np.complex128,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "is_sun": {
+            "axes": ["freq", "pol", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
@@ -643,7 +669,17 @@ class SunTransit(ContainerBase):
     def __init__(self, *args, **kwargs):
 
         kwargs["param"] = np.array(
-            ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
+            [
+                "peak_amplitude",
+                "centroid",
+                "fwhm",
+                "phase_intercept",
+                "phase_slope",
+                "phase_quad",
+                "phase_cube",
+                "phase_quart",
+                "phase_quint",
+            ]
         )
         kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
@@ -654,12 +690,20 @@ class SunTransit(ContainerBase):
         return self.datasets["coord"]
 
     @property
+    def evalue1(self):
+        return self.datasets["evalue1"]
+
+    @property
+    def evalue2(self):
+        return self.datasets["evalue2"]
+
+    @property
     def evalue_x(self):
-        return self.datasets["evalue_x"]
+        return self.datasets["evalue1"]
 
     @property
     def evalue_y(self):
-        return self.datasets["evalue_y"]
+        return self.datasets["evalue2"]
 
     @property
     def response(self):
@@ -668,6 +712,14 @@ class SunTransit(ContainerBase):
     @property
     def response_error(self):
         return self.datasets["response_error"]
+
+    @property
+    def coeff(self):
+        return self.datasets["coeff"]
+
+    @property
+    def is_sun(self):
+        return self.datasets["is_sun"]
 
     @property
     def flag(self):
@@ -716,6 +768,7 @@ class SunTransit(ContainerBase):
     def az(self):
         ind = list(self.index_map["coord"]).index("az")
         return self.datasets["coord"][:, ind]
+
 
 
 class RingMap(ContainerBase):
