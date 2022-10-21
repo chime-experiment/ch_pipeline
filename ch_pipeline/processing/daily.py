@@ -596,10 +596,10 @@ class DailyProcessing(base.ProcessingType):
         ),
         "nfreq_delay": 1025,
         # Job params
-        "time": 120,  # How long in minutes?
-        "nodes": 16,  # Number of nodes to use.
-        "ompnum": 6,  # Number of OpenMP threads
-        "pernode": 8,  # Jobs per node
+        "time": 150,  # How long in minutes?
+        "nodes": 12,  # Number of nodes to use.
+        "ompnum": 4,  # Number of OpenMP threads
+        "pernode": 12,  # Jobs per node
     }
     default_script = DEFAULT_SCRIPT
 
