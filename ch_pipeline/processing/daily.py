@@ -521,15 +521,19 @@ class DailyProcessing(base.ProcessingType):
     default_params = {
         # Time range(s) to process
         "intervals": [
-            # Two short two-day intervals either side of the caltime change (1878,
-            # 3000), one with the weird 4 baseline issue (1912), one with a
-            # single baseline-freq issue (1960), one with a different set of
-            # vertical stripes (1983), and one with a decorrelated cylinder
-            # (2325) in order to have a few good test days at the very
-            # start
+            # Two short two-day intervals either side of the caltime change
+            # (1878, 3000), one with the weird 4 baseline issue (1912), one
+            # with no actual data (1898), one with a single baseline-freq issue
+            # (1960), one to test the thermal correction which otherwise shows
+            # a large spread (1965), one with a different set of vertical
+            # stripes (1983), and one with a decorrelated cylinder (2325) in
+            # order to have a few good test days at the very start
+            # NOTE: these intervals are *inclusive*
             {"start": "CSD1878", "end": "CSD1879"},
+            {"start": "CSD1898", "end": "CSD1898"},
             {"start": "CSD1912", "end": "CSD1912"},
             {"start": "CSD1960", "end": "CSD1960"},
+            {"start": "CSD1965", "end": "CSD1965"},
             {"start": "CSD1983", "end": "CSD1983"},
             {"start": "CSD2325", "end": "CSD2325"},
             {"start": "CSD3000", "end": "CSD3001"},
