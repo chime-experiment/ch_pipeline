@@ -252,6 +252,8 @@ pipeline:
     - type: draco.core.misc.ApplyGain
       in: [tstream_day_rfi, thermal_gain]
       out: tstream_thermal_corrected
+      params:
+        inverse: false
 
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
