@@ -448,11 +448,14 @@ pipeline:
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
+    # Also, mask out an additional frequency band which isn't that visible in
+    # the data but generates a lot of high delay power
     - type: draco.analysis.flagging.MaskFreq
       in: sstream_blend2
       out: factmask
       params:
         factorize: true
+        bad_freq_ind: [[738, 753]]
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
