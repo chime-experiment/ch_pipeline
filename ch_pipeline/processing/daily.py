@@ -141,10 +141,21 @@ pipeline:
       params:
         exclude_intracyl: true
 
-    # Identify individual baselines with much lower weights than expected and
-    # mask out the entire time-freq sample
-    - type: draco.analysis.flagging.ThresholdVisWeightTime
+    # Identify individual baselines with much lower weights than expected
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
       in: tstream
+      out: full_bad_baseline_mask
+      params:
+        average_type: "median"
+        absolute_threshold: 1e-7
+        relative_threshold: 1e-5
+        pols_to_flag: "copol"
+
+    # Collapse bad-baseline mask over baseline, so that any time-freq sample
+    # with a low weight at any baseline is masked
+    - type: draco.analysis.flagging.CollapseBaselineMask
+      in: full_bad_baseline_mask
       out: bad_baseline_mask
 
     # Identify decorrelated cylinders
@@ -287,7 +298,7 @@ pipeline:
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+    - type: draco.analysis.flagging.ThresholdVisWeightBaselineAlt
       in: sstream
       out: sstream_tvwb
       params:
