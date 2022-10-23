@@ -56,6 +56,10 @@ pipeline:
         level_rank0: DEBUG
         level_all: WARNING
 
+    - type: draco.core.misc.CheckMPIEnvironment
+      params:
+        timeout: 420
+
     # Query for all the data for the sidereal day we are processing
     - type: ch_pipeline.core.dataquery.QueryDatabase
       out: filelist
