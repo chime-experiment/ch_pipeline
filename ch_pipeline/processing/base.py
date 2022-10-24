@@ -386,19 +386,21 @@ class ProcessingType(object):
         working_tags = {
             path.name for path in working_path.glob("*") if file_regex.match(path.name)
         }
-        # Get available, finished, waiting, and running jobs
+        # Get available, finished, pending, and running jobs
         available_tags = self.available()
         finished_tags = self.ls()
-        waiting_tags, running_tags = self.queued(user)
-        # Get pending jobs
-        not_pending = set(finished_tags) | set(waiting_tags) | set(running_tags)
-        pending_tags = [job for job in available_tags if job not in not_pending]
+        pending_tags, running_tags = self.queued(user)
+        # Get jobs which have not yet been submitted
+        submitted_tags = set(finished_tags) | set(pending_tags) | set(running_tags)
+        not_submitted_tags = [
+            job for job in available_tags if job not in submitted_tags
+        ]
         # Any tag in the working directory that is not running or
         # waiting should be considered as crashed. Also consider
         # finished tags to catch edge case where a tag is in the
         # process of being moved.
         crashed_tags = working_tags.difference(
-            waiting_tags + running_tags + finished_tags
+            pending_tags + running_tags + finished_tags
         )
         # This directory can contain job directories that have
         # previously crash. They may be re-run without being
@@ -418,12 +420,12 @@ class ProcessingType(object):
 
         # Return a dict of all status values
         tags = {
-            "Available": available_tags,
-            "Pending": pending_tags,
-            "Waiting": waiting_tags,
-            "Running": running_tags,
-            "Successful": finished_tags,
-            "Failed": sorted(crashed_tags),
+            "available": available_tags,
+            "not_yet_submitted": not_submitted_tags,
+            "pending": pending_tags,
+            "running": running_tags,
+            "successful": finished_tags,
+            "failed": sorted(crashed_tags),
         }
 
         return tags

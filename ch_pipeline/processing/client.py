@@ -229,7 +229,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     revision.generate(max=number_to_submit, submit=submit)
 
 
-@item.command("metrics")
+@item.command("status")
 @click.argument("revision", type=PREV)
 @click.option(
     "-u",
@@ -238,14 +238,14 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     default="chime",
     help="User to check jobs for.",
 )
-def metrics_list(revision, user):
+def status(revision, user):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
     tag_status = revision.status(user)
 
-    click.echo(f"Fairshare: {fs[0]}")
+    click.echo(f"fairshare: {fs[0]}")
     for key, value in tag_status.items():
         click.echo(f"{key}: {len(value)}")
 
