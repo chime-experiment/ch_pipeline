@@ -455,18 +455,25 @@ pipeline:
       params:
         frac: 1e-4
 
-    # Mask the daytime data again. This ensures that we only see the point sources in
+    # Mask the daytime data again. This ensures that we only see the time range in
     # the delay spectrum we would expect
     - type: ch_pipeline.analysis.flagging.MaskDay
       in: sstream_blend1
       out: sstream_blend2
+
+    # Mask out the bright sources so we can see the high delay structure more easily
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: sstream_blend2
+      out: sstream_blend3
+      params:
+        source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
     # Also, mask out an additional frequency band which isn't that visible in
     # the data but generates a lot of high delay power
     - type: draco.analysis.flagging.MaskFreq
-      in: sstream_blend2
+      in: sstream_blend3
       out: factmask
       params:
         factorize: true
@@ -474,14 +481,14 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_blend2, factmask]
-      out: sstream_blend3
+      in: [sstream_blend3, factmask]
+      out: sstream_blend4
 
     # Estimate the delay power spectrum of the data. This is a good diagnostic
     # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_blend3
+      in: sstream_blend4
       params:
         freq_zero: 800.0
         nfreq: {nfreq_delay}
@@ -493,7 +500,7 @@ pipeline:
     # Apply delay filter to stream
     - type: draco.analysis.delay.DelayFilter
       requires: manager
-      in: sstream_blend3
+      in: sstream_blend4
       out: sstream_dfilter
       params:
         delay_cut: 0.1
