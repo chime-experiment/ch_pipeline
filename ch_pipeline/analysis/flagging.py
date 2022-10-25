@@ -2271,7 +2271,7 @@ class HFBRNTMask(task.SingleTask):
         -------
         out : containers.HFBRFIMask
             Boolean mask that can be applied to an HFB data container
-            with the task `ApplyHFBInputMask` to mask contaminated
+            with the task `ApplyHFBMask` to mask contaminated
             frequencies, subfrequencies and time samples.
         """
 
@@ -2282,7 +2282,7 @@ class HFBRNTMask(task.SingleTask):
         # Number of samples per data point in the HFB data:
         # N_S = Delta nu * Delta t, where Delta nu is the frequency resolution
         # (390.625 kHz / 128) and Delta t the integration time (10 s)
-        # NOTE: SHould this be extracted from the container attributes? In that
+        # NOTE: Should this be extracted from the container attributes? In that
         # case this information needs to be added to the attributes upstream.
         N_SAMP = 390625.0 / 128.0 * 10.0
 
@@ -2308,3 +2308,69 @@ class HFBRNTMask(task.SingleTask):
 
         # Return output container
         return out
+
+
+class ApplyHFBMask(task.SingleTask):
+    """Apply a mask to an HFB stream.
+
+    Attributes
+    ----------
+    zero_data : bool, optional
+        Zero the data in addition to modifying the weights. Default is True.
+    """
+
+    zero_data = config.Property(proptype=bool, default=True)
+
+    def process(self, stream, mask):
+        """Set weights to zero for flagged data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        mask : containers.HFBRFIMask
+            Boolean mask indicating the samples that are contaminated by RFI.
+
+        Returns
+        -------
+        stream : containers.HFBData
+            Container with HFB data and weights, with weights of flagged data
+            set to zero."""
+
+        # flag = mask[:, :, np.newaxis, :]
+
+        # Create a slice that will expand the mask to
+        # the same dimensions as the weight array
+        waxis = stream.weight.attrs["axis"]
+        slc = [slice(None)] * len(waxis)
+        for ww, name in enumerate(waxis):
+            if name not in mask.mask.attrs["axis"]:
+                slc[ww] = None
+
+        # Extract mask
+        flag = mask.mask[:].astype(stream.weight.dtype)
+
+        # Convert mask from caput.mpiarray.MPIArray to regular numpy.ndarray
+        flag = np.array(flag)
+
+        # Expand mask to same dimension as weight array
+        flag = flag[tuple(slc)]
+
+        # Log how much data we're masking
+        self.log.info(
+            "%0.2f percent of data will be masked."
+            % (100.0 * np.sum(flag) / float(flag.size),)
+        )
+
+        # Apply the mask
+        if np.any(flag):
+
+            # Apply the mask to the weights
+            stream.weight[:] *= 1.0 - flag
+
+            # If requested, apply the mask to the data
+            if self.zero_data:
+                stream.hfb[:] *= 1.0 - flag
+
+        return stream
