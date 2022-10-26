@@ -2306,6 +2306,9 @@ class HFBRNTMask(task.SingleTask):
         # Save mask to output container
         out.mask[:] = mask
 
+        # Add beam selection to RFI mask attributes
+        out.attrs["beam"] = stream._data["index_map"]["beam"][:]
+
         # Return output container
         return out
 
