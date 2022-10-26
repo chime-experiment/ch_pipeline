@@ -156,7 +156,7 @@ def item_list(revision, long, human):
 def pending(revision):
     """List items that do not exist within REVISION
     (given as type:revision) but can be generated."""
-    pending = revision.pending()
+    pending = revision.status()["not_yet_submitted"]
     for tag in pending:
         click.echo(tag)
 
@@ -246,6 +246,75 @@ def status(revision, user):
     click.echo(f"fairshare: {fs[0]}")
     for key, value in tag_status.items():
         click.echo(f"{key}: {len(value)}")
+
+
+@item.command("failed")
+@click.argument("revision", type=PREV)
+@click.option(
+    "-u",
+    "--user",
+    type=str,
+    default="chime",
+    help="User to check jobs for.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+)
+def crashed(revision, user, verbose):
+    """List all crashed tags for REVISION, associated with available
+    category matches."""
+    failed = revision.failed(user)
+
+    for k, tags in failed.items():
+        if not tags:
+            continue
+
+        click.echo(f"{len(tags)} job(s) failed for reason: {k.upper()}")
+
+        if verbose:
+            for tag in tags:
+                click.echo(tag)
+
+
+# @item.command("resubmit")
+# @click.argument("revision", type=PREV)
+# @click.option(
+#     "-u",
+#     "--user",
+#     type=str,
+#     default="chime",
+#     help="""User to check jobs for. Use caution as this can cause
+#     jobs which are currently running to appear as failed.
+#     """,
+# )
+# @click.option(
+#     "--add-tags", multiple=True, default=[], help="List of specific tags to resubmit."
+# )
+# @click.option(
+#     "--ignore-tags",
+#     multiple=True,
+#     default=[],
+#     help="List of tags not to check.",
+# )
+# @click.option(
+#     "--confirm", is_flag=True, help="Automatically resubmit all possible jobs."
+# )
+# def resubmit(revision, user, add_tags, ignore_tags, confirm):
+#     """Move any jobs that can be resubmitted out of
+#     the working directory."""
+#     success, failed = revision.resubmit(add_tags, ignore_tags, user, confirm)
+
+#     if confirm:
+#         click.echo(f"Resubmitted {len(success)} tags: {success}")
+
+#         if failed:
+#             click.echo(f"Failed to resubmit {len(failed)} tags: {failed}")
+#     else:
+#         click.echo(f"{len(success)} tag(s) would be resubmitted")
+#         for tag in success:
+#             click.echo(tag)
 
 
 def dirstats(path):
