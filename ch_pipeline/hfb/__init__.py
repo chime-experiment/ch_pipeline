@@ -7,5 +7,5 @@ CHIME HFB Pipeline
     :toctree:
 
     containers
-
+    io
 """
