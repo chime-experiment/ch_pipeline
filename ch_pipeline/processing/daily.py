@@ -1,10 +1,10 @@
-import os
 import math
 import datetime
 
 import chimedb.core as db
-from ch_util import ephemeris
 import chimedb.data_index as di
+from ch_util import ephemeris
+from caput.tools import unique_ordered
 
 from . import base
 
@@ -601,6 +601,8 @@ class DailyProcessing(base.ProcessingType):
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
+        # Number of recent days to prioritize in queue
+        "num_recent_days_first": 0,
         # Frequencies to process
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
@@ -647,6 +649,7 @@ class DailyProcessing(base.ProcessingType):
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
         self._padding = self._revparams["padding"]
+        self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
 
     def _available_files(self, start_csd, end_csd):
         """
@@ -718,7 +721,7 @@ class DailyProcessing(base.ProcessingType):
         # files_that_exist might contain the same file multiple files
         # if it exists in multiple locations (nearline, online, gossec, etc)
         # we only want to include it once
-        filenames_that_exist = sorted(list(set(t for t in files_that_exist.tuples())))
+        filenames_that_exist = sorted({t for t in files_that_exist.tuples()})
 
         return filenames_online, filenames_that_exist
 
@@ -727,41 +730,38 @@ class DailyProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-
-        csds = []
-
-        # For each interval find and add all CSDs that have not already been added
-        for interval in self._intervals:
-            csd_i = csds_in_range(*interval)
-            csd_set = set(csds)
-            csds += [csd for csd in csd_i if csd not in csd_set]
-
-        # grab the list of files that are online, and that exist anywhere, from the earliest csd to the latest
+        # Lets us get only unique csds in the order we want them
+        # with a single pass.
+        csds = unique_ordered(
+            # This is a generator
+            (csd for i in self._intervals for csd in csds_in_range(*i))
+        )
         csds_sorted = sorted(csds)
+
+        # grab the list of files that are online, and that exist anywhere,
+        # from the earliest csd to the latest
         filenames_online, filenames_that_exist = self._available_files(
             csds_sorted[0], csds_sorted[-1] + 1
         )
-
         # only queue jobs for which all data is available online in chime_online
         csds_available = self._csds_available_data(
             csds_sorted, filenames_online, filenames_that_exist
         )
-        csds = [csd for csd in csds if csd in csds_available]
 
-        tags = ["%i" % csd for csd in csds]
+        tags = [f"{csd:.0f}" for csd in csds if csd in csds_available]
 
         return tags
 
-    def _csds_available_data(self, csds, filenames_online, filenames_that_exist):
+    def _csds_available_data(self, csds, filenames_online, filenames_that_exist) -> set:
         """
         Return the subset of csds in `csds` for whom all files are online.
 
         `filenames_online` and `filenames_that_exist` are a list of tuples
         (start_time, finish_time)
 
-        All 3 lists should be sorted.
+        All 3 input lists should be sorted.
         """
-        csds_available = []
+        csds_available = set()
 
         for csd in csds:
             start_time = ephemeris.csd_to_unix(csd)
@@ -777,7 +777,7 @@ class DailyProcessing(base.ProcessingType):
             )
 
             if (len(online) == len(exists)) and (len(online) != 0):
-                csds_available.append(csd)
+                csds_available.add(csd)
 
             # The final file in the span may contain more than one sidereal day
             index_online = max(index_online - 1, 0)
@@ -826,6 +826,18 @@ class DailyProcessing(base.ProcessingType):
         jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
 
         return jobparams
+
+    def _generate_hook(self):
+        to_run = self.pending()
+
+        if self._num_recent_days:
+            today = math.floor(ephemeris.chime.get_current_lsd())
+            priority = [
+                csd for csd in to_run if today - int(csd) <= self._num_recent_days
+            ]
+            to_run = priority + [csd for csd in to_run if csd not in priority]
+
+        return to_run
 
 
 class TestDailyProcessing(DailyProcessing):
