@@ -38,6 +38,7 @@ from draco.core.containers import (
     TODContainer,
     FreqContainer,
     TimeStream,
+    FormedBeam,
 )
 
 
@@ -769,6 +770,25 @@ class SunTransit(ContainerBase):
         ind = list(self.index_map["coord"]).index("az")
         return self.datasets["coord"][:, ind]
 
+
+class FormedBeamTime(FormedBeam, TODContainer):
+
+    _dataset_spec = {
+        "beam": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.complex128,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
 
 
 class RingMap(ContainerBase):
