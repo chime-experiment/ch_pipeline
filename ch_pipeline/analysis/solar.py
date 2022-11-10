@@ -866,7 +866,7 @@ class SolarBeamform(task.SingleTask):
         ----------
         sstream: andata.CorrData, containers.TimeStream, containers.SiderealStream
             Timestream collected during the day.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list describing the inputs as they are in the file.
 
         Returns
@@ -1066,7 +1066,7 @@ class SolarClean(task.SingleTask):
         ----------
         sstream: andata.CorrData, containers.TimeStream, or containers.SiderealStream
             Timestream collected during the day.
-        inputmap : list of :class:`CorrInput`s
+        inputmap : list of :class:`CorrInput`
             A list describing the inputs as they are in the file.
 
         Returns
