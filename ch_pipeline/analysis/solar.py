@@ -835,7 +835,7 @@ class SolarCleanN2(task.SingleTask):
 
 
 class SolarBeamform(task.SingleTask):
-    """Beamform visibilities to the location of the Sun.
+    """Estimate the average primary beam by beamforming on the Sun.
 
     Formerly called SunCalibration.
 
@@ -860,7 +860,7 @@ class SolarBeamform(task.SingleTask):
     sep_cyl = config.Property(proptype=bool, default=False)
 
     def process(self, sstream, inputmap):
-        """Beamform visibilities to the location of the Sun
+        """Beamform visibilities to the location of the Sun.
 
         Parameters
         ----------
