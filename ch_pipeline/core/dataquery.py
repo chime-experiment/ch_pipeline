@@ -86,6 +86,8 @@ class QueryDatabase(task.MPILoggedTask):
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
         exclude daytime data
+    exclude_nighttime : bool (default: False)
+        exclude nighttime data
     exclude_sun : bool (default: False)
         exclude data around Sun
     exclude_sun_time_delta : float (default: None)
@@ -132,6 +134,7 @@ class QueryDatabase(task.MPILoggedTask):
     end_csd = config.Property(proptype=float, default=None)
 
     exclude_daytime = config.Property(proptype=bool, default=False)
+    exclude_nighttime = config.Property(proptype=bool, default=False)
 
     exclude_sun = config.Property(proptype=bool, default=False)
     exclude_sun_time_delta = config.Property(proptype=float, default=None)
@@ -207,6 +210,9 @@ class QueryDatabase(task.MPILoggedTask):
 
             if self.exclude_daytime:
                 f.exclude_daytime()
+
+            if self.exclude_nighttime:
+                f.exclude_nighttime()
 
             if self.exclude_sun:
                 f.exclude_sun(

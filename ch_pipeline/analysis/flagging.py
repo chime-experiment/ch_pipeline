@@ -4,7 +4,7 @@ Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
-
+from typing import Union
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
@@ -13,9 +13,10 @@ from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
 from draco.analysis import flagging as dflagging
-from draco.core import task, io, containers
+from draco.core import task, io
+from draco.core import containers as dcontainers
 
-from ..core import containers as ccontainers
+from ..core import containers
 
 
 class RFIFilter(task.SingleTask):
@@ -50,6 +51,9 @@ class RFIFilter(task.SingleTask):
         Time interval in *seconds* to compare across.
     threshold_mad : float
         Threshold above which we mask the data.
+    use_draco_container : bool
+        If True, output container is a nondistributed draco RFIMask.
+        Otherwise, return a distributed RFIMask from ch_pipeline
     """
 
     stack = config.Property(proptype=bool, default=False)
@@ -62,8 +66,9 @@ class RFIFilter(task.SingleTask):
     freq_width = config.Property(proptype=float, default=10.0)
     time_width = config.Property(proptype=float, default=420.0)
     threshold_mad = config.Property(proptype=float, default=6.0)
+    use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data):
+    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
         """Creates a mask by identifying outliers in the
         autocorrelation data.  This mask can be used to zero out
         frequencies and time samples that are contaminated by RFI.
@@ -76,7 +81,7 @@ class RFIFilter(task.SingleTask):
 
         Returns
         -------
-        out : ccontainers.RFIMask
+        out : containers.RFIMask or dcontainers.RFIMask
             Boolean mask that can be applied to a timestream container
             with the task `ApplyCorrInputMask` to mask contaminated
             frequencies and time samples.
@@ -109,26 +114,26 @@ class RFIFilter(task.SingleTask):
         # increase in measured power relative to the local median.
         mask = ndev > self.threshold_mad
 
-        # Change flag convention
-        mask = np.logical_not(mask)
-
         # Create container to hold output
-        out = ccontainers.RFIMask(input=minput, axes_from=data, attrs_from=data)
-        if self.keep_ndev:
-            out.add_dataset("ndev")
-        if self.keep_auto:
-            out.add_dataset("auto")
+        if self.use_draco_container:
+            # draco RFIMask container is not distributed
+            out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()[:, 0, :]
+        else:
+            out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
+            out.redistribute("freq")
+            # Change flag convention
+            mask = np.logical_not(mask)
 
-        out.redistribute("freq")
+            if self.keep_ndev:
+                out.add_dataset("ndev")
+                out.ndev[:] = ndev
+            if self.keep_auto:
+                out.add_dataset("auto")
+                out.auto[:] = auto
 
         # Save mask to output container
         out.mask[:] = mask
-
-        if self.keep_ndev:
-            out.ndev[:] = ndev
-
-        if self.keep_auto:
-            out.auto[:] = auto
 
         # Return output container
         return out
@@ -414,19 +419,19 @@ class MonitorCorrInput(task.SingleTask):
 
         Returns
         -------
-        input_monitor : ccontainers.CorrInputMonitor
+        input_monitor : containers.CorrInputMonitor
             Saved for each sidereal day.  Contains the
             correlator input mask and frequency mask.
             Note that this is not output to the pipeline.  It is an
             ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        csd_flag : ccontainer.SiderealDayFlag
+        csd_flag : containers.SiderealDayFlag
             Contains a mask that indicates bad sidereal days, determined as
             days that contribute a large number of unique bad correlator
             inputs.  Note that this is not output to the pipeline.
             It is ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        input_monitor_all : ccontainers.CorrInputMask
+        input_monitor_all : containers.CorrInputMask
             Contains the correlator input mask obtained from taking AND
             of the masks from the (good) sidereal days.
         """
@@ -472,7 +477,7 @@ class MonitorCorrInput(task.SingleTask):
             if self.save:
 
                 # Create a container to hold the results
-                input_mon = ccontainers.CorrInputMonitor(
+                input_mon = containers.CorrInputMonitor(
                     freq=self.freq, input=self.input_map, distributed=False
                 )
 
@@ -539,7 +544,7 @@ class MonitorCorrInput(task.SingleTask):
         if self.save:
 
             # Create container
-            csd_flag = ccontainers.SiderealDayFlag(
+            csd_flag = containers.SiderealDayFlag(
                 csd=np.array([tmap[0] for tmap in self.timemap])
             )
 
@@ -555,7 +560,7 @@ class MonitorCorrInput(task.SingleTask):
         input_mask = np.all(input_mask_all[good_day_flag_all, :], axis=0)
 
         # Create a container to hold the results for the entire pass
-        input_mon = ccontainers.CorrInputMask(input=self.input_map)
+        input_mon = containers.CorrInputMask(input=self.input_map)
 
         # Place the results for the entire pass in a container
         input_mon.input_mask[:] = input_mask
@@ -731,7 +736,7 @@ class TestCorrInput(task.SingleTask):
         input_mask = np.prod(input_mask_all[:, self.use_test], axis=-1)
 
         # Create container to hold results
-        corr_input_test = ccontainers.CorrInputTest(
+        corr_input_test = containers.CorrInputTest(
             freq=freqmap, test=self.test, axes_from=timestream, attrs_from=timestream
         )
 
@@ -826,7 +831,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         if self.save:
 
             # Create container
-            csd_flag = ccontainers.SiderealDayFlag(csd=np.array(self._csd))
+            csd_flag = containers.SiderealDayFlag(csd=np.array(self._csd))
 
             # Save flags to container
             csd_flag.csd_flag[:] = good_day_flag
@@ -840,7 +845,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         input_mask = np.all(input_mask_all[good_day_flag, :], axis=0)
 
         # Create container to hold results
-        corr_input_mask = ccontainers.CorrInputMask(input=self.input)
+        corr_input_mask = containers.CorrInputMask(input=self.input)
 
         corr_input_mask.attrs["tag"] = "for_pass"
 
@@ -858,13 +863,13 @@ class ApplyCorrInputMask(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
-        cmask : ccontainers.RFIMask, ccontainers.CorrInputMask, etc.
+        cmask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
         """
 
         # Make sure containers are distributed across frequency
@@ -949,11 +954,11 @@ class ApplySiderealDayFlag(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData / containers.SiderealStream
+        timestream : andata.CorrData / dcontainers.SiderealStream
 
         Returns
         -------
-        timestream : andata.CorrData / containers.SiderealStream or None
+        timestream : andata.CorrData / dcontainers.SiderealStream or None
         """
 
         # Fetch the csd from the timestream attributes
@@ -1014,11 +1019,11 @@ class NanToNum(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
         Returns
         --------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
         """
 
         # Make sure we are distributed over frequency
@@ -1115,7 +1120,7 @@ class RadiometerWeight(task.SingleTask):
             # Copy attributes
             memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
-        elif isinstance(timestream, containers.SiderealStream):
+        elif isinstance(timestream, dcontainers.SiderealStream):
 
             self.log.debug(
                 "Scaling weights by outer product of inverse receiver temperature."
@@ -1161,7 +1166,7 @@ class BadNodeFlagger(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
         Returns
         -------
@@ -1371,12 +1376,12 @@ class MaskDay(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream or equivalent
+        sstream : dcontainers.SiderealStream or equivalent
             Unmasked sidereal stack.
 
         Returns
         -------
-        mstream : containers.SiderealStream or equivalent
+        mstream : dcontainers.SiderealStream or equivalent
             Masked sidereal stream.
         """
         # Redistribute over frequency
@@ -1530,12 +1535,12 @@ class MaskRA(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
+        sstream : dcontainers.SiderealStream
             Unmasked sidereal stack.
 
         Returns
         -------
-        mstream : containers.SiderealStream
+        mstream : dcontainers.SiderealStream
             Masked sidereal stream.
         """
 
@@ -1618,11 +1623,11 @@ class MaskCHIMEData(task.SingleTask):
 
         Parameters
         ----------
-        mmodes : containers.MModes
+        mmodes : dcontainers.MModes
 
         Returns
         -------
-        mmodes : containers.MModes
+        mmodes : dcontainers.MModes
         """
 
         tel = self.telescope
@@ -1697,6 +1702,373 @@ class MaskCHIMEMisc(task.SingleTask):
         return ss
 
 
+class MaskDecorrelatedCylinder(task.SingleTask):
+    """Identify and mask frequencies and times where a cylinder decorrelated.
+
+    If the error rate is high on a backplane link in the second stage shuffle
+    of the F-engine corner turn, then on rare occassions (few times per year)
+    the data streams being handled by that FPGA can become misaligned or
+    desynchronized with the rest of the data streams.  The 512 correlator inputs
+    on the cylinder corresponding to that pair of FPGA crates will have negligible
+    correlation with all other inputs for the 64 frequencies received by that
+    FPGA during the second stage shuffle.  This will persist until the data streams
+    are re-synchronized with a correlator restart.
+
+    This task identifies times and frequencies affected by these misalignment events
+    by examining, for each cylinder, the ratio of 1-cylinder-separation, co-polar
+    visibilities acquired by redundant baselines that do not contain the cylinder
+    to those that do contain the cylinder.  This ratio will be close to 1 under
+    normal operations since the baselines are largely redundant, however it will
+    become very large after a cylinder becomes misaligned since there is no
+    correlation and the denominator drops to near zero.
+
+    Additionally, if provided the mapping between frequency channel and FPGA,
+    this task will ensure that when there is evidence of a decorrelated cylinder,
+    all 64 frequencies handled by the problematic FPGA are masked.
+
+    Parameters
+    ----------
+    threshold: int
+        Mask frequencies and times where the median ratio of the
+        average-without-cylinder to average-with-cylinder visibility
+        amplitude is greater than this threshold.
+    max_frac_freq: float
+        Mask any frequency that was transmitted by an FPGA motherboard slot
+        with more than this fraction of frequencies masked by the above
+        threshold.  Only relevant if the frequency map is provided at setup.
+    """
+
+    threshold = config.Property(proptype=float, default=5.0)
+    max_frac_freq = config.Property(proptype=float, default=0.1)
+
+    def setup(self, freq_map=None):
+        """Determine the frequencies handled by each FPGA motherboard slot.
+
+        If a motherboard decorrelates, then all frequencies transmitted by
+        that slot will be affected.
+
+        Parameters
+        ----------
+        freq_map : FrequencyMap
+            The mapping between frequency bin and [crate, slot, link]
+            as a function of time.
+        """
+
+        self._set_slot_freqs(freq_map)
+
+    def process(self, data, inputmap):
+        """Create the mask.
+
+        Parameters
+        ----------
+        data : TimeStream
+            Visibilites before averaging over cylinders.
+        inputmap : list of :class:`CorrInput`
+            A list describing the inputs in data.
+
+        Returns
+        -------
+        out : RFIMask
+            Mask with True indicating that a cylinder decorrelated
+            at that frequency and time.
+        """
+
+        from draco.analysis.ringmapmaker import find_grid_indices
+
+        # Distribute over frequencies
+        data.redistribute("freq")
+
+        # Get polarisations of feeds
+        pol = tools.get_feed_polarisations(inputmap)
+
+        # Get positions of feeds
+        pos = tools.get_feed_positions(inputmap)
+
+        # Get cylinder each feed is on
+        cyl = np.array([inp.cyl if tools.is_chime(inp) else -1 for inp in inputmap])
+        ucyl = np.unique(cyl[cyl >= 0])
+        ncyl = ucyl.size
+
+        # Make sure that none of our typical products reference non-array feeds
+        stack_new, stack_flag = tools.redefine_stack_index_map(
+            inputmap, data.prod, data.stack, data.reverse_map["stack"]
+        )
+
+        valid_stack = np.flatnonzero(stack_flag)
+        ninvalid = stack_new.size - valid_stack.size
+
+        if ninvalid > 0:
+            stack_new = stack_new[valid_stack]
+            self.log.info(
+                "Could not find appropriate reference inputs for "
+                f"{ninvalid:0.0f} stacked products.  Ignoring these "
+                "products in decorrelated cylinder calculation."
+            )
+
+        t = data.prod[stack_new["prod"]]
+
+        prodstack = t.copy()
+        conj = stack_new["conjugate"]
+        prodstack["input_a"] = np.where(conj, t["input_b"], t["input_a"])
+        prodstack["input_b"] = np.where(conj, t["input_a"], t["input_b"])
+
+        # Calculate baseline distance and polarisation pair
+        index_a = prodstack["input_a"]
+        index_b = prodstack["input_b"]
+
+        bdist = pos[index_a] - pos[index_b]
+        bpol = np.core.defchararray.add(pol[index_a], pol[index_b])
+
+        # Find the grid indices
+        xind, yind, dx, dy = find_grid_indices(bdist)
+
+        # Only use the co-polar, 1-cylinder separation visibilities for this analysis
+        ico = np.flatnonzero((pol[index_a] == pol[index_b]) & (np.abs(xind) == 1))
+
+        # Create an identifier based on the polarisation pair and north-south baseline
+        pol_map = {pstr: pp for pp, pstr in enumerate(np.unique(bpol[ico]))}
+
+        idd = np.zeros((ico.size, 2), dtype=int)
+        idd[:, 0] = [pol_map[bpol[ii]] for ii in ico]
+        idd[:, 1] = yind[ico]
+
+        # Find the unique pol/baselines and the inverse map
+        uidd, index = np.unique(idd, return_inverse=True, axis=0)
+
+        isort = np.argsort(index)
+
+        # Determine boundaries of unique pol/baselines
+        bnd = np.concatenate(
+            ([0], np.flatnonzero(np.diff(index[isort]) > 0) + 1, [index.size])
+        )
+
+        # Ignore any unique pol/baseline that does not have ncyl - 1 redundant copies.
+        # This can happen due to the valid_stack selection.
+        ncopies = bnd[1:] - bnd[:-1]
+        bflag = ncopies == (ncyl - 1)
+        nmeas = np.sum(bflag)
+
+        # Loop over the unique pol/baselines and for each one determine if each of the
+        # cylinders is present in each of the redundant copies
+        pindex = np.zeros((nmeas, ncyl - 1), dtype=int)
+        flag_with = np.zeros((ncyl, nmeas, ncyl - 1), dtype=bool)
+
+        cc = 0
+        for bb in range(nmeas):
+
+            if not bflag[bb]:
+                continue
+
+            pi = ico[isort[bnd[bb] : bnd[bb + 1]]]
+            pindex[cc] = valid_stack[pi]
+
+            flag_with[:, cc, :] = (
+                ucyl[:, np.newaxis] == cyl[index_a[pi]][np.newaxis, :]
+            ) | (ucyl[:, np.newaxis] == cyl[index_b[pi]][np.newaxis, :])
+
+            cc += 1
+
+        flag_without = ~flag_with
+
+        # Extract the required data products
+        vis = data.vis[:].local_array[:, pindex, :]
+        flag = (data.weight[:].local_array[:] > 0.0)[:, pindex, :]
+
+        # Define slices that will expand both the coefficients and data
+        # to the correct shape for broadcasting against each other
+        cslc = (slice(None), slice(None), slice(None), None)
+        dslc = (None, slice(None), slice(None), slice(None))
+
+        # Create an array to fill with the final mask
+        mask = np.zeros((vis.shape[0], vis.shape[-1]), dtype=bool)
+
+        # Loop over frequencies
+        for ff in range(vis.shape[0]):
+
+            # For each cylinder, average the magnitude of the visibilities for:
+            #   all redundant baselines that contain that cylinder
+            #   all redundant baselines that do not contain that cylinder
+            fwith = flag_with[cslc] * flag[ff][dslc]
+            fwithout = flag_without[cslc] * flag[ff][dslc]
+
+            norm_with = np.sum(fwith, axis=2).astype(np.float32)
+            norm_without = np.sum(fwithout, axis=2).astype(np.float32)
+
+            avg_with = np.sum(
+                fwith * np.abs(vis[ff][dslc]), axis=2
+            ) * tools.invert_no_zero(norm_with)
+            avg_without = np.sum(
+                fwithout * np.abs(vis[ff][dslc]), axis=2
+            ) * tools.invert_no_zero(norm_without)
+
+            # Take the ratio of without the cylinder to with the cylinder
+            ratio = avg_without * tools.invert_no_zero(avg_with)
+
+            valid = (norm_with > 0.0) & (norm_without > 0.0)
+
+            # If all entries along axis=1 are invalid then the following
+            # nanmedian will throw a warning if we just fill the invalid
+            # positions with NaN's. Instead fill samples where all axis=1 is
+            # invalid with zeros which will still fail the following comparison
+            # to generate the mask
+            fill = np.where(valid.any(axis=1), np.nan, 0)[:, np.newaxis, ...]
+            # Take the median of the ratio over all unique baselines
+            med = np.nanmedian(np.where(valid, ratio, fill), axis=1)
+
+            # Mask any time where the median was greater than some threshold
+            mask[ff] = np.any(med > self.threshold, axis=0)
+
+        # Gather the mask for all frequencies on all nodes
+        mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()
+
+        # If more than some (user specified) fraction of frequencies transmitted
+        # by an FPGA motherboard slot have been masked, then mask all frequencies
+        # transmitted by that motherboard slot.  The cylinder decorrelation is
+        # expected to affect all of these frequencies.  This step is only possible
+        # if the frequency map as a function of time has been provided on setup.
+        if self.freq_map is not None and len(data.freq) == 1024:
+
+            grouper, slot_index = self._get_slot_freqs(data.time[0])
+
+            frac_freq_masked = np.sum(mask[grouper, :], axis=1) / grouper.shape[1]
+
+            mask = mask | (frac_freq_masked > self.max_frac_freq)[slot_index, :]
+
+        # Print the fraction of data that has been masked by this task
+        self.log.info(
+            "%0.2f percent of data was masked due to a decorrelated cylinder."
+            % (100.0 * np.sum(mask) / np.prod(mask.shape),)
+        )
+
+        # Create output container and store final mask
+        out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+
+        out.mask[:] = mask
+
+        return out
+
+    def _set_slot_freqs(self, freq_map):
+        """Determine the slot to frequency map as a function of time.
+
+        Parameters
+        ----------
+        freq_map : FrequencyMap
+            The mapping between frequency bin and [crate, slot, link]
+            as a function of time.
+        """
+
+        if freq_map is not None:
+
+            islot = list(freq_map.level).index("slot")
+            slot = freq_map.stream[:, :, islot]
+
+            nslot = np.max(slot) + 1
+            ntime, nfreq = slot.shape
+            nfreq_per_slot = nfreq // nslot
+
+            grouper = np.zeros((ntime, nslot, nfreq_per_slot), dtype=int)
+            for tt in range(ntime):
+                grouper[tt] = np.argsort(slot[tt], kind="mergesort").reshape(
+                    nslot, nfreq_per_slot
+                )
+
+            self.freq_map = freq_map
+            self.grouper = grouper
+            self.slot_index = slot
+
+        else:
+
+            self.freq_map = None
+
+    def _get_slot_freqs(self, timestamp):
+        """Look up the slot to frequency map that was used at a given time.
+
+        Parameters
+        ----------
+        timestamp : float64
+            Unix timestamp.
+
+        Returns
+        -------
+        grouper : np.ndarray[nslot, nfreq_per_slot]
+            Index into the frequency axis that will group
+            frequency channels based on the FPGA motherboard slot
+            that transmitted them.
+        slot_index : np.ndarray[nfreq,]
+            Index into the slot axis that will yield the
+            FPGA motherboard slot that transmitted each
+            frequency channel.
+        """
+
+        tindex = np.digitize(timestamp, self.freq_map.time) - 1
+
+        if tindex < 0:
+            tbefore = (self.freq_map.time.min() - timestamp) / (24 * 3600)
+            raise RuntimeError(
+                "Requested timestamp is before the earliest time "
+                f"in the frequency map file by {tbefore:0.1f} days."
+            )
+
+        if timestamp > self.freq_map.attrs["end_time"]:
+            tafter = (timestamp - self.freq_map.attrs["end_time"]) / (24 * 3600)
+            self.log.warning(
+                "Requested timestamp is after the end time covered "
+                f"by the frequency map file by {tafter:0.1f} days.  "
+                "Please ensure that the frequency map has not been "
+                "updated since then."
+            )
+
+        return self.grouper[tindex], self.slot_index[tindex]
+
+
+class ExpandMask(task.SingleTask):
+    """Expand a mask along the time/RA axis.
+
+    Used to mask the transitional regions between good and bad data.
+
+    Parameters
+    ----------
+    nexpand : int
+        If a time/RA is within nexpand samples from a masked time/RA,
+        then it will be masked in the output.
+    in_place : bool
+        If True, then overwrite the raw mask with the expanded mask.
+        If False, then create a new container with the expanded mask.
+    """
+
+    nexpand = config.Property(proptype=int, default=1)
+    in_place = config.Property(proptype=bool, default=False)
+
+    def process(self, raw_mask):
+        """Mask any times/RAs that neighbor a masked time/RA.
+
+        Parameters
+        ----------
+        raw_mask : RFIMask or SiderealRFIMask
+
+        Returns
+        -------
+        exp_mask : RFIMask or SiderealRFIMask
+        """
+
+        nfreq, ntime = raw_mask.mask[:].shape
+
+        mraw = np.zeros((nfreq, ntime + 2 * self.nexpand), dtype=bool)
+        mraw[:, self.nexpand : -self.nexpand] = raw_mask.mask[:]
+
+        window = 2 * self.nexpand + 1
+        mexp = np.any(rfi._rolling_window_lastaxis(mraw, window), axis=-1)
+
+        if self.in_place:
+            exp_mask = raw_mask
+        else:
+            exp_mask = dcontainers.empty_like(raw_mask)
+
+        exp_mask.mask[:] = mexp
+
+        return exp_mask
+
+
 class DataFlagger(task.SingleTask):
     """Flag data based on DataFlags in database.
 
@@ -1757,12 +2129,12 @@ class DataFlagger(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+        timestream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
             Timestream to flag.
 
         Returns
         -------
-        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+        timestream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
             Returns the same timestream object with a modified weight dataset.
         """
         # Redistribute over the frequency direction
@@ -1946,21 +2318,21 @@ class ApplyInputFlag(task.SingleTask):
             timestamp = data.time
             time_axis = "time"
 
-        elif issubclass(type(data), containers.SiderealStream):
+        elif issubclass(type(data), dcontainers.SiderealStream):
 
             ra = data.ra
             lsd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             timestamp = self.observer.lsd_to_unix(lsd + data.ra / 360.0)
             time_axis = "ra"
 
-        elif issubclass(type(data), containers.TrackBeam):
+        elif issubclass(type(data), dcontainers.TrackBeam):
 
             ra = data.pix["phi"][:] + data.attrs["cirs_ra"]
             lsdf = self.observer.unix_to_lsd(data.attrs["transit_time"]) + ra / 360.0
             timestamp = self.observer.lsd_to_unix(lsdf)
             time_axis = "pix"
 
-        elif issubclass(type(data), containers.StaticGainData):
+        elif issubclass(type(data), dcontainers.StaticGainData):
 
             timestamp = data.attrs["time"]
             time_axis = None

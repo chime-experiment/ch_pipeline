@@ -6,6 +6,9 @@ setup(
     packages=find_packages(),
     package_data={"ch_pipeline": ["data/*"]},
     install_requires=["Click"],
+    extras_require={
+        "hfb": ["beam-model @ git+ssh://git@github.com/CHIMEFRB/beam-model.git"],
+    },
     python_requires=">=3.6",
     entry_points="""
         [console_scripts]

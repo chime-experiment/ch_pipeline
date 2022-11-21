@@ -42,6 +42,11 @@ from draco.core import task, io
 
 from . import containers
 
+try:
+    from ..hfb.io import HFBReader
+except ImportError:
+    HFBReader = None
+
 
 class LoadCorrDataFiles(task.SingleTask):
     """Load CHIME correlator data from a file list passed into the setup routine.
@@ -199,7 +204,7 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadDataFiles(task.SingleTask):
+class LoadDataFiles(io.BaseLoadFiles):
     """Load general CHIME data from files passed into the setup routine.
 
     This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
@@ -219,6 +224,7 @@ class LoadDataFiles(task.SingleTask):
         "gain": andata.CalibrationGainReader,
         "digitalgain": andata.DigitalGainReader,
         "flaginput": andata.FlagInputReader,
+        "hfb": HFBReader,
     }
 
     def setup(self, files):
@@ -228,6 +234,9 @@ class LoadDataFiles(task.SingleTask):
         ----------
         files : list
         """
+        # Call the baseclass setup to resolve any selections
+        super().setup()
+
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
 
@@ -261,8 +270,26 @@ class LoadDataFiles(task.SingleTask):
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
+        # Handle file lists including time ranges
+        if isinstance(file_, tuple):
+            time_range = file_[1]
+            file_ = file_[0]
+        else:
+            time_range = (None, None)
+
         # Set up a Reader class
         rd = self._acqtype_reader[self.acqtype](file_)
+
+        # Select time range
+        rd.select_time_range(time_range[0], time_range[1])
+
+        # Select frequency range
+        if self._sel and "freq_sel" in self._sel:
+            rd.freq_sel = self._sel["freq_sel"]
+
+        # Select beams
+        if self._sel and "beam_sel" in self._sel:
+            rd.beam_sel = self._sel["beam_sel"]
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
         data = rd.read()

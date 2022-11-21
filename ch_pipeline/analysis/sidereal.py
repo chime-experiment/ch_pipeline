@@ -20,10 +20,8 @@ from mpi4py import MPI
 from caput import pipeline, config, tod
 from caput.weighted_median import weighted_median
 from ch_util import andata, ephemeris, tools
-from draco.core import task
+from draco.core import task, containers
 from draco.analysis import sidereal
-
-from ..core import containers
 
 
 class LoadTimeStreamSidereal(task.SingleTask):
@@ -407,11 +405,11 @@ class SiderealMean(task.SingleTask):
         mustream.attrs["statistic"] = self._name_of_statistic
 
         # Dereference visibilities
-        all_vis = sstream.vis[:].view(np.ndarray)
-        mu_vis = mustream.vis[:].view(np.ndarray)
+        all_vis = sstream.vis[:].local_array
+        mu_vis = mustream.vis[:].local_array
 
         # Combine the visibility weights with the quiet flag
-        all_weight = sstream.weight[:].view(np.ndarray) * flag_quiet.astype(np.float32)
+        all_weight = sstream.weight[:].local_array * flag_quiet.astype(np.float32)
         if not self.inverse_variance:
             all_weight = (all_weight > 0.0).astype(np.float32)
 
@@ -498,14 +496,14 @@ class ChangeSiderealMean(task.SingleTask):
 
         # Add or subtract value to the cross-correlations
         if self.add:
-            sstream.vis[:] += mustream.vis[:].view(np.ndarray) * not_auto
+            sstream.vis[:].local_array[:] += mustream.vis[:].local_array * not_auto
         else:
-            sstream.vis[:] -= mustream.vis[:].view(np.ndarray) * not_auto
+            sstream.vis[:].local_array[:] -= mustream.vis[:].local_array * not_auto
 
         # Set weights to zero if there was no mean
-        sstream.weight[:] *= (mustream.weight[:].view(np.ndarray) > 0.0).astype(
-            sstream.weight.dtype
-        )
+        sstream.weight[:].local_array[:] *= (
+            mustream.weight[:].local_array > 0.0
+        ).astype(sstream.weight.dtype)
 
         # Return sidereal stream with modified offset
         return sstream
