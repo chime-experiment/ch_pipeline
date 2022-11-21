@@ -1,25 +1,7 @@
-"""
-Tasks for analysis of the radio sun
+"""Tasks for analysis of the radio sun
 
-Tasks for analysis of the radio sun.  Includes grouping individual files
-into a solar day; solar calibration; solar beamforming; and solar excision.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    SolarGrouper
-    SolarCalibrationN2
-    SolarCleanN2
-    SolarBeamform
-    SolarClean
-
-Usage
-=====
-
-
+Includes grouping individual files into a solar day;
+solar calibration; solar beamforming; and solar excision.
 """
 
 import datetime
