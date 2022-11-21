@@ -633,7 +633,7 @@ class TestCorrInput(task.SingleTask):
 
         Returns
         -------
-        corr_input_test : ccontainer.CorrInputTest
+        corr_input_test : containers.CorrInputTest
             Container with the results of all tests and a
             input mask that combines all tests and frequencies.
         """
@@ -781,7 +781,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Parameters
         ----------
-        corr_input_mask : ccontainer.CorrInputMask
+        corr_input_mask : containers.CorrInputMask
         """
 
         if not self._accumulated_input_mask:
@@ -799,7 +799,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Returns
         --------
-        corr_input_mask : ccontainer.CorrInputMask
+        corr_input_mask : containers.CorrInputMask
         """
         ncsd = len(self._csd)
 
