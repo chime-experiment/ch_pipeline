@@ -229,29 +229,25 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     revision.generate(max=number_to_submit, submit=submit)
 
 
-@item.command("metrics")
+@item.command("status")
 @click.argument("revision", type=PREV)
-def metrics_list(revision):
+@click.option(
+    "-u",
+    "--user",
+    type=str,
+    default="chime",
+    help="User to check jobs for.",
+)
+def status(revision, user):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
-    complete = revision.ls()
-    available = revision.available()
-    waiting, running = revision.queued()
-    failed = revision.crashed()
-    # Direct copy from revision.pending method, put here
-    # to avoid duplicate calls
-    not_pending = set(complete) | set(waiting) | set(running)
-    pending = [job for job in available if job not in not_pending]
+    tag_status = revision.status(user)
 
-    click.echo(f"Fairshare: {fs[0]}")
-    click.echo(f"Available: {len(available)}")
-    click.echo(f"Pending: {len(pending)}")
-    click.echo(f"Waiting: {len(waiting)}")
-    click.echo(f"Running: {len(running)}")
-    click.echo(f"Successful: {len(complete)}")
-    click.echo(f"Failed: {len(failed)}")
+    click.echo(f"fairshare: {fs[0]}")
+    for key, value in tag_status.items():
+        click.echo(f"{key}: {len(value)}")
 
 
 def dirstats(path):

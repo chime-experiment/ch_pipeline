@@ -56,6 +56,10 @@ pipeline:
         level_rank0: DEBUG
         level_all: WARNING
 
+    - type: draco.core.misc.CheckMPIEnvironment
+      params:
+        timeout: 420
+
     # Query for all the data for the sidereal day we are processing
     - type: ch_pipeline.core.dataquery.QueryDatabase
       out: filelist
@@ -64,7 +68,7 @@ pipeline:
         end_csd: {csd[1]:.2f}
         accept_all_global_flags: true
         node_spoof:
-          cedar_online: "/project/rpp-krs/chime/chime_online/"
+          cedar_online: "/project/rpp-chime/chime/chime_online/"
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -78,6 +82,13 @@ pipeline:
       out: tcorr
       params:
         files: "{timing_file}"
+        distributed: false
+
+    # Load the frequency map
+    - type: ch_pipeline.core.io.LoadSetupFile
+      out: freqmap
+      params:
+        filename: "{freqmap_file}"
         distributed: false
 
     - type: draco.core.misc.AccumulateList
@@ -134,6 +145,32 @@ pipeline:
       params:
         exclude_intracyl: true
 
+    # Identify individual baselines with much lower weights than expected
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
+      in: tstream
+      out: full_bad_baseline_mask
+      params:
+        average_type: "median"
+        absolute_threshold: 1e-7
+        relative_threshold: 1e-5
+        pols_to_flag: "copol"
+
+    # Collapse bad-baseline mask over baseline, so that any time-freq sample
+    # with a low weight at any baseline is masked
+    - type: draco.analysis.flagging.CollapseBaselineMask
+      in: full_bad_baseline_mask
+      out: bad_baseline_mask
+
+    # Identify decorrelated cylinders
+    - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
+      requires: freqmap
+      in: [tstream, inputmap]
+      out: decorr_cyl_mask
+      params:
+        threshold: 5.0
+        max_frac_freq: 0.1
+
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
@@ -158,9 +195,46 @@ pipeline:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
 
+    # Concatenate together all the masks for bad baselines
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: bad_baseline_mask
+      out: bad_baseline_mask_day
+      params:
+        save: true
+        output_name: "bad_baseline_mask_{{tag}}.h5"
+
+    # Concatenate together all the decorrelated cylinder masks
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: decorr_cyl_mask
+      out: decorr_cyl_mask_day
+
+    # Expand the decorrelated cylinder mask along the time axis
+    - type: ch_pipeline.analysis.flagging.ExpandMask
+      in: decorr_cyl_mask_day
+      out: decorr_cyl_mask_day_exp
+      params:
+        nexpand: 6
+        in_place: true
+        save: true
+        output_name: "decorrelated_cylinder_mask_expanded_{{tag}}.h5"
+
+    # Apply the mask from the bad baselines. This will modify the data in
+    # place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream_day, bad_baseline_mask_day]
+      out: tstream_bbm
+
+    # Apply the mask from the decorrelated cylinders. This will modify the data
+    # in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [tstream_bbm, decorr_cyl_mask_day_exp]
+      out: tstream_dcm
+
     # Calculate the RFI mask from the autocorrelation data
     - type: ch_pipeline.analysis.flagging.RFIFilter
-      in: tstream_day
+      in: tstream_dcm
       out: rfimask
       params:
         stack: true
@@ -179,7 +253,7 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [tstream_day, rfimask]
+      in: [tstream_dcm, rfimask]
       out: tstream_day_rfi
 
     # Calculate the thermal gain correction
@@ -193,6 +267,8 @@ pipeline:
     - type: draco.core.misc.ApplyGain
       in: [tstream_day_rfi, thermal_gain]
       out: tstream_thermal_corrected
+      params:
+        inverse: false
 
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
@@ -206,34 +282,44 @@ pipeline:
       out: sstream
       params:
         samples: 4096
+
+    # Precision truncate the sidereal stream data and write it out
+    - type: draco.core.io.Truncate
+      in: sstream
+      params:
+        dataset:
+          vis:
+            weight_dataset: vis_weight
+            variance_increase: 1.0e-3
+          vis_weight: 1.0e-5
+        compression:
+          vis:
+            chunks: [32, 512, 512]
+          vis_weight:
+            chunks: [32, 512, 512]
         save: true
         output_name: "sstream_{{tag}}.zarr"
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeight
+    - type: draco.analysis.flagging.ThresholdVisWeightBaselineAlt
       in: sstream
-      out: weight_mask
+      out: sstream_tvwb
       params:
-        relative_threshold: 0.7
+        relative_threshold: 0.5
 
-    # Apply the mask to remove regions with too low sensitivity
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream, weight_mask]
-      out: sstream_weight_mask
-
-    # Generate the second RFI mask using targetted knowledge of the instrument
+    # Generate the second RFI mask using targeted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
-      in: sstream_weight_mask
+      in: sstream_tvwb
       out: rfimask2
       params:
         stack_ind: 66
-        save: true
         output_name: "rfi_mask2_{{tag}}.h5"
+        save: true
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_weight_mask, rfimask2]
+      in: [sstream_tvwb, rfimask2]
       out: sstream_mask
 
     # Make a map of the full dataset
@@ -246,6 +332,23 @@ pipeline:
         weight: natural
         exclude_intracyl: false
         include_auto: false
+
+    # Precision truncate and write out the chunked normal ringmap
+    - type: draco.core.io.Truncate
+      in: ringmap
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-3
+          weight: 1.0e-5
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_{{tag}}.zarr"
 
@@ -254,12 +357,31 @@ pipeline:
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
       in: sstream_mask
-      out: ringmapint
+      out: ringmap_int
       params:
         single_beam: true
         weight: natural
         exclude_intracyl: true
         include_auto: false
+
+    # Precision truncate and write out the chunked intercylinder ringmap
+    # NOTE: this cannot be combined with the above Truncate task as it would
+    # result in both ringmaps existing in memory at the same time.
+    - type: draco.core.io.Truncate
+      in: ringmap_int
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-3
+          weight: 1.0e-5
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_{{tag}}.zarr"
 
@@ -333,17 +455,40 @@ pipeline:
       params:
         frac: 1e-4
 
-    # Mask the daytime data again. This ensures that we only see the point sources in
+    # Mask the daytime data again. This ensures that we only see the time range in
     # the delay spectrum we would expect
     - type: ch_pipeline.analysis.flagging.MaskDay
       in: sstream_blend1
       out: sstream_blend2
 
+    # Mask out the bright sources so we can see the high delay structure more easily
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: sstream_blend2
+      out: sstream_blend3
+      params:
+        source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
+
+    # Try and derive an optimal time-freq factorizable mask that covers the
+    # existing masked entries
+    # Also, mask out an additional frequency band which isn't that visible in
+    # the data but generates a lot of high delay power
+    - type: draco.analysis.flagging.MaskFreq
+      in: sstream_blend3
+      out: factmask
+      params:
+        factorize: true
+        bad_freq_ind: [[738, 753]]
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_blend3, factmask]
+      out: sstream_blend4
+
     # Estimate the delay power spectrum of the data. This is a good diagnostic
     # of instrument performance
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstream_blend2
+      in: sstream_blend4
       params:
         freq_zero: 800.0
         nfreq: {nfreq_delay}
@@ -351,6 +496,40 @@ pipeline:
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
+
+    # Apply delay filter to stream
+    - type: draco.analysis.delay.DelayFilter
+      requires: manager
+      in: sstream_blend4
+      out: sstream_dfilter
+      params:
+        delay_cut: 0.1
+        za_cut: 1.0
+        window: true
+
+    # Estimate the delay power spectrum of the data after applying
+    # the delay filter
+    - type: draco.analysis.delay.DelaySpectrumEstimator
+      requires: manager
+      in: sstream_dfilter
+      params:
+        freq_zero: 800.0
+        nfreq: {nfreq_delay}
+        nsamp: 40
+        complex_timedomain: true
+        save: true
+        output_name: "delayspectrum_hpf_{{tag}}.h5"
+
+    # Zip up the zarr outputs. This doesn't actually need the sstream input
+    # it's just to guarantee this task doesn't start too early
+    - type: draco.core.io.ZipZarrContainers
+      requires: sstream_dfilter
+      params:
+        containers:
+          - "sstream_lsd_{tag}.zarr"
+          - "ringmap_lsd_{tag}.zarr"
+          - "ringmap_intercyl_lsd_{tag}.zarr"
+        remove: true
 """
 
 
@@ -364,48 +543,74 @@ class DailyProcessing(base.ProcessingType):
     default_params = {
         # Time range(s) to process
         "intervals": [
-            ## Priority days to reprocess
-            # Good ranges from rev_00
+            # Two short two-day intervals either side of the caltime change
+            # (1878, 3000), one with the weird 4 baseline issue (1912), one
+            # with no actual data (1898), one with a single baseline-freq issue
+            # (1960), one to test the thermal correction which otherwise shows
+            # a large spread (1965), one with a different set of vertical
+            # stripes (1983), and one with a decorrelated cylinder (2325) in
+            # order to have a few good test days at the very start
+            # NOTE: these intervals are *inclusive*
+            {"start": "CSD1878", "end": "CSD1879"},
+            {"start": "CSD1898", "end": "CSD1898"},
+            {"start": "CSD1912", "end": "CSD1912"},
+            {"start": "CSD1960", "end": "CSD1960"},
+            {"start": "CSD1965", "end": "CSD1965"},
+            {"start": "CSD1983", "end": "CSD1983"},
+            {"start": "CSD2325", "end": "CSD2325"},
+            {"start": "CSD3000", "end": "CSD3001"},
+            # Good short ranges from rev_00, these are spread over the year and
+            # quickly cover the full sky
             {"start": "CSD1868", "end": "CSD1875"},
             {"start": "CSD1927", "end": "CSD1935"},
             {"start": "CSD1973", "end": "CSD1977"},
             {"start": "CSD2071", "end": "CSD2080"},
             {"start": "CSD2162", "end": "CSD2166"},
-            # A good looking interval from late 2019 (determined from run
-            # notes, dataflags and data availability)
-            {"start": "CSD2143", "end": "CSD2148"},
-            # intervals for which we process only one day every 7 days
-            ## dataflags and calibration tables are currently only available until October 2020
-            {"start": "CSD1878", "end": "CSD2539", "step": 7},
-            {"start": "CSD1879", "end": "CSD2539", "step": 7},
-            {"start": "CSD1880", "end": "CSD2539", "step": 7},
-            {"start": "CSD1881", "end": "CSD2539", "step": 7},
-            {"start": "CSD1882", "end": "CSD2539", "step": 7},
-            {"start": "CSD1883", "end": "CSD2539", "step": 7},
-            {"start": "CSD1884", "end": "CSD2539", "step": 7},
+            # Intervals covering the days used in the stacking analysis
+            {"start": "CSD1878", "end": "CSD1939"},
+            {"start": "CSD1958", "end": "CSD1990"},
+            {"start": "CSD2012", "end": "CSD2013"},
+            {"start": "CSD2029", "end": "CSD2046"},
+            {"start": "CSD2059", "end": "CSD2060"},
+            {"start": "CSD2072", "end": "CSD2143"},
+            # Intervals for which we process only one day every 7 days, this
+            # will slowly build up coverage over the whole timespan up to
+            # October 2022
+            {"start": "CSD1878", "end": "CSD3250", "step": 7},
+            {"start": "CSD1879", "end": "CSD3250", "step": 7},
+            {"start": "CSD1880", "end": "CSD3250", "step": 7},
+            {"start": "CSD1881", "end": "CSD3250", "step": 7},
+            {"start": "CSD1882", "end": "CSD3250", "step": 7},
+            {"start": "CSD1883", "end": "CSD3250", "step": 7},
+            {"start": "CSD1884", "end": "CSD3250", "step": 7},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Frequencies to process
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
-        "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # Calibration times for thermal correction
         "caltimes_file": (
-            "/project/rpp-krs/chime/chime_processed/gain/calibration_times/"
+            "/project/rpp-chime/chime/chime_processed/gain/calibration_times/"
             "20180902_20201230_calibration_times.h5"
         ),
         # File for the timing correction
         "timing_file": (
-            "/project/rpp-krs/chime/chime_processed/timing/rev_00/referenced/"
+            "/project/rpp-chime/chime/chime_processed/timing/rev_00/referenced/"
             "*_chimetiming_delay.h5"
+        ),
+        # File containing the freq map being used for processing the data
+        "freqmap_file": (
+            "/project/rpp-chime/chime/chime_processed/freq_map/"
+            "20180902_20220927_freq_map.h5"
         ),
         # Catalogs to extract fluxes of
         "catalogs": [
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_OVRO.h5",
-            "/project/rpp-krs/chime/chime_processed/catalogs/ps_requested.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_cora_10Jy.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_QSO_05Jy.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_OVRO.h5",
+            "/project/rpp-chime/chime/chime_processed/catalogs/ps_requested.h5",
         ],
         # Delay spectrum estimation
         "blend_stack_file": (
@@ -413,10 +618,10 @@ class DailyProcessing(base.ProcessingType):
         ),
         "nfreq_delay": 1025,
         # Job params
-        "time": 180,  # How long in minutes?
-        "nodes": 16,  # Number of nodes to use.
-        "ompnum": 6,  # Number of OpenMP threads
-        "pernode": 8,  # Jobs per node
+        "time": 150,  # How long in minutes?
+        "nodes": 12,  # Number of nodes to use.
+        "ompnum": 4,  # Number of OpenMP threads
+        "pernode": 12,  # Jobs per node
     }
     default_script = DEFAULT_SCRIPT
 
@@ -431,9 +636,11 @@ class DailyProcessing(base.ProcessingType):
 
     def _available_files(self, start_csd, end_csd):
         """
-        Return chimestack files available in cedar_online between start_csd and end_csd, if all of the files for that period are available online.
+        Return chimestack files available in cedar_online between start_csd and
+        end_csd, if all of the files for that period are available online.
 
-        Return an empty list if files between start_csd and end_csd are only partially available online.
+        Return an empty list if files between start_csd and end_csd are only
+        partially available online.
 
         Total file count is verified by checking files that exist everywhere.
 
@@ -447,8 +654,8 @@ class DailyProcessing(base.ProcessingType):
         Returns
         -------
         list
-            List contains the chimestack files available in the timespan, if all of them are available online
-
+            List contains the chimestack files available in the timespan, if
+            all of them are available online
         """
 
         # Connect to databases
@@ -463,9 +670,10 @@ class DailyProcessing(base.ProcessingType):
         online_node = di.StorageNode.get(name="cedar_online", active=True)
         chimestack_inst = di.ArchiveInst.get(name="chimestack")
 
-        # TODO if the time range is so small that it’s completely contained within a single file, nothing will be returned
-        # have to special-case it by looking for files which start before the start time and end after the end time).
-
+        # TODO: if the time range is so small that it’s completely contained
+        # within a single file, nothing will be returned have to special-case
+        # it by looking for files which start before the start time and end
+        # after the end time).
         archive_files = (
             di.ArchiveFileCopy.select(
                 di.CorrFileInfo.start_time,
@@ -478,7 +686,6 @@ class DailyProcessing(base.ProcessingType):
         )
 
         # chimestack files available online which include between start and end_time
-
         files_that_exist = archive_files.where(
             di.ArchiveAcq.inst
             == chimestack_inst,  # specifically looking for chimestack files
@@ -627,7 +834,7 @@ class TestDailyProcessing(DailyProcessing):
             ],
             "freq": [400, 416],
             "nfreq_delay": 17,
-            "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_16freq/",
+            "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
             "ompnum": 12,  # Number of OpenMP threads

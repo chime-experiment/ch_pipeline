@@ -220,7 +220,7 @@ class ProcessingType(object):
 
         return cls(new_rev, create=True)
 
-    def queued(self):
+    def queued(self, user=None):
         """Get the queued and running jobs of this type.
 
         Returns
@@ -234,7 +234,7 @@ class ProcessingType(object):
         job_regex = re.compile("^%s$" % self.job_name(self.tag_pattern))
 
         # Find matching jobs
-        jobs = [job for job in slurm_jobs() if job_regex.match(job["NAME"])]
+        jobs = [job for job in slurm_jobs(user=user) if job_regex.match(job["NAME"])]
 
         running = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "R"]
         waiting = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "PD"]
@@ -353,22 +353,25 @@ class ProcessingType(object):
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
 
-    def pending(self):
+    def pending(self, user=None):
         """Jobs available to run."""
 
-        waiting, running = self.queued()
+        waiting, running = self.queued(user)
         not_pending = set(self.ls()) | set(waiting) | set(running)
         pending = [job for job in self.available() if job not in not_pending]
 
         return pending
 
-    def crashed(self) -> list:
-        """Find all jobs which have crashed.
+    def status(self, user=None) -> dict:
+        """Find the status of running jobs. This duplicates
+        some other methods for individual status values, but
+        reduces repeated method (and slurm) calls.
 
         Returns
         -------
-        crashed : list
-            Return the tags of all failed jobs.
+        status : dict
+            Return the tags associated with each status line: Available,
+            Pending, Waiting, Running, Successful, Failed
         """
         base = self.base_path
         working_path = base / "working"
@@ -383,15 +386,21 @@ class ProcessingType(object):
         working_tags = {
             path.name for path in working_path.glob("*") if file_regex.match(path.name)
         }
-        # Get finished, waiting, and running jobs
+        # Get available, finished, pending, and running jobs
+        available_tags = self.available()
         finished_tags = self.ls()
-        waiting_tags, running_tags = self.queued()
+        pending_tags, running_tags = self.queued(user)
+        # Get jobs which have not yet been submitted
+        submitted_tags = set(finished_tags) | set(pending_tags) | set(running_tags)
+        not_submitted_tags = [
+            job for job in available_tags if job not in submitted_tags
+        ]
         # Any tag in the working directory that is not running or
         # waiting should be considered as crashed. Also consider
         # finished tags to catch edge case where a tag is in the
         # process of being moved.
         crashed_tags = working_tags.difference(
-            waiting_tags + running_tags + finished_tags
+            pending_tags + running_tags + finished_tags
         )
         # This directory can contain job directories that have
         # previously crash. They may be re-run without being
@@ -409,8 +418,17 @@ class ProcessingType(object):
             # take union of these sets in place
             crashed_tags |= unique_crashed_dir
 
-        # This will cast to a sorted list
-        return sorted(crashed_tags)
+        # Return a dict of all status values
+        tags = {
+            "available": available_tags,
+            "not_yet_submitted": not_submitted_tags,
+            "pending": pending_tags,
+            "running": running_tags,
+            "successful": finished_tags,
+            "failed": sorted(crashed_tags),
+        }
+
+        return tags
 
 
 def find_venv():
