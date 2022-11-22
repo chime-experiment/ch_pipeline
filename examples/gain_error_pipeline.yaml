@@ -1,0 +1,191 @@
+# Example configuration file for generating an estimate of narrowband gain errors
+# based on the chime_gain, chime_digitalgain, and chime_flaginput acquisitions.
+# This will generate the gain errors relevant for 2021 and save to a single container.
+cluster:
+    directory:          $SCRATCH/gnarrowband/2021/
+    venv:               my_venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               gerr_2021               # Jobname
+    nodes:              1                       # Number of nodes to run on
+    time:               600                     # Time to run for (in minutes)
+    ompnum:             16                      # Number of OpenMP threads
+    pernode:            2
+    mem:                128000M
+    system:            'cedar'
+    account:           'rpp-chime'
+    
+# Define time ranges.  The digitalgain and flaginput start times need to be
+# early enough that they capture the file that was in use by the real-time
+# pipeline when the first calibration gain update occured.  The digital
+# gains are updated infrequently so one has to either use a large window
+# or look up the timestamp of the appropriate file.
+parameters:
+    
+    start_time_digital_gain: &start_time_digital_gain "20201013T000000Z"
+    end_time_digital_gain: &end_time_digital_gain     "20220101T000000Z"
+    
+    start_time_flaginput: &start_time_flaginput       "20201231T000000Z"
+    end_time_flaginput: &end_time_flaginput           "20220101T000000Z"
+    
+    start_time_gain: &start_time_gain                 "20210101T000000Z"
+    end_time_gain: &end_time_gain                     "20220101T000000Z"
+
+# Pipeline task configuration
+pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - cora
+    - draco
+    - drift
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
+  tasks:
+    - type: draco.core.task.SetMPILogging
+      params:
+        level_rank0: INFO
+        level_all: WARNING
+
+    # Load the telescope model
+    - type: draco.core.io.LoadProductManager
+      out: manager
+      params:
+        product_directory: "/project/rpp-chime/chime/beam_transfers/chime_4cyl_585-800_I_XX-YY_psbeam"
+        
+    - type: ch_pipeline.core.dataquery.QueryDatabase
+      out: digital_gain_files
+      params:
+        start_time: *start_digital_gain
+        end_time: *end_digital_gain
+        accept_all_global_flags: Yes
+        node_spoof:
+          cedar_online: "/project/rpp-chime/chime/chime_online/"
+        acqtype: "digitalgain"
+        instrument: "chime"
+
+    - type: ch_pipeline.core.dataquery.QueryDatabase
+      out: input_flag_files
+      params:
+        start_time: *start_time_flaginput
+        end_time:   *end_time_flaginput
+        accept_all_global_flags: Yes
+        node_spoof:
+          cedar_online: "/project/rpp-chime/chime/chime_online/"
+        acqtype: "flaginput"
+        instrument: "chime"
+
+    - type: ch_pipeline.core.dataquery.QueryDatabase
+      out: gain_files
+      params:
+        start_time: *start_time_gain
+        end_time:   *end_time_gain
+        accept_all_global_flags: Yes
+        node_spoof:
+          cedar_online: "/project/rpp-chime/chime/chime_online/"
+        acqtype: "gain"
+        instrument: "chime"
+
+    - type: ch_pipeline.core.io.LoadGainUpdates
+      requires: gain_files
+      out: gain
+      params:
+        acqtype: "gain"
+        keep_transition: No
+
+    - type: ch_pipeline.analysis.calibration.ApplyDigitalGain
+      requires: digital_gain_files
+      in: gain
+      out: total_gain
+      params:
+        invert: No
+        normalize: Yes
+
+    - type: ch_pipeline.analysis.calibration.InvertGain
+      in: total_gain
+      out: inv_total_gain
+
+    - type: ch_pipeline.analysis.calibration.ComputeCommonMode
+      requires: manager
+      in: inv_total_gain
+      out: cmn
+      params:
+        use_cylinder: No
+        use_amplitude: Yes
+        use_percentile: No
+        percentile: 50.0
+        save: Yes
+        output_name: "common_mode_{tag}_inverted.h5"
+
+    - type: ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures
+      in: cmn
+      out: cmn_flagged0
+      params:
+        tau_cut: 0.20
+        window: 75
+        save: Yes
+        output_name: "common_mode_{tag}_inverted_flagged_initial.h5"
+        
+    - type: ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures
+      in: cmn_flagged0
+      out: cmn_flagged
+      params:
+        tau_cut: 0.60
+        window: 75
+        save: Yes
+        output_name: "common_mode_{tag}_inverted_flagged.h5"
+
+    - type: ch_pipeline.analysis.calibration.InterpolateGainOverFrequency
+      in: cmn_flagged
+      out: cmn_interpolated
+      params:
+        save: Yes
+        output_name: "common_mode_{tag}_inverted_interpolated.h5"
+        
+    - type: ch_pipeline.analysis.calibration.EstimateNarrowbandGainError
+      in: [cmn, cmn_flagged, cmn_interpolated]
+      out: error
+      params:
+        save: Yes
+        output_name: "common_mode_{tag}_inverted_error.h5"
+
+    - type: ch_pipeline.analysis.calibration.ExpandCommonMode
+      requires: manager
+      in: error
+      out: error_inp
+      params:
+        use_cylinder: No
+        save: Yes
+        output_name: "{tag}_inverted_error.h5"
+
+    - type:       ch_pipeline.analysis.flagging.ApplyInputFlag
+      requires:   input_flag_files
+      in:         error_inp
+      out:        error_inp_flag
+      params:
+        save:   Yes
+        output_name:  "{tag}_inverted_error_input_flagged.h5"
+
+    - type: draco.core.misc.AccumulateList
+      in: error_inp_flag
+      out: error_inp_flag_list
+
+    - type: ch_pipeline.analysis.calibration.ConcatenateGains
+      in: error_inp_flag_list
+      out: error_all
+      params:
+        save: Yes
+        output_name: "20210101_20211231_gain_inverted_error_input_flagged.h5"

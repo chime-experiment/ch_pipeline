@@ -246,21 +246,27 @@ class LoadDataFiles(io.BaseLoadFiles):
         self.files = files
 
     def process(self):
-        """Load in each sidereal day.
+        """Load and return the next available file.
+
+        Raises a PipelineStopIteration if there are no more files to load.
 
         Returns
         -------
-        ts : andata.CorrData
-            The timestream of each sidereal day.
+        data : subclass of andata.BaseData
         """
 
-        if len(self.files) == self._file_ptr:
+        return self._load_next_file()
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+
+        if self._file_ptr == len(self.files):
             raise pipeline.PipelineStopIteration
 
         # Collect garbage to remove any prior data objects
         gc.collect()
 
-        # Fetch and remove the first item in the list
+        # Fetch and remove the next item in the list
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
@@ -286,10 +292,99 @@ class LoadDataFiles(io.BaseLoadFiles):
             rd.beam_sel = self._sel["beam_sel"]
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        ts = rd.read()
+        data = rd.read()
 
-        # Return timestream
-        return ts
+        return data
+
+
+class LoadGainUpdates(LoadDataFiles):
+    """Iterate over gain updates.
+
+    Attributes
+    ----------
+    acqtype: {"gain"|"digitalgain"}
+        Type of acquisition.
+    keep_transition: bool
+        If this is True, then gain updates that were transitional
+        in nature -- i.e., they executed a smooth transition to
+        new gains -- will be loaded. By default, transitional
+        gain updates are ignored.
+    """
+
+    gains = None
+
+    acqtype = config.enum(["gain", "digitalgain"], default="gain")
+    keep_transition = config.Property(proptype=bool, default=False)
+
+    def process(self):
+        """Load the next available gain update.
+
+        Returns
+        -------
+        out: StaticGainUpdate
+            The next gain update, packaged into a pipeline container.
+        """
+        # If there are no gains available, then load the next file.
+        if self.gains is None:
+            self.gains = self._load_next_file()
+
+        # Make sure we are not dealing with a transitional gain update
+        if not self.keep_transition:
+
+            while "transition" in self.gains.update_id[self._time_ptr].decode():
+
+                self._time_ptr += 1
+
+                if self._time_ptr == self.gains.ntime:
+                    self.gains = self._load_next_file()
+
+        # Create output container
+        out = containers.StaticGainData(
+            axes_from=self.gains,
+            attrs_from=self.gains,
+            distributed=True,
+            comm=self.comm,
+        )
+
+        out.add_dataset("weight")
+        out.redistribute("freq")
+
+        # Save the update_time and update_id as attributes
+        out.attrs["time"] = self.gains.time[self._time_ptr]
+        out.attrs["update_id"] = self.gains.update_id[self._time_ptr].decode()
+        out.attrs["tag"] = out.attrs["update_id"]
+
+        # Find the local frequencies
+        sfreq = out.gain.local_offset[0]
+        efreq = sfreq + out.gain.local_shape[0]
+
+        fsel = slice(sfreq, efreq)
+
+        # Transfer over the gains and weights for the local frequencies
+        out.gain[:] = self.gains.gain[self._time_ptr][fsel]
+
+        if "weight" in self.gains:
+            out.weight[:] = self.gains.weight[self._time_ptr][fsel]
+        else:
+            out.weight[:] = 1.0
+
+        # Increment the time pointer
+        self._time_ptr += 1
+
+        # Determine if we need to load a new file on the next iteration
+        if self._time_ptr == self.gains.ntime:
+            self.gains = None
+
+        # Output the static gain container
+        return out
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+
+        gains = super()._load_next_file()
+        self._time_ptr = 0
+
+        return gains
 
 
 class LoadSetupFile(io.BaseLoadFiles):
