@@ -148,21 +148,66 @@ pipeline:
       in: sstream_mask7
       out: sstack_stack
       params:
-        save: true
         tag: {tag}
-        output_name: "sstack.h5"
+
+    # Precision truncate the sidereal stack data
+    - type: draco.core.io.Truncate
+      in: sstack_stack
+      out: sstack_trunc
+      params:
+        dataset:
+          vis:
+            weight_dataset: vis_weight
+            variance_increase: 1.0e-4
+          vis_weight: 1.0e-6
+        compression:
+          vis:
+            chunks: [16, 512, 512]
+          vis_weight:
+            chunks: [16, 512, 512]
+
+    # Save the sstack out to a zarr zip file
+    - type: draco.core.io.SaveZarrZip
+      in: sstack_trunc
+      out: zip_handle
+      params:
+        output_name: "sstack.zarr.zip"
 
     - type: ch_pipeline.analysis.mapmaker.RingMapMaker
       requires: manager
-      in: sstack_stack
+      in: sstack_trunc
+      out: ringmap
       params:
         single_beam: true
         weight: "natural"
         exclude_intracyl: false
         include_auto: false
-        save: true
-        output_name: "ringmap.h5"
         npix: 1024
+
+    # Precision truncate the chunked normal ringmap
+    - type: draco.core.io.Truncate
+      in: ringmap
+      out: ringmap_trunc
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-4
+          weight: 1.0e-6
+        compression:
+          map:
+            chunks: [1, 1, 16, 512, 512]
+          weight:
+            chunks: [1, 16, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 16, 512, 512]
+
+    # Save the ringmap out to a ZarrZip file
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_trunc
+      out: zip_handle
+      params:
+        output_name: "ringmap.zarr.zip"
 
     # Estimate the delay spectrum
     - type: draco.analysis.delay.DelaySpectrumEstimator
@@ -170,10 +215,15 @@ pipeline:
       in: sstack_stack
       params:
         freq_zero: 800.0
-        nfreq: 1025
+        complex_timedomain: true
+        nfreq: {nfreq_delay}
         nsamp: 40
         save: true
         output_name: "dspec.h5"
+
+    # Wait for the Zipping to finish
+    - type: draco.core.io.WaitZarrZip
+      in: zip_handle
 """
 
 
