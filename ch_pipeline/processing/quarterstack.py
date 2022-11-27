@@ -95,22 +95,44 @@ pipeline:
           - snow
           - decorrelated_cylinder
 
+    # Load gain errors as a function of time
+    - type: ch_pipeline.core.io.LoadSetupFile
+      out: gain_err
+      params:
+        filename: {gain_err_file}
+        distributed: true
+
+    # Apply a mask that removes frequencies and times that suffer from gain errors
+    - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
+      requires: gair_err
+      in: sstream_mask3
+      out: mask_gain_err
+      params:
+        transition: 600.0
+        threshold: 1.0e-3
+        ignore_input_flags: Yes
+        save: false
+
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_mask3, mask_gain_err]
+      out: sstream_mask4
+
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
     - type: draco.analysis.flagging.ThresholdVisWeight
-      in: sstream_mask3
-      out: sstream_mask4
+      in: sstream_mask4
+      out: sstream_mask5
       params:
           relative_threshold: 0.5
 
     - type: draco.analysis.flagging.RFIMask
-      in: sstream_mask4
-      out: sstream_mask5
+      in: sstream_mask5
+      out: sstream_mask6
       params:
           stack_ind: 66
 
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: sstream_mask5
+      in: sstream_mask6
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -119,11 +141,11 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask5, med]
-      out: sstream_mask6
+      in: [sstream_mask6, med]
+      out: sstream_mask7
 
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask6
+      in: sstream_mask7
       out: sstack_stack
       params:
         save: true
@@ -188,7 +210,7 @@ class QuarterStackProcessing(base.ProcessingType):
         # over earlier ones)
         "daily_revisions": ["rev_03"],
         # Usually the opinions are queried for each revision, this dictionary allows
-        # that to be overriden. Each `data_rev: opinion_rev` pair means that the
+        # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
         # `opinion_rev`.
         "opinion_overrides": {
@@ -208,6 +230,29 @@ class QuarterStackProcessing(base.ProcessingType):
             "q2": [240, 255],
             "q3": [315, 330],
             "q4": [45, 60],
+        },
+        "gain_error_file": {
+            2018: (
+              "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+              "20180905_20191231_gain_inverted_error_input_flagged.h5"
+            ),
+            2019: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20180905_20191231_gain_inverted_error_input_flagged.h5"
+            ),
+            2020: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+            ),
+            # Update these below when they become available
+            2021: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+            ),
+            2022: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+            ),
         },
         # Job params
         "time": 180,  # How long in minutes?
@@ -338,10 +383,13 @@ class QuarterStackProcessing(base.ProcessingType):
             [f"- {paths[day]}/sstream_lsd_{day}.h5" for day in days]
         )
 
-        quarter = self._parse_tag(tag)[1]
+        year, quarter, _ = self._parse_tag(tag)[1]
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
+        gain_err_file = self._revparams["gain_error_file"][year]
 
-        jobparams.update({"days": day_list_str, "ra_range": ra_range})
+        jobparams.update({
+            "days": day_list_str, "ra_range": ra_range, "gain_err_file": gain_err_file
+        })
 
         return jobparams
 
