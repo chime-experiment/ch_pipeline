@@ -23,6 +23,8 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     ----------
     source_dec : float
         Declination of source in degrees.
+    beam_ew_exclude : list
+        List of East-West beam indices (i.e., in the range 0-3) to exclude.
     freq_phys_range : list
         Start and stop of physical frequencies (in MHz) to read. The mean is
         used as reference frequency in evaluating beam positions (for selecting
@@ -50,6 +52,7 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     _file_ptr = 0
 
     source_dec = config.Property(proptype=float, default=None)
+    beam_ew_exclude = config.Property(proptype=list, default=[])
     freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_range = config.Property(proptype=list, default=[])
 
@@ -87,6 +90,9 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
         if self.source_dec:
             beam_index_ns = self._find_beam()
             self.beam_sel = slice(beam_index_ns, 1024, 256)
+            if self.beam_ew_exclude:
+                beam_ew_include = list({0, 1, 2, 3} - set(self.beam_ew_exclude))
+                self.beam_sel = list(np.arange(1024)[self.beam_sel][beam_ew_include])
         elif "beam_sel" in self._sel:
             self.beam_sel = self._sel["beam_sel"]
         else:
