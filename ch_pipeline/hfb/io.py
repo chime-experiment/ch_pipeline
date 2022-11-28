@@ -23,7 +23,11 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     ----------
     source_dec : float
         Declination of source in degrees.
-    freq_physical : list
+    freq_phys_range : list
+        Start and stop of physical frequencies (in MHz) to read. The mean is
+        used as reference frequency in evaluating beam positions (for selecting
+        the beams closest to a transiting source).
+    freq_phys_list : list
         List of physical frequencies (in MHz) to read. The first frequency
         in this list is also used in evaluating beam positions (for selecting
         the beams closest to a transiting source).
@@ -32,7 +36,9 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     ----------
     Selections in frequency and beams can be done in two ways:
     1. By passing a `source_dec` attribute (for the beam selection) and/or
-       a `freq_physical` attribute (for the frequency selection).
+       a `freq_phys_range` or `freq_phys_list` attribute (for the frequency
+       selection). If both `freq_phys_range` and `freq_phys_list` are given the
+       former will take precedence, but you should clearly avoid doing this.
     2. By manually passing indices in the `selections` attribute
        (see documentation in :class:`draco.core.io.BaseLoadFiles`).
     Method 1 takes precedence over method 2. If no relevant attributes are
@@ -44,7 +50,8 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     _file_ptr = 0
 
     source_dec = config.Property(proptype=float, default=None)
-    freq_physical = config.Property(proptype=list, default=[])
+    freq_phys_list = config.Property(proptype=list, default=[])
+    freq_phys_range = config.Property(proptype=list, default=[])
 
     def setup(self, files):
         """Set the list of files to load; set up frequency and beam selection.
@@ -62,10 +69,14 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
         self._sel = self._resolve_sel()
 
         # Set up frequency selection.
-        if self.freq_physical:
-            basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+        cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
+        if self.freq_phys_range:
+            freq_index_start = np.argmin(np.abs(cfreq - self.freq_phys_range[0]))
+            freq_index_stop = np.argmin(np.abs(cfreq - self.freq_phys_range[-1]))
+            self.freq_sel = slice(freq_index_start, freq_index_stop)
+        elif self.freq_phys_list:
             self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+                set([np.argmin(np.abs(cfreq - freq)) for freq in self.freq_phys_list])
             )
         elif "freq_sel" in self._sel:
             self.freq_sel = self._sel["freq_sel"]
@@ -145,7 +156,12 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
         beams_ind = np.arange(1000, 1256)
 
         # Decide frequency (in MHz) at which to evaluate beam positions
-        freq = self.freq_physical[0] if self.freq_physical else 600.0
+        if self.freq_phys_range:
+            freq = np.mean(self.freq_phys_range)
+        elif self.freq_phys_list:
+            freq = self.freq_phys_list[0]
+        else:
+            freq = 600.0
 
         # Find beam positions
         beams_xy = mdl.get_beam_positions(beams_ind, freq).squeeze()
