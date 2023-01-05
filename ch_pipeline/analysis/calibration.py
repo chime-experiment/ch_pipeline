@@ -1803,8 +1803,8 @@ class ThermalCalibration(task.SingleTask):
         # results
         try:
             # First attempt to group all dataset_ids for all frequencies on
-            # rank=0 so it can do the full lookup
-            dataset_ids = data.flags["dataset_id"][:].gather(rank=0)
+            # rank=0 so it can do the full lookup.
+            dataset_ids = data.dataset_id[:].gather(rank=0)
 
             if self.comm.rank == 0:
                 # Try to use the dataset ID scheme in here, if the time range passed won't
