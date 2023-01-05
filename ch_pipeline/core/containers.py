@@ -1002,7 +1002,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     _dataset_spec = {
         "flags/dataset_id": {
             "axes": ["freq", "time"],
-            "dtype": "U32",
+            "dtype": "S33",
             "initialise": False,
             "distributed": True,
         },
@@ -1046,6 +1046,12 @@ class CHIMETimeStream(TimeStream, RawContainer):
         if "/flags/inputs" in newdata:
             storage["input_flags"] = storage["flags"].pop("inputs")
             storage["input_flags"]._name = "/input_flags"
+
+        if "/flags/dataset_id" in newdata:
+            # Replace the dataset with data converted to a bytestring
+            dataset_id = storage["flags"].pop("dataset_id")
+            newdata.add_dataset("flags/dataset_id")
+            newdata["/flags/dataset_id"][:] = memh5.ensure_bytestring(dataset_id[:])
 
         return newdata
 
