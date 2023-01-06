@@ -6,23 +6,23 @@ from caput import config
 
 from draco.core import task
 
-from containers import HFBRFIMask
+from .containers import HFBRFIMask
 
 
-class HFBRNTMask(task.SingleTask):
+class HFBRadiometerNoiseTestRFIMask(task.SingleTask):
     """Identify RFI in HFB data using the radiometer noise test, averaging over beams.
 
     Attributes
     ----------
     threshold : float
         The desired threshold for the RFI fliter. Data with sensitivity metric
-        values above this thershold will be considered RFI.
+        values above this threshold will be considered RFI. Default is 2.0
     keep_sens : bool
         Save the sensitivity metric data that were used to construct
         the mask in the output container.
     """
 
-    threshold = config.Property(proptype=float, default=1.6)
+    threshold = config.Property(proptype=float, default=2.0)
     keep_sens = config.Property(proptype=bool, default=False)
 
     def process(self, stream):
@@ -46,20 +46,25 @@ class HFBRNTMask(task.SingleTask):
         weight = np.mean(stream.weight[:], axis=2)
 
         # Number of samples per data point in the HFB data:
-        # N_S = Delta nu * Delta t, where Delta nu is the frequency resolution
-        # (390.625 kHz / 128) and Delta t the integration time (10 s)
-        # NOTE: Should this be extracted from the container attributes? In that
-        # case this information needs to be added to the attributes upstream.
-        N_SAMP = 390625.0 / 128.0 * 10.0
+        # n_samp = delta_nu * delta_t * (1 - frac_lost), where
+        # delta_nu is the frequency resolution (390.625 kHz / 128),
+        # delta_t the integration time (~10.066 s), and
+        # frac_lost is the fraction of integration that was lost upstream
+        freq_width = stream._data["index_map/freq/width"][0] * 1e6
+        nsubfreq = len(stream._data["index_map/subfreq"])
+        delta_nu = freq_width / nsubfreq
+        delta_t = np.median(np.diff(stream._data["index_map/time/ctime"]))
+        frac_lost = stream["flags/frac_lost"][0]
+        n_samp = delta_nu * delta_t * (1.0 - frac_lost)
 
         # Ideal radiometer equation
-        radiometer = data**2 / N_SAMP
+        radiometer = data**2 / n_samp
 
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
         sensitivity_metric = 2.0 / (radiometer * weight)
 
-        # Boolean mask idicating data that are contaminated by RFI
+        # Boolean mask indicating data that are contaminated by RFI
         mask = sensitivity_metric > self.threshold
 
         # Create container to hold output
