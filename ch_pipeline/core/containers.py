@@ -85,7 +85,7 @@ class RFIMask(ContainerBase):
     _dataset_spec = {
         "mask": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -127,7 +127,7 @@ class CorrInputMask(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -150,13 +150,13 @@ class CorrInputTest(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "passed_test": {
             "axes": ["freq", "input", "test"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": False,
         },
@@ -200,37 +200,37 @@ class CorrInputMonitor(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "input_powered": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_mask": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_powered": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
         "expected_position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
@@ -290,7 +290,7 @@ class SiderealDayFlag(ContainerBase):
     _dataset_spec = {
         "csd_flag": {
             "axes": ["csd"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -334,7 +334,7 @@ class TransitFitParams(ContainerBase):
         },
         "ndof": {
             "axes": ["freq", "input", "component"],
-            "dtype": np.int,
+            "dtype": int,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -438,7 +438,7 @@ class PointSourceTransit(StaticGainData):
         },
         "flag": {
             "axes": ["freq", "input", "ra"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -646,7 +646,7 @@ class SunTransit(ContainerBase):
         },
         "flag": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
