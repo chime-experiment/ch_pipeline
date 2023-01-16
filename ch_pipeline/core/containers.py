@@ -25,6 +25,7 @@ Tasks
 """
 import posixpath
 from typing import List, Optional, Union
+from functools import cached_property
 from draco.core.task import MPILoggedTask
 
 import numpy as np
@@ -942,7 +943,7 @@ class RawContainer(TODContainer):
         parent_name, name = posixpath.split(name)
         return parent_name == "/" or self.group_name_allowed(parent_name)
 
-    @property
+    @cached_property
     def time(self):
         """The 'time' axis centres as Unix/POSIX time."""
 
