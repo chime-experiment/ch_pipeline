@@ -122,11 +122,8 @@ class ApplyHFBMask(task.SingleTask):
             if name not in mask.mask.attrs["axis"]:
                 slc[ww] = None
 
-        # Extract mask
-        flag = mask.mask[:].astype(stream.weight.dtype)
-
-        # Convert mask from caput.mpiarray.MPIArray to regular numpy.ndarray
-        flag = np.array(flag)
+        # Extract mask, transform to regular numpy array
+        flag = mask.mask[:].local_array
 
         # Expand mask to same dimension as weight array
         flag = flag[tuple(slc)]
