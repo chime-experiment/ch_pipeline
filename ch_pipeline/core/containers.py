@@ -944,7 +944,7 @@ class RawContainer(TODContainer):
         return parent_name == "/" or self.group_name_allowed(parent_name)
 
     @cached_property
-    def time(self):
+    def time(self) -> np.ndarray:
         """The 'time' axis centres as Unix/POSIX time."""
 
         time = self._data["index_map"]["time"]["ctime"].copy()
