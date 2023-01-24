@@ -889,16 +889,15 @@ def csds_in_range(start, end, step=1):
     csds : list of ints
     """
 
-    if end is None:
-        end = datetime.datetime.utcnow()
-
     if start.startswith("CSD"):
         start_csd = int(start[3:])
     else:
         start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
         start_csd = math.floor(start_csd)
 
-    if end.startswith("CSD"):
+    if end is None:
+        end_csd = int(ephemeris.chime.get_current_lsd())
+    elif end.startswith("CSD"):
         end_csd = int(end[3:])
     else:
         end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
