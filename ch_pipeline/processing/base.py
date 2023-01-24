@@ -348,10 +348,14 @@ class ProcessingType(object):
             Submit the jobs to the queue.
         """
 
-        to_run = self.pending()[:max]
+        to_run = self._generate_hook()[:max]
 
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
+
+    def _generate_hook(self):
+        """Override to add custom behaviour when jobs are queued."""
+        return self.pending()
 
     def pending(self, user=None):
         """Jobs available to run."""
