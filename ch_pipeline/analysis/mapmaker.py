@@ -101,9 +101,9 @@ class RingMapMaker(task.SingleTask):
 
         # Construct mapping from vis array to unpacked 2D grid
         nprod = sstream.prodstack.shape[0]
-        pind = np.zeros(nprod, dtype=np.int)
-        xind = np.zeros(nprod, dtype=np.int)
-        ysep = np.zeros(nprod, dtype=np.float)
+        pind = np.zeros(nprod, dtype=np.int64)
+        xind = np.zeros(nprod, dtype=np.int64)
+        ysep = np.zeros(nprod, dtype=np.float64)
 
         for pp, (ii, jj) in enumerate(sstream.prodstack):
 
@@ -123,7 +123,7 @@ class RingMapMaker(task.SingleTask):
         abs_ysep = np.abs(ysep)
         min_ysep, max_ysep = np.percentile(abs_ysep[abs_ysep > 0.0], [0, 100])
 
-        yind = np.round(ysep / min_ysep).astype(np.int)
+        yind = np.round(ysep / min_ysep).astype(np.int64)
 
         grid_index = list(zip(pind, xind, yind))
 

@@ -246,7 +246,7 @@ class ChannelFlagger(task.SingleTask):
         ]
 
         # Create a global channel weight (channels are bad by default)
-        chan_mask = np.zeros(timestream.ninput, dtype=np.int)
+        chan_mask = np.zeros(timestream.ninput, dtype=np.int64)
 
         # Mark any powered CHIME channels as good
         chan_mask[:] = tools.is_chime_on(inputmap)
@@ -284,16 +284,16 @@ class ChannelFlagger(task.SingleTask):
                 # frequency (explicit cast to int or numpy complains,
                 # this should really be done upstream).
                 if not self.ignore_gains:
-                    chan_mask[test_channels] *= good_gains.astype(np.int)
+                    chan_mask[test_channels] *= good_gains.astype(np.int64)
                 if not self.ignore_noise:
-                    chan_mask[test_channels] *= good_noise.astype(np.int)
+                    chan_mask[test_channels] *= good_noise.astype(np.int64)
                 if not self.ignore_fit:
-                    chan_mask[test_channels] *= good_fit.astype(np.int)
+                    chan_mask[test_channels] *= good_fit.astype(np.int64)
 
         # Gather the channel flags from all nodes, and combine into a
         # single flag (checking that all tests pass)
         chan_mask_all = np.zeros(
-            (timestream.comm.size, timestream.ninput), dtype=np.int
+            (timestream.comm.size, timestream.ninput), dtype=np.int64
         )
         timestream.comm.Allgather(chan_mask, chan_mask_all)
         chan_mask = np.prod(chan_mask_all, axis=0)
@@ -352,7 +352,7 @@ class MonitorCorrInput(task.SingleTask):
             # Determine the days in each file and the days in all files
             se_times = get_times(files)
             se_csd = ephemeris.csd(se_times)
-            days = np.unique(np.floor(se_csd).astype(np.int))
+            days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Determine the relevant files for each day
             filemap = [(day, _days_in_csd(day, se_csd, extra=0.005)) for day in days]
@@ -447,8 +447,8 @@ class MonitorCorrInput(task.SingleTask):
         i_day = np.arange(i_day_start, i_day_end)
 
         # Create local arrays to hold results
-        input_mask = np.ones((n_local, self.ninput), dtype=np.bool)
-        good_day_flag = np.zeros(n_local, dtype=np.bool)
+        input_mask = np.ones((n_local, self.ninput), dtype=bool)
+        good_day_flag = np.zeros(n_local, dtype=bool)
 
         # Loop over days
         for i_local, i_dist in enumerate(i_day):
@@ -510,8 +510,8 @@ class MonitorCorrInput(task.SingleTask):
                 self._save_output(input_mon)
 
         # Gather the flags from all nodes
-        input_mask_all = np.zeros((self.ndays, self.ninput), dtype=np.bool)
-        good_day_flag_all = np.zeros(self.ndays, dtype=np.bool)
+        input_mask_all = np.zeros((self.ndays, self.ninput), dtype=bool)
+        good_day_flag_all = np.zeros(self.ndays, dtype=bool)
 
         mpiutil.world.Allgather(input_mask, input_mask_all)
         mpiutil.world.Allgather(good_day_flag, good_day_flag_all)
@@ -523,7 +523,7 @@ class MonitorCorrInput(task.SingleTask):
         # ONLY for this day is greater than some user specified threshold
         if np.sum(good_day_flag_all) >= max(2, self.n_day_min):
 
-            n_uniq_bad = np.zeros(self.ndays, dtype=np.int)
+            n_uniq_bad = np.zeros(self.ndays, dtype=np.int64)
             dindex = np.arange(self.ndays)[good_day_flag_all]
 
             for ii, day in enumerate(dindex):
@@ -647,7 +647,7 @@ class TestCorrInput(task.SingleTask):
         # Find the indices for frequencies in this timestream nearest
         # to the requested test frequencies.
         if self.test_freq is None:
-            freq_ind = np.arange(len(freqmap), dtype=np.int)
+            freq_ind = np.arange(len(freqmap), dtype=np.int64)
         else:
             freq_ind = [
                 np.argmin(np.abs(freqmap["centre"] - freq)) for freq in self.test_freq
@@ -659,8 +659,8 @@ class TestCorrInput(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Create local flag arrays (inputs are good by default)
-        passed_test = np.ones((nfreq, timestream.ninput, self.ntest), dtype=np.int)
-        is_test_freq = np.zeros(nfreq, dtype=np.bool)
+        passed_test = np.ones((nfreq, timestream.ninput, self.ntest), dtype=np.int64)
+        is_test_freq = np.zeros(nfreq, dtype=bool)
 
         # Mark any non-CHIME inputs as bad
         for i in range(timestream.ninput):
@@ -716,9 +716,9 @@ class TestCorrInput(task.SingleTask):
 
         # Gather the input flags from all nodes
         passed_test_all = np.zeros(
-            (timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int
+            (timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int64
         )
-        is_test_freq_all = np.zeros(timestream.comm.size, dtype=np.bool)
+        is_test_freq_all = np.zeros(timestream.comm.size, dtype=bool)
 
         timestream.comm.Allgather(passed_test, passed_test_all)
         timestream.comm.Allgather(is_test_freq, is_test_freq_all)
@@ -805,12 +805,12 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         input_mask_all = np.asarray(self._accumulated_input_mask)
 
-        good_day_flag = np.ones(ncsd, dtype=np.bool)
+        good_day_flag = np.ones(ncsd, dtype=bool)
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if ncsd >= max(2, self.n_day_min):
 
-            n_uniq_bad = np.zeros(ncsd, dtype=np.int)
+            n_uniq_bad = np.zeros(ncsd, dtype=np.int64)
             dindex = np.arange(ncsd)[good_day_flag]
 
             for ii, day in enumerate(dindex):
@@ -1251,7 +1251,7 @@ def daytime_flag(time):
         Boolean flag that is True if the time occured during the day and False otherwise.
     """
     time = np.atleast_1d(time)
-    flag = np.zeros(time.size, dtype=np.bool)
+    flag = np.zeros(time.size, dtype=bool)
 
     rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
@@ -1283,7 +1283,7 @@ def transit_flag(body, time, nsigma=2.0):
     obs = ephemeris.chime
 
     # Create boolean flag
-    flag = np.zeros(time.size, dtype=np.bool)
+    flag = np.zeros(time.size, dtype=bool)
 
     # Find transit times
     transit_times = obs.transit_times(
@@ -1325,9 +1325,9 @@ def taper_mask(mask, nwidth, outer=False):
 
     num = len(mask)
     if outer:
-        tapered_mask = 1.0 - mask.astype(np.float)
+        tapered_mask = 1.0 - mask.astype(np.float64)
     else:
-        tapered_mask = mask.astype(np.float)
+        tapered_mask = mask.astype(np.float64)
 
     taper = np.hanning(2 * nwidth - 1)
 
@@ -1410,7 +1410,7 @@ class MaskDay(task.SingleTask):
                 / (np.abs(np.median(np.diff(ra))) * 240.0 * ephemeris.SIDEREAL_S)
             )
 
-            flag = np.zeros(ra.size, dtype=np.bool)
+            flag = np.zeros(ra.size, dtype=bool)
             for cc in csd:
                 time = ephemeris.csd_to_unix(cc + ra / 360.0)
                 flag |= self._flag(time)
@@ -1479,7 +1479,7 @@ class MaskSource(MaskDay):
 
     def _flag(self, time):
 
-        flag = np.zeros(time.size, dtype=np.bool)
+        flag = np.zeros(time.size, dtype=bool)
         for body in self.body:
             flag |= transit_flag(body, time, nsigma=self.nsigma)
 
