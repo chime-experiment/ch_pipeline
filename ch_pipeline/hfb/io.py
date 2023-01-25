@@ -1,6 +1,7 @@
 """HFB tasks for reading and writing files
 """
 
+import os
 import gc
 import numpy as np
 
@@ -16,8 +17,8 @@ from beam_model.formed import FFTFormedActualBeamModel
 from .containers import HFBReader
 
 
-class LoadHFBDataFiles(io.BaseLoadFiles):
-    """Load CHIME HFB data from a file list passed into the setup routine.
+class BaseLoadHFBDataFiles(io.BaseLoadFiles):
+    """Base class for loading CHIME HFB data from files on disk into containers.
 
     Attributes
     ----------
@@ -48,29 +49,16 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
     passed, all frequencies/beams are read.
     """
 
-    files = None
-
-    _file_ptr = 0
-
     source_dec = config.Property(proptype=float, default=None)
     beam_ew_include = config.Property(proptype=list, default=None)
     freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_range = config.Property(proptype=list, default=[])
 
-    def setup(self, files):
-        """Set the list of files to load; set up frequency and beam selection.
-
-        Parameters
-        ----------
-        files : list
-        """
-        if not isinstance(files, (list, tuple)):
-            raise RuntimeError("Argument must be list of files.")
-
-        self.files = files
+    def setup(self):
+        """Set up frequency and beam selection."""
 
         # Resolve any selections provided through the `selections` attribute
-        self._sel = self._resolve_sel()
+        super().setup()
 
         # Set up frequency selection.
         cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
@@ -92,56 +80,13 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
             beam_index_ns = self._find_beam()
             self.beam_sel = slice(beam_index_ns, 1024, 256)
             if self.beam_ew_include:
-                self.beam_sel = list(np.arange(1024)[self.beam_sel][self.beam_ew_include])
+                self.beam_sel = list(
+                    np.arange(1024)[self.beam_sel][self.beam_ew_include]
+                )
         elif "beam_sel" in self._sel:
             self.beam_sel = self._sel["beam_sel"]
         else:
             self.beam_sel = slice(None)
-
-    def process(self):
-        """Load in each sidereal day.
-
-        Returns
-        -------
-        ts : HFBData
-            The timestream of each sidereal day.
-        """
-
-        if len(self.files) == self._file_ptr:
-            raise pipeline.PipelineStopIteration
-
-        # Collect garbage to remove any prior data objects
-        gc.collect()
-
-        # Fetch and remove the first item in the list
-        file_ = self.files[self._file_ptr]
-        self._file_ptr += 1
-
-        # Handle file lists including time ranges
-        if isinstance(file_, tuple):
-            time_range = file_[1]
-            file_ = file_[0]
-        else:
-            time_range = (None, None)
-
-        # Set up the reader
-        rd = HFBReader(file_)
-
-        # Select time range
-        rd.select_time_range(time_range[0], time_range[1])
-
-        # Select frequency range
-        rd.freq_sel = self.freq_sel
-
-        # Select beams
-        rd.beam_sel = self.beam_sel
-
-        # Read file(s)
-        self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        ts = rd.read()
-
-        # Return timestream
-        return ts
 
     def _find_beam(self):
         """Find NS beam number of beam closest to source at transit
@@ -176,3 +121,95 @@ class LoadHFBDataFiles(io.BaseLoadFiles):
         beam_index_ns = np.abs(beams_xy[:, 1] - src_y).argmin()
 
         return beam_index_ns
+
+    def _load_files(self, files, time_range=(None, None)):
+        # Load a file into the HFBData container.
+
+        for filename in files:
+            if not os.path.exists(filename):
+                raise RuntimeError(f"File does not exist: {filename}")
+
+        self.log.info(f"Loading file {files}")
+        self.log.debug(f"Reading with time range: {time_range}")
+        self.log.debug(f"Reading with freq selections: {self.freq_sel}")
+        self.log.debug(f"Reading with beam selections: {self.beam_sel}")
+
+        # Set up the reader
+        rd = HFBReader(files)
+
+        # Select time range
+        rd.select_time_range(time_range[0], time_range[1])
+
+        # Select frequency range
+        rd.freq_sel = self.freq_sel
+
+        # Select beams
+        rd.beam_sel = self.beam_sel
+
+        # Read file
+        cont = rd.read()
+
+        if self.redistribute is not None:
+            cont.redistribute(self.redistribute)
+
+        return cont
+
+
+class LoadHFBDataFromFilelist(BaseLoadHFBDataFiles):
+    """Load CHIME HFB data from a file list passed into the setup routine."""
+
+    files = None
+
+    _file_ptr = 0
+
+    def setup(self, files):
+        """Set the list of files to load; set up frequency and beam selection.
+
+        Parameters
+        ----------
+        files : list
+            List of lists of filenames, or list of tuples, where each tuple
+            consists of a list of filenames and a tuple of time bounds. Each
+            item in the main list will be places in a single HFBData container.
+        """
+        if not isinstance(files, (list, tuple)):
+            raise RuntimeError("Argument must be list of lists of files.")
+
+        self.files = files
+
+        # Call the baseclass setup to resolve any selections
+        super().setup()
+
+    def process(self):
+        """Load in each sidereal day.
+
+        Returns
+        -------
+        ts : HFBData
+            The timestream of each sidereal day.
+        """
+
+        if len(self.files) == self._file_ptr:
+            raise pipeline.PipelineStopIteration
+
+        # Collect garbage to remove any prior data objects
+        gc.collect()
+
+        # Fetch and remove the first item in the list
+        file_ = self.files[self._file_ptr]
+        self._file_ptr += 1
+
+        # Handle file lists including time ranges
+        if isinstance(file_, tuple):
+            time_range = file_[1]
+            file_ = file_[0]
+        else:
+            time_range = (None, None)
+
+        # Read file(s)
+        self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}.")
+
+        ts = self._load_files(file_, time_range)
+
+        # Return timestream
+        return ts
