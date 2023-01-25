@@ -77,7 +77,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
             se_times = get_times(self.files)
             se_csd = ephemeris.csd(se_times)
-            days = np.unique(np.floor(se_csd).astype(np.int))
+            days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Construct list of files in each day
             filemap = [
@@ -357,7 +357,7 @@ class SiderealMean(task.SingleTask):
         if "ra" in sstream.index_map:
             ra = sstream.ra
             timestamp = {dd: ephemeris.csd_to_unix(dd + ra / 360.0) for dd in lsd_list}
-            flag_quiet = np.ones(ra.size, dtype=np.bool)
+            flag_quiet = np.ones(ra.size, dtype=bool)
 
         elif "time" in sstream.index_map:
 
@@ -384,7 +384,7 @@ class SiderealMean(task.SingleTask):
 
         if self.mask_ra:
             # Only use data within user specified ranges of RA
-            mask_ra = np.zeros(ra.size, dtype=np.bool)
+            mask_ra = np.zeros(ra.size, dtype=bool)
             for ra_range in self.mask_ra:
                 self.log.info(
                     "Using data between RA = [%0.2f, %0.2f] deg" % tuple(ra_range)

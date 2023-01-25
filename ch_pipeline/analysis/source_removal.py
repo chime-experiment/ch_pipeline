@@ -387,7 +387,7 @@ class SolveSources(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -696,7 +696,7 @@ class SubtractSources(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -868,7 +868,7 @@ class SolveSourcesWithBeam(SolveSources):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
@@ -1054,7 +1054,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod_new["input_a"][cj], prod_new["input_b"][cj] = (
                 prod_new["input_b"][cj],
