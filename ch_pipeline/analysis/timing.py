@@ -381,3 +381,45 @@ class ConstructTimingCorrection(task.SingleTask):
 
         # Return timing correction
         return tcorr
+
+
+class CentreTimeSamples(task.SingleTask):
+    """Apply a shift to container time samples.
+
+    Parameters
+    ----------
+    method : str [center, value]
+        How to shift the time samples. If `center`, samples are shifted
+        by half the absolute median difference. If `value`, samples are
+        shifted by the value of `shift` property.
+    shift : float
+        Shift to apply to the time samples, if `method` is `value`
+    """
+
+    direction = config.enum(["forward", "back"], default="forward")
+
+    def process(self, cont):
+        """Apply a shift to the container `time` property.
+
+        Parameters
+        ----------
+        cont : draco.core.containers.TODContainer, or container
+            which inherits from it
+
+        Returns
+        -------
+        cont : same container with `index_map` time shifted
+        """
+
+        # Extract the time array
+        time = cont.time[:]
+
+        # Gets the absolute centering shift
+        shift = abs(np.median(np.diff(time)) / 2)
+
+        if self.direction == "back":
+            shift *= -1
+
+        time += shift
+
+        return cont
