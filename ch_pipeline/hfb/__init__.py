@@ -6,6 +6,7 @@ CHIME HFB Pipeline
 .. autosummary::
     :toctree:
 
+    analysis
     containers
     flagging
     io
