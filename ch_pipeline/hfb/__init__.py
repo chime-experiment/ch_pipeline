@@ -7,5 +7,6 @@ CHIME HFB Pipeline
     :toctree:
 
     containers
+    flagging
 
 """
