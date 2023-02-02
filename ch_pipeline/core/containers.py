@@ -989,6 +989,8 @@ class CHIMETimeStream(TimeStream, RawContainer):
     containers API.
     """
 
+    _axes = {"time": {"index_alignment": "left"}}
+
     # Add in the extra datasets contained within the CHIME corrdata time streams
     _dataset_spec = {
         "flags/dataset_id": {
