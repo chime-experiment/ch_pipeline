@@ -177,3 +177,88 @@ class HFBDivideByTemplate(task.SingleTask):
         out.weight[:] = weight
 
         return out
+
+
+class HFBStackDays(task.SingleTask):
+    """Combine HFB data of multiple days.
+
+    Attributes
+    ----------
+    weighting: str (default: "inverse_variance")
+        The weighting to use in the stack.
+        Either `uniform` or `inverse_variance`.
+    """
+
+    stack = None
+
+    weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
+
+    def process(self, sdata):
+        """Add weights and data of one day to stack.
+
+        Parameters
+        ----------
+        sdata : hfb.containers.HFBTimeAverage, hfb.containers.HFBHighResTimeAverage
+            Individual (time-averaged) day to add to stack.
+        """
+
+        # If this is our first sidereal day, then initialize the
+        # container that will hold the stack.
+        if self.stack is None:
+
+            self.stack = containers.empty_like(sdata)
+
+            self.stack.add_dataset("nsample")
+
+            self.stack.redistribute("freq")
+
+            # Initialize all datasets to zero
+            for data in self.stack.datasets.values():
+                data[:] = 0
+
+        # Accumulate the total number of samples
+        dtype = self.stack.nsample.dtype
+        count = (sdata.weight[:] > 0.0).astype(dtype)
+        self.stack.nsample[:] += count
+
+        # Accumulate variances or inverse variances
+        if self.weighting == "uniform":
+            # Accumulate the variances in the stack.weight dataset.
+            self.stack.weight[:] += tools.invert_no_zero(sdata.weight[:])
+        else:
+            # We are using inverse variance weights.  In this case,
+            # we accumulate the inverse variances in the stack.weight
+            # dataset.
+            self.stack.weight[:] += sdata.weight[:]
+
+        # Accumulate data
+        if self.weighting == "uniform":
+            self.stack.hfb[:] += sdata.hfb[:]
+        else:
+            self.stack.hfb[:] += sdata.weight[:] * sdata.hfb[:]
+
+    def process_finish(self):
+        """Normalize and return stacked weights and data."""
+
+        # Compute weights and data
+        if self.weighting == "uniform":
+
+            # Number of days with non-zero weight
+            norm = self.stack.nsample[:].astype(np.float32)
+
+            # For uniform weighting, invert the accumulated variances and
+            # multiply by number of days to finalize stack.weight.
+            self.stack.weight[:] = norm * tools.invert_no_zero(self.stack.weight[:])
+
+            # For uniform weighting, simply normalize accumulated data by number
+            # of days to finalize stack.hfb.
+            self.stack.hfb[:] /= norm
+
+        else:
+
+            # For inverse variance weighting, the weight dataset doesn't have to
+            # be normalized (it is simply the sum of the weights). The accumulated
+            # data have to be normalized by the sum of the weights.
+            self.stack.hfb[:] *= tools.invert_no_zero(self.stack.weight[:])
+
+        return self.stack
