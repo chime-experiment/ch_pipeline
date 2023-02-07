@@ -3,11 +3,13 @@
 import numpy as np
 
 from caput import config
+from caput import mpiarray
 
 from draco.core import task
 from draco.util import tools
 
 from . import containers
+from .containers import HFBHighResData
 
 
 class HFBMakeTimeAverage(task.SingleTask):
@@ -83,7 +85,7 @@ class MakeHighFreqRes(task.SingleTask):
     """Combine frequency and sub-frequency axes"""
 
     def process(self, stream):
-        """Convert HFBData to HFBHighFreqRes container
+        """Convert HFBData to HFBHighResData container
 
         Parameters
         ----------
@@ -92,7 +94,7 @@ class MakeHighFreqRes(task.SingleTask):
 
         Returns
         -------
-        out : HFBHighFreqRes
+        out : HFBHighResData
             Data with single high-resolution frequency axis
         """
 
@@ -106,15 +108,25 @@ class MakeHighFreqRes(task.SingleTask):
         weight = stream.weight[:]
 
         # Change data and weights to numpy array, so that it can be reshaped
-        data = data.local_array
-        weight = weight.local_array
+        if type(data) == mpiarray.MPIArray:
+            data = data.local_array
+            weight = weight.local_array
+
+        # Make combined frequency axis
+        cfreq = stream._data["index_map"]["freq"]["centre"]
+        subfreq = stream._data["index_map"]["subfreq"][:]
+        freq = (cfreq[:, np.newaxis] + subfreq).flatten()
+
+        # Retrieve beam and time axes
+        beam = stream._data["index_map"]["beam"][:]
+        time = stream.time
 
         # Combine frequency and sub-frequency axes
         data = data.reshape(nfreq * nsubfreq, nbeam, -1)
         weight = weight.reshape(nfreq * nsubfreq, nbeam, -1)
 
         # Create container to hold output
-        out = containers.HFBHighFreqRes(axes_from=["freq", "beam", "time"], attrs_from=stream)
+        out = HFBHighResData(freq=freq, beam=beam, time=time, attrs_from=stream)
 
         # Save data to output container
         out.hfb[:] = data
