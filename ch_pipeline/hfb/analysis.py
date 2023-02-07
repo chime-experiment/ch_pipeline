@@ -1,6 +1,5 @@
 """Tasks for HFB analysis
 """
-
 import numpy as np
 
 from caput import config
@@ -78,4 +77,44 @@ class HFBMakeTimeAverage(task.SingleTask):
         out.weight[:] = weight
 
         # Return output container
+        return out
+
+
+class HFBDivideByTemplate(task.SingleTask):
+    """Divide HFB data by template of time-averaged HFB data.
+
+    Used for flattening sub-frequency band shape by dividing on-source data by a template.
+    """
+
+    def process(self, stream, template):
+        """Divide data by template and place in HFBData container.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights; the numerator in the division.
+
+        template : containers.HFBTimeAverage
+            Container with time-averaged HFB data and weights; the denominator in the division.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights; the result of the division.
+        """
+
+        # Divide data by template
+        data = stream.hfb[:] / template.hfb[:, :, :, np.newaxis]
+
+        # Divide variance by square of template, which means to
+        # multiply weight by square of template
+        weight = stream.weight[:] * template.hfb[:, :, :, np.newaxis] ** 2
+
+        # Create container to hold output
+        out = containers.HFBData(axes_from=stream, attrs_from=stream)
+
+        # Save data and weights to output container
+        out.hfb[:] = data
+        out.weight[:] = weight
+
         return out
