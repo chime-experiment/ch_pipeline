@@ -72,6 +72,50 @@ class HFBMakeTimeAverage(task.SingleTask):
         # Create container to hold output
         out = out_cont(axes_from=stream, attrs_from=stream)
 
+        # Save data and weights to output container
+        out.hfb[:] = data
+        out.weight[:] = weight
+
+        return out
+
+
+class MakeHighFreqRes(task.SingleTask):
+    """Combine frequency and sub-frequency axes"""
+
+    def process(self, stream):
+        """Convert HFBData to HFBHighFreqRes container
+
+        Parameters
+        ----------
+        stream : HFBData
+            Data with frequency and subfrequency axis
+
+        Returns
+        -------
+        out : HFBHighFreqRes
+            Data with single high-resolution frequency axis
+        """
+
+        # Retrieve shape of data
+        nfreq = len(stream._data["index_map"]["freq"]["centre"][:])
+        nsubfreq = len(stream._data["index_map"]["subfreq"][:])
+        nbeam = len(stream._data["index_map"]["beam"][:])
+
+        # Retrieve data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        data = data.local_array
+        weight = weight.local_array
+
+        # Combine frequency and sub-frequency axes
+        data = data.reshape(nfreq * nsubfreq, nbeam, -1)
+        weight = weight.reshape(nfreq * nsubfreq, nbeam, -1)
+
+        # Create container to hold output
+        out = containers.HFBHighFreqRes(axes_from=["freq", "beam", "time"], attrs_from=stream)
+
         # Save data to output container
         out.hfb[:] = data
         out.weight[:] = weight
@@ -95,7 +139,8 @@ class HFBDivideByTemplate(task.SingleTask):
             Container with HFB data and weights; the numerator in the division.
 
         template : containers.HFBTimeAverage
-            Container with time-averaged HFB data and weights; the denominator in the division.
+            Container with time-averaged HFB data and weights; the denominator in the
+            division.
 
         Returns
         -------
