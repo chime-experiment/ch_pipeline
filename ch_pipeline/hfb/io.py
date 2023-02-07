@@ -26,7 +26,8 @@ class BaseLoadFiles(io.BaseLoadFiles):
         Declination of source in degrees.
     beam_ew_include : list
         List of East-West beam indices (i.e., in the range 0-3) to include.
-        By default all four EW beams are included.
+        By default all four EW beams are included. Does not work in combination
+        with `freq_phys_list`.
     freq_phys_range : list
         Start and stop of physical frequencies (in MHz) to read. The mean is
         used as reference frequency in evaluating beam positions (for selecting
@@ -34,7 +35,8 @@ class BaseLoadFiles(io.BaseLoadFiles):
     freq_phys_list : list
         List of physical frequencies (in MHz) to read. The first frequency
         in this list is also used in evaluating beam positions (for selecting
-        the beams closest to a transiting source).
+        the beams closest to a transiting source). Does not work in combination
+        with `beam_ew_include`.
 
     Selections
     ----------
@@ -63,8 +65,10 @@ class BaseLoadFiles(io.BaseLoadFiles):
         # Set up frequency selection.
         cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
         if self.freq_phys_range:
-            freq_index_start = np.argmin(np.abs(cfreq - self.freq_phys_range[0]))
-            freq_index_stop = np.argmin(np.abs(cfreq - self.freq_phys_range[-1]))
+            freq_phys_start = np.max(self.freq_phys_range)
+            freq_phys_stop = np.min(self.freq_phys_range)
+            freq_index_start = np.argmin(np.abs(cfreq - freq_phys_start))
+            freq_index_stop = np.argmin(np.abs(cfreq - freq_phys_stop))
             self.freq_sel = slice(freq_index_start, freq_index_stop)
         elif self.freq_phys_list:
             self.freq_sel = sorted(
