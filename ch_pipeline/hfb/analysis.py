@@ -205,7 +205,6 @@ class HFBStackDays(task.SingleTask):
         # If this is our first sidereal day, then initialize the
         # container that will hold the stack.
         if self.stack is None:
-
             self.stack = containers.empty_like(sdata)
 
             self.stack.add_dataset("nsample")
@@ -242,7 +241,6 @@ class HFBStackDays(task.SingleTask):
 
         # Compute weights and data
         if self.weighting == "uniform":
-
             # Number of days with non-zero weight
             norm = self.stack.nsample[:].astype(np.float32)
 
@@ -255,7 +253,6 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] /= norm
 
         else:
-
             # For inverse variance weighting, the weight dataset doesn't have to
             # be normalized (it is simply the sum of the weights). The accumulated
             # data have to be normalized by the sum of the weights.
