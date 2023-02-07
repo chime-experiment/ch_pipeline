@@ -9,7 +9,7 @@ from draco.core import task
 from .containers import HFBRFIMask
 
 
-class HFBRadiometerNoiseTestRFIMask(task.SingleTask):
+class HFBRadiometerRFIFlagging(task.SingleTask):
     """Identify RFI in HFB data using the radiometer noise test, averaging over beams.
 
     Attributes
@@ -123,6 +123,7 @@ class ApplyHFBMask(task.SingleTask):
                 slc[ww] = None
 
         # Extract mask, transform to regular numpy array
+        # TODO: Changes needed when distributed reading work for HFBData
         flag = mask.mask[:].local_array
 
         # Expand mask to same dimension as weight array
