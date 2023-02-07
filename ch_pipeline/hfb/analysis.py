@@ -259,3 +259,33 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] *= tools.invert_no_zero(self.stack.weight[:])
 
         return self.stack
+
+
+class HFBBeamAverage(task.SingleTask):
+    """Taking the average of HFB data over beam axis.
+    """
+
+    def process(self, stream):
+        """Take average over beam axis.
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBFlat
+            Average of stream over time axis. The output is used for flattening the sub-frequency
+            band shape.
+        """
+
+        # Extract data array, averaging over beam axis.
+        data = np.sum(stream.hfb[:], axis=2)/np.count_nonzero(stream.hfb[:], axis=2)
+        weight = np.sum(stream.weight[:], axis=2)/np.count_nonzero(stream.weight[:], axis=2)
+
+        # Create container to hold output
+        out = containers.HFBBeamAverage(axes_from=stream, attrs_from=stream)
+
+        # Save data to output container
+        out.average[:] = data
+        out.weight[:] = weight
+
+        # Return output container
+        return out
