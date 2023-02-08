@@ -7,7 +7,7 @@ pre-map making flagging on m-modes.
 from typing import Union
 import numpy as np
 
-from caput import mpiutil, mpiarray, memh5, config, pipeline
+from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
@@ -81,7 +81,7 @@ class RFIFilter(task.SingleTask):
 
         Returns
         -------
-        out : core.containers.RFIMask
+        out : containers.RFIMask or dcontainers.RFIMask
             Boolean mask that can be applied to a timestream container
             with the task `ApplyCorrInputMask` to mask contaminated
             frequencies and time samples.
@@ -246,7 +246,7 @@ class ChannelFlagger(task.SingleTask):
         ]
 
         # Create a global channel weight (channels are bad by default)
-        chan_mask = np.zeros(timestream.ninput, dtype=np.int)
+        chan_mask = np.zeros(timestream.ninput, dtype=np.int64)
 
         # Mark any powered CHIME channels as good
         chan_mask[:] = tools.is_chime_on(inputmap)
@@ -284,16 +284,16 @@ class ChannelFlagger(task.SingleTask):
                 # frequency (explicit cast to int or numpy complains,
                 # this should really be done upstream).
                 if not self.ignore_gains:
-                    chan_mask[test_channels] *= good_gains.astype(np.int)
+                    chan_mask[test_channels] *= good_gains.astype(np.int64)
                 if not self.ignore_noise:
-                    chan_mask[test_channels] *= good_noise.astype(np.int)
+                    chan_mask[test_channels] *= good_noise.astype(np.int64)
                 if not self.ignore_fit:
-                    chan_mask[test_channels] *= good_fit.astype(np.int)
+                    chan_mask[test_channels] *= good_fit.astype(np.int64)
 
         # Gather the channel flags from all nodes, and combine into a
         # single flag (checking that all tests pass)
         chan_mask_all = np.zeros(
-            (timestream.comm.size, timestream.ninput), dtype=np.int
+            (timestream.comm.size, timestream.ninput), dtype=np.int64
         )
         timestream.comm.Allgather(chan_mask, chan_mask_all)
         chan_mask = np.prod(chan_mask_all, axis=0)
@@ -352,7 +352,7 @@ class MonitorCorrInput(task.SingleTask):
             # Determine the days in each file and the days in all files
             se_times = get_times(files)
             se_csd = ephemeris.csd(se_times)
-            days = np.unique(np.floor(se_csd).astype(np.int))
+            days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Determine the relevant files for each day
             filemap = [(day, _days_in_csd(day, se_csd, extra=0.005)) for day in days]
@@ -425,7 +425,7 @@ class MonitorCorrInput(task.SingleTask):
             Note that this is not output to the pipeline.  It is an
             ancillary data product that is saved when one sets the
             'save' parameter in the configuration file.
-        csd_flag : container.SiderealDayFlag
+        csd_flag : containers.SiderealDayFlag
             Contains a mask that indicates bad sidereal days, determined as
             days that contribute a large number of unique bad correlator
             inputs.  Note that this is not output to the pipeline.
@@ -447,8 +447,8 @@ class MonitorCorrInput(task.SingleTask):
         i_day = np.arange(i_day_start, i_day_end)
 
         # Create local arrays to hold results
-        input_mask = np.ones((n_local, self.ninput), dtype=np.bool)
-        good_day_flag = np.zeros(n_local, dtype=np.bool)
+        input_mask = np.ones((n_local, self.ninput), dtype=bool)
+        good_day_flag = np.zeros(n_local, dtype=bool)
 
         # Loop over days
         for i_local, i_dist in enumerate(i_day):
@@ -510,8 +510,8 @@ class MonitorCorrInput(task.SingleTask):
                 self._save_output(input_mon)
 
         # Gather the flags from all nodes
-        input_mask_all = np.zeros((self.ndays, self.ninput), dtype=np.bool)
-        good_day_flag_all = np.zeros(self.ndays, dtype=np.bool)
+        input_mask_all = np.zeros((self.ndays, self.ninput), dtype=bool)
+        good_day_flag_all = np.zeros(self.ndays, dtype=bool)
 
         mpiutil.world.Allgather(input_mask, input_mask_all)
         mpiutil.world.Allgather(good_day_flag, good_day_flag_all)
@@ -523,7 +523,7 @@ class MonitorCorrInput(task.SingleTask):
         # ONLY for this day is greater than some user specified threshold
         if np.sum(good_day_flag_all) >= max(2, self.n_day_min):
 
-            n_uniq_bad = np.zeros(self.ndays, dtype=np.int)
+            n_uniq_bad = np.zeros(self.ndays, dtype=np.int64)
             dindex = np.arange(self.ndays)[good_day_flag_all]
 
             for ii, day in enumerate(dindex):
@@ -633,7 +633,7 @@ class TestCorrInput(task.SingleTask):
 
         Returns
         -------
-        corr_input_test : container.CorrInputTest
+        corr_input_test : containers.CorrInputTest
             Container with the results of all tests and a
             input mask that combines all tests and frequencies.
         """
@@ -647,7 +647,7 @@ class TestCorrInput(task.SingleTask):
         # Find the indices for frequencies in this timestream nearest
         # to the requested test frequencies.
         if self.test_freq is None:
-            freq_ind = np.arange(len(freqmap), dtype=np.int)
+            freq_ind = np.arange(len(freqmap), dtype=np.int64)
         else:
             freq_ind = [
                 np.argmin(np.abs(freqmap["centre"] - freq)) for freq in self.test_freq
@@ -659,8 +659,8 @@ class TestCorrInput(task.SingleTask):
         efreq = sfreq + nfreq
 
         # Create local flag arrays (inputs are good by default)
-        passed_test = np.ones((nfreq, timestream.ninput, self.ntest), dtype=np.int)
-        is_test_freq = np.zeros(nfreq, dtype=np.bool)
+        passed_test = np.ones((nfreq, timestream.ninput, self.ntest), dtype=np.int64)
+        is_test_freq = np.zeros(nfreq, dtype=bool)
 
         # Mark any non-CHIME inputs as bad
         for i in range(timestream.ninput):
@@ -716,9 +716,9 @@ class TestCorrInput(task.SingleTask):
 
         # Gather the input flags from all nodes
         passed_test_all = np.zeros(
-            (timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int
+            (timestream.comm.size, timestream.ninput, self.ntest), dtype=np.int64
         )
-        is_test_freq_all = np.zeros(timestream.comm.size, dtype=np.bool)
+        is_test_freq_all = np.zeros(timestream.comm.size, dtype=bool)
 
         timestream.comm.Allgather(passed_test, passed_test_all)
         timestream.comm.Allgather(is_test_freq, is_test_freq_all)
@@ -781,7 +781,7 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Parameters
         ----------
-        corr_input_mask : container.CorrInputMask
+        corr_input_mask : containers.CorrInputMask
         """
 
         if not self._accumulated_input_mask:
@@ -799,18 +799,18 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         Returns
         --------
-        corr_input_mask : container.CorrInputMask
+        corr_input_mask : containers.CorrInputMask
         """
         ncsd = len(self._csd)
 
         input_mask_all = np.asarray(self._accumulated_input_mask)
 
-        good_day_flag = np.ones(ncsd, dtype=np.bool)
+        good_day_flag = np.ones(ncsd, dtype=bool)
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if ncsd >= max(2, self.n_day_min):
 
-            n_uniq_bad = np.zeros(ncsd, dtype=np.int)
+            n_uniq_bad = np.zeros(ncsd, dtype=np.int64)
             dindex = np.arange(ncsd)[good_day_flag]
 
             for ii, day in enumerate(dindex):
@@ -863,13 +863,13 @@ class ApplyCorrInputMask(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
         cmask : containers.RFIMask, containers.CorrInputMask, etc.
 
         Returns
         -------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
         """
 
         # Make sure containers are distributed across frequency
@@ -954,11 +954,11 @@ class ApplySiderealDayFlag(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData / containers.SiderealStream
+        timestream : andata.CorrData / dcontainers.SiderealStream
 
         Returns
         -------
-        timestream : andata.CorrData / containers.SiderealStream or None
+        timestream : andata.CorrData / dcontainers.SiderealStream or None
         """
 
         # Fetch the csd from the timestream attributes
@@ -1019,11 +1019,11 @@ class NanToNum(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
         Returns
         --------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
         """
 
         # Make sure we are distributed over frequency
@@ -1120,7 +1120,7 @@ class RadiometerWeight(task.SingleTask):
             # Copy attributes
             memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
-        elif isinstance(timestream, containers.SiderealStream):
+        elif isinstance(timestream, dcontainers.SiderealStream):
 
             self.log.debug(
                 "Scaling weights by outer product of inverse receiver temperature."
@@ -1166,7 +1166,7 @@ class BadNodeFlagger(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream
+        timestream : andata.CorrData or dcontainers.SiderealStream
 
         Returns
         -------
@@ -1251,7 +1251,7 @@ def daytime_flag(time):
         Boolean flag that is True if the time occured during the day and False otherwise.
     """
     time = np.atleast_1d(time)
-    flag = np.zeros(time.size, dtype=np.bool)
+    flag = np.zeros(time.size, dtype=bool)
 
     rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
@@ -1283,7 +1283,7 @@ def transit_flag(body, time, nsigma=2.0):
     obs = ephemeris.chime
 
     # Create boolean flag
-    flag = np.zeros(time.size, dtype=np.bool)
+    flag = np.zeros(time.size, dtype=bool)
 
     # Find transit times
     transit_times = obs.transit_times(
@@ -1325,9 +1325,9 @@ def taper_mask(mask, nwidth, outer=False):
 
     num = len(mask)
     if outer:
-        tapered_mask = 1.0 - mask.astype(np.float)
+        tapered_mask = 1.0 - mask.astype(np.float64)
     else:
-        tapered_mask = mask.astype(np.float)
+        tapered_mask = mask.astype(np.float64)
 
     taper = np.hanning(2 * nwidth - 1)
 
@@ -1376,12 +1376,12 @@ class MaskDay(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream or equivalent
+        sstream : dcontainers.SiderealStream or equivalent
             Unmasked sidereal stack.
 
         Returns
         -------
-        mstream : containers.SiderealStream or equivalent
+        mstream : dcontainers.SiderealStream or equivalent
             Masked sidereal stream.
         """
         # Redistribute over frequency
@@ -1410,7 +1410,7 @@ class MaskDay(task.SingleTask):
                 / (np.abs(np.median(np.diff(ra))) * 240.0 * ephemeris.SIDEREAL_S)
             )
 
-            flag = np.zeros(ra.size, dtype=np.bool)
+            flag = np.zeros(ra.size, dtype=bool)
             for cc in csd:
                 time = ephemeris.csd_to_unix(cc + ra / 360.0)
                 flag |= self._flag(time)
@@ -1479,7 +1479,7 @@ class MaskSource(MaskDay):
 
     def _flag(self, time):
 
-        flag = np.zeros(time.size, dtype=np.bool)
+        flag = np.zeros(time.size, dtype=bool)
         for body in self.body:
             flag |= transit_flag(body, time, nsigma=self.nsigma)
 
@@ -1535,12 +1535,12 @@ class MaskRA(task.SingleTask):
 
         Parameters
         ----------
-        sstream : containers.SiderealStream
+        sstream : dcontainers.SiderealStream
             Unmasked sidereal stack.
 
         Returns
         -------
-        mstream : containers.SiderealStream
+        mstream : dcontainers.SiderealStream
             Masked sidereal stream.
         """
 
@@ -1623,11 +1623,11 @@ class MaskCHIMEData(task.SingleTask):
 
         Parameters
         ----------
-        mmodes : containers.MModes
+        mmodes : dcontainers.MModes
 
         Returns
         -------
-        mmodes : containers.MModes
+        mmodes : dcontainers.MModes
         """
 
         tel = self.telescope
@@ -2129,12 +2129,12 @@ class DataFlagger(task.SingleTask):
 
         Parameters
         ----------
-        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+        timestream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
             Timestream to flag.
 
         Returns
         -------
-        timestream : andata.CorrData or containers.SiderealStream or container.TimeStream
+        timestream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
             Returns the same timestream object with a modified weight dataset.
         """
         # Redistribute over the frequency direction
@@ -2241,3 +2241,140 @@ class DataFlagger(task.SingleTask):
         )
 
         return timestream
+
+
+class ApplyInputFlag(task.SingleTask):
+    """Flag bad inputs.
+
+    Uses the flaginput acquisition generated by the real-time pipeline.
+    """
+
+    def setup(self, files, observer=None):
+        """Load flaginput files that cover full span of time to be processed.
+
+        Parameters
+        ----------
+        files: list of str
+            List of paths to files containing the input flags.
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+        self.observer = ephemeris.chime if observer is None else observer
+
+        self.input_flags = andata.FlagInputData.from_acq_h5(files, datasets=["flag"])
+
+    def process(self, data):
+        """Lookup and apply the relevant input flags.
+
+        Parameters
+        ----------
+        data: TODContainer, SiderealStream, TrackBeam
+            Must have `input` axis.
+
+        Returns
+        -------
+        data: TODContainer, SiderealStream, TrackBeam
+            The input container with the weight dataset
+            set to zero for bad inputs.
+        """
+        axis = list(data.weight.attrs["axis"])
+        daxis = {ax: ind for ind, ax in enumerate(axis)}
+
+        if "input" not in daxis:
+            raise RuntimeError("The weight dataset must have an input axis.")
+
+        timestamp, time_axis = self._get_timestamp(data)
+
+        sel = {time_axis: slice(None), "input": slice(None)}
+        if data.distributed:
+            avail = [ax for ax in axis if ax not in [time_axis, "input"]]
+
+            if len(avail) > 0:
+                data.redistribute(avail[0])
+            else:
+                data.redistribute("input")
+                sinp = data.weight.local_offset[daxis["input"]]
+                einp = sinp + data.weight.local_shape[daxis["input"]]
+
+                sel["input"] = slice(sinp, einp)
+
+        expand = tuple([sel.get(ax, None) for ax in axis])
+
+        transpose = (time_axis is not None) and (daxis["input"] < daxis[time_axis])
+        flag = self.input_flags.resample("flag", timestamp, transpose=transpose)
+
+        if time_axis is None:
+            flag = flag[0]
+
+        data.weight[:] *= flag[expand].astype(np.float32)
+
+        return data
+
+    def _get_timestamp(self, data):
+        """Determine the timestamp based on the container type."""
+
+        if issubclass(type(data), tod.TOData):
+
+            timestamp = data.time
+            time_axis = "time"
+
+        elif issubclass(type(data), dcontainers.SiderealStream):
+
+            ra = data.ra
+            lsd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            timestamp = self.observer.lsd_to_unix(lsd + data.ra / 360.0)
+            time_axis = "ra"
+
+        elif issubclass(type(data), dcontainers.TrackBeam):
+
+            ra = data.pix["phi"][:] + data.attrs["cirs_ra"]
+            lsdf = self.observer.unix_to_lsd(data.attrs["transit_time"]) + ra / 360.0
+            timestamp = self.observer.lsd_to_unix(lsdf)
+            time_axis = "pix"
+
+        elif issubclass(type(data), dcontainers.StaticGainData):
+
+            timestamp = data.attrs["time"]
+            time_axis = None
+
+        else:
+            raise RuntimeError(
+                "Do not know how to calculate timestamp"
+                f" for container type {type(data)}."
+            )
+
+        return timestamp, time_axis
+
+
+class SetInputFlag(ApplyInputFlag):
+    """Set input flags dataset based on values from the real-time pipeline at the time.
+
+    This is useful for holographic observations or SiderealStreams, neither of which
+    have their input_flags dataset populated.
+    """
+
+    def process(self, data):
+        """Lookup and save the input flags based on the time.
+
+        Parameters
+        ----------
+        data: TODContainer, SiderealStream, TrackBeam
+            Must have `input_flags` dataset.
+
+        Returns
+        -------
+        data: TODContainer, SiderealStream, TrackBeam
+            The input container with the input_flags dataset
+            set to 1.0 for good inputs and 0.0 for bad inputs.
+        """
+        daxis = {ax: ind for ind, ax in enumerate(data.input_flags.attrs["axis"])}
+
+        timestamp, time_axis = self._get_timestamp(data)
+
+        flag = self.input_flags.resample(
+            "flag", timestamp, transpose=daxis["input"] < daxis[time_axis]
+        )
+
+        data.input_flags[:] = flag
+
+        return data

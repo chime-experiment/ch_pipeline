@@ -8,5 +8,5 @@ CHIME HFB Pipeline
 
     containers
     flagging
-
+    io
 """

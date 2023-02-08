@@ -42,11 +42,6 @@ from draco.core import task, io
 
 from . import containers
 
-try:
-    from ..hfb.io import HFBReader
-except ImportError:
-    HFBReader = None
-
 
 class LoadCorrDataFiles(task.SingleTask):
     """Load CHIME correlator data from a file list passed into the setup routine.
@@ -204,7 +199,7 @@ class LoadCorrDataFiles(task.SingleTask):
         return ts
 
 
-class LoadDataFiles(io.BaseLoadFiles):
+class LoadDataFiles(task.SingleTask):
     """Load general CHIME data from files passed into the setup routine.
 
     This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
@@ -224,7 +219,6 @@ class LoadDataFiles(io.BaseLoadFiles):
         "gain": andata.CalibrationGainReader,
         "digitalgain": andata.DigitalGainReader,
         "flaginput": andata.FlagInputReader,
-        "hfb": HFBReader,
     }
 
     def setup(self, files):
@@ -234,9 +228,6 @@ class LoadDataFiles(io.BaseLoadFiles):
         ----------
         files : list
         """
-        # Call the baseclass setup to resolve any selections
-        super().setup()
-
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
 
@@ -246,50 +237,127 @@ class LoadDataFiles(io.BaseLoadFiles):
         self.files = files
 
     def process(self):
-        """Load in each sidereal day.
+        """Load and return the next available file.
+
+        Raises a PipelineStopIteration if there are no more files to load.
 
         Returns
         -------
-        ts : andata.CorrData
-            The timestream of each sidereal day.
+        data : subclass of andata.BaseData
         """
 
-        if len(self.files) == self._file_ptr:
+        return self._load_next_file()
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+
+        if self._file_ptr == len(self.files):
             raise pipeline.PipelineStopIteration
 
         # Collect garbage to remove any prior data objects
         gc.collect()
 
-        # Fetch and remove the first item in the list
+        # Fetch and remove the next item in the list
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
-
-        # Handle file lists including time ranges
-        if isinstance(file_, tuple):
-            time_range = file_[1]
-            file_ = file_[0]
-        else:
-            time_range = (None, None)
 
         # Set up a Reader class
         rd = self._acqtype_reader[self.acqtype](file_)
 
-        # Select time range
-        rd.select_time_range(time_range[0], time_range[1])
-
-        # Select frequency range
-        if self._sel and "freq_sel" in self._sel:
-            rd.freq_sel = self._sel["freq_sel"]
-
-        # Select beams
-        if self._sel and "beam_sel" in self._sel:
-            rd.beam_sel = self._sel["beam_sel"]
-
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        ts = rd.read()
+        data = rd.read()
 
-        # Return timestream
-        return ts
+        return data
+
+
+class LoadGainUpdates(LoadDataFiles):
+    """Iterate over gain updates.
+
+    Attributes
+    ----------
+    acqtype: {"gain"|"digitalgain"}
+        Type of acquisition.
+    keep_transition: bool
+        If this is True, then gain updates that were transitional
+        in nature -- i.e., they executed a smooth transition to
+        new gains -- will be loaded. By default, transitional
+        gain updates are ignored.
+    """
+
+    gains = None
+
+    acqtype = config.enum(["gain", "digitalgain"], default="gain")
+    keep_transition = config.Property(proptype=bool, default=False)
+
+    def process(self):
+        """Load the next available gain update.
+
+        Returns
+        -------
+        out: StaticGainUpdate
+            The next gain update, packaged into a pipeline container.
+        """
+        # If there are no gains available, then load the next file.
+        if self.gains is None:
+            self.gains = self._load_next_file()
+
+        # Make sure we are not dealing with a transitional gain update
+        if not self.keep_transition:
+
+            while "transition" in self.gains.update_id[self._time_ptr].decode():
+
+                self._time_ptr += 1
+
+                if self._time_ptr == self.gains.ntime:
+                    self.gains = self._load_next_file()
+
+        # Create output container
+        out = containers.StaticGainData(
+            axes_from=self.gains,
+            attrs_from=self.gains,
+            distributed=True,
+            comm=self.comm,
+        )
+
+        out.add_dataset("weight")
+        out.redistribute("freq")
+
+        # Save the update_time and update_id as attributes
+        out.attrs["time"] = self.gains.time[self._time_ptr]
+        out.attrs["update_id"] = self.gains.update_id[self._time_ptr].decode()
+        out.attrs["tag"] = out.attrs["update_id"]
+
+        # Find the local frequencies
+        sfreq = out.gain.local_offset[0]
+        efreq = sfreq + out.gain.local_shape[0]
+
+        fsel = slice(sfreq, efreq)
+
+        # Transfer over the gains and weights for the local frequencies
+        out.gain[:] = self.gains.gain[self._time_ptr][fsel]
+
+        if "weight" in self.gains:
+            out.weight[:] = self.gains.weight[self._time_ptr][fsel]
+        else:
+            out.weight[:] = 1.0
+
+        # Increment the time pointer
+        self._time_ptr += 1
+
+        # Determine if we need to load a new file on the next iteration
+        if self._time_ptr == self.gains.ntime:
+            self.gains = None
+
+        # Output the static gain container
+        return out
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+
+        gains = super()._load_next_file()
+        self._time_ptr = 0
+
+        return gains
 
 
 class LoadSetupFile(io.BaseLoadFiles):

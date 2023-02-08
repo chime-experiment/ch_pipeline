@@ -25,6 +25,7 @@ Tasks
 """
 import posixpath
 from typing import List, Optional, Union
+from functools import cached_property
 from draco.core.task import MPILoggedTask
 
 import numpy as np
@@ -38,6 +39,7 @@ from draco.core.containers import (
     TODContainer,
     FreqContainer,
     TimeStream,
+    FormedBeam,
 )
 
 
@@ -84,7 +86,7 @@ class RFIMask(ContainerBase):
     _dataset_spec = {
         "mask": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -126,7 +128,7 @@ class CorrInputMask(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -149,13 +151,13 @@ class CorrInputTest(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "passed_test": {
             "axes": ["freq", "input", "test"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": False,
         },
@@ -199,37 +201,37 @@ class CorrInputMonitor(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "input_powered": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_mask": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_powered": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
         "expected_position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
@@ -289,7 +291,7 @@ class SiderealDayFlag(ContainerBase):
     _dataset_spec = {
         "csd_flag": {
             "axes": ["csd"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -333,7 +335,7 @@ class TransitFitParams(ContainerBase):
         },
         "ndof": {
             "axes": ["freq", "input", "component"],
-            "dtype": np.int,
+            "dtype": int,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -437,7 +439,7 @@ class PointSourceTransit(StaticGainData):
         },
         "flag": {
             "axes": ["freq", "input", "ra"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -580,7 +582,19 @@ class SourceModel(FreqContainer):
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit."""
 
-    _axes = ("freq", "input", "time", "pol_x", "pol_y", "coord", "param")
+    _axes = (
+        "freq",
+        "input",
+        "time",
+        "pol",
+        "eigen",
+        "good_input1",
+        "good_input2",
+        "udegree",
+        "vdegree",
+        "coord",
+        "param",
+    )
 
     _dataset_spec = {
         "coord": {
@@ -589,29 +603,43 @@ class SunTransit(ContainerBase):
             "initialise": True,
             "distributed": False,
         },
-        "evalue_x": {
-            "axes": ["freq", "pol_x", "time"],
+        "evalue1": {
+            "axes": ["freq", "good_input1", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "evalue_y": {
-            "axes": ["freq", "pol_y", "time"],
+        "evalue2": {
+            "axes": ["freq", "good_input2", "time"],
             "dtype": np.float64,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
             "dtype": np.complex128,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response_error": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "coeff": {
+            "axes": ["freq", "pol", "time", "udegree", "vdegree"],
+            "dtype": np.complex128,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "is_sun": {
+            "axes": ["freq", "pol", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
@@ -619,7 +647,7 @@ class SunTransit(ContainerBase):
         },
         "flag": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -643,7 +671,17 @@ class SunTransit(ContainerBase):
     def __init__(self, *args, **kwargs):
 
         kwargs["param"] = np.array(
-            ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
+            [
+                "peak_amplitude",
+                "centroid",
+                "fwhm",
+                "phase_intercept",
+                "phase_slope",
+                "phase_quad",
+                "phase_cube",
+                "phase_quart",
+                "phase_quint",
+            ]
         )
         kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
@@ -654,12 +692,20 @@ class SunTransit(ContainerBase):
         return self.datasets["coord"]
 
     @property
+    def evalue1(self):
+        return self.datasets["evalue1"]
+
+    @property
+    def evalue2(self):
+        return self.datasets["evalue2"]
+
+    @property
     def evalue_x(self):
-        return self.datasets["evalue_x"]
+        return self.datasets["evalue1"]
 
     @property
     def evalue_y(self):
-        return self.datasets["evalue_y"]
+        return self.datasets["evalue2"]
 
     @property
     def response(self):
@@ -668,6 +714,14 @@ class SunTransit(ContainerBase):
     @property
     def response_error(self):
         return self.datasets["response_error"]
+
+    @property
+    def coeff(self):
+        return self.datasets["coeff"]
+
+    @property
+    def is_sun(self):
+        return self.datasets["is_sun"]
 
     @property
     def flag(self):
@@ -716,6 +770,26 @@ class SunTransit(ContainerBase):
     def az(self):
         ind = list(self.index_map["coord"]).index("az")
         return self.datasets["coord"][:, ind]
+
+
+class FormedBeamTime(FormedBeam, TODContainer):
+
+    _dataset_spec = {
+        "beam": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.complex128,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
 
 
 class RingMap(ContainerBase):
@@ -868,6 +942,15 @@ class RawContainer(TODContainer):
 
         parent_name, name = posixpath.split(name)
         return parent_name == "/" or self.group_name_allowed(parent_name)
+
+    @cached_property
+    def time(self) -> np.ndarray:
+        """The 'time' axis centres as Unix/POSIX time."""
+
+        time = self._data["index_map"]["time"]["ctime"].copy()
+        # Shift from lower edge to centres.
+        time += abs(np.median(np.diff(time)) / 2)
+        return time
 
     @classmethod
     def from_acq_h5(
