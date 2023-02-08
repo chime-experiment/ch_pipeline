@@ -12,6 +12,8 @@ from ch_util import andata
 
 from ..core.containers import RawContainer, FreqContainer
 
+from draco.core.containers import TODContainer
+
 
 class HFBData(RawContainer, FreqContainer):
     """A container for HFB data.
@@ -153,3 +155,38 @@ class HFBReader(tod.Reader):
             datasets=self.dataset_sel,
             **kwargs,
         )
+
+
+class HFBRFIMask(TODContainer, FreqContainer):
+    """Container for holding a mask that indicates HFB data that is free of
+    RFI events.
+
+    The `sens` dataset (if initialized) holds the sensitivity metric data.
+    """
+
+    _axes = ("subfreq",)
+
+    _dataset_spec = {
+        "mask": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": np.bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "sens": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def mask(self):
+        return self.datasets["mask"]
+
+    @property
+    def sens(self):
+        return self.datasets["sens"]
