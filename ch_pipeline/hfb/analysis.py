@@ -315,8 +315,12 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
     """
 
     if weighting == "uniform":
+        # Binary weights for uniform weighting
+        binary_weight = np.zeros(weight.shape)
+        binary_weight[weight != 0] = 1
+
         # Number of samples with non-zero weight in each time bin
-        nsamples = np.count_nonzero(weight, axis=axis)
+        nsamples = np.sum(binary_weight, axis=axis)
 
         # For uniform weighting, the average of the variances is
         # sum( 1 / weight ) / nsamples,
@@ -326,7 +330,7 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
 
         # For uniform weighting, the averaged data is the average of all
         # non-zero data
-        avg_data = np.sum(data, axis=axis) / nsamples
+        avg_data = np.sum(binary_weight * data, axis=axis) / nsamples
 
     else:
         # For inverse-variance weighting, the averaged weight turns out to
