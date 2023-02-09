@@ -606,7 +606,6 @@ class CHIME(telescope.PolarisedTelescope):
         self._beam_normalization = None
 
         if self.dec_normalized is not None:
-
             angpos = np.array(
                 [(0.5 * np.pi - np.radians(self.dec_normalized)), 0.0]
             ).reshape(1, -1)
@@ -616,14 +615,12 @@ class CHIME(telescope.PolarisedTelescope):
             beam_lookup = {}
 
             for fe, feed in enumerate(self.feeds):
-
                 if not tools.is_array(feed):
                     continue
 
                 beamclass = self.beamclass[fe]
 
                 if beamclass not in beam_lookup:
-
                     beam_lookup[beamclass] = np.ones((self.nfreq, 2), dtype=np.float64)
                     for fr in range(self.nfreq):
                         beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[0]
@@ -884,7 +881,6 @@ class CHIMEExternalBeam(CHIME):
 
             # Check resolution and resample to a better resolution if needed
             if nside != self._beam_nside:
-
                 if nside > self._beam_nside:
                     logger.warning(
                         f"Requested nside={nside} higher than that of "

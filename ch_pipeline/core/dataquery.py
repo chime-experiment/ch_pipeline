@@ -167,7 +167,6 @@ class QueryDatabase(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-
             if self.run_name:
                 return self.QueryRun()
 
@@ -309,7 +308,6 @@ class QueryRun(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-
             layout.connect_database()
 
             cat_run = (
@@ -541,7 +539,6 @@ class QueryAcquisitions(task.MPILoggedTask):
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
         if self.comm.rank == 0:
-
             layout.connect_database()
 
             fi = finder.Finder(node_spoof=self.node_spoof)
@@ -553,7 +550,6 @@ class QueryAcquisitions(task.MPILoggedTask):
 
             files = []
             for aa, acq in enumerate(fi.acqs):
-
                 acq_results = fi.get_results_acq(aa)
 
                 filelist = [ff for acqr in acq_results for ff in acqr[0]]
@@ -640,7 +636,6 @@ class QueryInputs(task.MPILoggedTask):
         inputs = None
 
         if mpiutil.rank0:
-
             # Get the datetime of the middle of the file
             time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
@@ -678,7 +673,6 @@ def finder_from_spec(spec, node_spoof=None):
 
     fi = None
     if mpiutil.rank0:
-
         # Get instrument
         inst_obj = (
             di.ArchiveInst.select().where(di.ArchiveInst.name == instrument).get()
@@ -729,7 +723,6 @@ def files_from_spec(spec, node_spoof=None):
     files = None
 
     if mpiutil.rank0:
-
         # Get the finder object
         fi = finder_from_spec(spec, node_spoof)
 

@@ -74,7 +74,6 @@ class LoadTimeStreamSidereal(task.SingleTask):
 
         filemap = None
         if self.comm.rank == 0:
-
             se_times = get_times(self.files)
             se_csd = ephemeris.csd(se_times)
             days = np.unique(np.floor(se_csd).astype(np.int64))
@@ -324,7 +323,6 @@ class SiderealMean(task.SingleTask):
                         fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
                         > self.flux_threshold
                     ) and (body.dec.degrees > self.dec_threshold):
-
                         self.log.info(
                             "Will mask %s prior to calculating sidereal %s."
                             % (src, self._name_of_statistic)
@@ -360,7 +358,6 @@ class SiderealMean(task.SingleTask):
             flag_quiet = np.ones(ra.size, dtype=bool)
 
         elif "time" in sstream.index_map:
-
             ra = ephemeris.lsa(sstream.time)
             timestamp = {lsd: sstream.time}
             flag_quiet = np.fix(ephemeris.unix_to_csd(sstream.time)) == lsd

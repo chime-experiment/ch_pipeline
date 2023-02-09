@@ -48,7 +48,6 @@ class ProcessingType(object):
     default_script = DEFAULT_SCRIPT
 
     def __init__(self, revision, create=False, root_path=None):
-
         self.revision = revision
 
         if root_path:
