@@ -11,11 +11,14 @@ On-source data selection is based on 2 criteria:
 
 A few points about sensitivity for on-source data selection:
 
-Sensitivity of the last row of EW beams is higher in side lobes than the main lobe. So if we take maximum sensitivity
-of the beam to calculate the threshold needed for data selection, selected data won't be in the main lobe. Therefore,
-for setting sensitivity threshold, closest sample to the centre of the beam is chosen (this sample is closest to the
-transit time through centre of the beam). Then, sensitivity corresponding to this sample is the maximum sensitivity 
-we want for setting the threshold for on-source data selection
+i) Sensitivity of the last row of EW beams is higher in the side lobes than the main lobe. That is why So if we take maximum
+sensitivity of the beam to calculate the threshold needed for data selection, selected data won't be in the main lobe. 
+Therefore, for setting sensitivity threshold, closest sample to the centre of the beam is chosen (this sample 
+is closest to the transit time through the centre beam centre). Then, sensitivity corresponding to this sample is the 
+maximum sensitivity we want for setting up the threshold for on-source data selection.
+
+ii) sensitivity 
+
 
 
 
@@ -452,7 +455,8 @@ class HFBtransit(task.SingleTask):
             #Swap axes to have (freq,beam,time), reshape it to have subfreq, and multiply sens by data, weight and time
             sens = np.swapaxes(sens,0,2)
             sens = sens.reshape(nfreq, 128, nbeam, len(time))
-            data = data*sens
+            
+            #change the weights to select off-source data
             weight = weight*sens
 
         #on-source data:
@@ -487,7 +491,7 @@ class HFBtransit(task.SingleTask):
             sens = np.swapaxes(sens,0,2)
             sens = sens.reshape(nfreq, 128, nbeam, len(time))
 
-            data = data*sens
+            #change the weights to select on-source data
             weight = weight*sens
 
         
