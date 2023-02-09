@@ -9,6 +9,8 @@ from draco.core import task
 from draco.util import tools
 from draco.core import containers as dcontainers
 
+import beam_model
+
 from . import containers
 
 
@@ -347,3 +349,136 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
         avg_data = np.sum(weight * data, axis=axis) * tools.invert_no_zero(avg_weight)
 
     return avg_data, avg_weight
+
+
+class HFBtransit(task.SingleTask):
+    """Find transit data through FRB beams.
+
+    Attributes
+    ----------
+    sensitivity_threshold: float
+
+    beam_index : list
+        List of beam indices for which find the transit time
+    ra : float
+        Right ascension of the source
+    dec : float
+        Declination of the source
+    """
+    sensitivity_threshold = config.Property(proptype=float)
+    ra = config.Property(proptype=float)
+    dec = config.Property(proptype=float)
+    on_source = config.Property(proptype=bool, default=True)
+    #s = 5
+
+    def process(self, stream):
+        """Find transit data for the given beams.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+
+        Returns
+        -------
+        out : containers.HFBData
+            Array consisting of transit data 
+        """
+        formed_beam = beam_model.formed.FFTFormedBeamModel() 
+        tied=beam_model.composite.FutureMostAccurateCompositeBeamModel()
+    
+        #Extract beam indices, change format for sensitivity calculations
+        beam = stream._data['index_map']['beam'][:]
+        nbeam = len(beam)
+        if len(str(beam[0])) == 1:
+            beam_index = [beam[0],int('100'+str(beam[0])),int('200'+str(beam[0])),int('300'+str(beam[0]))]
+        elif len(str(beam[0])) == 2:
+            beam_index = [beam[0],int('10'+str(beam[0])),int('20'+str(beam[0])),int('30'+str(beam[0]))]
+        elif len(str(beam[0])) == 3:
+            beam_index = [beam[0],int('1'+str(beam[0])),int('2'+str(beam[0])),int('3'+str(beam[0]))]
+
+        #Extract physical frequencies:
+        nfreq = len(stream._data['index_map']['freq']['centre'][:])
+        physical_freq = (stream._data['index_map']['freq']['centre'][:].reshape(nfreq,1)+stream._data['index_map']['subfreq'][:]).flatten()
+        # Extract time array, hfb data and weights for selected beams and frequencies:
+        time = stream.time[:] #Is it starting of acquistion time?
+        data = stream.hfb[:,:,:,:]
+        weight = stream.weight[:,:,:,:]
+
+        #Convert equatorial position of the source to cartesian coordinates:
+
+        pfe=[]
+        for j,time_sample in enumerate(time):
+            pfe.append(formed_beam.get_position_from_equatorial(self.ra,self.dec,time[j]))
+        pfe = np.asarray(pfe)
+        #sens = actual_beam.get_sensitivity(self.beam_index, pfe, physical_freq)
+        #sens_mask = np.copy(sens)
+        sens=tied.get_sensitivity(beam_index, pfe, physical_freq) 
+        sens_on = np.copy(sens)
+        #print(sens.shape)
+
+        beam_width = formed_beam.get_beam_widths(beam_index, physical_freq)
+        pos = formed_beam.get_beam_positions(beam_index, physical_freq)
+
+        #off-source data
+        if self.on_source==False:
+            x_edge_upper = (pos[:,:,0]+18*beam_width[:,:,0]/2)
+            x_edge_lower = (pos[:,:,0]-18*beam_width[:,:,0]/2)
+            #Select data when the source is completely outside of the primary beam
+            off=((pfe[:,0][:,None,None]>x_edge_upper[None,:,:]) | (pfe[:,0][:,None,None]<x_edge_lower[None,:,:]))
+            sens[(off)] = 1 
+            sens[np.invert(off)] = 0
+            #Swap axes to have (freq,beam,time), reshape it to have subfreq, and multiply sens by data, weight and time
+            sens = np.swapaxes(sens,0,2)
+            sens = sens.reshape(nfreq, 128, nbeam, len(time))
+            data = data*sens
+            weight = weight*sens
+
+        #on-source data:
+        elif self.on_source==True:
+            #Select only the main lobe using beam_width function
+            
+            
+            x_edge_upper = (pos[:,:,0]+beam_width[:,:,0]/2)
+            x_edge_lower = (pos[:,:,0]-beam_width[:,:,0]/2)
+
+            main_lobe=((pfe[:,0][:,None,None]<x_edge_upper[None,:,:]) & (pfe[:,0][:,None,None]>x_edge_lower[None,:,:]))
+
+            
+            #Find sensitivity corresponding to the closest sample to transit wrt centre of the beam:
+            beam_pos_x = formed_beam.get_beam_positions(beam_index, physical_freq)[:,:,0] #shape (beam,freq,(x,y))
+            transit_index = np.argmin(np.abs(pfe[:,0][:,None,None]-beam_pos_x),axis=0) #transit indices with shape (beam,freq)
+
+            max_sens=np.zeros(transit_index.shape)
+
+            for i in range(transit_index.shape[0]):
+                for j in range(transit_index.shape[1]):
+                    max_sens[i,j]=sens[:,i,j][transit_index[i,j]]
+
+            threshold = self.sensitivity_threshold*max_sens
+            
+            sens[((sens_on>threshold[None,:,:]) & main_lobe)] = 1
+            sens[((sens_on<threshold[None,:,:]) | np.invert(main_lobe))] = 0
+            
+            
+
+            #Swap axes to have (freq,beam,time), reshape it to have subfreq, and multiply sens by data, weight and time
+            sens = np.swapaxes(sens,0,2)
+            sens = sens.reshape(nfreq, 128, nbeam, len(time))
+
+            data = data*sens
+            weight = weight*sens
+
+        
+
+        # Create container to hold output
+        out= containers.HFBData(axes_from=stream, attrs_from=stream)
+
+        # Save weights and data to output container for on-source and off-source data
+        out.hfb[:] = data
+        out.weight[:] = weight
+
+
+        # Return output container
+        return out
