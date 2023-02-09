@@ -183,7 +183,7 @@ class HFBStackDays(task.SingleTask):
 
         Parameters
         ----------
-        sdata : hfb.containers.HFBTimeAverage, hfb.containers.HFBHighResTimeAverage
+        sdata : hfb.containers.HFBHighResSpectrum
             Individual (time-averaged) day to add to stack.
         """
 
