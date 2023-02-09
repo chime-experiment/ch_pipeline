@@ -127,7 +127,6 @@ def model_extended_sources(
     S = np.zeros((nfreq, nbaseline, ntime, nparam), dtype=np.complex64)
 
     for ss, body in enumerate(bodies):
-
         # Calculate the source coordinates
         obs = observer.observe(body).apparent()
         src_radec = obs.cirs_radec(date)
@@ -189,7 +188,6 @@ def solve_single_time(vis, weight, source_model):
     coeff = np.zeros((ntime, nparam), dtype=np.complex64)
 
     for tt in range(ntime):
-
         S = source_model[:, tt, :]
 
         # Calculate covariance of model coefficients
@@ -464,7 +462,6 @@ class SolveSources(task.SingleTask):
 
         # Loop over polarisations
         for pp, upp in enumerate(upol):
-
             this_pol = np.flatnonzero(pol == upp)
 
             dist_pol = distance[:, this_pol]
@@ -472,7 +469,6 @@ class SolveSources(task.SingleTask):
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :]
                 weight = all_weight[ff, this_pol, :] * bweight_pol
@@ -490,7 +486,6 @@ class SolveSources(task.SingleTask):
                 # and baseline dependent response.  Assumes the description of the extended
                 # emission is constant in time.
                 if self.extended_source_kwargs:
-
                     ext_model, sedge = model_extended_sources(
                         nu,
                         dist_pol,
@@ -502,7 +497,6 @@ class SolveSources(task.SingleTask):
 
                     iters = 0
                     while iters < self.max_iter:
-
                         model = ext_model.copy()
                         for ss in range(self.nsources):
                             model[:, :, sedge[ss] : sedge[ss + 1]] *= amplitude[
@@ -596,12 +590,10 @@ class LPFSourceAmplitude(task.SingleTask):
         amp = model.amplitude[:].view(np.ndarray)
 
         for ss, src in enumerate(model.source):
-
             flux = FluxCatalog[src].predict_flux(model.freq)
             inv_flux = tools.invert_no_zero(flux)[:, np.newaxis]
 
             for pp in range(npol):
-
                 a = amp[:, pp, :, ss]
                 flag = np.abs(a) > 0
 
@@ -724,12 +716,10 @@ class SubtractSources(task.SingleTask):
 
         # Subtract source model
         for pp, upp in enumerate(model.index_map["pol"]):
-
             this_pol = np.flatnonzero(pol == upp)
             dist_pol = distance[:, this_pol]
 
             for ff, nu in enumerate(freq):
-
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
                     nu, dist_pol, timestamp, bodies, **source_model_kwargs
@@ -938,7 +928,6 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Loop over polarisations
         for pp, upp in enumerate(upol):
-
             this_pol = np.flatnonzero(pol == upp)
 
             dist_pol = distance[:, this_pol]
@@ -946,7 +935,6 @@ class SolveSourcesWithBeam(SolveSources):
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Determine extended source model
                 source_model, sedge = model_extended_sources(
                     nu, dist_pol, timestamp, self.bodies, **self.source_kwargs
@@ -1080,13 +1068,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # Subtract source model
         for pp, upp in enumerate(model.index_map["pol"]):
-
             this_pol = np.flatnonzero(pol == upp)
             dist_pol = distance[:, this_pol]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
                     nu, dist_pol, timestamp, bodies, **source_model_kwargs
@@ -1133,7 +1119,6 @@ def kz_coeffs(m, k):
 
     # Iterate k-1 times over coefficients
     for i in range(1, k):
-
         t = np.zeros((m, m + i * (m - 1)))
         for km in range(m):
             t[km, km : km + coef.size] = coef
@@ -1210,7 +1195,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
     y = np.where(flag, y, 0.0)
 
     if np.isscalar(mode):
-
         y_extended = np.pad(y, pad_width, mode=mode)
         flag_extended = np.pad(flag.astype(np.float64), pad_width, mode=mode)
 
@@ -1219,7 +1203,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
         flag_extended = flag.astype(np.float64)
 
         for dd, (pw, md) in enumerate(zip(pad_width, mode)):
-
             pws = tuple([pw if ii == dd else (0, 0) for ii in range(2)])
 
             y_extended = np.pad(y_extended, pws, mode=md)

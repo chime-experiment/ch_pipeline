@@ -137,7 +137,6 @@ class ApplyHFBMask(task.SingleTask):
 
         # Apply the mask
         if np.any(flag):
-
             # Apply the mask to the weights
             stream.weight[:] *= 1.0 - flag
 
