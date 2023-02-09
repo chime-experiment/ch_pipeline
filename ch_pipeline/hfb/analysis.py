@@ -261,24 +261,39 @@ class HFBStackDays(task.SingleTask):
         return self.stack
 
 
-class HFBBeamAverage(task.SingleTask):
+class HFBAverageOverBeams(task.SingleTask):
     """Taking the average of HFB data over beam axis.
+
+    Attributes
+    ----------
+    weighting: str (default: "inverse_variance")
+        The weighting to use in the averaging.
+        Either `uniform` or `inverse_variance`.
     """
+
+    weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
         """Take average over beam axis.
-            Container with HFB data and weights.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResTimeAverage
+            Container with time-averaged high-frequency resolution HFB data and weights.
 
         Returns
         -------
-        out : containers.HFBFlat
-            Average of stream over time axis. The output is used for flattening the sub-frequency
-            band shape.
+        out : containers.HFBHighResSpectrum
+            Container with high-frequency resolution spectrum data and weights.
         """
 
-        # Extract data array, averaging over beam axis.
-        data = np.sum(stream.hfb[:], axis=2)/np.count_nonzero(stream.hfb[:], axis=2)
-        weight = np.sum(stream.weight[:], axis=2)/np.count_nonzero(stream.weight[:], axis=2)
+        # Average data over beams, which corresponds to axis index 1
+        data, weight = average_hfb(
+            data=stream.hfb[:],
+            weight=stream.weight[:],
+            axis=1,
+            weighting=self.weighting,
+        )
 
         # Create container to hold output
         out = containers.HFBBeamAverage(axes_from=stream, attrs_from=stream)
@@ -289,3 +304,52 @@ class HFBBeamAverage(task.SingleTask):
 
         # Return output container
         return out
+
+
+def average_hfb(data, weight, axis, weighting="inverse_variance"):
+    """Average HFB data
+
+    Parameters
+    ----------
+    data : array
+        Data to average.
+    weight : array
+        Weights of `data`.
+    axis : int
+        Index of axis to average over.
+    weighting: str (default: "inverse_variance")
+        The weighting to use in the averaging.
+        Either `uniform` or `inverse_variance`.
+
+    Output
+    ------
+    avg_data : array
+        Averaged data.
+    avg_weight : array
+        Averaged weights.
+    """
+
+    if weighting == "uniform":
+        # Number of samples with non-zero weight in each time bin
+        nsamples = np.count_nonzero(weight, axis=axis)
+
+        # For uniform weighting, the average of the variances is
+        # sum( 1 / weight ) / nsamples,
+        # and the averaged weight is the inverse of that
+        variance = tools.invert_no_zero(weight)
+        avg_weight = nsamples / np.sum(variance, axis=axis)
+
+        # For uniform weighting, the averaged data is the average of all
+        # non-zero data
+        avg_data = np.sum(data, axis=axis) / nsamples
+
+    else:
+        # For inverse-variance weighting, the averaged weight turns out to
+        # be equal to the sum of the weights
+        avg_weight = np.sum(weight, axis=axis)
+
+        # For inverse-variance weighting, the averaged data is the weighted
+        # sum of the data, normalized by the sum of the weights
+        avg_data = np.sum(weight * data, axis=axis) / avg_weight
+
+    return avg_data, avg_weight
