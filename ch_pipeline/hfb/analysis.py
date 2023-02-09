@@ -9,6 +9,13 @@ On-source data selection is based on 2 criteria:
 1) The source must be inside the main lobe of synthetic beam.
 2) Sensitivity of the beam toward the source must be greater than some threshold. 
 
+A few points about sensitivity for on-source data selection:
+
+Sensitivity of the last row of EW beams is higher in side lobes than the main lobe. So if we take maximum sensitivity
+of the beam to calculate the threshold needed for data selection, selected data won't be in the main lobe. Therefore,
+for setting sensitivity threshold, closest sample to the centre of the beam is chosen (this sample is closest to the
+transit time through centre of the beam). Then, sensitivity corresponding to this sample is the maximum sensitivity 
+we want for setting the threshold for on-source data selection
 
 
 
