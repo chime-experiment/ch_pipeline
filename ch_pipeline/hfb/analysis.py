@@ -7,6 +7,7 @@ from caput import mpiarray
 
 from draco.core import task
 from draco.util import tools
+from draco.core import containers as dcontainers
 
 from . import containers
 
@@ -190,7 +191,7 @@ class HFBStackDays(task.SingleTask):
         # If this is our first sidereal day, then initialize the
         # container that will hold the stack.
         if self.stack is None:
-            self.stack = containers.empty_like(sdata)
+            self.stack = dcontainers.empty_like(sdata)
 
             self.stack.add_dataset("nsample")
 
