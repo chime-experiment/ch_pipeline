@@ -1,4 +1,17 @@
-"""Tasks for HFB analysis
+"""
+Task for selecting on- and off-source data. 
+beam_width gives the width of the synthetic beam. To select off-source data, a window around the beam is chosen.
+Size of this window is determined by "w" parameter: window size = w * beam_width
+Normally, when w ~ 18, the source is outside of the sideloebes of the beam.  Data outside this window is taken as 
+off-source data.
+On-source data selection is based on 2 criteria: 
+
+1) The source must be inside the main lobe of synthetic beam.
+2) Sensitivity of the beam toward the source must be greater than some threshold. 
+
+
+
+
 """
 import numpy as np
 
