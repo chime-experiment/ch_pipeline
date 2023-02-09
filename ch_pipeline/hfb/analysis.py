@@ -326,11 +326,13 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
         # sum( 1 / weight ) / nsamples,
         # and the averaged weight is the inverse of that
         variance = tools.invert_no_zero(weight)
-        avg_weight = nsamples / np.sum(variance, axis=axis)
+        avg_weight = nsamples * tools.invert_no_zero(np.sum(variance, axis=axis))
 
         # For uniform weighting, the averaged data is the average of all
         # non-zero data
-        avg_data = np.sum(binary_weight * data, axis=axis) / nsamples
+        avg_data = np.sum(binary_weight * data, axis=axis) * tools.invert_no_zero(
+            nsamples
+        )
 
     else:
         # For inverse-variance weighting, the averaged weight turns out to
@@ -339,6 +341,6 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
 
         # For inverse-variance weighting, the averaged data is the weighted
         # sum of the data, normalized by the sum of the weights
-        avg_data = np.sum(weight * data, axis=axis) / avg_weight
+        avg_data = np.sum(weight * data, axis=axis) * tools.invert_no_zero(avg_weight)
 
     return avg_data, avg_weight
