@@ -410,29 +410,11 @@ class HFBSelectTransit(task.SingleTask):
         tied = beam_model.composite.FutureMostAccurateCompositeBeamModel()
 
         # Extract beam indices, change format for sensitivity calculations
-        beam = stream._data["index_map"]["beam"][:]
-        nbeam = len(beam)
-        if len(str(beam[0])) == 1:
-            beam_index = [
-                beam[0],
-                int("100" + str(beam[0])),
-                int("200" + str(beam[0])),
-                int("300" + str(beam[0])),
-            ]
-        elif len(str(beam[0])) == 2:
-            beam_index = [
-                beam[0],
-                int("10" + str(beam[0])),
-                int("20" + str(beam[0])),
-                int("30" + str(beam[0])),
-            ]
-        elif len(str(beam[0])) == 3:
-            beam_index = [
-                beam[0],
-                int("1" + str(beam[0])),
-                int("2" + str(beam[0])),
-                int("3" + str(beam[0])),
-            ]
+        # For example, change [12, 268, 524, 780] to [  12, 1012, 2012, 3012]
+        beam_ind = stream._data["index_map"]["beam"][:]
+        dtype = beam_ind.dtype
+        beam_number = (beam_ind % 256 + 1000 * np.floor(beam_ind / 256)).astype(dtype)
+        nbeam = len(beam_number)
 
         # Extract physical frequencies:
         nfreq = len(stream._data["index_map"]["freq"]["centre"][:])
@@ -455,12 +437,12 @@ class HFBSelectTransit(task.SingleTask):
         pfe = np.asarray(pfe)
         # sens = actual_beam.get_sensitivity(self.beam_index, pfe, physical_freq)
         # sens_mask = np.copy(sens)
-        sens = tied.get_sensitivity(beam_index, pfe, physical_freq)
+        sens = tied.get_sensitivity(beam_number, pfe, physical_freq)
         sens_on = np.copy(sens)
         # print(sens.shape)
 
-        beam_width = formed_beam.get_beam_widths(beam_index, physical_freq)
-        pos = formed_beam.get_beam_positions(beam_index, physical_freq)
+        beam_width = formed_beam.get_beam_widths(beam_number, physical_freq)
+        pos = formed_beam.get_beam_positions(beam_number, physical_freq)
 
         # off-source data
         if self.on_source is False:
@@ -491,7 +473,7 @@ class HFBSelectTransit(task.SingleTask):
             )
 
             # Find sensitivity corresponding to the closest sample to transit wrt centre of the beam:
-            beam_pos_x = formed_beam.get_beam_positions(beam_index, physical_freq)[
+            beam_pos_x = formed_beam.get_beam_positions(beam_number, physical_freq)[
                 :, :, 0
             ]  # shape (beam,freq,(x,y))
             transit_index = np.argmin(
