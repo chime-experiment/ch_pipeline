@@ -11,7 +11,7 @@ from draco.util import tools
 from . import containers
 
 
-class HFBMakeTimeAverage(task.SingleTask):
+class HFBAverageOverTime(task.SingleTask):
     """Take average over time axis.
 
     Used for making sub-frequency band shape template and general time averaging.
@@ -47,28 +47,13 @@ class HFBMakeTimeAverage(task.SingleTask):
         # Get the output container
         out_cont = contmap[stream.__class__]
 
-        if self.weighting == "uniform":
-            # Number of samples with non-zero weight in each time bin
-            nsamples = np.count_nonzero(stream.weight[:], axis=-1)
-
-            # For uniform weighting, the average of the variances is
-            # sum( 1 / weight ) / nsamples,
-            # and the averaged weight is the inverse of that
-            variance = tools.invert_no_zero(stream.weight[:])
-            weight = nsamples / np.sum(variance, axis=-1)
-
-            # For uniform weighting, the averaged data is the average of all
-            # non-zero data
-            data = np.sum(stream.hfb[:], axis=-1) / nsamples
-
-        else:
-            # For inverse-variance weighting, the averaged weight turns out to
-            # be equal to the sum of the weights
-            weight = np.sum(stream.weight[:], axis=-1)
-
-            # For inverse-variance weighting, the averaged data is the weighted
-            # sum of the data, normalized by the sum of the weights
-            data = np.sum(stream.weight[:] * stream.hfb[:], axis=-1) / weight
+        # Average data over time, which corresponds to the final axis (index -1)
+        data, weight = average_hfb(
+            data=stream.hfb[:],
+            weight=stream.weight[:],
+            axis=-1,
+            weighting=self.weighting,
+        )
 
         # Create container to hold output
         out = out_cont(axes_from=stream, attrs_from=stream)
@@ -296,10 +281,10 @@ class HFBAverageOverBeams(task.SingleTask):
         )
 
         # Create container to hold output
-        out = containers.HFBBeamAverage(axes_from=stream, attrs_from=stream)
+        out = containers.HFBHighResSpectrum(axes_from=stream, attrs_from=stream)
 
         # Save data to output container
-        out.average[:] = data
+        out.hfb[:] = data
         out.weight[:] = weight
 
         # Return output container
