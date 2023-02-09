@@ -237,7 +237,7 @@ class HFBTimeAverage(FreqContainer):
         return self.datasets["nsample"]
 
 
-class HFBHighResData(RawContainer, FreqContainer):
+class HFBHighResData(TODContainer, FreqContainer):
     """Container for holding high-resolution frequency data"""
 
     _axes = ("beam",)
@@ -250,7 +250,7 @@ class HFBHighResData(RawContainer, FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "flags/hfb_weight": {
+        "hfb_weight": {
             "axes": ["freq", "beam", "time"],
             "dtype": np.float32,
             "initialise": True,
@@ -267,7 +267,7 @@ class HFBHighResData(RawContainer, FreqContainer):
     @property
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
-        return self["flags/hfb_weight"]
+        return self["hfb_weight"]
 
 
 class HFBHighResTimeAverage(FreqContainer):

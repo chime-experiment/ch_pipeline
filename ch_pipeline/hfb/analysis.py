@@ -9,7 +9,6 @@ from draco.core import task
 from draco.util import tools
 
 from . import containers
-from .containers import HFBHighResData
 
 
 class HFBMakeTimeAverage(task.SingleTask):
@@ -108,7 +107,7 @@ class MakeHighFreqRes(task.SingleTask):
         weight = stream.weight[:]
 
         # Change data and weights to numpy array, so that it can be reshaped
-        if type(data) == mpiarray.MPIArray:
+        if isinstance(data, mpiarray.MPIArray):
             data = data.local_array
             weight = weight.local_array
 
@@ -126,7 +125,9 @@ class MakeHighFreqRes(task.SingleTask):
         weight = weight.reshape(nfreq * nsubfreq, nbeam, -1)
 
         # Create container to hold output
-        out = HFBHighResData(freq=freq, beam=beam, time=time, attrs_from=stream)
+        out = containers.HFBHighResData(
+            freq=freq, beam=beam, time=time, attrs_from=stream
+        )
 
         # Save data to output container
         out.hfb[:] = data
@@ -139,7 +140,8 @@ class MakeHighFreqRes(task.SingleTask):
 class HFBDivideByTemplate(task.SingleTask):
     """Divide HFB data by template of time-averaged HFB data.
 
-    Used for flattening sub-frequency band shape by dividing on-source data by a template.
+    Used for flattening sub-frequency band shape by dividing on-source data by a
+    template.
     """
 
     def process(self, stream, template):
@@ -161,7 +163,7 @@ class HFBDivideByTemplate(task.SingleTask):
         """
 
         # Divide data by template
-        data = stream.hfb[:] / template.hfb[:, :, :, np.newaxis]
+        data = stream.hfb[:] * tools.invert_no_zero(template.hfb[:, :, :, np.newaxis])
 
         # Divide variance by square of template, which means to
         # multiply weight by square of template
