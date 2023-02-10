@@ -194,18 +194,18 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
 
         Parameters
         ----------
-        timestamp : float
-            Start observing time (in unix time)
-
         freq : np.ndarray[nfreq]
             1D array of frequencies in the data (in MHz).
+
+        timestamp : float
+            Start observing time (in unix time)
 
         Returns
         -------
         mask : np.ndarray[nfreq]
             Mask array. True will include a frequency channel, False masks it out.
         """
-        return ~rfi.frequency_mask(freq, timestamp)
+        return ~rfi.frequency_mask(freq, timestamp=timestamp)
 
 
 class ChannelFlagger(task.SingleTask):
@@ -260,10 +260,8 @@ class ChannelFlagger(task.SingleTask):
 
         # Iterate over frequencies and find bad channels
         for fi in freq_ind:
-
             # Only run good_channels if frequency is local
             if fi >= sf and fi < ef:
-
                 # Run good channels code and unpack arguments
                 res = data_quality.good_channels(
                     timestream, test_freq=fi, inputs=inputmap, verbose=False
@@ -376,7 +374,6 @@ class MonitorCorrInput(task.SingleTask):
             # Loop through the rest of the days and make sure the
             # inputs and frequencies are the same
             for fmap in filemap[1:]:
-
                 data_r = andata.Reader(self.files[fmap[1]])
 
                 if len(data_r.input) != ninput:
@@ -455,7 +452,6 @@ class MonitorCorrInput(task.SingleTask):
 
         # Loop over days
         for i_local, i_dist in enumerate(i_day):
-
             csd, time_range = self.timemap[i_dist]
 
             # Print status
@@ -478,7 +474,6 @@ class MonitorCorrInput(task.SingleTask):
 
             # If requested, write to disk
             if self.save:
-
                 # Create a container to hold the results
                 input_mon = containers.CorrInputMonitor(
                     freq=self.freq, input=self.input_map, distributed=False
@@ -525,7 +520,6 @@ class MonitorCorrInput(task.SingleTask):
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if np.sum(good_day_flag_all) >= max(2, self.n_day_min):
-
             n_uniq_bad = np.zeros(self.ndays, dtype=np.int64)
             dindex = np.arange(self.ndays)[good_day_flag_all]
 
@@ -545,7 +539,6 @@ class MonitorCorrInput(task.SingleTask):
 
         # Write csd flag to file
         if self.save:
-
             # Create container
             csd_flag = containers.SiderealDayFlag(
                 csd=np.array([tmap[0] for tmap in self.timemap])
@@ -676,9 +669,7 @@ class TestCorrInput(task.SingleTask):
 
         # Iterate over frequencies and find bad inputs
         for fi_local, fi_dist in enumerate(range(sfreq, efreq)):
-
             if fi_dist in freq_ind:
-
                 # Check if vis_weight is zero for this frequency,
                 # which would imply a bad GPU node.
                 if "vis_weight" in timestream.flags:
@@ -812,7 +803,6 @@ class AccumulateCorrInputMask(task.SingleTask):
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if ncsd >= max(2, self.n_day_min):
-
             n_uniq_bad = np.zeros(ncsd, dtype=np.int64)
             dindex = np.arange(ncsd)[good_day_flag]
 
@@ -832,7 +822,6 @@ class AccumulateCorrInputMask(task.SingleTask):
 
         # Write csd flag to file
         if self.save:
-
             # Create container
             csd_flag = containers.SiderealDayFlag(csd=np.array(self._csd))
 
@@ -905,15 +894,12 @@ class ApplyCorrInputMask(task.SingleTask):
         ntinput = tstream_input.size
 
         if nminput == 1:
-
             # Apply same mask to all products
             weight *= mask
 
         else:
-
             # Map each input to a mask
             if nminput < ntinput:
-
                 # The expression below will expand a mask constructed from the stacked
                 # autocorrelation data for each cylinder/polarisation to the inputs from
                 # that cylinder/polarisation.  However, we may want to make this more robust
@@ -974,7 +960,6 @@ class ApplySiderealDayFlag(task.SingleTask):
 
         # Is this csd specified in the file?
         if this_csd not in self.csd_dict:
-
             output = timestream
 
             if this_csd is None:
@@ -989,7 +974,6 @@ class ApplySiderealDayFlag(task.SingleTask):
                 ) % (this_csd, self.file_name)
 
         else:
-
             # Is this csd flagged good?
             this_flag = self.csd_dict[this_csd]
 
@@ -1034,7 +1018,6 @@ class NanToNum(task.SingleTask):
 
         # Loop over frequencies to reduce memory usage
         for lfi, fi in timestream.vis[:].enumerate(0):
-
             # Set non-finite values of the visibility equal to zero
             flag = ~np.isfinite(timestream.vis[fi])
             if np.any(flag):
@@ -1085,7 +1068,6 @@ class RadiometerWeight(task.SingleTask):
         timestream.redistribute("freq")
 
         if isinstance(timestream, andata.CorrData):
-
             self.log.debug("Converting weights to effective number of samples.")
 
             # Extract number of samples per integration period
@@ -1124,7 +1106,6 @@ class RadiometerWeight(task.SingleTask):
             memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
         elif isinstance(timestream, dcontainers.SiderealStream):
-
             self.log.debug(
                 "Scaling weights by outer product of inverse receiver temperature."
             )
@@ -1220,7 +1201,6 @@ class BadNodeFlagger(task.SingleTask):
         # Manually flag frequencies corresponding to specific GPU nodes on specific acquisitions
         this_acq = timestream.attrs.get("acquisition_name", None)
         if this_acq in self.nodes_by_acq:
-
             # Grab list of nodes from input dictionary
             nodes_to_flag = self.nodes_by_acq[this_acq]
             if not hasattr(nodes_to_flag, "__iter__"):
@@ -1295,7 +1275,6 @@ def transit_flag(body, time, nsigma=2.0):
 
     # Loop over transit times
     for ttrans in transit_times:
-
         # Compute source coordinates
         sf_time = ephemeris.unix_to_skyfield_time(ttrans)
         pos = obs.skyfield_obs().at(sf_time).observe(body)
@@ -1305,7 +1284,6 @@ def transit_flag(body, time, nsigma=2.0):
 
         # Make sure body is above horizon
         if alt.radians > 0.0:
-
             # Estimate the amount of time the body is in the primary beam
             # as +/- nsigma sigma, where sigma denotes the width of the
             # primary beam.  We use the lowest frequency and E-W (or X) polarisation,
@@ -1325,7 +1303,6 @@ def transit_flag(body, time, nsigma=2.0):
 
 
 def taper_mask(mask, nwidth, outer=False):
-
     num = len(mask)
     if outer:
         tapered_mask = 1.0 - mask.astype(np.float64)
@@ -1426,7 +1403,6 @@ class MaskDay(task.SingleTask):
 
         # Apply the mask
         if np.any(flag):
-
             # If requested, apply taper.
             if ntaper > 0:
                 self.log.info("Applying taper over %d time samples." % ntaper)
@@ -1481,7 +1457,6 @@ class MaskSource(MaskDay):
         self.body = [ephemeris.source_dictionary[src] for src in source]
 
     def _flag(self, time):
-
         flag = np.zeros(time.size, dtype=bool)
         for body in self.body:
             flag |= transit_flag(body, time, nsigma=self.nsigma)
@@ -1640,7 +1615,6 @@ class MaskCHIMEData(task.SingleTask):
         mw = mmodes.weight[:]
 
         for pi, (fi, fj) in enumerate(mmodes.prodstack):
-
             oi, oj = tel.feeds[fi], tel.feeds[fj]
 
             # Check if baseline is intra-cylinder
@@ -1673,12 +1647,10 @@ class MaskCHIMEMisc(task.SingleTask):
     mask_freq = config.Property(proptype=list, default=None)
 
     def process(self, ss):
-
         ss.redistribute("prod")
 
         # Mask out the 10 MHz lines
         if self.mask_clock:
-
             # Identify the frequency bins that contain the 10 MHz clock line
             m10 = (
                 np.abs(((ss.freq["centre"] + 5) % 10.0) - 5.0) > 0.5 * ss.freq["width"]
@@ -1687,16 +1659,13 @@ class MaskCHIMEMisc(task.SingleTask):
             ss.weight[:] *= m10[:, np.newaxis, np.newaxis]
 
         if self.mask_nodes is not None:
-
             node_index = ((800.0 - ss.freq["centre"]) / 400.0 * 1024) % 16
 
             for ni in self.mask_nodes:
-
                 node_mask = node_index != ni
                 ss.weight[:] *= node_mask[:, np.newaxis, np.newaxis]
 
         if self.mask_freq is not None:
-
             fmask = np.ones_like(ss.freq["centre"])
             fmask[self.mask_freq] = 0.0
 
@@ -1858,7 +1827,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
 
         cc = 0
         for bb in range(nmeas):
-
             if not bflag[bb]:
                 continue
 
@@ -1887,7 +1855,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
 
         # Loop over frequencies
         for ff in range(vis.shape[0]):
-
             # For each cylinder, average the magnitude of the visibilities for:
             #   all redundant baselines that contain that cylinder
             #   all redundant baselines that do not contain that cylinder
@@ -1930,7 +1897,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         # expected to affect all of these frequencies.  This step is only possible
         # if the frequency map as a function of time has been provided on setup.
         if self.freq_map is not None and len(data.freq) == 1024:
-
             grouper, slot_index = self._get_slot_freqs(data.time[0])
 
             frac_freq_masked = np.sum(mask[grouper, :], axis=1) / grouper.shape[1]
@@ -1961,7 +1927,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         """
 
         if freq_map is not None:
-
             islot = list(freq_map.level).index("slot")
             slot = freq_map.stream[:, :, islot]
 
@@ -1980,7 +1945,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
             self.slot_index = slot
 
         else:
-
             self.freq_map = None
 
     def _get_slot_freqs(self, timestamp):
@@ -2317,26 +2281,22 @@ class ApplyInputFlag(task.SingleTask):
         """Determine the timestamp based on the container type."""
 
         if issubclass(type(data), tod.TOData):
-
             timestamp = data.time
             time_axis = "time"
 
         elif issubclass(type(data), dcontainers.SiderealStream):
-
             ra = data.ra
             lsd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             timestamp = self.observer.lsd_to_unix(lsd + data.ra / 360.0)
             time_axis = "ra"
 
         elif issubclass(type(data), dcontainers.TrackBeam):
-
             ra = data.pix["phi"][:] + data.attrs["cirs_ra"]
             lsdf = self.observer.unix_to_lsd(data.attrs["transit_time"]) + ra / 360.0
             timestamp = self.observer.lsd_to_unix(lsdf)
             time_axis = "pix"
 
         elif issubclass(type(data), dcontainers.StaticGainData):
-
             timestamp = data.attrs["time"]
             time_axis = None
 

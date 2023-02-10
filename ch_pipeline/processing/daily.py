@@ -626,7 +626,6 @@ class DailyProcessing(base.ProcessingType):
     default_script = DEFAULT_SCRIPT
 
     def _load_hook(self):
-
         # Process the intervals
         self._intervals = []
         for t in self._revparams["intervals"]:

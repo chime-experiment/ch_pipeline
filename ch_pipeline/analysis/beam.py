@@ -407,11 +407,9 @@ class EdgeFlagger(task.SingleTask):
         weight = track["weight"][:].view(np.ndarray)
 
         for ind in np.ndindex(*weight.shape[:-1]):
-
             flag = np.flatnonzero(weight[ind] > 0.0)
 
             if flag.size > 0:
-
                 imin, imax = np.percentile(flag, [0, 100]).astype(np.int64)
                 imax = imax + 1
 
@@ -524,7 +522,6 @@ class TransitResampler(task.SingleTask):
         return new_beam
 
     def _resample(self, xgrid, ygrid, wgrid, x):
-
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
@@ -795,7 +792,6 @@ class ConstructStackedBeam(task.SingleTask):
 
         # Construct stack
         for pp, (ss, conj) in enumerate(reverse_stack):
-
             aa, bb = prod[pp]
             if conj:
                 aa, bb = bb, aa
@@ -836,9 +832,7 @@ class ConstructStackedBeam(task.SingleTask):
 
     @staticmethod
     def _resolve_pol(pol1, pol2, pol_axis):
-
         if "co" in pol_axis:
-
             if pol1 == pol2:
                 ipol = pol_axis.index("co")
             else:
@@ -847,7 +841,6 @@ class ConstructStackedBeam(task.SingleTask):
             return ipol, ipol
 
         else:
-
             if pol1 == pol2:
                 ipol1 = pol_axis.index(pol1)
                 ipol2 = pol_axis.index(pol2)

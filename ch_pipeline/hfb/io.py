@@ -243,7 +243,6 @@ class LoadFiles(LoadFilesFromParams):
         # Convert list of filelists to list of filegroups
         self.filegroups = []
         for i, flist in enumerate(filelists):
-
             tag = f"group_{i}"
 
             # Handle lists including time ranges

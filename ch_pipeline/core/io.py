@@ -303,9 +303,7 @@ class LoadGainUpdates(LoadDataFiles):
 
         # Make sure we are not dealing with a transitional gain update
         if not self.keep_transition:
-
             while "transition" in self.gains.update_id[self._time_ptr].decode():
-
                 self._time_ptr += 1
 
                 if self._time_ptr == self.gains.ntime:
@@ -423,7 +421,6 @@ class LoadFileFromTag(io.BaseLoadFiles):
         # If we are returning the same file for every iteration,
         # then load that file now.
         if self.only_prefix:
-
             filename = self.prefix
 
             split_ext = os.path.splitext(filename)
@@ -434,7 +431,6 @@ class LoadFileFromTag(io.BaseLoadFiles):
             self.outcont = self._load_file(filename)
 
         else:
-
             self.prefix = os.path.splitext(self.prefix)[0]
 
     def process(self, incont):
@@ -449,7 +445,6 @@ class LoadFileFromTag(io.BaseLoadFiles):
         outcont : subclass of `memh5.BasicCont`
         """
         if not self.only_prefix:
-
             filename = self.prefix + incont.attrs["tag"] + ".h5"
 
             # Load file into outcont attribute
@@ -479,7 +474,6 @@ class FilterExisting(task.MPILoggedTask):
     min_files_in_csd = config.Property(proptype=int, default=6)
 
     def __init__(self):
-
         super(FilterExisting, self).__init__()
 
         self.csd_list = []
@@ -515,7 +509,6 @@ class FilterExisting(task.MPILoggedTask):
             )
 
             for acq, fname, start, finish in query.tuples():
-
                 if start is None or finish is None:
                     continue
 
@@ -537,7 +530,6 @@ class FilterExisting(task.MPILoggedTask):
         csd_list = {}
 
         for path in files:
-
             acq, fname = path.split("/")[-2:]
             name = os.path.join(acq, fname)
 
@@ -556,7 +548,6 @@ class FilterExisting(task.MPILoggedTask):
         new_files = set()
 
         for csd, csd_files in sorted(csd_list.items()):
-
             if csd in self.csd_list:
                 self.log.debug("Skipping existing CSD=%i, files: %s", csd, csd_files)
                 continue
