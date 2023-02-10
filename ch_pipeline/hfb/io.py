@@ -255,7 +255,10 @@ class LoadFiles(LoadFilesFromParams):
             else:
                 fgroup = {"files": flist, "time_range": (None, None), "tag": tag}
 
-            self.filegroups.append(fgroup)
+            # Avoid adding filegroups with empty filelists (the output of
+            # QueryDatabase with return_intervals included days with no files)
+            if fgroup["files"]:
+                self.filegroups.append(fgroup)
 
         # Call the baseclass setup to resolve any selections
         super().setup()
