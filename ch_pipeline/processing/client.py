@@ -18,7 +18,6 @@ class PType(click.ParamType):
     name = "processing type"
 
     def convert(self, value, param, ctx):
-
         if value not in _typedict:
             self.fail(
                 'processing type "%s" unknown. See `chp type list` '
@@ -144,7 +143,6 @@ def create(type_):
 def item_list(revision, long, human):
     """List existing items within the REVISION (given as type:revision)."""
     for tag in revision.ls():
-
         if long:
             n, size = dirstats(revision.base_path / tag)
             size = humansize(size, width=10) if human else str(size)

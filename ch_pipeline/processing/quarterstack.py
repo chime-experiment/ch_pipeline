@@ -213,7 +213,6 @@ class QuarterStackProcessing(base.ProcessingType):
         # NOTE: later entries is `daily_revisions` will override LSDs found in earlier
         # revisions.
         for rev in self.default_params["daily_revisions"]:
-
             daily_path = (
                 self.root_path
                 if self.default_params["daily_root"] is None
@@ -245,7 +244,6 @@ class QuarterStackProcessing(base.ProcessingType):
             good_days = [x[0] for x in query.tuples()]
 
             for d in daily_rev.ls():
-
                 # Filter out known bad days here
                 if (int(d) in bad_days) or (int(d) not in good_days):
                     continue
@@ -271,7 +269,6 @@ class QuarterStackProcessing(base.ProcessingType):
         # For each quarter divide the LSDs it contains into a number of partitions to
         # give jack knifes
         for quarter in quarters:
-
             lsds_in_quarter = sorted(np.array(lsds)[yq == quarter])
 
             # Skip quarters with two few days in them
