@@ -4,6 +4,7 @@ from . import base
 from . import daily
 from . import beam
 from . import quarterstack
+from . import reprocess
 
 click.disable_unicode_literals_warning = True
 
