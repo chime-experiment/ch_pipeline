@@ -189,11 +189,14 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
 
         return madtimes
 
-    def _static_rfi_mask_hook(self, freq):
+    def _static_rfi_mask_hook(self, freq, timestamp=None):
         """Use the static CHIME RFI mask.
 
         Parameters
         ----------
+        timestamp : float
+            Start observing time (in unix time)
+
         freq : np.ndarray[nfreq]
             1D array of frequencies in the data (in MHz).
 
@@ -202,7 +205,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         mask : np.ndarray[nfreq]
             Mask array. True will include a frequency channel, False masks it out.
         """
-        return ~rfi.frequency_mask(freq)
+        return ~rfi.frequency_mask(freq, timestamp)
 
 
 class ChannelFlagger(task.SingleTask):
