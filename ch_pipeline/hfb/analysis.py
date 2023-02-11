@@ -407,7 +407,7 @@ class HFBSelectTransit(task.SingleTask):
             Array consisting of transit data
         """
         formed_beam = beam_model.formed.FFTFormedBeamModel()
-        tied = beam_model.composite.FutureMostAccurateCompositeBeamModel()
+        tied = beam_model.composite.FutureMostAccurateCompositeBeamModel(interpolate_bad_freq=True)
 
         # Extract beam indices, change format for sensitivity calculations
         # For example, change [12, 268, 524, 780] to [  12, 1012, 2012, 3012]
