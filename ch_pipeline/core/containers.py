@@ -43,6 +43,70 @@ from draco.core.containers import (
 )
 
 
+class FrequencyMapSingle(FreqContainer):
+    """Map between frequency bin and FPGA [crate, slot, link].
+
+    This container holds a map between the frequency bins and stream ids.
+    A stream id is encoded based on the shuffle, crate, slot, and link values
+    as follows:
+
+    stream_id = shuffle*2**12 + crate*2**8 + slot*2**4 + link
+
+    The value of shuffle is always 3.
+    """
+
+    _axes = ("level",)
+
+    _dataset_spec = {
+        "stream": {
+            "axes": ["freq", "level"],
+            "dtype": np.int32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "stream_id": {
+            "axes": ["freq"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    def __init__(self, *args, **kwargs):
+        if "level" not in kwargs:
+            kwargs["level"] = np.array(["shuffle", "crate", "slot", "link"], dtype=str)
+
+        super().__init__(*args, **kwargs)
+
+    @property
+    def shuffle(self):
+        return self.stream[:, 0]
+
+    @property
+    def crate(self):
+        return self.stream[:, 1]
+
+    @property
+    def slot(self):
+        return self.stream[:, 2]
+
+    @property
+    def link(self):
+        return self.stream[:, 3]
+
+    @property
+    def stream(self):
+        return self.datasets["stream"]
+
+    @property
+    def stream_id(self):
+        return self.datasets["stream_id"]
+
+    @property
+    def level(self):
+        return self.index_map["level"]
+
+
 class FrequencyMap(FreqContainer, TODContainer):
     """Map between frequency bin and FPGA stream (GPU node) as a function of time."""
 
