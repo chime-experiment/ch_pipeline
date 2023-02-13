@@ -1713,22 +1713,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
     threshold = config.Property(proptype=float, default=5.0)
     max_frac_freq = config.Property(proptype=float, default=0.1)
 
-    def setup(self, freq_map=None):
-        """Determine the frequencies handled by each FPGA motherboard slot.
-
-        If a motherboard decorrelates, then all frequencies transmitted by
-        that slot will be affected.
-
-        Parameters
-        ----------
-        freq_map : FrequencyMap
-            The mapping between frequency bin and [crate, slot, link]
-            as a function of time.
-        """
-
-        self._set_slot_freqs(freq_map)
-
-    def process(self, data, inputmap):
+    def process(self, data, inputmap, freqmap):
         """Create the mask.
 
         Parameters
@@ -1737,6 +1722,8 @@ class MaskDecorrelatedCylinder(task.SingleTask):
             Visibilites before averaging over cylinders.
         inputmap : list of :class:`CorrInput`
             A list describing the inputs in data.
+        freqmap : :class:`FrequencyMapSingle`
+            The mapping between frequency bin and [shuffle, crate, slot, link]
 
         Returns
         -------
@@ -1896,12 +1883,14 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         # transmitted by that motherboard slot.  The cylinder decorrelation is
         # expected to affect all of these frequencies.  This step is only possible
         # if the frequency map as a function of time has been provided on setup.
-        if self.freq_map is not None and len(data.freq) == 1024:
-            grouper, slot_index = self._get_slot_freqs(data.time[0])
+
+        if freqmap is not None and len(data.freq) == 1024:
+            slot = freqmap.slot[:]
+            grouper = np.argsort(slot, kind="mergesort").reshape(max(slot) + 1, -1)
 
             frac_freq_masked = np.sum(mask[grouper, :], axis=1) / grouper.shape[1]
 
-            mask = mask | (frac_freq_masked > self.max_frac_freq)[slot_index, :]
+            mask = mask | (frac_freq_masked > self.max_frac_freq)[slot, :]
 
         # Print the fraction of data that has been masked by this task
         self.log.info(
@@ -1915,77 +1904,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         out.mask[:] = mask
 
         return out
-
-    def _set_slot_freqs(self, freq_map):
-        """Determine the slot to frequency map as a function of time.
-
-        Parameters
-        ----------
-        freq_map : FrequencyMap
-            The mapping between frequency bin and [crate, slot, link]
-            as a function of time.
-        """
-
-        if freq_map is not None:
-            islot = list(freq_map.level).index("slot")
-            slot = freq_map.stream[:, :, islot]
-
-            nslot = np.max(slot) + 1
-            ntime, nfreq = slot.shape
-            nfreq_per_slot = nfreq // nslot
-
-            grouper = np.zeros((ntime, nslot, nfreq_per_slot), dtype=int)
-            for tt in range(ntime):
-                grouper[tt] = np.argsort(slot[tt], kind="mergesort").reshape(
-                    nslot, nfreq_per_slot
-                )
-
-            self.freq_map = freq_map
-            self.grouper = grouper
-            self.slot_index = slot
-
-        else:
-            self.freq_map = None
-
-    def _get_slot_freqs(self, timestamp):
-        """Look up the slot to frequency map that was used at a given time.
-
-        Parameters
-        ----------
-        timestamp : float64
-            Unix timestamp.
-
-        Returns
-        -------
-        grouper : np.ndarray[nslot, nfreq_per_slot]
-            Index into the frequency axis that will group
-            frequency channels based on the FPGA motherboard slot
-            that transmitted them.
-        slot_index : np.ndarray[nfreq,]
-            Index into the slot axis that will yield the
-            FPGA motherboard slot that transmitted each
-            frequency channel.
-        """
-
-        tindex = np.digitize(timestamp, self.freq_map.time) - 1
-
-        if tindex < 0:
-            tbefore = (self.freq_map.time.min() - timestamp) / (24 * 3600)
-            raise RuntimeError(
-                "Requested timestamp is before the earliest time "
-                f"in the frequency map file by {tbefore:0.1f} days."
-            )
-
-        if timestamp > self.freq_map.attrs["end_time"]:
-            tafter = (timestamp - self.freq_map.attrs["end_time"]) / (24 * 3600)
-            self.log.warning(
-                "Requested timestamp is after the end time covered "
-                f"by the frequency map file by {tafter:0.1f} days.  "
-                "Please ensure that the frequency map has not been "
-                "updated since then."
-            )
-
-        return self.grouper[tindex], self.slot_index[tindex]
 
 
 class ExpandMask(task.SingleTask):
