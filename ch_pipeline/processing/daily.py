@@ -84,13 +84,6 @@ pipeline:
         files: "{timing_file}"
         distributed: false
 
-    # Load the frequency map
-    - type: ch_pipeline.core.io.LoadSetupFile
-      out: freqmap
-      params:
-        filename: "{freqmap_file}"
-        distributed: false
-
     - type: draco.core.misc.AccumulateList
       in: tcorr
       out: tcorrlist
@@ -162,10 +155,16 @@ pipeline:
       in: full_bad_baseline_mask
       out: bad_baseline_mask
 
+    # Load the frequency map active when this data was collected
+    - type: ch_pipeline.core.dataquery.QueryFrequencyMap
+      in: tstream
+      out: freqmap
+      params:
+        cache: true
+
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      requires: freqmap
-      in: [tstream, inputmap]
+      in: [tstream, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
