@@ -7,9 +7,10 @@ import json
 import numpy as np
 
 from scipy.constants import c as speed_of_light
+from scipy.interpolate import LinearNDInterpolator
 import scipy.signal
 
-from caput import config
+from caput import config, mpiarray
 from ch_util import andata, ephemeris, tools
 from ch_util.fluxcat import FluxCatalog
 from draco.core import task, io
@@ -29,7 +30,7 @@ def model_extended_sources(
     min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
-    **kwargs
+    **kwargs,
 ):
     """Generate a model for the visibilities.
 
@@ -165,8 +166,26 @@ def model_extended_sources(
     return S, source_bound
 
 
-def solve_single_time(vis, weight, source_model, rcond=None):
+def solve_single_time(
+    vis, weight, source_model, rcond=None, rcond_for_degenerate_sources=None
+):
     """Fit source model to the visibilities, treating each time independently.
+
+    Notes
+    -----
+
+    Includes functionality to flag frequency/time samples for which the
+    fringe factors for multiple sources are very similar, and thus the
+    least-squares solver will have difficulty distinguishing their
+    amplitudes. In detail, if `rcond_for_degenerate_sources` is specified,
+    the routine diagonalizes the source model parameter covariance matrix
+    at each time. If any of the eigenvalues is less than
+    `rcond_for_degenerate_sources` times the maximum eigenvalue, and the
+    corresponding eigenvector is dominated by more than one source, the
+    time sample and relevant sources are flagged. (If the eigenvector
+    is only dominated by one source, the eigenvalue is typically close
+    to zero, so the source amplitude will be close to zero and no extra
+    flagging is required.)
 
     Parameters
     ----------
@@ -181,15 +200,31 @@ def solve_single_time(vis, weight, source_model, rcond=None):
         Value for rcond parameter of least-squares solver: in parameter
         matrix, cuts off singular values whose ratio to the leading
         singular value is less than rcond. Default: None.
+    rcond_for_degenerate_sources : float, optional
+        See Notes for details. If specified, function returns 3-element
+        tuple instead of coeff array. Default: None.
 
     Returns
     -------
     coeff : np.ndarray[ntime, nparam]
         Best-fit coefficients of the model for each time.
+    degenerate_time_idx : list
+        List of time sample indices where degenerate sources were found.
+        Only returned if `rcond_for_degenerate_sources` is specified.
+    degenerate_source_idx : list
+        List of arrays containing indices of degenerate sources for each
+        time index in `degenerate_time_idx`. Only returned if
+        `rcond_for_degenerate_sources` is specified.
     """
+    # Threshold for counting an eigenvector component as dominant
+    _HIGH_EVEC_VALUE = 0.5
+
     nbaseline, ntime, nparam = source_model.shape
 
     coeff = np.zeros((ntime, nparam), dtype=np.complex64)
+
+    degenerate_time_idx = []
+    degenerate_source_idx = []
 
     for tt in range(ntime):
         S = source_model[:, tt, :]
@@ -197,12 +232,33 @@ def solve_single_time(vis, weight, source_model, rcond=None):
         # Calculate covariance of model coefficients
         C = np.dot(S.T.conj(), weight[:, tt, np.newaxis] * S)
 
+        # If desired, look for degenerate sources
+        if rcond_for_degenerate_sources is not None:
+            # We look for eigenvalues of the parameter covariance that are
+            # lower than the specified rcond values times the maximum
+            # eigenvalue. If any are found, we check to see if the corresponding
+            # eigenvectors are dominated by more than one source. If so,
+            # we save the time and source indices
+            evals, evecs = np.linalg.eigh(C)
+            eval_max = np.abs(evals).max()
+            for val, vec in zip(evals, evecs.T):
+                if (np.abs(val) / eval_max) < rcond_for_degenerate_sources:
+                    high_evec_components = np.argwhere(
+                        np.abs(vec) > _HIGH_EVEC_VALUE
+                    ).flatten()
+                    if len(high_evec_components) > 1:
+                        degenerate_time_idx.append(tt)
+                        degenerate_source_idx.append(high_evec_components)
+
         # Solve for model coefficients
         coeff[tt, :] = np.linalg.lstsq(
             C, np.dot(S.T.conj(), weight[:, tt] * vis[:, tt]), rcond=rcond
         )[0]
 
-    return coeff
+    if rcond_for_degenerate_sources is not None:
+        return coeff, degenerate_time_idx, degenerate_source_idx
+    else:
+        return coeff
 
 
 def solve_multiple_times(vis, weight, source_model, rcond=None):
@@ -284,7 +340,19 @@ class SolveSources(task.SingleTask):
     rcond : float, optional
         Value for rcond parameter of least-squares solver: in parameter
         matrix, cuts off singular values whose ratio to the leading
-        singular value is less than rcond. Default: None.
+        singular value is less than rcond. A non-default value for this parameter
+        does not appear to improve any results, so the default is recommended.
+        Default: None.
+    regularize_degenerate_sources : bool, optional
+        If True, attempt to identify time/frequency samples where the fringe factors
+        associated with two or more sources are similar, and interpolate the
+        source amplitudes for those samples based on the amplitudes of nearby
+        samples. Only implemented for point sources; ignored for extended sources.
+        Default: False.
+    rcond_regularizer : float, optional
+        Threshold for eigenvalue ratios of source model parameter covariance,
+        determining if any sources are degenerate at a given time/frequency sample.
+        See :func:`solve_single_time` for more info. Default: 1e-1.
     """
 
     sources = config.Property(
@@ -306,6 +374,9 @@ class SolveSources(task.SingleTask):
     max_iter = config.Property(proptype=int, default=4)
 
     rcond = config.Property(proptype=float, default=None)
+
+    regularize_degenerate_sources = config.Property(proptype=bool, default=False)
+    rcond_regularizer = config.Property(proptype=float, default=1e-1)
 
     def setup(self, tel):
         """Set up the source model.
@@ -474,6 +545,12 @@ class SolveSources(task.SingleTask):
         if self.extended_source_kwargs:
             out_coeff = out.coeff[:].view(np.ndarray)
 
+        # If flagging degenerate sources, make bool array to store these flags
+        if self.regularize_degenerate_sources and not self.extended_source_kwargs:
+            local_source_flags = np.zeros(
+                (nfreq, ntime, len(self.sources)), dtype=np.bool
+            )
+
         # Loop over polarisations
         for pp, upp in enumerate(upol):
             this_pol = np.flatnonzero(pol == upp)
@@ -481,20 +558,40 @@ class SolveSources(task.SingleTask):
             dist_pol = distance[:, this_pol]
             bweight_pol = baseline_weight[this_pol, np.newaxis]
 
+            # Re-initalize flags for each polarisation
+            if self.regularize_degenerate_sources and not self.extended_source_kwargs:
+                local_source_flags[:] = 0
+
             # Loop over frequencies
             for ff, nu in enumerate(freq):
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :]
                 weight = all_weight[ff, this_pol, :] * bweight_pol
 
-                # Determine the initial source model, assuming all sources are point sources
+                # Determine the initial source model, assuming all sources are
+                # point sources
                 psrc_model, _ = model_extended_sources(
                     nu, dist_pol, timestamp, self.bodies, **self.point_source_kwargs
                 )
                 psrc_model = psrc_model[0]
 
-                # Obtain initial estimate of each source assuming point source
-                amplitude = solve_single_time(vis, weight, psrc_model, rcond=self.rcond)
+                # Obtain initial estimate of each source assuming point source.
+                # If planning to regularize degenerate sources, accept that metadata
+                # from the solver method and update the source flags
+                if self.regularize_degenerate_sources:
+                    amplitude, time_idx, src_idx = solve_single_time(
+                        vis,
+                        weight,
+                        psrc_model,
+                        rcond=self.rcond,
+                        rcond_for_degenerate_sources=self.rcond_regularizer,
+                    )
+                    for tt, ss_list in zip(time_idx, src_idx):
+                        local_source_flags[ff, tt, ss_list] = True
+                else:
+                    amplitude = solve_single_time(
+                        vis, weight, psrc_model, rcond=self.rcond
+                    )
 
                 # If modeling extended sources, iterate over time-dependent normalization
                 # and baseline dependent response.  Assumes the description of the extended
@@ -505,7 +602,7 @@ class SolveSources(task.SingleTask):
                         dist_pol,
                         timestamp,
                         self.bodies,
-                        **self.extended_source_kwargs
+                        **self.extended_source_kwargs,
                     )
                     ext_model = ext_model[0]
 
@@ -542,6 +639,58 @@ class SolveSources(task.SingleTask):
                     out_coeff[ff, pp, :] = coeff
 
                 out_amplitude[ff, pp, :, :] = amplitude
+
+            # Regularize amplitudes of degenerate sources, if desired
+            if self.regularize_degenerate_sources and not self.extended_source_kwargs:
+                # Gather full copy of source flags and amplitude (packed as
+                # [freq, time, source]) onto each rank
+                global_source_flags = mpiarray.MPIArray.wrap(
+                    local_source_flags, axis=0
+                ).allgather()
+                global_amplitude = mpiarray.MPIArray.wrap(
+                    out_amplitude[:, pp], axis=0
+                ).allgather()
+
+                # Make flattened, masked coordinate arrays for frequency and time
+                global_time, global_freq = np.meshgrid(
+                    out.index_map["time"], out.index_map["freq"]["centre"]
+                )
+                global_time = global_time.flatten()
+                global_freq = global_freq.flatten()
+
+                # Loop over sources
+                for si, src in enumerate(self.sources):
+                    # Make flattened mask that selects unflagged freq/time samples
+                    unflagged_mask = ~global_source_flags[:, :, si].flatten()
+                    source_amplitude = global_amplitude[:, :, si].flatten()
+
+                    # Make 2d interpolating function using unflagged values
+                    interp = LinearNDInterpolator(
+                        list(
+                            zip(
+                                global_freq[unflagged_mask],
+                                global_time[unflagged_mask],
+                            )
+                        ),
+                        source_amplitude[unflagged_mask],
+                        fill_value=0.0,
+                        rescale=True,
+                    )
+
+                    # Set flagged values to output of interpolator, and update
+                    # output amplitude with results
+                    source_amplitude[~unflagged_mask] = interp(
+                        global_freq[~unflagged_mask],
+                        global_time[~unflagged_mask],
+                    )
+                    out_amplitude[:, pp, :, si] = source_amplitude.reshape(
+                        len(out.index_map["freq"]), ntime
+                    )[sfreq:efreq]
+
+                    self.log.info(
+                        f"Source {src}, pol {upp}: "
+                        f"{np.sum(~unflagged_mask)} samples regularized"
+                    )
 
         # Save a few attributes necessary to interpret the data
         out.attrs["min_distance"] = self.min_distance
