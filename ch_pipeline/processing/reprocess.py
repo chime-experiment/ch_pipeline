@@ -150,11 +150,20 @@ pipeline:
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeightBaselineAlt
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
       in: sstream
-      out: sstream_tvwb
+      out: full_tvwb_mask
       params:
         relative_threshold: 0.5
+        ignore_absolute_threshold: -1
+        average_type: "mean"
+        pols_to_flag: "all"
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyBaselineMask
+      in: [sstream, full_tvwb_mask]
+      out: sstream_tvwb
 
     # Generate the second RFI mask using targeted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
