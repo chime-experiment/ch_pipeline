@@ -305,12 +305,23 @@ pipeline:
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
       in: sstream
-      out: sstream_tvwb
+      out: full_tvwb_mask
       params:
         relative_threshold: 0.5
         ignore_absolute_threshold: -1
         average_type: "mean"
         pols_to_flag: "all"
+
+    # Collapse bad-baseline mask over baseline, so that any time-freq sample
+    # with a low weight at any baseline is masked
+    - type: draco.analysis.flagging.CollapseBaselineMask
+      in: full_tvwb_mask
+      out: tvwb_mask
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream, tvwb_mask]
+      out: sstream_tvwb
 
     # Generate the second RFI mask using targeted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
