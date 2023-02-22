@@ -9,7 +9,7 @@ setup(
     extras_require={
         "hfb": ["beam-model @ git+ssh://git@github.com/CHIMEFRB/beam-model.git"],
     },
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     entry_points="""
         [console_scripts]
         chp=ch_pipeline.processing.client:cli
