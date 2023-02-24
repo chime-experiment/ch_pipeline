@@ -4,7 +4,9 @@ Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
-from typing import Union, overload
+from __future__ import annotations
+from typing import overload
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
@@ -68,7 +70,17 @@ class RFIFilter(task.SingleTask):
     threshold_mad = config.Property(proptype=float, default=6.0)
     use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
+    @overload
+    def process(
+        self, data: andata.CorrData | dcontainers.TimeStream
+    ) -> containers.RFIMask | dcontainers.RFIMask:
+        ...
+
+    @overload
+    def process(self, data: dcontainers.SiderealStream) -> dcontainers.SiderealRFIMask:
+        ...
+
+    def process(self, data):
         """Creates a mask by identifying outliers in the
         autocorrelation data.  This mask can be used to zero out
         frequencies and time samples that are contaminated by RFI.
@@ -117,7 +129,10 @@ class RFIFilter(task.SingleTask):
         # Create container to hold output
         if self.use_draco_container:
             # draco RFIMask container is not distributed
-            out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            if "time" in data.index_map:
+                out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            elif "ra" in data.index_map:
+                out = dcontainers.SiderealRFIMask(axes_from=data, attrs_from=data)
             mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()[:, 0, :]
         else:
             out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
