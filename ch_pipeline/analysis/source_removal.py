@@ -369,8 +369,10 @@ class SolveSources(task.SingleTask):
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
+            output_kwargs = {}
         else:
             raise RuntimeError("Unable to extract time from input container.")
 
@@ -433,11 +435,11 @@ class SolveSources(task.SingleTask):
         # Create output container
         out = containers.SourceModel(
             pol=upol,
-            time=timestamp,
             source=np.array(self.sources),
             param=param_name,
             axes_from=data,
             attrs_from=data,
+            **output_kwargs
         )
 
         # Determine extended source model
@@ -842,8 +844,10 @@ class SolveSourcesWithBeam(SolveSources):
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
             timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
+            output_kwargs = {}
         else:
             raise RuntimeError("Unable to extract time from input container.")
 
@@ -906,11 +910,11 @@ class SolveSourcesWithBeam(SolveSources):
         # Create output container
         out = containers.SourceModel(
             pol=upol,
-            time=timestamp,
             source=np.array(self.sources),
             param=param_name,
             axes_from=data,
             attrs_from=data,
+            **output_kwargs
         )
 
         out.add_dataset("coeff")
