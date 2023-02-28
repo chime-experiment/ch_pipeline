@@ -827,8 +827,8 @@ class DailyProcessing(base.ProcessingType):
 
         return jobparams
 
-    def _generate_hook(self):
-        to_run = self.pending()
+    def _generate_hook(self, user=None):
+        to_run = self.status(user=user)["not_yet_submitted"]
 
         if self._num_recent_days:
             today = math.floor(ephemeris.chime.get_current_lsd())
