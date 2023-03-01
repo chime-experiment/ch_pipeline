@@ -5,6 +5,7 @@ import numpy as np
 from caput import config
 
 from draco.core import task
+from caput import tools
 
 from .containers import HFBRFIMask
 
@@ -58,11 +59,11 @@ class HFBRadiometerRFIFlagging(task.SingleTask):
         n_samp = delta_nu * delta_t * (1.0 - frac_lost)
 
         # Ideal radiometer equation
-        radiometer = data**2 / n_samp
+        radiometer = data**2 * tools.invert_no_zero(n_samp)
 
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
-        sensitivity_metric = 2.0 / (radiometer * weight)
+        sensitivity_metric = 2.0 * tools.invert_no_zero(radiometer * weight)
 
         # Boolean mask indicating data that are contaminated by RFI
         mask = sensitivity_metric > self.threshold
