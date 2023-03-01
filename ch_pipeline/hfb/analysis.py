@@ -147,12 +147,14 @@ class HFBDivideByTemplate(task.SingleTask):
             Container with HFB data and weights; the result of the division.
         """
 
+        template_array = template.hfb[:]
+
         # Divide data by template
-        data = stream.hfb[:] * tools.invert_no_zero(template.hfb[:, :, :, np.newaxis])
+        data = stream.hfb[:] * tools.invert_no_zero(template_array[:, :, :, np.newaxis])
 
         # Divide variance by square of template, which means to
         # multiply weight by square of template
-        weight = stream.weight[:] * template.hfb[:, :, :, np.newaxis] ** 2
+        weight = stream.weight[:] * template_array[:, :, :, np.newaxis] ** 2
 
         # Create container to hold output
         out = containers.HFBData(axes_from=stream, attrs_from=stream)
