@@ -5,7 +5,7 @@ import numpy as np
 from caput import config
 
 from draco.core import task
-from draco.util import tools
+from caput import tools
 
 from .containers import HFBRFIMask
 
