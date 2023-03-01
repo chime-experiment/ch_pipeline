@@ -1061,6 +1061,14 @@ class CHIMETimeStream(TimeStream, RawContainer):
         return self["flags/frac_lost"]
 
     @property
+    def dataset_id(self):
+        """Get the dataset id flags dataset as U33 type."""
+        try:
+            return memh5.ensure_unicode(self["flags/dataset_id"][:])
+        except KeyError:
+            return None
+
+    @property
     def flags(self):
         """Get the flags group."""
         flags_group = dict(self["flags"])
