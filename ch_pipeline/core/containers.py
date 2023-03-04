@@ -1111,6 +1111,19 @@ class CHIMETimeStream(TimeStream, RawContainer):
             storage["input_flags"] = storage["flags"].pop("inputs")
             storage["input_flags"]._name = "/input_flags"
 
+        # Remove any datasets/flags which shouldn't be present in this container.
+        # If any other dataset is needed, then a CorrData container should be used
+        # or a new dataset_spec entry should be added to this container. At present,
+        # this should only affect the "frac_rfi" flag.
+        contains = set(newdata.datasets) | {
+            "flags/" + name for name in newdata["flags"]
+        }
+
+        for name in contains:
+            if name not in newdata.dataset_spec:
+                del newdata[name]
+                continue
+
         return newdata
 
     @property
