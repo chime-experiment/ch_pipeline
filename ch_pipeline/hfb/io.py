@@ -9,6 +9,7 @@ from caput import pipeline
 from caput import config
 
 from ch_util import ephemeris
+from ch_util.hfbcat import HFBCatalog
 
 from draco.core import io
 
@@ -22,6 +23,8 @@ class BaseLoadFiles(io.BaseLoadFiles):
 
     Attributes
     ----------
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`.
     source_dec : float
         Declination of source in degrees.
     beam_ew_include : list
@@ -37,30 +40,68 @@ class BaseLoadFiles(io.BaseLoadFiles):
         in this list is also used in evaluating beam positions (for selecting
         the beams closest to a transiting source). Does not work in combination
         with `beam_ew_include`.
+    freq_phys_delta : float
+        Half-width of frequency chuck (in MHz) that is selected around the
+        frequency listed in the HFB target list in case a source is provided
+        via `source_name`.
+        Default is 1.
 
     Selections
     ----------
-    Selections in frequency and beams can be done in two ways:
-    1. By passing a `source_dec` attribute (for the beam selection) and/or
+    Selections in frequency and beams can be done in multiple ways:
+    1. By passing a `source_name` attribute, in which case the HFB target list
+       is consulted for the declination of the source (for the beam selection)
+       and the frequency of its absorption feature (for the frequency selection,
+       together with `freq_phys_delta`).
+    2. By passing a `source_dec` attribute (for the beam selection) and/or
        a `freq_phys_range` or `freq_phys_list` attribute (for the frequency
        selection). If both `freq_phys_range` and `freq_phys_list` are given the
        former will take precedence, but you should clearly avoid doing this.
-    2. By manually passing indices in the `selections` attribute
+       The `source_dec`, `freq_phys_range`, and `freq_phys_list` attributes
+       cancel the look-up of declination and frequency from the HFB target list
+       triggered by the `source_name` attribute.
+    3. By manually passing indices in the `selections` attribute
        (see documentation in :class:`draco.core.io.BaseLoadFiles`).
     Method 1 takes precedence over method 2. If no relevant attributes are
     passed, all frequencies/beams are read.
     """
 
+    source_name = config.Property(proptype=str, default=None)
     source_dec = config.Property(proptype=float, default=None)
     beam_ew_include = config.Property(proptype=list, default=None)
-    freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_range = config.Property(proptype=list, default=[])
+    freq_phys_list = config.Property(proptype=list, default=[])
+    freq_phys_delta = config.Property(proptype=float, default=1.0)
 
     def setup(self):
         """Set up frequency and beam selection."""
 
         # Resolve any selections provided through the `selections` attribute
         super().setup()
+
+        # Look up source in catalog
+        if self.source_name:
+            hfb_cat = HFBCatalog[self.source_name]
+
+            # Load source declination, unless manually overridden
+            if not self.source_dec:
+                self.source_dec = hfb_cat.dec
+
+            # Load frequency(ies) of absorption features, unless a range or list
+            # of frequecies to load is provided via the task's attributes
+            if not self.freq_phys_range and not self.freq_phys_list:
+                nfreq_abs = len(hfb_cat.freq_abs)
+                if nfreq_abs == 1:
+                    self.freq_phys_range = [
+                        hfb_cat.freq_abs[0] - self.freq_phys_delta,
+                        hfb_cat.freq_abs[0] + self.freq_phys_delta,
+                    ]
+                else:
+                    raise NotImplementedError(
+                        f"Source {hfb_cat.name} has {nfreq_abs} absorption features"
+                        "listed in the catalog. Please manually select frequencies"
+                        "to load, e.g., using `freq_phys_range` or `freq_phys_list`."
+                    )
 
         # Set up frequency selection.
         cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
