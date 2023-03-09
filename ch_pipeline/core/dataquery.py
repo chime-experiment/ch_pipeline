@@ -75,6 +75,8 @@ class QueryDatabase(task.MPILoggedTask):
     node_spoof : dictionary
         (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
         can be in any format ensure_unix will support, including e.g.
@@ -126,6 +128,7 @@ class QueryDatabase(task.MPILoggedTask):
     return_intervals = config.Property(proptype=bool, default=False)
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     acqtype = config.Property(proptype=str, default="corr")
     instrument = config.Property(proptype=str, default=None)
@@ -175,7 +178,7 @@ class QueryDatabase(task.MPILoggedTask):
             if self.run_name:
                 return self.QueryRun()
 
-            layout.connect_database()
+            layout.connect_database(ntries=self.connection_attempts)
 
             f = finder.Finder(node_spoof=self.node_spoof)
 
@@ -293,10 +296,13 @@ class QueryRun(task.MPILoggedTask):
         Name of the `run` defined in the database.
     node_spoof : str, optional
         Node spoof argument. See documentation of :class:`ch_util.finder.Finder`.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     run_name = config.Property(proptype=str)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the specified run.
@@ -313,7 +319,7 @@ class QueryRun(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-            layout.connect_database()
+            layout.connect_database(ntries=self.connection_attempts)
 
             cat_run = (
                 layout.global_flag_category.select()
@@ -395,11 +401,14 @@ class QueryDataspecFile(task.MPILoggedTask):
         Name of dataset to use.
     archive_root : str
         Root of archive to add to file paths.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     dataset_file = config.Property(proptype=str, default="")
     dataset_name = config.Property(proptype=str, default="")
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the given dataspec.
@@ -448,7 +457,9 @@ class QueryDataspecFile(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
+        files = files_from_spec(
+            dspec, node_spoof=self.node_spoof, ntries=self.connection_attempts
+        )
 
         return files
 
@@ -464,11 +475,14 @@ class QueryDataspec(task.MPILoggedTask):
         List of time ranges as documented above.
     node_spoof : dict, optional
         Optional node spoof argument.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     instrument = config.Property(proptype=str)
     timerange = config.Property(proptype=list)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the given dataspec.
@@ -485,7 +499,9 @@ class QueryDataspec(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
+        files = files_from_spec(
+            dspec, node_spoof=self.node_spoof, ntries=self.connection_attempts
+        )
 
         return files
 
@@ -501,6 +517,9 @@ class QueryAcquisitions(task.MPILoggedTask):
     ----------
     node_spoof : dict
         Host and directory in which to find data.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection
+        before exiting
     start_time, end_time : str
         Find all acquisitions between this start and end time.
     instrument : str
@@ -517,6 +536,7 @@ class QueryAcquisitions(task.MPILoggedTask):
     """
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
     instrument = config.Property(proptype=str, default="chimestack")
     start_time = config.Property(default=None)
     end_time = config.Property(default=None)
@@ -544,7 +564,7 @@ class QueryAcquisitions(task.MPILoggedTask):
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
         if self.comm.rank == 0:
-            layout.connect_database()
+            layout.connect_database(ntries=self.connection_attempts)
 
             fi = finder.Finder(node_spoof=self.node_spoof)
             fi.only_corr()
@@ -777,13 +797,17 @@ class QueryFrequencyMap(task.MPILoggedTask):
         return cont
 
 
-def finder_from_spec(spec, node_spoof=None):
+def finder_from_spec(spec, node_spoof=None, ntries=1):
     """Get a `Finder` object from the dataspec.
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
+    node_spoof : dict or None
+        Host and directory in which to find data.
+    ntries : int (default: 1)
+        number of times to try to establish a database connection before exiting
 
     Returns
     -------
@@ -813,7 +837,7 @@ def finder_from_spec(spec, node_spoof=None):
             node_spoof = spec["node_spoof"]
 
         # Create a finder object limited to the relevant time
-        fi = finder.Finder(node_spoof=node_spoof)
+        fi = finder.Finder(node_spoof=node_spoof, ntries=ntries)
 
         # Set the time range that encapsulates all the intervals
         fi.set_time_range(earliest, latest)
@@ -828,14 +852,17 @@ def finder_from_spec(spec, node_spoof=None):
     return fi
 
 
-def files_from_spec(spec, node_spoof=None):
+def files_from_spec(spec, node_spoof=None, ntries=1):
     """Get the names of files in a dataset.
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
-
+    node_spoof : dict or None
+        Host and directory in which to find data.
+    ntries : int (default: 1)
+        number of times to try to establish a database connection before exiting
     Returns
     -------
     files : list
@@ -846,7 +873,7 @@ def files_from_spec(spec, node_spoof=None):
 
     if mpiutil.rank0:
         # Get the finder object
-        fi = finder_from_spec(spec, node_spoof)
+        fi = finder_from_spec(spec, node_spoof, ntries=ntries)
 
         # Pull out the results and extract all the files
         results = fi.get_results()
