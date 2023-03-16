@@ -9,7 +9,7 @@ from draco.core import task
 from draco.util import tools
 from draco.core import containers as dcontainers
 
-import beam_model
+from beam_model.composite import FutureMostAccurateCompositeBeamModel
 
 from . import containers
 
@@ -354,43 +354,90 @@ def average_hfb(data, weight, axis, weighting="inverse_variance"):
 class HFBSelectTransit(task.SingleTask):
     """Find transit data through FRB beams.
 
-    Task for selecting on- and off-source data.
-    beam_width gives the width of the synthetic beam. To select off-source data, a window around the beam is chosen.
-    Size of this window is determined by "w" parameter: window size = w * beam_width
-    Normally, when w ~ 18, the source is outside of the sideloebes of the beam.  Data outside this window is taken as
-    off-source data.
-    On-source data selection is based on 2 criteria:
+    Task for selecting on- and off-source data. The task can do both, but only
+    one at a time (which one is set by the `selection` attribute). The selection
+    of data is determined by the following criteria (a single one or both can be
+    used, as specified by the `criteria` attribute):
 
-    1) The source must be inside the main lobe of synthetic beam.
-    2) Sensitivity of the beam toward the source must be greater than some threshold.
-
-    A few points about sensitivity for on-source data selection:
-
-    i) Sensitivity of the last row of EW beams is higher in the side lobes than the main lobe. That is why So if we take maximum
-    sensitivity of the beam to calculate the threshold needed for data selection, selected data won't be in the main lobe.
-    Therefore, for setting sensitivity threshold, closest sample to the centre of the beam is chosen (this sample
-    is closest to the transit time through the centre beam centre). Then, sensitivity corresponding to this sample is the
-    maximum sensitivity we want for setting up the threshold for on-source data selection.
-
-    ii) sensitivity
+    1) The offset in RA of the time samples with respect to the nominal centre of
+       the synthetic beam being considered. This results in a window of data that
+       is includes (in the case of on-source selection) or excluded (in the case
+       of off-source selection). The size of the window is measured in units of
+       the half-width of the synthetic beams in the EW direction, and set by the
+       `on_source_include_window` and `off_source_exclude_window` attributes.
+    2) The sensitivity of the synthetic beam toward the source. This must be greater
+       than some threshold (in the case of on-source selection) or lower than some
+       ceiling (in the case of off-source selection). The threshold/ceiling is set
+       by the `on_source_sens_threshold` and `off_source_sens_ceiling` attributes,
+       as a fraction of the maximum sensitivity in the beam's main lobe. (The
+       sensitivity of the last row of EW beams, EW index 3, is higher in the side
+       lobes than the main lobe. If we were to use the maximum sensitivity of the
+       beam per se to calculate the threshold needed for data selection, selected
+       data won't be in the main lobe.)
 
     Attributes
     ----------
-    sensitivity_threshold: float
-
-    beam_index : list
-        List of beam indices for which find the transit time
+    selection : str
+        What part of the data to select. Options are: 'on-source', 'off-source'.
+        Default is 'on-source'
+    criteria : list of strings
+        Criteria used to decide which time samples are selected. Possible entries:
+        'offset' (i.e., the RA offset of the source to the centre of the beam),
+        'sensitivity' (i.e., the synthetic beam sensitivity).
+        Default is ['offset', 'sensitivity']
+    on_source_include_window : float
+        Half-width of the window to include when selecting on-source data in units
+        of the EW half-width of the synthetic beams (beam and frequency dependent).
+        Default is 1.0
+    on_source_sens_threshold : float
+        Fraction of maximum beam sensitivity above which samples are considered
+        on-source.
+        Default is 0.6
+    off_source_exclude_window : float
+        Half-width of the window to exclude when selecting off-source data in units
+        of the EW half-width of the synthetic beams (beam and frequency dependent).
+        A value of 10.0 excludes the first main sidelobe of the synthetic beams.
+        A value of 18.0 excludes a further minor sidelobe, at the cost of requiring
+        larger chunks of data around transit, especially at lower frequecies.
+        Default is 18.0
+    off_source_sens_ceiling : float
+        Fraction of maximum beam sensitivity below which samples are considered
+        off-source.
+        Default is 0.005
     ra : float
-        Right ascension of the source
+        Right ascension of the source.
     dec : float
-        Declination of the source
+        Declination of the source.
+    time_offset : float
+        Time (is seconds) to add to the data times before comparison with the
+        beam model. This is a temporary hack, to be removed when the data times
+        are fully understood.
+        Default is 0.0
     """
 
-    sensitivity_threshold = config.Property(proptype=float)
-    ra = config.Property(proptype=float)
-    dec = config.Property(proptype=float)
-    on_source = config.Property(proptype=bool, default=True)
-    # s = 5
+    selection = config.enum(["on-source", "off-source"], default="on-source")
+    criteria = config.list_type(type_=str, default=["offset"])
+    on_source_include_window = config.Property(proptype=float, default=1.0)
+    on_source_sens_threshold = config.Property(proptype=float, default=0.6)
+    off_source_exclude_window = config.Property(proptype=float, default=18.0)
+    off_source_sens_ceiling = config.Property(proptype=float, default=0.005)
+    ra = config.Property(proptype=float, default=None)
+    dec = config.Property(proptype=float, default=None)
+    time_offset = config.Property(proptype=float, default=0.0)
+
+    def setup(self):
+        """Check criteria attribute."""
+
+        if not self.criteria:
+            raise ValueError("No selection criteria set.")
+
+        available_criteria = ["offset", "sensitivity"]
+        for criterion in self.criteria:
+            if criterion not in available_criteria:
+                raise ValueError(
+                    f"Unknown selection criterion passed ({criterion})."
+                    f"Available criteria are: {available_criteria}"
+                )
 
     def process(self, stream):
         """Find transit data for the given beams.
@@ -400,109 +447,135 @@ class HFBSelectTransit(task.SingleTask):
         stream : containers.HFBData
             Container with HFB data and weights.
 
-
         Returns
         -------
         out : containers.HFBData
-            Array consisting of transit data
+            Container with same HFB data, but weights adjusted to make selection.
         """
-        formed_beam = beam_model.formed.FFTFormedBeamModel()
-        tied = beam_model.composite.FutureMostAccurateCompositeBeamModel(interpolate_bad_freq=True)
 
-        # Extract beam indices, change format for sensitivity calculations
-        # For example, change [12, 268, 524, 780] to [  12, 1012, 2012, 3012]
-        beam_ind = stream._data["index_map"]["beam"][:]
-        dtype = beam_ind.dtype
-        beam_number = (beam_ind % 256 + 1000 * np.floor(beam_ind / 256)).astype(dtype)
-        nbeam = len(beam_number)
+        # Extract axes lengths
+        nfreq, nsubfreq, nbeam, ntime = stream.hfb.shape
 
-        # Extract physical frequencies:
-        nfreq = len(stream._data["index_map"]["freq"]["centre"][:])
-        physical_freq = (
-            stream._data["index_map"]["freq"]["centre"][:].reshape(nfreq, 1)
-            + stream._data["index_map"]["subfreq"][:]
-        ).flatten()
-        # Extract time array, hfb data and weights for selected beams and frequencies:
-        time = stream.time[:]  # Is it starting of acquistion time?
-        data = stream.hfb[:, :, :, :]
-        weight = stream.weight[:, :, :, :]
+        # Extract physical frequencies by combining CHIME frequency channels and
+        # HFB subfrequencies into one vector
+        freq = stream._data["index_map"]["freq"]["centre"][:]
+        subfreq = stream._data["index_map"]["subfreq"]
+        phys_freq = (freq.reshape(nfreq, 1) + subfreq).flatten()
 
-        # Convert equatorial position of the source to cartesian coordinates:
+        # Extract beam indices, then change format for sensitivity calculations.
+        # The beam_model package uses a format (referred to here as `beam_number`)
+        # where the EW beam index is indicated by thousands, and the NS beam index
+        # by the remaining digits (a number ranging form 0 and 255). For example,
+        # the indices [12, 268, 524, 780] will be changed to [12, 1012, 2012, 3012]
+        beam_index = stream._data["index_map"]["beam"][:]
+        dtype = beam_index.dtype
+        nbeam_ns = 256
+        beam_number = (
+            beam_index % nbeam_ns + 1000 * np.floor(beam_index / nbeam_ns)
+        ).astype(dtype)
 
-        pfe = []
-        for j, time_sample in enumerate(time):
-            pfe.append(
-                formed_beam.get_position_from_equatorial(self.ra, self.dec, time[j])
-            )
-        pfe = np.asarray(pfe)
-        # sens = actual_beam.get_sensitivity(self.beam_index, pfe, physical_freq)
-        # sens_mask = np.copy(sens)
-        sens = tied.get_sensitivity(beam_number, pfe, physical_freq)
-        sens_on = np.copy(sens)
-        # print(sens.shape)
+        # Extract time array. HACK: Possibly add offset to time.
+        time = stream.time[:] + self.time_offset
 
-        beam_width = formed_beam.get_beam_widths(beam_number, physical_freq)
-        pos = formed_beam.get_beam_positions(beam_number, physical_freq)
+        # Load beam model used for sensitivity calculations, for looking up beam
+        # positions and beam widths, and for finding source positions in beam-model
+        # xy-coordinates. Set `interpolate_bad_freq=True` to avoid issues at
+        # frequencies where the data-driven primary-beam model lacks data.
+        beam_mdl = FutureMostAccurateCompositeBeamModel(interpolate_bad_freq=True)
 
-        # off-source data
-        if self.on_source is False:
-            x_edge_upper = pos[:, :, 0] + 18 * beam_width[:, :, 0] / 2
-            x_edge_lower = pos[:, :, 0] - 18 * beam_width[:, :, 0] / 2
-            # Select data when the source is completely outside of the primary beam
-            off = (pfe[:, 0][:, None, None] > x_edge_upper[None, :, :]) | (
-                pfe[:, 0][:, None, None] < x_edge_lower[None, :, :]
-            )
-            sens[(off)] = 1
-            sens[np.invert(off)] = 0
-            # Swap axes to have (freq,beam,time), reshape it to have subfreq, and multiply sens by data, weight and time
-            sens = np.swapaxes(sens, 0, 2)
-            sens = sens.reshape(nfreq, 128, nbeam, len(time))
-
-            # change the weights to select off-source data
-            weight = weight * sens
-
-        # on-source data:
-        elif self.on_source is True:
-            # Select only the main lobe using beam_width function
-
-            x_edge_upper = pos[:, :, 0] + beam_width[:, :, 0] / 2
-            x_edge_lower = pos[:, :, 0] - beam_width[:, :, 0] / 2
-
-            main_lobe = (pfe[:, 0][:, None, None] < x_edge_upper[None, :, :]) & (
-                pfe[:, 0][:, None, None] > x_edge_lower[None, :, :]
+        # Obtain the track of the source in beam-model xy-coordinates from its
+        # equatorial position and time. The array has shape (ntime, 2).
+        posxy_source = np.zeros((ntime, 2))
+        for itime, time_sample in enumerate(time):
+            posxy_source[itime, :] = beam_mdl.get_position_from_equatorial(
+                self.ra, self.dec, time_sample
             )
 
-            # Find sensitivity corresponding to the closest sample to transit wrt centre of the beam:
-            beam_pos_x = formed_beam.get_beam_positions(beam_number, physical_freq)[
-                :, :, 0
-            ]  # shape (beam,freq,(x,y))
-            transit_index = np.argmin(
-                np.abs(pfe[:, 0][:, None, None] - beam_pos_x), axis=0
-            )  # transit indices with shape (beam,freq)
+        # Calculate the centre positions of the synthetic beams and their widths
+        # (FWHM in the EW and NS directions) in beam-model xy-coordinates for all
+        # combinations of beam and frequency. The shape of both resulting arrays
+        # is (nbeam, nfreq, 2), with the final dimension giving x and y.
+        posxy_beams = beam_mdl.get_beam_positions(beam_number, phys_freq)
+        beam_width = beam_mdl.get_beam_widths(beam_number, phys_freq)
 
-            max_sens = np.zeros(transit_index.shape)
+        # Compute the offset between the source position and the centres of the
+        # synthetic beams in terms of beam model x coordinate. Make sure this
+        # array gets axes (time, beam, phys_freq).
+        x_offset = np.abs(
+            posxy_source[:, 0][:, np.newaxis, np.newaxis] - posxy_beams[:, :, 0]
+        )
 
-            for i in range(transit_index.shape[0]):
-                for j in range(transit_index.shape[1]):
-                    max_sens[i, j] = sens[:, i, j][transit_index[i, j]]
+        # Create a boolean array that selects the main lobe of the synthetic beam.
+        # It is defined as time samples that are within `on-source-include-window`
+        # synthetic beam EW half-widths of the centre of the beam. The array has axes
+        # (time, beam, phys_freq).
+        main_lobe = x_offset < self.on_source_include_window * beam_width[:, :, 0] / 2
 
-            threshold = self.sensitivity_threshold * max_sens
+        # Compute beam sensitivities only if necessary
+        if "sensitivity" in self.criteria:
+            # Calculate the (composite) beam sesitivities for all combinations of
+            # source position (i.e., time), beam, and frequency, resulting in an
+            # array of size (ntime, nbeam, nfreq * nsubfreq).
+            sens = beam_mdl.get_sensitivity(beam_number, posxy_source, phys_freq)
 
-            sens[((sens_on > threshold[None, :, :]) & main_lobe)] = 1
-            sens[((sens_on < threshold[None, :, :]) | np.invert(main_lobe))] = 0
+            # Find the maximum sensitivity within the main lobe of the beam.
+            # The resulting array has axes (beam, phys_freq)
+            sens_only_main_lobe = sens * main_lobe.astype(float)
+            max_sens = sens_only_main_lobe.max(axis=0)
 
-            # Swap axes to have (freq,beam,time), reshape it to have subfreq, and multiply sens by data, weight and time
-            sens = np.swapaxes(sens, 0, 2)
-            sens = sens.reshape(nfreq, 128, nbeam, len(time))
+        # Create a boolean mask that selects certain samples of the data:
+        # True for selected samples, False for non-selected samples.
+        # Initialize the array as all True, then set parts of it to False below
+        # based on choosen criteria
+        mask = np.full((ntime, nbeam, nfreq * nsubfreq), True)
 
-            # change the weights to select on-source data
-            weight = weight * sens
+        if self.selection == "on-source":
+            # Make mask to select on-source data
+
+            if "offset" in self.criteria:
+                # Ensure that on-source data corresponds to time samples where the
+                # source is inside the main lobe of the synthetic beam.
+                mask &= main_lobe
+
+            if "sensitivity" in self.criteria:
+                # Ensure that on-source data corresponds to time samples where the
+                # beam sensitivity is above the choosen threshold (i.e., at least
+                # `on_source_sens_threshold` times the maximum sensitivity found
+                # in the main lobe of the beam being considered).
+                sens_threshold = self.on_source_sens_threshold * max_sens
+                mask &= sens > sens_threshold[np.newaxis, :, :]
+
+        elif self.selection == "off-source":
+            # Make mask to select off-source data
+
+            if "offset" in self.criteria:
+                # Ensure that off-source data corresponds to time samples where
+                # the source is far enough away from the synthetic beam (at least
+                # `off_source_exclude_window` synthetic beam half-widths away from
+                # the beam centre).
+                x_offset_lim = self.off_source_exclude_window * beam_width[:, :, 0] / 2
+                mask &= x_offset > x_offset_lim
+
+            if "sensitivity" in self.criteria:
+                # Ensure that off-source data corresponds to time samples where
+                # the beam sensitivity is below the choosen threshold (at most
+                # `off_source_sens_ceiling` times the maximum sensitivity found
+                # in the main lobe of the beam being considered).
+                sens_threshold = self.off_source_sens_ceiling * max_sens
+                mask &= sens < sens_threshold[np.newaxis, :, :]
+
+        # The mask created above has axes (time, beam, phys_freq). Convert this
+        # back to the axes used in the hfb containers (freq, subfreq, beam, time):
+        # First swap axes to get (phys_freq, beam, time). Then reshape the array
+        # to convert phys_freq to freq and subfreq.
+        mask = np.swapaxes(mask, 0, 2)
+        mask = mask.reshape(nfreq, nsubfreq, nbeam, ntime)
 
         # Create container to hold output
-        out = containers.HFBData(axes_from=stream, attrs_from=stream)
+        out = containers.HFBData(copy_from=stream)
 
-        # Save weights and data to output container for on-source and off-source data
-        out.hfb[:] = data
+        # Set weights of non-selected samples to zero
+        weight = stream.weight[:] * mask.astype(float)
         out.weight[:] = weight
 
         # Return output container
