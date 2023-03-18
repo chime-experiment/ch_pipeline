@@ -698,39 +698,38 @@ class QueryFrequencyMap(task.MPILoggedTask):
         stream_id = None
         stream = None
 
-        if self.comm.rank == 0:
+        try:
+            dsid_flag = ts.dataset_id[:].gather(rank=0)
+        except KeyError:
+            dsid_flag = None
+
+        if self.comm.rank == 0 and dsid_flag is not None:
             layout.connect_database()
+            # Get only unique dataset ids to reduce number of lookups. Ignore
+            # the null dataset at the 0th index
+            unique_dataset_ids = np.unique(dsid_flag[:])[1:]
 
-            # Get the dataset_id dataset, which will be None if it
-            # does not exist
-            if (dsid_flag := ts.flags.get("dataset_id", None)) is not None:
-                # Get only unique dataset ids to reduce number of lookups. Ignore
-                # the null dataset at the 0th index
-                unique_dataset_ids = np.unique(dsid_flag[:])[1:]
+            if len(unique_dataset_ids) != 0:
+                fmaps = {}
+                # Get the frequency map for each unique dataset_id. They should all
+                # have the same frequency map - otherwise, raise an error
+                for dsid in unique_dataset_ids:
+                    state = (
+                        ds.Dataset.from_id(str(dsid))
+                        .closest_ancestor_of_type("f_engine_frequency_map")
+                        .state
+                    )
+                    fmaps[state.id] = state.data
 
-                if len(unique_dataset_ids) != 0:
-                    fmaps = {}
-                    # Get the frequency map for each unique dataset_id. They should all
-                    # have the same frequency map - otherwise, raise an error
-                    for dsid in unique_dataset_ids:
-                        state = (
-                            ds.Dataset.from_id(str(dsid))
-                            .closest_ancestor_of_type("f_engine_frequency_map")
-                            .state
-                        )
-                        fmaps[state.id] = state.data
+                if len(fmaps.keys()) > 1:
+                    raise ValueError("Multiple frequency maps found for this dataset.")
 
-                    if len(fmaps.keys()) > 1:
-                        raise ValueError(
-                            "Multiple frequency maps found for this dataset."
-                        )
+                # Extract the stream_id and frequency map
+                fmap_dict = list(fmaps.values())[0]["fmap"]
 
-                    # Extract the stream_id and frequency map
-                    fmap_dict = list(fmaps.values())[0]["fmap"]
-
-                    stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
-                    fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
-                    stream = tools.order_frequency_map_stream(fmap, stream_id)
+                stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
+                fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
+                stream = tools.order_frequency_map_stream(fmap, stream_id)
 
         # Broadcast to all ranks
         stream_id = self.comm.bcast(stream_id, root=0)
