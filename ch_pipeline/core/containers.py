@@ -1143,8 +1143,11 @@ class CHIMETimeStream(TimeStream, RawContainer):
 
         # Alias the groups back in for maximum compatibility with CHIME Andata
         # based code
-        flags_group["vis_weight"] = self["vis_weight"]
-        flags_group["input_flags"] = self["input_flags"]
+        if "vis_weight" in self:
+            flags_group["vis_weight"] = self["vis_weight"]
+
+        if "input_flags" in self:
+            flags_group["input_flags"] = self["input_flags"]
 
         return flags_group
 
