@@ -1066,7 +1066,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     _dataset_spec = {
         "flags/dataset_id": {
             "axes": ["freq", "time"],
-            "dtype": "U32",
+            "dtype": "S32",
             "initialise": False,
             "distributed": True,
         },
@@ -1130,6 +1130,11 @@ class CHIMETimeStream(TimeStream, RawContainer):
     def frac_lost(self):
         """Get the input flags dataset."""
         return self["flags/frac_lost"]
+
+    @cached_property
+    def dataset_id(self):
+        """Get the dataset_id dataset in Unicode."""
+        return memh5.ensure_unicode(self["flags/dataset_id"][:])
 
     @property
     def flags(self):
