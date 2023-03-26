@@ -73,8 +73,17 @@ class BaseLoadFiles(io.BaseLoadFiles):
     freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_delta = config.Property(proptype=float, default=1.0)
 
-    def setup(self):
-        """Set up frequency and beam selection."""
+    def setup(self, observer=None):
+        """Set up observer, and frequency and beam selection.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        self.observer = ephemeris.chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
         super().setup()
@@ -254,14 +263,28 @@ class LoadFilesFromParams(BaseLoadFiles):
         filegroup = self.filegroups[self._fgroup_ptr]
         self._fgroup_ptr += 1
 
-        if "time_range" not in filegroup:
-            filegroup["time_range"] = (None, None)
+        if "time_range" in filegroup:
+            time_range = filegroup["time_range"]
+        else:
+            time_range = (None, None)
 
         # Read filegroup
         self.log.info(
             f"Reading filegroup {self._fgroup_ptr} of {len(self.filegroups)}."
         )
-        ts = self._load_filelist(filegroup["files"], filegroup["time_range"])
+        ts = self._load_filelist(filegroup["files"], time_range)
+
+        # Find the time to use to compute the container's LSD
+        if time_range:
+            # Use middle of time_range, which normally corresponds to the transit time
+            container_time = np.mean(time_range)
+        else:
+            # Use the start time of the container
+            container_time = ts.time[0]
+
+        # Compute LSD and add to container attributes.
+        lsd = self.observer.unix_to_lsd(container_time)
+        ts.attrs["lsd"] = lsd
 
         # Return timestream
         return ts
