@@ -286,6 +286,17 @@ class LoadFilesFromParams(BaseLoadFiles):
         lsd = self.observer.unix_to_lsd(container_time)
         ts.attrs["lsd"] = lsd
 
+        # Create tag from container_time/LSD, unless manually overridden
+        if "tag" in filegroup:
+            tag = filegroup["tag"]
+        else:
+            tag = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
+            # tag = f"lsd_{lsd:.0f}"
+            # TODO: pick tag format
+
+        # Add tag to container
+        ts.attrs["tag"] = tag
+
         # Return timestream
         return ts
 
@@ -303,24 +314,22 @@ class LoadFiles(LoadFilesFromParams):
         filelists : list
             List of lists of filenames, or list of tuples, where each tuple
             consists of a list of filenames and a tuple of time bounds. Each
-            item in the main list will be places in a single HFBData container.
+            item in the main list will be placed in a single HFBData container.
         """
         if not isinstance(filelists, list):
             raise RuntimeError("Argument must be list of lists of files.")
 
         # Convert list of filelists to list of filegroups
         self.filegroups = []
-        for i, flist in enumerate(filelists):
-            tag = f"group_{i}"
-
+        for flist in filelists:
             # Handle lists including time ranges
             if isinstance(flist, tuple):
-                fgroup = {"files": flist[0], "time_range": flist[1], "tag": tag}
+                fgroup = {"files": flist[0], "time_range": flist[1]}
             else:
-                fgroup = {"files": flist, "time_range": (None, None), "tag": tag}
+                fgroup = {"files": flist, "time_range": (None, None)}
 
             # Avoid adding filegroups with empty filelists (the output of
-            # QueryDatabase with return_intervals included days with no files)
+            # QueryDatabase with return_intervals can include days with no files)
             if fgroup["files"]:
                 self.filegroups.append(fgroup)
 
