@@ -332,6 +332,9 @@ class HFBAverageOverBeams(task.SingleTask):
         out.hfb[:] = data
         out.weight[:] = weight
 
+        # Add list of beams to attributes
+        out.attrs["beam"] = stream._data["index_map"]["beam"][:]
+
         # Return output container
         return out
 
