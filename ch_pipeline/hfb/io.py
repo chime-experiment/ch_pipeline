@@ -263,6 +263,9 @@ class LoadFilesFromParams(BaseLoadFiles):
         )
         ts = self._load_filelist(filegroup["files"], filegroup["time_range"])
 
+        # Add source name to container attributes, to allow catalog use
+        ts.attrs["source_name"] = self.source_name
+
         # Return timestream
         return ts
 
