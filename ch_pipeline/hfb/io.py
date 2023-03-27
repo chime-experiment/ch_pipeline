@@ -297,6 +297,9 @@ class LoadFilesFromParams(BaseLoadFiles):
         # Add tag to container
         ts.attrs["tag"] = tag
 
+        # Add list of files (full paths) to container attributes
+        ts.attrs["files"] = filegroup["files"]
+
         # Return timestream
         return ts
 
