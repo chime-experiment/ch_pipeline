@@ -283,19 +283,18 @@ class LoadFilesFromParams(BaseLoadFiles):
             container_time = ts.time[0]
 
         # Compute LSD and add to container attributes.
-        lsd = self.observer.unix_to_lsd(container_time)
+        lsd = int(self.observer.unix_to_lsd(container_time))
         ts.attrs["lsd"] = lsd
 
-        # Create tag from container_time/LSD, unless manually overridden
-        if "tag" in filegroup:
-            tag = filegroup["tag"]
-        else:
-            tag = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
-            # tag = f"lsd_{lsd:.0f}"
-            # TODO: pick tag format
+        # Add calendar date in YYYYMMDD format to attributes
+        calendar_date = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
+        ts.attrs["calendar_date"] = calendar_date
 
-        # Add tag to container
-        ts.attrs["tag"] = tag
+        # Create tag from LSD, unless manually overridden
+        if "tag" in filegroup:
+            ts.attrs["tag"] = filegroup["tag"]
+        else:
+            ts.attrs["tag"] = f"lsd_{lsd:d}"
 
         # Add list of files (full paths) to container attributes
         ts.attrs["files"] = filegroup["files"]
