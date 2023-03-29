@@ -16,18 +16,23 @@ from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from . import containers
 
 
-class HFBAverageOverTime(task.SingleTask):
-    """Take average over time axis.
+class HFBAverage(task.SingleTask):
+    """Take average of HFB data over any axis.
 
-    Used for making sub-frequency band shape template and general time averaging.
+    Used for making sub-frequency band shape template and general time averaging,
+    and for taking the average of HFB data over beam axis.
 
     Attributes
     ----------
+    axis: str (default: "time")
+        Axis over which to take average.
+        Options are `freq`, `subfreq`, `beam`, and `time`.
     weighting: str (default: "inverse_variance")
         The weighting to use in the stack.
         Either `uniform` or `inverse_variance`.
     """
 
+    axis = config.enum(["freq", "subfreq", "beam", "time"], default="time")
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
@@ -45,18 +50,34 @@ class HFBAverageOverTime(task.SingleTask):
         """
 
         contmap = {
-            containers.HFBData: containers.HFBTimeAverage,
-            containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            "freq": {},
+            "subfreq": {},
+            "beam": {
+                containers.HFBHighResTimeAverage: containers.HFBHighResSpectrum,
+            },
+            "time": {
+                containers.HFBData: containers.HFBTimeAverage,
+                containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            },
         }
 
-        # Get the output container
-        out_cont = contmap[stream.__class__]
+        # Check if necessary output container exists
+        if stream.__class__ not in contmap[self.axis]:
+            raise NotImplementedError(
+                f"Averaging {stream.__class__} over {self.axis} is not implemented."
+            )
 
-        # Average data over time, which corresponds to the final axis (index -1)
+        # Get the output container
+        out_cont = contmap[self.axis][stream.__class__]
+
+        # Find index of axis over which to average
+        axis_index = stream._dataset_spec["hfb"]["axes"].index(self.axis)
+
+        # Average data
         data, weight = average_hfb(
             data=stream.hfb[:],
             weight=stream.weight[:],
-            axis=-1,
+            axis=axis_index,
             weighting=self.weighting,
         )
 
@@ -66,6 +87,9 @@ class HFBAverageOverTime(task.SingleTask):
         # Save data and weights to output container
         out.hfb[:] = data
         out.weight[:] = weight
+
+        # Add index map of axis that was averaged over to attributes
+        out.attrs[self.axis] = stream._data["index_map"][self.axis][:]
 
         return out
 
@@ -290,54 +314,6 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] *= tools.invert_no_zero(self.stack.weight[:])
 
         return self.stack
-
-
-class HFBAverageOverBeams(task.SingleTask):
-    """Taking the average of HFB data over beam axis.
-
-    Attributes
-    ----------
-    weighting: str (default: "inverse_variance")
-        The weighting to use in the averaging.
-        Either `uniform` or `inverse_variance`.
-    """
-
-    weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
-
-    def process(self, stream):
-        """Take average over beam axis.
-
-        Parameters
-        ----------
-        stream : containers.HFBHighResTimeAverage
-            Container with time-averaged high-frequency resolution HFB data and weights.
-
-        Returns
-        -------
-        out : containers.HFBHighResSpectrum
-            Container with high-frequency resolution spectrum data and weights.
-        """
-
-        # Average data over beams, which corresponds to axis index 1
-        data, weight = average_hfb(
-            data=stream.hfb[:],
-            weight=stream.weight[:],
-            axis=1,
-            weighting=self.weighting,
-        )
-
-        # Create container to hold output
-        out = containers.HFBHighResSpectrum(axes_from=stream, attrs_from=stream)
-
-        # Save data to output container
-        out.hfb[:] = data
-        out.weight[:] = weight
-
-        # Add list of beams to attributes
-        out.attrs["beam"] = stream._data["index_map"]["beam"][:]
-
-        # Return output container
-        return out
 
 
 def average_hfb(data, weight, axis, weighting="inverse_variance"):
