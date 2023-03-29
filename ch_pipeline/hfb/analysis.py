@@ -571,6 +571,11 @@ class HFBSelectTransit(task.SingleTask):
         mask = np.swapaxes(mask, 0, 2)
         mask = mask.reshape(nfreq, nsubfreq, nbeam, ntime)
 
+        self.log.info(
+            f"Average number of {self.selection} time samples selected: "
+            f"{mask.sum(axis=3).mean():.1f}"
+        )
+
         # Create container to hold output
         out = containers.HFBData(copy_from=stream)
 
