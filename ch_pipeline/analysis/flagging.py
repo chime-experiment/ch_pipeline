@@ -1935,11 +1935,12 @@ class ExpandMask(task.SingleTask):
         -------
         exp_mask : RFIMask or SiderealRFIMask
         """
-
-        nfreq, ntime = raw_mask.mask[:].shape
-
-        mraw = np.zeros((nfreq, ntime + 2 * self.nexpand), dtype=bool)
-        mraw[:, self.nexpand : -self.nexpand] = raw_mask.mask[:]
+        # Get a reference to the mask
+        mask = raw_mask.mask[:]
+        # Log the original fraction of flagged data
+        original_mask_sum = mask.sum()
+        # Produce the padded mask to expand in time
+        mraw = self._padded_mask_hook(mask)
 
         window = 2 * self.nexpand + 1
         mexp = np.any(rfi._rolling_window_lastaxis(mraw, window), axis=-1)
@@ -1948,10 +1949,56 @@ class ExpandMask(task.SingleTask):
             exp_mask = raw_mask
         else:
             exp_mask = dcontainers.empty_like(raw_mask)
+            # Make sure that this mask is all zero
+            exp_mask.mask[:] = 0
 
-        exp_mask.mask[:] = mexp
+        exp_mask.mask[:] |= mexp
+
+        # Log the new percent of data masked
+        og_frac = 100.0 * original_mask_sum / mask.size
+        drop_frac = 100.0 * exp_mask.mask[:].sum() / mask.size
+        self.log.info(f"Originally flagged {og_frac:.2f}% of data.")
+        self.log.info(f"Flagged {drop_frac:.2f}% of data after expansion.")
 
         return exp_mask
+
+    def _padded_mask_hook(self, mask: np.ndarray) -> np.ndarray:
+        """Overwrite to modify creation of the padded mask."""
+        nfreq, ntime = mask.shape
+        mraw = np.zeros((nfreq, ntime + 2 * self.nexpand), dtype=bool)
+        mraw[:, self.nexpand : -self.nexpand] = mask
+
+        return mraw
+
+
+class ExpandGainMask(ExpandMask):
+    """Expand a Bad Gain Mask to account for gain interpolation.
+
+    Since bad calibration will only happen once per day, only expand
+    the gains in time for regions where they are consistently bad from
+    the start or until the end of the day.
+    """
+
+    def _padded_mask_hook(self, mask: np.ndarray) -> np.ndarray:
+        """Create the padded mask to expand."""
+        # Initialize the empty mask. We don't want to combine with the
+        # original mask until after expanding
+        nfreq, ntime = mask.shape
+        mraw = np.zeros((nfreq, ntime + 2 * self.nexpand), dtype=bool)
+
+        # Indices of the first and last unmasked samples along the time axis.
+        time_start_idx = mask.argmin(axis=1) + self.nexpand
+        time_end_idx = mraw.shape[1] - mask[:, ::-1].argmin(axis=1) - self.nexpand
+
+        # Only take frequencies where there is masking in the first or last samples
+        freq_start_idx = time_start_idx > self.nexpand
+        freq_end_idx = time_end_idx < mraw.shape[1] - self.nexpand
+
+        # Just mask the edges of these regions and expand them in time
+        mraw[freq_start_idx, time_start_idx[freq_start_idx]] = True
+        mraw[freq_end_idx, time_end_idx[freq_end_idx]] = True
+
+        return mraw
 
 
 class DataFlagger(task.SingleTask):
