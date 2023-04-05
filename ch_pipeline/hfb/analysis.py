@@ -67,26 +67,56 @@ class HFBAverage(task.SingleTask):
                 f"Averaging {stream.__class__} over {self.axis} is not implemented."
             )
 
-        # Get the output container
-        out_cont = contmap[self.axis][stream.__class__]
-
         # Find index of axis over which to average
         axis_index = stream._dataset_spec["hfb"]["axes"].index(self.axis)
 
-        # Average data
-        data, weight = average_hfb(
-            data=stream.hfb[:],
-            weight=stream.weight[:],
-            axis=axis_index,
-            weighting=self.weighting,
-        )
+        # Extract hfb and weight datasets from input container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Average the data and weights
+        if self.weighting == "uniform":
+            # Binary weights for uniform weighting
+            binary_weight = np.zeros(weight.shape)
+            binary_weight[weight != 0] = 1
+
+            # Number of samples with non-zero weight in each time bin
+            nsamples = np.sum(binary_weight, axis=axis_index)
+
+            # For uniform weighting, the average of the variances is
+            # sum( 1 / weight ) / nsamples,
+            # and the averaged weight is the inverse of that
+            variance = tools.invert_no_zero(weight)
+            avg_weight = nsamples * tools.invert_no_zero(
+                np.sum(variance, axis=axis_index)
+            )
+
+            # For uniform weighting, the averaged data is the average of all
+            # non-zero data
+            avg_data = np.sum(
+                binary_weight * data, axis=axis_index
+            ) * tools.invert_no_zero(nsamples)
+
+        else:
+            # For inverse-variance weighting, the averaged weight turns out to
+            # be equal to the sum of the weights
+            avg_weight = np.sum(weight, axis=axis_index)
+
+            # For inverse-variance weighting, the averaged data is the weighted
+            # sum of the data, normalized by the sum of the weights
+            avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
+                avg_weight
+            )
+
+        # Get the output container
+        out_cont_type = contmap[self.axis][stream.__class__]
 
         # Create container to hold output
-        out = out_cont(axes_from=stream, attrs_from=stream)
+        out = out_cont_type(axes_from=stream, attrs_from=stream)
 
         # Save data and weights to output container
-        out.hfb[:] = data
-        out.weight[:] = weight
+        out.hfb[:] = avg_data
+        out.weight[:] = avg_weight
 
         # Add index map of axis that was averaged over to attributes
         out.attrs[self.axis] = stream._data["index_map"][self.axis][:]
@@ -314,61 +344,6 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] *= tools.invert_no_zero(self.stack.weight[:])
 
         return self.stack
-
-
-def average_hfb(data, weight, axis, weighting="inverse_variance"):
-    """Average HFB data
-
-    Parameters
-    ----------
-    data : array
-        Data to average.
-    weight : array
-        Weights of `data`.
-    axis : int
-        Index of axis to average over.
-    weighting: str (default: "inverse_variance")
-        The weighting to use in the averaging.
-        Either `uniform` or `inverse_variance`.
-
-    Output
-    ------
-    avg_data : array
-        Averaged data.
-    avg_weight : array
-        Averaged weights.
-    """
-
-    if weighting == "uniform":
-        # Binary weights for uniform weighting
-        binary_weight = np.zeros(weight.shape)
-        binary_weight[weight != 0] = 1
-
-        # Number of samples with non-zero weight in each time bin
-        nsamples = np.sum(binary_weight, axis=axis)
-
-        # For uniform weighting, the average of the variances is
-        # sum( 1 / weight ) / nsamples,
-        # and the averaged weight is the inverse of that
-        variance = tools.invert_no_zero(weight)
-        avg_weight = nsamples * tools.invert_no_zero(np.sum(variance, axis=axis))
-
-        # For uniform weighting, the averaged data is the average of all
-        # non-zero data
-        avg_data = np.sum(binary_weight * data, axis=axis) * tools.invert_no_zero(
-            nsamples
-        )
-
-    else:
-        # For inverse-variance weighting, the averaged weight turns out to
-        # be equal to the sum of the weights
-        avg_weight = np.sum(weight, axis=axis)
-
-        # For inverse-variance weighting, the averaged data is the weighted
-        # sum of the data, normalized by the sum of the weights
-        avg_data = np.sum(weight * data, axis=axis) * tools.invert_no_zero(avg_weight)
-
-    return avg_data, avg_weight
 
 
 class HFBSelectTransit(task.SingleTask):
