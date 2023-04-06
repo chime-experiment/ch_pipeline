@@ -1,5 +1,4 @@
 import math
-import datetime
 
 import chimedb.core as db
 import chimedb.data_index as di
@@ -69,6 +68,7 @@ pipeline:
         accept_all_global_flags: true
         node_spoof:
           cedar_online: "/project/rpp-chime/chime/chime_online/"
+        connection_attempts: 5
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -138,10 +138,19 @@ pipeline:
       params:
         exclude_intracyl: true
 
+    # Mask out any weights that are abnormally large or small, since these are likely
+    # numerical issues and represent bad data
+    - type: draco.analysis.flagging.SanitizeWeights
+      in: tstream
+      out: tstream_sanitized
+      params:
+        max_thresh: 1e30
+        min_thresh: 1e-30
+
     # Identify individual baselines with much lower weights than expected
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
-      in: tstream
+      in: tstream_sanitized
       out: full_bad_baseline_mask
       params:
         average_type: "median"
@@ -155,16 +164,16 @@ pipeline:
       in: full_bad_baseline_mask
       out: bad_baseline_mask
 
-    # Load the frequency map active when this data was collected
+    # Load the frequency map that was active when this data was collected
     - type: ch_pipeline.core.dataquery.QueryFrequencyMap
-      in: tstream
+      in: tstream_sanitized
       out: freqmap
       params:
-        cache: true
+        cache: false
 
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      in: [tstream, inputmap, freqmap]
+      in: [tstream_sanitized, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
@@ -173,7 +182,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream
+      in: tstream_sanitized
       out: tstream_col
       params:
         weight: "natural"
@@ -193,6 +202,14 @@ pipeline:
       params:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
+
+    # Save out the sensitivity-based RFI Mask for analysis
+    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
+      in: sensitivity_day
+      out: rfi_sensitivity_mask
+      params:
+        save: true
+        output_name: "rfi_sensitivity_mask_{{tag}}.h5"
 
     # Concatenate together all the masks for bad baselines
     - type: draco.analysis.sidereal.SiderealGrouper
@@ -221,13 +238,13 @@ pipeline:
 
     # Apply the mask from the bad baselines. This will modify the data in
     # place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_day, bad_baseline_mask_day]
       out: tstream_bbm
 
     # Apply the mask from the decorrelated cylinders. This will modify the data
     # in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_bbm, decorr_cyl_mask_day_exp]
       out: tstream_dcm
 
@@ -251,7 +268,7 @@ pipeline:
         nan_check: false
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_dcm, rfimask]
       out: tstream_day_rfi
 
@@ -282,22 +299,31 @@ pipeline:
       params:
         samples: 4096
 
-    # Precision truncate the sidereal stream data and write it out
+    # Precision truncate the sidereal stream data
     - type: draco.core.io.Truncate
       in: sstream
+      out: sstream_trunc
       params:
         dataset:
           vis:
             weight_dataset: vis_weight
             variance_increase: 1.0e-3
           vis_weight: 1.0e-5
+
+    # Save the truncated sidereal stream to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: sstream_trunc
+      out: sstream_trunc_handle
+      params:
         compression:
           vis:
             chunks: [32, 512, 512]
           vis_weight:
             chunks: [32, 512, 512]
         save: true
-        output_name: "sstream_{{tag}}.zarr"
+        output_name: "sstream_{{tag}}.zarr.zip"
+        remove: true
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
@@ -326,7 +352,7 @@ pipeline:
         save: true
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [sstream_tvwb, rfimask2]
       out: sstream_mask
 
@@ -344,12 +370,20 @@ pipeline:
     # Precision truncate and write out the chunked normal ringmap
     - type: draco.core.io.Truncate
       in: ringmap
+      out: ringmap_trunc
       params:
         dataset:
           map:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
+
+    # Save the truncated ringmap to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_trunc
+      out: ringmap_trunc_handle
+      params:
         compression:
           map:
             chunks: [1, 1, 32, 512, 512]
@@ -358,7 +392,8 @@ pipeline:
           dirty_beam:
             chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_{{tag}}.zarr"
+        output_name: "ringmap_{{tag}}.zarr.zip"
+        remove: true
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
@@ -377,12 +412,20 @@ pipeline:
     # result in both ringmaps existing in memory at the same time.
     - type: draco.core.io.Truncate
       in: ringmap_int
+      out: ringmap_int_trunc
       params:
         dataset:
           map:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
+
+    # Save the truncated intercylinder ringmap to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_int_trunc
+      out: ringmap_int_trunc_handle
+      params:
         compression:
           map:
             chunks: [1, 1, 32, 512, 512]
@@ -391,7 +434,8 @@ pipeline:
           dirty_beam:
             chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.zarr"
+        output_name: "ringmap_intercyl_{{tag}}.zarr.zip"
+        remove: true
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
@@ -503,17 +547,24 @@ pipeline:
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
-    # Also, mask out an additional frequency band which isn't that visible in
-    # the data but generates a lot of high delay power
+    # Also, mask out some additional frequencies:
+    # 506.25 - 511.71 MHz: band which isn't that visible in the data but generates
+    # a lot of high delay power
+    # 519.14 - 525.4 MHz: unmasked band in the stack that seems to generate a lot
+    # of power across all delays
+    # 601.56 - 608.59 MHz: sporadic band which generates some power
+    # 459.38 - 465.23 MHz: another high-power band in the stack
+    # 609.77 - 610.55 MHz: narrow band in stack creating artifacts in delay-filtered
+    # ringmaps 
     - type: draco.analysis.flagging.MaskFreq
       in: sstream_blend3
       out: factmask
       params:
         factorize: true
-        bad_freq_ind: [[738, 753]]
+        bad_freq_ind: [[738, 753], [703, 720], [490, 509], [857, 873], [485, 488]]
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [sstream_blend3, factmask]
       out: sstream_blend4
 
@@ -553,16 +604,63 @@ pipeline:
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
 
-    # Zip up the zarr outputs. This doesn't actually need the sstream input
-    # it's just to guarantee this task doesn't start too early
-    - type: draco.core.io.ZipZarrContainers
-      requires: sstream_dfilter
+    # Make an intercylinder ringmap from the delay-filtered visibilities,
+    - type: draco.analysis.ringmapmaker.RingMapMaker
+      requires: manager
+      in: sstream_dfilter
+      out: ringmap_int_hpf
       params:
-        containers:
-          - "sstream_lsd_{tag}.zarr"
-          - "ringmap_lsd_{tag}.zarr"
-          - "ringmap_intercyl_lsd_{tag}.zarr"
+        single_beam: true
+        weight: natural
+        exclude_intracyl: true
+        include_auto: false
+
+    # Select 10 frequencies from the delay-filtered map that are useful for validation
+    - type: draco.analysis.transform.SelectFreq
+      in: ringmap_int_hpf
+      out: ringmap_int_hpf_sel
+      params:
+        channel_index: [65, 250, 325, 399, 470, 605, 730, 830, 950, 990]
+
+    # Precision truncate and write out the chunked filtered ringmap.
+    # Don't truncate the map itself, to preserve low-amplitude pixels.
+    - type: draco.core.io.Truncate
+      in: ringmap_int_hpf_sel
+      out: ringmap_int_hpf_sel_trunc
+      params:
+        dataset:
+          map: No
+          weight: 1.0e-5
+
+    # Save the truncated filtered intercylinder ringmap to a .zarr file and
+    # start a background task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_int_hpf_sel_trunc
+      out: ringmap_int_hpf_sel_trunc_handle
+      params:
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
         remove: true
+
+    # Wait for all the zarr zipping tasks to complete
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_int_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_int_hpf_sel_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: sstream_trunc_handle
 """
 
 
@@ -607,15 +705,15 @@ class DailyProcessing(base.ProcessingType):
             {"start": "CSD2059", "end": "CSD2060"},
             {"start": "CSD2072", "end": "CSD2143"},
             # Intervals for which we process only one day every 7 days, this
-            # will slowly build up coverage over the whole timespan up to
-            # October 2022
-            {"start": "CSD1878", "end": "CSD3250", "step": 7},
-            {"start": "CSD1879", "end": "CSD3250", "step": 7},
-            {"start": "CSD1880", "end": "CSD3250", "step": 7},
-            {"start": "CSD1881", "end": "CSD3250", "step": 7},
-            {"start": "CSD1882", "end": "CSD3250", "step": 7},
-            {"start": "CSD1883", "end": "CSD3250", "step": 7},
-            {"start": "CSD1884", "end": "CSD3250", "step": 7},
+            # will slowly build up coverage over the whole timespan, extending
+            # as new days become available
+            {"start": "CSD1878", "step": 7},
+            {"start": "CSD1879", "step": 7},
+            {"start": "CSD1880", "step": 7},
+            {"start": "CSD1881", "step": 7},
+            {"start": "CSD1882", "step": 7},
+            {"start": "CSD1883", "step": 7},
+            {"start": "CSD1884", "step": 7},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
@@ -653,7 +751,7 @@ class DailyProcessing(base.ProcessingType):
         ),
         "nfreq_delay": 1025,
         # Job params
-        "time": 150,  # How long in minutes?
+        "time": 100,  # How long in minutes?
         "nodes": 12,  # Number of nodes to use.
         "ompnum": 4,  # Number of OpenMP threads
         "pernode": 12,  # Jobs per node
