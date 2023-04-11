@@ -183,7 +183,6 @@ class HFBStackDays(task.SingleTask):
 
     stack = None
 
-    tag = config.Property(proptype=str, default="stack")
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, sdata):
