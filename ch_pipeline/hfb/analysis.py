@@ -174,6 +174,8 @@ class HFBStackDays(task.SingleTask):
 
     Attributes
     ----------
+    tag : str (default: "stack")
+        The tag to give the stack.
     weighting: str (default: "inverse_variance")
         The weighting to use in the stack.
         Either `uniform` or `inverse_variance`.
@@ -192,22 +194,51 @@ class HFBStackDays(task.SingleTask):
             Individual (time-averaged) day to add to stack.
         """
 
+        # Get the LSD (or CSD) label out of the input's attributes.
+        # If there is no label, use a placeholder.
+        if "lsd" in sdata.attrs:
+            input_lsd = sdata.attrs["lsd"]
+        elif "csd" in sdata.attrs:
+            input_lsd = sdata.attrs["csd"]
+        else:
+            input_lsd = -1
+
+        input_lsd = _ensure_list(input_lsd)
+
         # If this is our first sidereal day, then initialize the
         # container that will hold the stack.
         if self.stack is None:
             self.stack = dcontainers.empty_like(sdata)
 
-            self.stack.add_dataset("nsample")
+            # Add stack-specific dataset: count of samples, to be used as weight
+            # for the uniform weighting case. Initialize this dataset to zero.
+            if "nsample" not in self.stack.datasets:
+                self.stack.add_dataset("nsample")
+                self.stack.nsample[:] = 0
 
             self.stack.redistribute("freq")
 
-            # Initialize all datasets to zero
-            for data in self.stack.datasets.values():
-                data[:] = 0
+            self.lsd_list = []
 
-        # Accumulate the total number of samples
-        dtype = self.stack.nsample.dtype
-        count = (sdata.weight[:] > 0.0).astype(dtype)
+        # Accumulate
+        self.log.info("Adding to stack LSD(s): %s" % input_lsd)
+
+        self.lsd_list += input_lsd
+
+        if "nsample" in sdata.datasets:
+            # The input sidereal stream is already a stack
+            # over multiple sidereal days. Use the nsample
+            # dataset as the weight for the uniform case.
+            count = sdata.nsample[:]
+        else:
+            # The input sidereal stream contains a single
+            # sidereal day.  Use a boolean array that
+            # indicates a non-zero weight dataset as
+            # the weight for the uniform case.
+            dtype = self.stack.nsample.dtype
+            count = (sdata.weight[:] > 0.0).astype(dtype)
+
+        # Accumulate the total number of samples.
         self.stack.nsample[:] += count
 
         # Accumulate variances or inverse variances
@@ -227,7 +258,15 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] += sdata.weight[:] * sdata.hfb[:]
 
     def process_finish(self):
-        """Normalize and return stacked weights and data."""
+        """Normalize and return stacked weights and data.
+
+        Returns
+        -------
+        stack : hfb.containers.HFBHighResSpectrum
+            Stack of sidereal days.
+        """
+        self.stack.attrs["tag"] = self.tag
+        self.stack.attrs["lsd"] = np.array(self.lsd_list)
 
         # Compute weights and data
         if self.weighting == "uniform":
@@ -291,6 +330,9 @@ class HFBAverageOverBeams(task.SingleTask):
         # Save data to output container
         out.hfb[:] = data
         out.weight[:] = weight
+
+        # Add list of beams to attributes
+        out.attrs["beam"] = stream._data["index_map"]["beam"][:]
 
         # Return output container
         return out
@@ -585,3 +627,12 @@ class HFBSelectTransit(task.SingleTask):
 
         # Return output container
         return out
+
+
+def _ensure_list(x):
+    if hasattr(x, "__iter__"):
+        y = [xx for xx in x]
+    else:
+        y = [x]
+
+    return y
