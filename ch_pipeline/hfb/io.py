@@ -98,7 +98,11 @@ class BaseLoadFiles(io.BaseLoadFiles):
 
             # Load frequency(ies) of absorption features, unless a range or list
             # of frequecies to load is provided via the task's attributes
-            if not self.freq_phys_range and not self.freq_phys_list:
+            if (
+                hasattr(hfb_cat, "freq_abs")
+                and not self.freq_phys_range
+                and not self.freq_phys_list
+            ):
                 nfreq_abs = len(hfb_cat.freq_abs)
                 if nfreq_abs == 1:
                     self.freq_phys_range = [
@@ -298,6 +302,9 @@ class LoadFilesFromParams(BaseLoadFiles):
 
         # Add list of files (full paths) to container attributes
         ts.attrs["files"] = filegroup["files"]
+
+        # Add source name to container attributes, to allow catalog use
+        ts.attrs["source_name"] = self.source_name
 
         # Return timestream
         return ts

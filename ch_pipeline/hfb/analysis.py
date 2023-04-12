@@ -5,6 +5,8 @@ import numpy as np
 from caput import config
 from caput import mpiarray
 
+from ch_util.hfbcat import HFBCatalog
+
 from draco.core import task
 from draco.util import tools
 from draco.core import containers as dcontainers
@@ -446,10 +448,17 @@ class HFBSelectTransit(task.SingleTask):
         Fraction of maximum beam sensitivity below which samples are considered
         off-source.
         Default is 0.005
-    ra : float
-        Right ascension of the source.
-    dec : float
-        Declination of the source.
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
+        not provided, the task will look for it in the input container attributes.
+    source_ra : float
+        Right ascension of the source in degrees, in case this is not available in
+        `ch_util.hfbcat.HFBCatalog` (or in case the value given there needs to be
+        overridden manually).
+    source_dec : float
+        Declination of the source in degrees, in case this is not available in
+        `ch_util.hfbcat.HFBCatalog` (or in case the value given there needs to be
+        overridden manually).
     time_offset : float
         Time (is seconds) to add to the data times before comparison with the
         beam model. This is a temporary hack, to be removed when the data times
@@ -463,8 +472,9 @@ class HFBSelectTransit(task.SingleTask):
     on_source_sens_threshold = config.Property(proptype=float, default=0.6)
     off_source_exclude_window = config.Property(proptype=float, default=18.0)
     off_source_sens_ceiling = config.Property(proptype=float, default=0.005)
-    ra = config.Property(proptype=float, default=None)
-    dec = config.Property(proptype=float, default=None)
+    source_name = config.Property(proptype=str, default=None)
+    source_ra = config.Property(proptype=float, default=None)
+    source_dec = config.Property(proptype=float, default=None)
     time_offset = config.Property(proptype=float, default=0.0)
 
     def setup(self):
@@ -494,6 +504,19 @@ class HFBSelectTransit(task.SingleTask):
         out : containers.HFBData
             Container with same HFB data, but weights adjusted to make selection.
         """
+
+        # On the first pass, obtain the source's coordinates from the HFB catalog,
+        # unless they are provided manually via the task's source_ra / source_dec
+        # attributes. To do this, get the source name from the container attributes,
+        # unless manually overridden via the task's source_name attribute.
+        if not self.source_ra or not self.source_dec:
+            if not self.source_name:
+                self.source_name = stream.attrs["source_name"]
+            hfb_cat = HFBCatalog[self.source_name]
+            if not self.source_ra:
+                self.source_ra = hfb_cat.ra
+            if not self.source_dec:
+                self.source_dec = hfb_cat.dec
 
         # Extract axes lengths
         nfreq, nsubfreq, nbeam, ntime = stream.hfb.shape
@@ -530,7 +553,7 @@ class HFBSelectTransit(task.SingleTask):
         posxy_source = np.zeros((ntime, 2))
         for itime, time_sample in enumerate(time):
             posxy_source[itime, :] = beam_mdl.get_position_from_equatorial(
-                self.ra, self.dec, time_sample
+                self.source_ra, self.source_dec, time_sample
             )
 
         # Calculate the centre positions of the synthetic beams and their widths
