@@ -4,7 +4,7 @@ from . import base
 from . import daily
 from . import beam
 from . import quarterstack
-from . import reprocess
+from . import sidereal
 
 click.disable_unicode_literals_warning = True
 

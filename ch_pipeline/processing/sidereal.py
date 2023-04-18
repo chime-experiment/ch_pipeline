@@ -314,3 +314,227 @@ class DelaySpectrumReprocessing(SiderealReprocessing):
         del self.default_params["timing_file"]
         del self.default_params["freqmap_file"]
         del self.default_params["catalogs"]
+
+
+WAVELET_SCRIPT = """
+# Cluster configuration
+cluster:
+  name: {jobname}
+
+  directory: {dir}
+  temp_directory: {tempdir}
+
+  time: {time}
+  system: cedar
+  nodes: {nodes}
+  ompnum: {ompnum}
+  pernode: {pernode}
+  mem: 192000M
+
+  venv: {venv}
+
+# Pipeline task configuration
+pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - cora
+    - draco
+    - drift
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
+  tasks:
+
+    - type: draco.core.task.SetMPILogging
+      params:
+        level_rank0: DEBUG
+        level_all: WARNING
+
+    - type: draco.core.misc.CheckMPIEnvironment
+      params:
+        timeout: 420
+
+    # Load the telescope model that we need for several steps
+    - type: draco.core.io.LoadProductManager
+      out: manager
+      params:
+        product_directory: "{product_path}"
+
+    # Load the sidereal stream we want to process
+    - type: draco.core.io.LoadFilesFromParams
+      out: sstream
+      params:
+        files: "{src_type_path}/{csd}/sstream*{csd}.*"
+
+    # Flag out low weight samples to remove transient RFI artifacts at the edges of
+    # flagged regions
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
+      in: sstream
+      out: full_tvwb_mask
+      params:
+        relative_threshold: 0.5
+        ignore_absolute_threshold: -1
+        average_type: "mean"
+        pols_to_flag: "all"
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyBaselineMask
+      in: [sstream, full_tvwb_mask]
+      out: sstream_tvwb
+
+    # Generate the second RFI mask using targeted knowledge of the instrument
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream_tvwb
+      out: rfimask2
+      params:
+        stack_ind: 66
+        output_name: "rfi_mask2_{{tag}}.h5"
+        save: true
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_tvwb, rfimask2]
+      out: sstream_mask
+
+    # Mask out day time data
+    - type: ch_pipeline.analysis.flagging.DayMask
+      in: sstream_mask
+      out: sstream_mask1
+
+    - type: ch_pipeline.analysis.flagging.MaskMoon
+      in: sstream_mask1
+      out: sstream_mask2
+
+    # Remove ranges of time known to be bad that may effect the delay power
+    # spectrum estimate
+    - type: ch_pipeline.analysis.flagging.DataFlagger
+      in: sstream_mask2
+      out: sstream_mask3
+      params:
+        flag_type:
+          - acjump
+          - bad_calibration_acquisition_restart
+          - bad_calibration_fpga_restart
+          - bad_calibration_gains
+          - decorrelated_cylinder
+          - globalflag
+          - rain1mm
+
+    # Load the stack that we will blend into the daily data
+    - type: draco.core.io.LoadBasicCont
+      out: sstack
+      params:
+        files:
+            - "{blend_stack_file}"
+        selections:
+            freq_range: [{freq[0]:d}, {freq[1]:d}]
+
+    - type: draco.analysis.flagging.BlendStack
+      requires: sstack
+      in: sstream_mask3
+      out: sstream_blend1
+      params:
+        frac: 1e-4
+
+    # Mask the daytime data again. This ensures that we only see the time range in
+    # the delay spectrum we would expect
+    - type: ch_pipeline.analysis.flagging.MaskDay
+      in: sstream_blend1
+      out: sstream_blend2
+
+    # Mask out the bright sources so we can see the high delay structure more easily
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: sstream_blend2
+      out: sstream_blend3
+      params:
+        source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
+
+    # Try and derive an optimal time-freq factorizable mask that covers the
+    # existing masked entries
+    # Also, mask out an additional frequency band which isn't that visible in
+    # the data but generates a lot of high delay power
+    - type: draco.analysis.flagging.MaskFreq
+      in: sstream_blend3
+      out: factmask
+      params:
+        factorize: true
+        bad_freq_ind: [[738, 753]]
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_blend3, factmask]
+      out: sstream_blend4
+
+    - type: draco.analysis.ringmapmaker.MakeVisGrid
+      requires: manager
+      in: sstream_blend4
+      out: visgrid
+      params:
+        centered: true
+
+    - type: draco.analysis.transform.SelectPol
+      in: visgrid
+      out: visgrid_I
+      params:
+        pol: ["I"]
+
+    - type: draco.core.io.LoadBasicCont
+      out: dspec
+      params:
+        files: "/project/rpp-chime/jrs65/shared/delayspectrum_stack.h5"
+
+    # Estimate the wavelet power spectrum
+    - type: draco.analysis.wavelet.WaveletSpectrumEstimator
+      in: [visgrid_I, dspec]
+      out: wspec
+      params:
+        average_axis: "ra"
+        dataset: "vis"
+        save: true
+        wavelet: "cmor1-1.0"
+        output_name: "waveletspectrum_{{tag}}.h5"
+"""
+
+
+class WaveletProcessing(SiderealReprocessing):
+    """Generate a Delay Spectrum from a SiderealStream product of a daily revision
+
+    This runs the basic pipeline config to generate both the Delay Spectrum and
+    hpf Delay Spectrum from a given Sidereal Stream product.
+    """
+
+    type_name = "wavelet"
+    tag_pattern = r"\d+"
+
+    default_script = WAVELET_SCRIPT
+
+    def _update_default_params_hook(self):
+        self.default_params.update(
+            {
+                "time": 40,
+                "nodes": 8,
+                "ompnum": 4,
+                "pernode": 12,
+            }
+        )
+        # Since we've copied the daily processing config, we can remove
+        # any irrelevant items from the config
+        del self.default_params["padding"]
+        del self.default_params["caltimes_file"]
+        del self.default_params["timing_file"]
+        del self.default_params["freqmap_file"]
+        del self.default_params["catalogs"]
