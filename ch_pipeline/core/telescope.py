@@ -413,7 +413,7 @@ class CHIME(telescope.PolarisedTelescope):
                     return "Y"
             return "N"
 
-        return np.asarray([_pol(f) for f in self.feeds], dtype=np.str)
+        return np.asarray([_pol(f) for f in self.feeds], dtype=str)
 
     #
     # === Setup the primary beams ===
