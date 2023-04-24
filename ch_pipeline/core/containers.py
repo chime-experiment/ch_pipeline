@@ -1131,10 +1131,13 @@ class CHIMETimeStream(TimeStream, RawContainer):
         """Get the input flags dataset."""
         return self["flags/frac_lost"]
 
-    @cached_property
+    @property
     def dataset_id(self):
         """Get the dataset_id dataset in Unicode."""
-        return memh5.ensure_unicode(self["flags/dataset_id"][:])
+        dsid = memh5.ensure_unicode(self["flags/dataset_id"][:])
+        dsid.flags.writeable = False
+
+        return dsid
 
     @property
     def flags(self):
