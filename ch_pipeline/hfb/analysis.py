@@ -14,6 +14,7 @@ from draco.core import containers as dcontainers
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
 
 from . import containers
+from .pfb import DeconvolvePFB
 
 
 class HFBAverage(task.SingleTask):
@@ -600,6 +601,54 @@ class HFBSelectTransit(task.SingleTask):
         out.weight[:] = weight
 
         # Return output container
+        return out
+
+
+class HFBFlattenPFB(task.SingleTask):
+    """Flatten HFB data using PFB deconvolution."""
+
+    def process(self, stream):
+        """Flatten HFB data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with flattened HFB data.
+        """
+
+        # Extract data and weight from container
+        data = stream.hfb
+        weight = stream.weight
+
+        # Mask out DC bin (subfrequency bin 64) by setting weight to zero
+        weight[:, 64, :, :] = 0
+
+        # Instantiate PFB-deconvolution class with default parameters
+        pfb_deconvolve = DeconvolvePFB()
+
+        # Create output container
+        out = containers.HFBData(axes_from=stream, attrs_from=stream)
+
+        # Flatten one beam at a time
+        for ibeam, _ in enumerate(stream._data["index_map"]["beam"][:]):
+            # Select data and weights for beam
+            data_beam = data[:, :, ibeam, :]
+            weight_beam = weight[:, :, ibeam, :]
+
+            # Apply PFB deconvolution
+            flat_data, flat_weight = pfb_deconvolve.flatten(
+                data_beam, weight_beam, centered=True
+            )
+
+            # Add flattened data and weights to output container
+            out.hfb[:, :, ibeam, :] = flat_data
+            out.weight[:, :, ibeam, :] = flat_weight
+
         return out
 
 
