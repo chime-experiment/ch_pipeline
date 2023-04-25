@@ -46,6 +46,7 @@ import numpy as np
 from caput import mpiutil, config, pipeline
 from draco.core import task
 from chimedb import data_index as di, dataset as ds
+from chimedb.core import exceptions
 from ch_util import tools, ephemeris, finder, layout, andata
 from ch_pipeline.core import containers
 
@@ -711,25 +712,32 @@ class QueryFrequencyMap(task.MPILoggedTask):
 
             if len(unique_dataset_ids) != 0:
                 fmaps = {}
-                # Get the frequency map for each unique dataset_id. They should all
+                # Get the frequency map for each unique dataset id. They should all
                 # have the same frequency map - otherwise, raise an error
                 for dsid in unique_dataset_ids:
-                    state = (
-                        ds.Dataset.from_id(str(dsid))
-                        .closest_ancestor_of_type("f_engine_frequency_map")
-                        .state
-                    )
-                    fmaps[state.id] = state.data
+                    try:
+                        state = (
+                            ds.Dataset.from_id(str(dsid))
+                            .closest_ancestor_of_type("f_engine_frequency_map")
+                            .state
+                        )
+                        fmaps[state.id] = state.data
+                    except exceptions.NotFoundError:
+                        # No frequency map found for this dataset id, so the default
+                        # is used. Provide an entry so we can still check how many
+                        # frequency maps were found
+                        fmaps["default"] = 1
 
                 if len(fmaps.keys()) > 1:
                     raise ValueError("Multiple frequency maps found for this dataset.")
 
-                # Extract the stream_id and frequency map
-                fmap_dict = list(fmaps.values())[0]["fmap"]
+                if "default" not in fmaps:
+                    # Extract the stream_id and frequency map
+                    fmap_dict = list(fmaps.values())[0]["fmap"]
 
-                stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
-                fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
-                stream = tools.order_frequency_map_stream(fmap, stream_id)
+                    stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
+                    fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
+                    stream = tools.order_frequency_map_stream(fmap, stream_id)
 
         # Broadcast to all ranks
         stream_id = self.comm.bcast(stream_id, root=0)
