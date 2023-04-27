@@ -423,6 +423,23 @@ pipeline:
         save: true
         output_name: "sourceflux_{{tag}}.h5"
 
+    # Load the source catalogs to measure flux as a function of hour angle
+    - type: draco.core.io.LoadBasicCont
+      out: source_catalog_nocollapse
+      params:
+        files:
+        - "{catalogs[0]}"
+
+    # Measure the beamformed visibility as a function of hour angle
+    - type: draco.analysis.beamform.BeamFormCat
+      requires: [manager, sstream_inter]
+      in: source_catalog_nocollapse
+      params:
+        timetrack: 300.0
+        collapse_ha: false
+        save: true
+        output_name: "sourceflux_vs_ha_{{tag}}.h5"
+
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
       in: sstream_mask
