@@ -649,7 +649,51 @@ pipeline:
         output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
         remove: true
 
+    # Downselect the ringmap to keep only the XX and YY pols
+    - type: draco.analysis.transform.Downselect
+      in: ringmap_int_hpf
+      out: ringmap_int_hpf_xx_yy
+      params:
+        selections:
+          pol_index: [0, 3]
+
+    # Take the variance of the map across elevation. Apply weights
+    # as a mask only
+    - type: draco.analysis.transform.ReduceVar
+      in: ringmap_int_hpf_xx_yy
+      params:
+        axes:
+          - el
+        dataset: map
+        weighting: weighted
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
+
+    # Take the variance of the map across frequency. Apply weights
+    # as a mask only
+    - type: draco.analysis.transform.ReduceVar
+      in: ringmap_int_hpf_xx_yy
+      params:
+        axes:
+          - freq
+        dataset: map
+        weighting: weighted
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
+
     # Wait for all the zarr zipping tasks to complete
+    # Wait for the sstream last since it will likely take the
+    # longest to complete
     - type: draco.core.io.WaitZarrZip
       in: ringmap_trunc_handle
 
