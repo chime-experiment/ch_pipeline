@@ -622,7 +622,75 @@ pipeline:
         output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
         remove: true
 
+    # Take the variance over frequency for the XX pol of the delay-filtered
+    # ringmap
+    - type: draco.analysis.transform.Reduce
+      in: ringmap_int_hpf
+      out: ringmap_reduced_freq
+      params:
+        axes: ["freq"]
+        datasets: ["map"]
+        op: "var"
+        selections: {"pol":[0]}
+        generate_weight: true
+        apply_weight: false
+
+    - type: draco.core.io.Truncate
+      in: ringmap_reduced_freq
+      out: ringmap_reduced_freq_trunc
+      params:
+        dataset:
+          map: No
+          weight: 1.0e-5
+
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_reduced_freq_trunc
+      out: ringmap_reduced_freq_trunc_handle
+      params:
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_freq_var_{{tag}}.zarr.zip"
+        remove: true
+
+    - type: draco.analysis.transform.Reduce
+      in: ringmap_int_hpf
+      out: ringmap_reduced_el
+      params:
+          axes: ["el"]
+          datasets: ["map"]
+          op: "var"
+          selections: {"pol":[0]}
+          generate_weight: true
+          apply_weight: false
+
+    - type: draco.core.io.Truncate
+      in: ringmap_reduced_el
+      out: ringmap_reduced_el_trunc
+      params:
+        dataset:
+          map: No
+          weight: 1.0e-5
+
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_reduced_el_trunc
+      out: ringmap_reduced_el_trunc_handle
+      params:
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_el_var_{{tag}}.zarr.zip"
+        remove: true
+
     # Wait for all the zarr zipping tasks to complete
+    # Wait for the sstream last since it will likely take the
+    # longest to complete
     - type: draco.core.io.WaitZarrZip
       in: ringmap_trunc_handle
 
@@ -631,6 +699,12 @@ pipeline:
 
     - type: draco.core.io.WaitZarrZip
       in: ringmap_int_hpf_sel_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_reduced_freq_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_reduced_el_trunc_handle
 
     - type: draco.core.io.WaitZarrZip
       in: sstream_trunc_handle
