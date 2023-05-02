@@ -9,7 +9,7 @@ use for `ch_util`.
 Important notes:
 
  - *Don't* develop directly in master, use a feature branch for any change, and merge back into *master* promptly. Merging should be done by filing a Pull Request.
- - *Do* install the `virtualenv` with `./mkvenv.sh`
+ - *Do* install the `virtualenv` with `mkchimeenv`, located [here](https://github.com/chime-experiment/mkchimeenv).
 
 ## Development Guidelines
 
@@ -66,13 +66,14 @@ These dependencies can be installed using:
 ```bash
 $ pip install -r requirements.txt
 ```
-This is automatically done by the `mkvenv.sh` script.
+This is automatically done by the `mkchimeenv` script.
 
 ### Virtualenv
 
-The script `mkvenv.sh` will automatically install a
+The script `mkchimeenv`, located [here](https://github.com/chime-experiment/mkchimeenv), will automatically install a
 [virtualenv](http://www.virtualenv.org/) containing all the pipeline
 dependencies from the `requirements.txt` file. This gives a fresh, self-contained installation of the pipeline to work with. Before use, you should activate it using:
 ```bash
-$ source venv/bin/activate
+$ source VENV_NAME/venv/bin/activate
 ```
+where `VENV_NAME` was the name you specified when invoking `mkchimeenv`.
