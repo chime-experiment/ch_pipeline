@@ -165,7 +165,6 @@ class HolographyFringestop(base.ProcessingType):
     default_script = DEFAULT_SCRIPT
 
     def _available_tags(self):
-
         self._tags = {}
 
         # Query database for holography observations of given sources

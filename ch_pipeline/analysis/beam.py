@@ -280,7 +280,6 @@ class TransitGrouper(task.SingleTask):
             self.obs_id = this_run[0][0]
 
     def _match_dataset_id(self, tstream):
-
         if not self.check_dataset_id:
             # skip this check
             return True
