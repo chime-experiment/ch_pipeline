@@ -690,6 +690,7 @@ class QueryFrequencyMap(task.MPILoggedTask):
         freq_map
             Frequency slot map container
         """
+        from peewee import DoesNotExist
 
         # Fetch from the cache if we can
         if self.cache and self._cached_inputs:
@@ -715,18 +716,30 @@ class QueryFrequencyMap(task.MPILoggedTask):
                 # Get the frequency map for each unique dataset id. They should all
                 # have the same frequency map - otherwise, raise an error
                 for dsid in unique_dataset_ids:
+                    _missing_ds_flag = False
                     try:
-                        state = (
-                            ds.Dataset.from_id(str(dsid))
-                            .closest_ancestor_of_type("f_engine_frequency_map")
-                            .state
-                        )
+                        dataset = ds.Dataset.from_id(str(dsid))
+                    except DoesNotExist:
+                        # This dataset id does not exist in the database. If none of the
+                        # dataset ids are found, throw an exception
+                        _missing_ds_flag = True
+                        continue
+
+                    try:
+                        state = dataset.closest_ancestor_of_type(
+                            "f_engine_frequency_map"
+                        ).state
                         fmaps[state.id] = state.data
                     except exceptions.NotFoundError:
                         # No frequency map found for this dataset id, so the default
                         # is used. Provide an entry so we can still check how many
                         # frequency maps were found
                         fmaps["default"] = 1
+
+                if _missing_ds_flag and not fmaps:
+                    raise exceptions.NotFoundError(
+                        "None of the available dataset_ids exist in the chime database."
+                    )
 
                 if len(fmaps.keys()) > 1:
                     raise ValueError("Multiple frequency maps found for this dataset.")
