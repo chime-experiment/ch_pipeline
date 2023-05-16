@@ -16,18 +16,23 @@ from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from . import containers
 
 
-class HFBAverageOverTime(task.SingleTask):
-    """Take average over time axis.
+class HFBAverage(task.SingleTask):
+    """Take average of HFB data over any axis.
 
-    Used for making sub-frequency band shape template and general time averaging.
+    Used for making sub-frequency band shape template and general time averaging,
+    and for taking the average of HFB data over beam axis.
 
     Attributes
     ----------
+    axis: str (default: "time")
+        Axis over which to take average.
+        Options are `freq`, `subfreq`, `beam`, and `time`.
     weighting: str (default: "inverse_variance")
         The weighting to use in the stack.
         Either `uniform` or `inverse_variance`.
     """
 
+    axis = config.enum(["freq", "subfreq", "beam", "time"], default="time")
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
@@ -45,27 +50,76 @@ class HFBAverageOverTime(task.SingleTask):
         """
 
         contmap = {
-            containers.HFBData: containers.HFBTimeAverage,
-            containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            "freq": {},
+            "subfreq": {},
+            "beam": {
+                containers.HFBHighResTimeAverage: containers.HFBHighResSpectrum,
+            },
+            "time": {
+                containers.HFBData: containers.HFBTimeAverage,
+                containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            },
         }
 
-        # Get the output container
-        out_cont = contmap[stream.__class__]
+        # Check if necessary output container exists
+        if stream.__class__ not in contmap[self.axis]:
+            raise NotImplementedError(
+                f"Averaging {stream.__class__} over {self.axis} is not implemented."
+            )
 
-        # Average data over time, which corresponds to the final axis (index -1)
-        data, weight = average_hfb(
-            data=stream.hfb[:],
-            weight=stream.weight[:],
-            axis=-1,
-            weighting=self.weighting,
-        )
+        # Find index of axis over which to average
+        axis_index = stream._dataset_spec["hfb"]["axes"].index(self.axis)
+
+        # Extract hfb and weight datasets from input container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Average the data and weights
+        if self.weighting == "uniform":
+            # Binary weights for uniform weighting
+            binary_weight = np.zeros(weight.shape)
+            binary_weight[weight != 0] = 1
+
+            # Number of samples with non-zero weight in each time bin
+            nsamples = np.sum(binary_weight, axis=axis_index)
+
+            # For uniform weighting, the average of the variances is
+            # sum( 1 / weight ) / nsamples,
+            # and the averaged weight is the inverse of that
+            variance = tools.invert_no_zero(weight)
+            avg_weight = nsamples * tools.invert_no_zero(
+                np.sum(variance, axis=axis_index)
+            )
+
+            # For uniform weighting, the averaged data is the average of all
+            # non-zero data
+            avg_data = np.sum(
+                binary_weight * data, axis=axis_index
+            ) * tools.invert_no_zero(nsamples)
+
+        else:
+            # For inverse-variance weighting, the averaged weight turns out to
+            # be equal to the sum of the weights
+            avg_weight = np.sum(weight, axis=axis_index)
+
+            # For inverse-variance weighting, the averaged data is the weighted
+            # sum of the data, normalized by the sum of the weights
+            avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
+                avg_weight
+            )
+
+        # Get the output container
+        out_cont_type = contmap[self.axis][stream.__class__]
 
         # Create container to hold output
-        out = out_cont(axes_from=stream, attrs_from=stream)
+        out = out_cont_type(axes_from=stream, attrs_from=stream)
 
         # Save data and weights to output container
-        out.hfb[:] = data
-        out.weight[:] = weight
+        out.hfb[:] = avg_data
+        out.weight[:] = avg_weight
+
+        # Add index map of axis that was averaged over to attributes
+        out.attrs[self.axis] = stream._data["index_map"][self.axis][:]
 
         return out
 
@@ -290,109 +344,6 @@ class HFBStackDays(task.SingleTask):
             self.stack.hfb[:] *= tools.invert_no_zero(self.stack.weight[:])
 
         return self.stack
-
-
-class HFBAverageOverBeams(task.SingleTask):
-    """Taking the average of HFB data over beam axis.
-
-    Attributes
-    ----------
-    weighting: str (default: "inverse_variance")
-        The weighting to use in the averaging.
-        Either `uniform` or `inverse_variance`.
-    """
-
-    weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
-
-    def process(self, stream):
-        """Take average over beam axis.
-
-        Parameters
-        ----------
-        stream : containers.HFBHighResTimeAverage
-            Container with time-averaged high-frequency resolution HFB data and weights.
-
-        Returns
-        -------
-        out : containers.HFBHighResSpectrum
-            Container with high-frequency resolution spectrum data and weights.
-        """
-
-        # Average data over beams, which corresponds to axis index 1
-        data, weight = average_hfb(
-            data=stream.hfb[:],
-            weight=stream.weight[:],
-            axis=1,
-            weighting=self.weighting,
-        )
-
-        # Create container to hold output
-        out = containers.HFBHighResSpectrum(axes_from=stream, attrs_from=stream)
-
-        # Save data to output container
-        out.hfb[:] = data
-        out.weight[:] = weight
-
-        # Add list of beams to attributes
-        out.attrs["beam"] = stream._data["index_map"]["beam"][:]
-
-        # Return output container
-        return out
-
-
-def average_hfb(data, weight, axis, weighting="inverse_variance"):
-    """Average HFB data
-
-    Parameters
-    ----------
-    data : array
-        Data to average.
-    weight : array
-        Weights of `data`.
-    axis : int
-        Index of axis to average over.
-    weighting: str (default: "inverse_variance")
-        The weighting to use in the averaging.
-        Either `uniform` or `inverse_variance`.
-
-    Output
-    ------
-    avg_data : array
-        Averaged data.
-    avg_weight : array
-        Averaged weights.
-    """
-
-    if weighting == "uniform":
-        # Binary weights for uniform weighting
-        binary_weight = np.zeros(weight.shape)
-        binary_weight[weight != 0] = 1
-
-        # Number of samples with non-zero weight in each time bin
-        nsamples = np.sum(binary_weight, axis=axis)
-
-        # For uniform weighting, the average of the variances is
-        # sum( 1 / weight ) / nsamples,
-        # and the averaged weight is the inverse of that
-        variance = tools.invert_no_zero(weight)
-        avg_weight = nsamples * tools.invert_no_zero(np.sum(variance, axis=axis))
-
-        # For uniform weighting, the averaged data is the average of all
-        # non-zero data
-        avg_data = np.sum(binary_weight * data, axis=axis) * tools.invert_no_zero(
-            nsamples
-        )
-
-    else:
-        # For inverse-variance weighting, the averaged weight turns out to
-        # be equal to the sum of the weights
-        avg_weight = np.sum(weight, axis=axis)
-
-        # For inverse-variance weighting, the averaged data is the weighted
-        # sum of the data, normalized by the sum of the weights
-        avg_data = np.sum(weight * data, axis=axis) * tools.invert_no_zero(avg_weight)
-
-    return avg_data, avg_weight
 
 
 class HFBSelectTransit(task.SingleTask):
