@@ -169,7 +169,7 @@ class HFBRFIMask(TODContainer, FreqContainer):
     _dataset_spec = {
         "mask": {
             "axes": ["freq", "subfreq", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
