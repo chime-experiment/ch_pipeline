@@ -304,7 +304,8 @@ class LoadFilesFromParams(BaseLoadFiles):
         ts.attrs["files"] = filegroup["files"]
 
         # Add source name to container attributes, to allow catalog use
-        ts.attrs["source_name"] = self.source_name
+        if self.source_name:
+            ts.attrs["source_name"] = self.source_name
 
         # Return timestream
         return ts
