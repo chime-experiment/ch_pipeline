@@ -37,13 +37,18 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
+from __future__ import annotations
 
 import os
 
+import numpy as np
+
 from caput import mpiutil, config, pipeline
 from draco.core import task
-from chimedb import data_index as di
-from ch_util import tools, ephemeris, finder, layout
+from chimedb import data_index as di, dataset as ds
+from chimedb.core import exceptions
+from ch_util import tools, ephemeris, finder, layout, andata
+from ch_pipeline.core import containers
 
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
@@ -653,6 +658,123 @@ class QueryInputs(task.MPILoggedTask):
         mpiutil.world.Barrier()
 
         return inputs
+
+
+class QueryFrequencyMap(task.MPILoggedTask):
+    """Get the CHIME frequency map that was active when this data was collected.
+
+    Attributes
+    ----------
+    cache : bool
+        Only query for the inputs for the first container received. For all
+        subsequent files just return the initial set of inputs. This can help
+        minimise the number of potentially fragile database operations.
+    """
+
+    cache = config.Property(proptype=bool, default=False)
+
+    _cached_inputs = None
+
+    def next(
+        self, ts: andata.CorrData | containers.CHIMETimeStream
+    ) -> containers.FrequencyMapSingle:
+        """Generate an input description from the timestream passed in.
+
+        Parameters
+        ----------
+        ts
+            Timestream container.
+
+        Returns
+        -------
+        freq_map
+            Frequency slot map container
+        """
+        from peewee import DoesNotExist
+
+        # Fetch from the cache if we can
+        if self.cache and self._cached_inputs:
+            self.log.debug("Using cached inputs.")
+            return self._cached_inputs
+
+        stream_id = None
+        stream = None
+
+        try:
+            dsid_flag = ts.dataset_id[:].gather(rank=0)
+        except KeyError:
+            dsid_flag = None
+
+        if self.comm.rank == 0 and dsid_flag is not None:
+            layout.connect_database()
+            # Get only unique dataset ids to reduce number of lookups. Ignore
+            # the null dataset at the 0th index
+            unique_dataset_ids = np.unique(dsid_flag[:])[1:]
+
+            if len(unique_dataset_ids) != 0:
+                fmaps = {}
+                # Get the frequency map for each unique dataset id. They should all
+                # have the same frequency map - otherwise, raise an error
+                for dsid in unique_dataset_ids:
+                    _missing_ds_flag = False
+                    try:
+                        dataset = ds.Dataset.from_id(str(dsid))
+                    except DoesNotExist:
+                        # This dataset id does not exist in the database. If none of the
+                        # dataset ids are found, throw an exception
+                        _missing_ds_flag = True
+                        continue
+
+                    try:
+                        state = dataset.closest_ancestor_of_type(
+                            "f_engine_frequency_map"
+                        ).state
+                        fmaps[state.id] = state.data
+                    except exceptions.NotFoundError:
+                        # No frequency map found for this dataset id, so the default
+                        # is used. Provide an entry so we can still check how many
+                        # frequency maps were found
+                        fmaps["default"] = 1
+
+                if _missing_ds_flag and not fmaps:
+                    raise exceptions.NotFoundError(
+                        "None of the available dataset_ids exist in the chime database."
+                    )
+
+                if len(fmaps.keys()) > 1:
+                    raise ValueError("Multiple frequency maps found for this dataset.")
+
+                if "default" not in fmaps:
+                    # Extract the stream_id and frequency map
+                    fmap_dict = list(fmaps.values())[0]["fmap"]
+
+                    stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
+                    fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
+                    stream = tools.order_frequency_map_stream(fmap, stream_id)
+
+        # Broadcast to all ranks
+        stream_id = self.comm.bcast(stream_id, root=0)
+        stream = self.comm.bcast(stream, root=0)
+
+        # Check to see if we found a frequency map. If not, get the default mapping
+        if stream is None or stream_id is None:
+            stream, stream_id = tools.get_default_frequency_map_stream()
+            self.log.info("No frequency map found. Using default.")
+
+        # Set the frequency array for all 1024 frequencies, starting at 800 MHz
+        # The frequency map is only properly defined when all frequencies are used
+        freq = np.linspace(800, 400, 1024, endpoint=False)
+        cont = containers.FrequencyMapSingle(copy_from=ts, freq=freq)
+
+        cont.stream[:] = stream
+        cont.stream_id[:] = stream_id
+
+        # Save into the cache for the next iteration
+        if self.cache:
+            self.log.debug("Caching input.")
+            self._cached_inputs = cont
+
+        return cont
 
 
 def finder_from_spec(spec, node_spoof=None):

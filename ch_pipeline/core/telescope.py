@@ -353,7 +353,7 @@ class CHIME(telescope.PolarisedTelescope):
 
         return self._pos
 
-    @property
+    @cached_property
     def beamclass(self):
         """Beam class definition for the CHIME/Pathfinder.
 
@@ -394,7 +394,7 @@ class CHIME(telescope.PolarisedTelescope):
             ]
             return np.array(beamclass)
 
-    @property
+    @cached_property
     def polarisation(self):
         """
         Polarisation map.
@@ -797,6 +797,7 @@ class CHIMEExternalBeam(CHIME):
         )
 
         self._is_grid_beam = isinstance(self._primary_beam, GridBeam)
+        self._is_healpix_beam = isinstance(self._primary_beam, HEALPixBeam)
 
         # cache axes
         self._beam_freq = self._primary_beam.freq[:]
@@ -817,9 +818,20 @@ class CHIMEExternalBeam(CHIME):
         if len(self._primary_beam.input) > 1:
             raise ValueError("Per-feed beam model not supported for now.")
 
-        complex_beam = np.issubclass_(
-            self._primary_beam.beam.dtype.type, np.complexfloating
-        )
+        # If a HEALPixBeam, must check types of theta and phi fields
+        if self._is_healpix_beam:
+            hpb_types = [
+                v[0].type for v in self._primary_beam.beam.dtype.fields.values()
+            ]
+
+            complex_beam = np.all(
+                [np.issubclass_(hpbt, np.complexfloating) for hpbt in hpb_types]
+            )
+        else:
+            complex_beam = np.issubclass_(
+                self._primary_beam.beam.dtype.type, np.complexfloating
+            )
+
         self._output_dtype = (
             np.complex128 if complex_beam and not self.force_real_beam else np.float64
         )

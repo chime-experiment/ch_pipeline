@@ -1785,7 +1785,7 @@ class ThermalCalibration(task.SingleTask):
         else:
             timestamp = data.time[:]
             gain = containers.CommonModeGainData(
-                time=timestamp, axes_from=data, distributed=True, comm=data.comm
+                axes_from=data, distributed=True, comm=data.comm
             )
         # Redistribute
         gain.redistribute("freq")
@@ -1804,7 +1804,7 @@ class ThermalCalibration(task.SingleTask):
         try:
             # First attempt to group all dataset_ids for all frequencies on
             # rank=0 so it can do the full lookup
-            dataset_ids = data.flags["dataset_id"][:].gather(rank=0)
+            dataset_ids = data.dataset_id[:].gather(rank=0)
 
             if self.comm.rank == 0:
                 # Try to use the dataset ID scheme in here, if the time range passed won't
@@ -2643,7 +2643,7 @@ class FlagNarrowbandGainError(task.SingleTask):
             # The input container has a time axis.  Use a singleton lsd axis.
             timestamp = data.time[np.newaxis, :]
 
-            out = containers.RFIMask(time=data.time, axes_from=data, attrs_from=data)
+            out = containers.RFIMask(axes_from=data, attrs_from=data)
 
         # Determine dimensions
         nfreq, ninput, nupdate = self.frac_error.shape
