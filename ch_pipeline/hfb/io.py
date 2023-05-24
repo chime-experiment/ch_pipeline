@@ -9,6 +9,7 @@ from caput import pipeline
 from caput import config
 
 from ch_util import ephemeris
+from ch_util.hfbcat import HFBCatalog
 
 from draco.core import io
 
@@ -22,11 +23,14 @@ class BaseLoadFiles(io.BaseLoadFiles):
 
     Attributes
     ----------
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`.
     source_dec : float
         Declination of source in degrees.
     beam_ew_include : list
         List of East-West beam indices (i.e., in the range 0-3) to include.
-        By default all four EW beams are included.
+        By default all four EW beams are included. Does not work in combination
+        with `freq_phys_list`.
     freq_phys_range : list
         Start and stop of physical frequencies (in MHz) to read. The mean is
         used as reference frequency in evaluating beam positions (for selecting
@@ -34,37 +38,91 @@ class BaseLoadFiles(io.BaseLoadFiles):
     freq_phys_list : list
         List of physical frequencies (in MHz) to read. The first frequency
         in this list is also used in evaluating beam positions (for selecting
-        the beams closest to a transiting source).
+        the beams closest to a transiting source). Does not work in combination
+        with `beam_ew_include`.
+    freq_phys_delta : float
+        Half-width of frequency chuck (in MHz) that is selected around the
+        frequency listed in the HFB target list in case a source is provided
+        via `source_name`.
+        Default is 1.
 
     Selections
     ----------
-    Selections in frequency and beams can be done in two ways:
-    1. By passing a `source_dec` attribute (for the beam selection) and/or
+    Selections in frequency and beams can be done in multiple ways:
+    1. By passing a `source_name` attribute, in which case the HFB target list
+       is consulted for the declination of the source (for the beam selection)
+       and the frequency of its absorption feature (for the frequency selection,
+       together with `freq_phys_delta`).
+    2. By passing a `source_dec` attribute (for the beam selection) and/or
        a `freq_phys_range` or `freq_phys_list` attribute (for the frequency
        selection). If both `freq_phys_range` and `freq_phys_list` are given the
        former will take precedence, but you should clearly avoid doing this.
-    2. By manually passing indices in the `selections` attribute
+       The `source_dec`, `freq_phys_range`, and `freq_phys_list` attributes
+       cancel the look-up of declination and frequency from the HFB target list
+       triggered by the `source_name` attribute.
+    3. By manually passing indices in the `selections` attribute
        (see documentation in :class:`draco.core.io.BaseLoadFiles`).
     Method 1 takes precedence over method 2. If no relevant attributes are
     passed, all frequencies/beams are read.
     """
 
+    source_name = config.Property(proptype=str, default=None)
     source_dec = config.Property(proptype=float, default=None)
     beam_ew_include = config.Property(proptype=list, default=None)
-    freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_range = config.Property(proptype=list, default=[])
+    freq_phys_list = config.Property(proptype=list, default=[])
+    freq_phys_delta = config.Property(proptype=float, default=1.0)
 
-    def setup(self):
-        """Set up frequency and beam selection."""
+    def setup(self, observer=None):
+        """Set up observer, and frequency and beam selection.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        self.observer = ephemeris.chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
         super().setup()
 
+        # Look up source in catalog
+        if self.source_name:
+            hfb_cat = HFBCatalog[self.source_name]
+
+            # Load source declination, unless manually overridden
+            if not self.source_dec:
+                self.source_dec = hfb_cat.dec
+
+            # Load frequency(ies) of absorption features, unless a range or list
+            # of frequecies to load is provided via the task's attributes
+            if (
+                hasattr(hfb_cat, "freq_abs")
+                and not self.freq_phys_range
+                and not self.freq_phys_list
+            ):
+                nfreq_abs = len(hfb_cat.freq_abs)
+                if nfreq_abs == 1:
+                    self.freq_phys_range = [
+                        hfb_cat.freq_abs[0] - self.freq_phys_delta,
+                        hfb_cat.freq_abs[0] + self.freq_phys_delta,
+                    ]
+                else:
+                    raise NotImplementedError(
+                        f"Source {hfb_cat.name} has {nfreq_abs} absorption features"
+                        "listed in the catalog. Please manually select frequencies"
+                        "to load, e.g., using `freq_phys_range` or `freq_phys_list`."
+                    )
+
         # Set up frequency selection.
         cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
         if self.freq_phys_range:
-            freq_index_start = np.argmin(np.abs(cfreq - self.freq_phys_range[0]))
-            freq_index_stop = np.argmin(np.abs(cfreq - self.freq_phys_range[-1]))
+            freq_phys_start = np.max(self.freq_phys_range)
+            freq_phys_stop = np.min(self.freq_phys_range)
+            freq_index_start = np.argmin(np.abs(cfreq - freq_phys_start))
+            freq_index_stop = np.argmin(np.abs(cfreq - freq_phys_stop))
             self.freq_sel = slice(freq_index_start, freq_index_stop)
         elif self.freq_phys_list:
             self.freq_sel = sorted(
@@ -209,14 +267,45 @@ class LoadFilesFromParams(BaseLoadFiles):
         filegroup = self.filegroups[self._fgroup_ptr]
         self._fgroup_ptr += 1
 
-        if "time_range" not in filegroup:
-            filegroup["time_range"] = (None, None)
+        if "time_range" in filegroup:
+            time_range = filegroup["time_range"]
+        else:
+            time_range = (None, None)
 
         # Read filegroup
         self.log.info(
             f"Reading filegroup {self._fgroup_ptr} of {len(self.filegroups)}."
         )
-        ts = self._load_filelist(filegroup["files"], filegroup["time_range"])
+        ts = self._load_filelist(filegroup["files"], time_range)
+
+        # Find the time to use to compute the container's LSD
+        if time_range:
+            # Use middle of time_range, which normally corresponds to the transit time
+            container_time = np.mean(time_range)
+        else:
+            # Use the start time of the container
+            container_time = ts.time[0]
+
+        # Compute LSD and add to container attributes.
+        lsd = int(self.observer.unix_to_lsd(container_time))
+        ts.attrs["lsd"] = lsd
+
+        # Add calendar date in YYYYMMDD format to attributes
+        calendar_date = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
+        ts.attrs["calendar_date"] = calendar_date
+
+        # Create tag from LSD, unless manually overridden
+        if "tag" in filegroup:
+            ts.attrs["tag"] = filegroup["tag"]
+        else:
+            ts.attrs["tag"] = f"lsd_{lsd:d}"
+
+        # Add list of files (full paths) to container attributes
+        ts.attrs["files"] = filegroup["files"]
+
+        # Add source name to container attributes, to allow catalog use
+        if self.source_name:
+            ts.attrs["source_name"] = self.source_name
 
         # Return timestream
         return ts
@@ -235,23 +324,24 @@ class LoadFiles(LoadFilesFromParams):
         filelists : list
             List of lists of filenames, or list of tuples, where each tuple
             consists of a list of filenames and a tuple of time bounds. Each
-            item in the main list will be places in a single HFBData container.
+            item in the main list will be placed in a single HFBData container.
         """
         if not isinstance(filelists, list):
             raise RuntimeError("Argument must be list of lists of files.")
 
         # Convert list of filelists to list of filegroups
         self.filegroups = []
-        for i, flist in enumerate(filelists):
-            tag = f"group_{i}"
-
+        for flist in filelists:
             # Handle lists including time ranges
             if isinstance(flist, tuple):
-                fgroup = {"files": flist[0], "time_range": flist[1], "tag": tag}
+                fgroup = {"files": flist[0], "time_range": flist[1]}
             else:
-                fgroup = {"files": flist, "time_range": (None, None), "tag": tag}
+                fgroup = {"files": flist, "time_range": (None, None)}
 
-            self.filegroups.append(fgroup)
+            # Avoid adding filegroups with empty filelists (the output of
+            # QueryDatabase with return_intervals can include days with no files)
+            if fgroup["files"]:
+                self.filegroups.append(fgroup)
 
         # Call the baseclass setup to resolve any selections
         super().setup()

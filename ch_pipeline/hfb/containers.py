@@ -12,6 +12,8 @@ from ch_util import andata
 
 from ..core.containers import RawContainer, FreqContainer
 
+from draco.core.containers import TODContainer
+
 
 class HFBData(RawContainer, FreqContainer):
     """A container for HFB data.
@@ -153,3 +155,177 @@ class HFBReader(tod.Reader):
             datasets=self.dataset_sel,
             **kwargs,
         )
+
+
+class HFBRFIMask(TODContainer, FreqContainer):
+    """Container for holding a mask that indicates HFB data that is free of
+    RFI events.
+
+    The `sens` dataset (if initialized) holds the sensitivity metric data.
+    """
+
+    _axes = ("subfreq",)
+
+    _dataset_spec = {
+        "mask": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "sens": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def mask(self):
+        return self.datasets["mask"]
+
+    @property
+    def sens(self):
+        return self.datasets["sens"]
+
+
+class HFBTimeAverage(FreqContainer):
+    """Container for holding average data for flattening sub-frequency band shape."""
+
+    _axes = ("subfreq", "beam")
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "subfreq", "beam"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["freq", "subfreq", "beam"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        return self["weight"]
+
+
+class HFBHighResData(TODContainer, FreqContainer):
+    """Container for holding high-resolution frequency data"""
+
+    _axes = ("beam",)
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "hfb_weight": {
+            "axes": ["freq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        return self["hfb_weight"]
+
+
+class HFBHighResTimeAverage(FreqContainer):
+    """Container for holding time-averaged high-resolution frequency data"""
+
+    _axes = ("beam",)
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "beam"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "hfb_weight": {
+            "axes": ["freq", "beam"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        return self["hfb_weight"]
+
+
+class HFBHighResSpectrum(FreqContainer):
+    """Container for holding high-resolution frequency spectrum"""
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "hfb_weight": {
+            "axes": ["freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "nsample": {
+            "axes": ["freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        return self["hfb_weight"]
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
