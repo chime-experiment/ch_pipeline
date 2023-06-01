@@ -285,6 +285,7 @@ class LoadFilesFromParams(BaseLoadFiles):
         else:
             # Use the start time of the container
             container_time = ts.time[0]
+        ts.attrs["container_time"] = container_time
 
         # Compute LSD and add to container attributes.
         lsd = int(self.observer.unix_to_lsd(container_time))
