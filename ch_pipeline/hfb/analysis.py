@@ -2,10 +2,16 @@
 """
 import numpy as np
 
+from scipy.interpolate import interp1d
+
+from skyfield.positionlib import Angle
+from skyfield.starlib import Star
+
 from caput import config
 from caput import mpiarray
 
 from ch_util.hfbcat import HFBCatalog
+from ch_util.ephemeris import get_doppler_shifted_freq
 
 from draco.core import task
 from draco.util import tools
@@ -600,6 +606,99 @@ class HFBSelectTransit(task.SingleTask):
         out.weight[:] = weight
 
         # Return output container
+        return out
+
+
+class HFBDopplerShift(task.SingleTask):
+    """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
+
+    Attributes
+    ----------
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
+        not provided, the task will look for it in the input container attributes.
+    source_ra : float
+        Right ascension of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    source_dec : float
+        Declination of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    time_override : float
+        Unix time used to calculate Doppler shift, to override the time found in
+        each input container, stored in its attributes as `container_time`."""
+
+    source_name = config.Property(proptype=str, default=None)
+    source_ra = config.Property(proptype=float, default=None)
+    source_dec = config.Property(proptype=float, default=None)
+    time_override = config.Property(proptype=float, default=None)
+
+    source = None
+
+    def process(self, stream):
+        """Doppler shift a container with high-resolution HFB data.
+
+        Parameters
+        ----------
+        stream : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Data with high-resolution frequency axis.
+
+        Returns
+        -------
+        out : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Doppler shifted data.
+        """
+
+        # On the first pass, obtain a skyfield Star object of the source. This can
+        # either be retrieved from the HFB catalog (using the source name from the
+        # container attributes, unless manually overridden via the task's source_name
+        # attribute) or generated from the task's source_ra / source_dec attributes.
+        if not self.source:
+            if not self.source_ra and not self.source_dec:
+                if not self.source_name:
+                    self.source_name = stream.attrs["source_name"]
+                self.source = HFBCatalog[self.source_name].skyfield
+            elif self.source_ra and self.source_dec:
+                self.source = Star(
+                    ra=Angle(degrees=self.source_ra), dec=Angle(degrees=self.source_dec)
+                )
+            else:
+                raise RuntimeError(
+                    "Requires either a source name or both an RA and a Dec. "
+                    f"Got source name {self.source_name}, RA {self.source_ra}, "
+                    f"Dec {self.source_dec}"
+                )
+
+        # Use the container time (which is normally the transit time) as the time
+        # used to compute the Doppler correction, unless an override is provided.
+        if self.time_override is None:
+            time = stream.attrs["container_time"]
+        else:
+            time = self.time_override
+
+        # Obtain Doppler shifted frequencies.
+        freq_shifted = get_doppler_shifted_freq(self.source, time, stream.freq)
+        freq_shifted = freq_shifted.squeeze()
+
+        # Generate a SciPy 1D interpolation function and interpolate data.
+        # Use linear interpolation for data.
+        _interp_data = interp1d(
+            stream.freq, stream.hfb[:], kind="linear", axis=0, bounds_error=False
+        )
+        data_shifted = _interp_data(freq_shifted)
+
+        # Generate a SciPy 1D interpolation function and interpolate weights.
+        # Do not attempt to propagate the errors, use weight from nearest point.
+        _interp_weight = interp1d(
+            stream.freq, stream.weight[:], kind="nearest", axis=0, bounds_error=False
+        )
+        weight_shifted = _interp_weight(freq_shifted)
+
+        # Create container to hold output
+        out = dcontainers.empty_like(stream)
+
+        out.hfb[:] = data_shifted
+        out.weight[:] = weight_shifted
+
         return out
 
 
