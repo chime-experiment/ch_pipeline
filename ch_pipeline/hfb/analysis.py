@@ -2,10 +2,16 @@
 """
 import numpy as np
 
+from scipy.interpolate import interp1d
+
+from skyfield.positionlib import Angle
+from skyfield.starlib import Star
+
 from caput import config
 from caput import mpiarray
 
 from ch_util.hfbcat import HFBCatalog
+from ch_util.ephemeris import chime, get_doppler_shifted_freq
 
 from draco.core import task
 from draco.util import tools
@@ -742,6 +748,185 @@ class HFBDividePFB(task.SingleTask):
         out.weight[:] = weight * pfb_shape[:, np.newaxis] ** 2
 
         return out
+
+
+class HFBDopplerShift(task.SingleTask):
+    """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
+
+    Attributes
+    ----------
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
+        not provided, the task will look for it in the input container attributes.
+    source_ra : float
+        Right ascension of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    source_dec : float
+        Declination of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    time_override : float
+        Unix time used to calculate Doppler shift, to override the time calculated
+        from the LSD and the RA of the source found in the container attributes."""
+
+    source_name = config.Property(proptype=str, default=None)
+    source_ra = config.Property(proptype=float, default=None)
+    source_dec = config.Property(proptype=float, default=None)
+    time_override = config.Property(proptype=float, default=None)
+
+    source = None
+
+    def setup(self, observer=None):
+        """Setup the HFBDopplerShift task.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        self.observer = chime if observer is None else observer
+
+    def process(self, stream):
+        """Doppler shift a container with high-resolution HFB data.
+
+        Parameters
+        ----------
+        stream : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Data with high-resolution frequency axis.
+
+        Returns
+        -------
+        out : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Doppler shifted data.
+        """
+
+        # On the first pass, obtain a skyfield Star object of the source. This can
+        # either be retrieved from the HFB catalog (using the source name from the
+        # container attributes, unless manually overridden via the task's source_name
+        # attribute) or generated from the task's source_ra / source_dec attributes.
+        if not self.source:
+            if not self.source_ra and not self.source_dec:
+                if not self.source_name:
+                    self.source_name = stream.attrs["source_name"]
+                self.source = HFBCatalog[self.source_name].skyfield
+            elif self.source_ra and self.source_dec:
+                self.source = Star(
+                    ra=Angle(degrees=self.source_ra), dec=Angle(degrees=self.source_dec)
+                )
+            else:
+                raise RuntimeError(
+                    "Requires either a source name or both an RA and a Dec. "
+                    f"Got source name {self.source_name}, RA {self.source_ra}, "
+                    f"Dec {self.source_dec}"
+                )
+
+        # Obtain time used to compute Doppler correction from container LSD and source RA,
+        # unless an override is provided.
+        if self.time_override is not None:
+            time = self.time_override
+        else:
+            if isinstance(stream.attrs["lsd"], list):
+                raise TypeError(
+                    f"Container includes multiple LSDs: {stream.attrs['lsd']} "
+                    "Use time_override to force Doppler correction."
+                )
+            lsd_float = stream.attrs["lsd"] + self.source.ra.hours / 24.0
+            time = self.observer.lsd_to_unix(lsd_float)
+
+        # Extract frequencies, data, and weights from input container.
+        freq_obs = stream.freq
+        data_obs = stream.hfb[:]
+        weight_obs = stream.weight[:]
+
+        # Obtain Doppler shifted frequencies.
+        freq_shifted = get_doppler_shifted_freq(
+            source=self.source,
+            date=time,
+            freq_rest=freq_obs,
+            obs=self.observer,
+        ).squeeze()
+
+        # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
+        # using linear interpolation and moving these to the observed frequencies.
+        # Reverse frequency dimension, because the interpolation function requires
+        # ascending x arrays. Zero out data points that need to be extrapolated.
+        data_shifted, weight_shifted = _interpolation_linear(
+            x=freq_obs[::-1],
+            y=data_obs[::-1, ...],
+            w=weight_obs[::-1, ...],
+            xeval=freq_shifted[::-1],
+            zero_outside=True,
+        )
+
+        # Reverse back frequency dimension.
+        data_shifted = data_shifted[::-1, ...]
+        weight_shifted = weight_shifted[::-1, ...]
+
+        # Create container to hold output.
+        out = dcontainers.empty_like(stream)
+
+        out.hfb[:] = data_shifted
+        out.weight[:] = weight_shifted
+
+        return out
+
+
+def _interpolation_linear(x, y, w, xeval, zero_outside=True):
+    """Linear interpolation with handling of uncertainties and flagged data."""
+
+    # Invert weights to obtain variances
+    var = tools.invert_no_zero(w)
+
+    # Find indices of x points left and right of xeval points
+    index = np.searchsorted(x, xeval, side="left")
+    ind1 = index - 1
+    ind2 = index
+
+    # Find points below the range of x and overwrite left and right indices
+    # with the two indices at the start of x for extrapolation
+    below = np.flatnonzero(ind1 == -1)
+    if below.size > 0:
+        ind1[below] = 0
+        ind2[below] = 1
+
+    # Find points above the range of x and overwrite left and right indices
+    # with the two indices at the end of x for extrapolation
+    above = np.flatnonzero(ind2 == x.size)
+    if above.size > 0:
+        ind1[above] = x.size - 2
+        ind2[above] = x.size - 1
+
+    # Compute intervals
+    adx1 = xeval - x[ind1]
+    adx2 = x[ind2] - xeval
+
+    # Compute relative weights of left and right points
+    norm = tools.invert_no_zero(adx1 + adx2)
+    a1 = adx2 * norm
+    a2 = adx1 * norm
+
+    # Adjust shape of a1 and a2 to allow broadcasting with y and var
+    new_axes_pos = tuple(range(1, len(y.shape)))
+    a1 = np.expand_dims(a1, axis=new_axes_pos)
+    a2 = np.expand_dims(a2, axis=new_axes_pos)
+
+    # Do interpolation and extrapolation
+    yeval = a1 * y[ind1, ...] + a2 * y[ind2, ...]
+    weval = tools.invert_no_zero(a1**2 * var[ind1, ...] + a2**2 * var[ind2, ...])
+
+    # Set interpolated weight to zero if either of the two weights going into
+    # the interpolation is zero, indicated data flagged as bad
+    flags = (w[ind1, ...] == 0.0) | (w[ind2, ...] == 0.0)
+    weval[flags] = 0.0
+
+    if zero_outside:
+        # Overwrite extrapolated points with zeros
+        outside = np.concatenate((below, above))
+        yeval[outside] = 0.0
+        weval[outside] = 0.0
+
+    return yeval, weval
 
 
 def _ensure_list(x):
