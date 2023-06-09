@@ -2,10 +2,16 @@
 """
 import numpy as np
 
+from scipy.interpolate import interp1d
+
+from skyfield.positionlib import Angle
+from skyfield.starlib import Star
+
 from caput import config
 from caput import mpiarray
 
 from ch_util.hfbcat import HFBCatalog
+from ch_util.ephemeris import chime, get_doppler_shifted_freq
 
 from draco.core import task
 from draco.util import tools
@@ -607,6 +613,119 @@ class HFBSelectTransit(task.SingleTask):
         out.weight[:] = weight
 
         # Return output container
+        return out
+
+
+class HFBDopplerShift(task.SingleTask):
+    """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
+
+    Attributes
+    ----------
+    source_name : str
+        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
+        not provided, the task will look for it in the input container attributes.
+    source_ra : float
+        Right ascension of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    source_dec : float
+        Declination of the source in degrees, in case the source is not in
+        `ch_util.hfbcat.HFBCatalog`.
+    time_override : float
+        Unix time used to calculate Doppler shift, to override the time calculated
+        from the LSD and the RA of the source found in the container attributes."""
+
+    source_name = config.Property(proptype=str, default=None)
+    source_ra = config.Property(proptype=float, default=None)
+    source_dec = config.Property(proptype=float, default=None)
+    time_override = config.Property(proptype=float, default=None)
+
+    source = None
+
+    def setup(self, observer=None):
+        """Setup the HFBDopplerShift task.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        self.observer = chime if observer is None else observer
+
+    def process(self, stream):
+        """Doppler shift a container with high-resolution HFB data.
+
+        Parameters
+        ----------
+        stream : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Data with high-resolution frequency axis.
+
+        Returns
+        -------
+        out : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Doppler shifted data.
+        """
+
+        # On the first pass, obtain a skyfield Star object of the source. This can
+        # either be retrieved from the HFB catalog (using the source name from the
+        # container attributes, unless manually overridden via the task's source_name
+        # attribute) or generated from the task's source_ra / source_dec attributes.
+        if not self.source:
+            if not self.source_ra and not self.source_dec:
+                if not self.source_name:
+                    self.source_name = stream.attrs["source_name"]
+                self.source = HFBCatalog[self.source_name].skyfield
+            elif self.source_ra and self.source_dec:
+                self.source = Star(
+                    ra=Angle(degrees=self.source_ra), dec=Angle(degrees=self.source_dec)
+                )
+            else:
+                raise RuntimeError(
+                    "Requires either a source name or both an RA and a Dec. "
+                    f"Got source name {self.source_name}, RA {self.source_ra}, "
+                    f"Dec {self.source_dec}"
+                )
+
+        # Obtain time used to compute Doppler correction from container LSD and source RA,
+        # unless an override is provided.
+        if self.time_override is not None:
+            time = self.time_override
+        else:
+            if isinstance(stream.attrs["lsd"], list):
+                raise TypeError(
+                    f"Container includes multiple LSDs: {stream.attrs['lsd']} "
+                    "Use time_override to force Doppler correction."
+                )
+            lsd_float = stream.attrs["lsd"] + self.source.ra.hours / 24.0
+            time = self.observer.lsd_to_unix(lsd_float)
+
+        # Obtain Doppler shifted frequencies.
+        freq_obs_frame = get_doppler_shifted_freq(
+            source=self.source, date=time, freq_rest=stream.freq, obs=self.observer
+        )
+        freq_obs_frame = freq_obs_frame.squeeze()
+
+        # Generate a SciPy 1D interpolation function and interpolate data.
+        # Use linear interpolation for data.
+        _interp_data = interp1d(
+            freq_obs_frame, stream.hfb[:], kind="linear", axis=0, bounds_error=False
+        )
+        data_rest_frame = _interp_data(stream.freq)
+
+        # Generate a SciPy 1D interpolation function and interpolate weights.
+        # Do not attempt to propagate the errors, use weight from nearest point.
+        _interp_weight = interp1d(
+            freq_obs_frame, stream.weight[:], kind="nearest", axis=0, bounds_error=False
+        )
+        weight_rest_frame = _interp_weight(stream.freq)
+
+        # Create container to hold output
+        out = dcontainers.empty_like(stream)
+
+        out.hfb[:] = data_rest_frame
+        out.weight[:] = weight_rest_frame
+
         return out
 
 
