@@ -233,6 +233,50 @@ class HFBDivideByTemplate(task.SingleTask):
         return out
 
 
+class HFBDifference(task.SingleTask):
+    """Take the difference of two sets of HFB data.
+
+    Used for flattening sub-frequency band shape by differencing on-source and
+    off-source data.
+    """
+
+    def process(self, minuend, subtrahend):
+        """Take difference and place in container.
+
+        Parameters
+        ----------
+        minuend : HFBData or HFBTimeAverage
+            Container with HFB data and weights; the data being subtracted from.
+
+        subtrahend : HFBData or HFBTimeAverage
+            Container with HFB data and weights; the data being subtracted.
+
+        Returns
+        -------
+        out : HFBData or HFBTimeAverage
+            Container with HFB data and weights; the result of the subtraction.
+        """
+
+        # Difference data
+        data = minuend.hfb[:] - subtrahend.hfb[:]
+
+        # Add standard deviations in quadrature, hence add variances, hence
+        # take inverse of sum of reciprocals of weights
+        weight = tools.invert_no_zero(
+            tools.invert_no_zero(minuend.weight[:])
+            + tools.invert_no_zero(subtrahend.weight[:])
+        )
+
+        # Create container to hold output
+        out = dcontainers.empty_like(minuend)
+
+        # Save data and weights to output container
+        out.hfb[:] = data
+        out.weight[:] = weight
+
+        return out
+
+
 class HFBStackDays(task.SingleTask):
     """Combine HFB data of multiple days.
 
