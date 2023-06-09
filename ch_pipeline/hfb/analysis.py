@@ -652,6 +652,47 @@ class HFBFlattenPFB(task.SingleTask):
         return out
 
 
+class HFBDividePFB(task.SingleTask):
+    """Flatten HFB data by dividing out the PFB shape."""
+
+    def process(self, stream):
+        """Flatten HFB data.
+
+        Parameters
+        ----------
+        stream : containers.HFBTimeAverage
+            Container with time-averaged HFB data.
+
+        Returns
+        -------
+        out : containers.HFBTimeAverage
+            Container with flattened time-averaged HFB data.
+        """
+
+        # Extract data and weight from container
+        data = stream.hfb
+        weight = stream.weight
+
+        # Mask out DC bin (subfrequency bin 64) by setting weight to zero
+        weight[:, 64, :] = 0
+
+        # Get PFB shape, instantiating PFB-deconvolution class with default parameters
+        pfb_shape = DeconvolvePFB().Wt2.sum(axis=1)
+        pfb_shape = np.roll(pfb_shape, 64)
+
+        # Create container to hold output
+        out = dcontainers.empty_like(stream)
+
+        # Divide data by PFB shape and place in output container
+        out.hfb[:] = data / pfb_shape[:, np.newaxis]
+
+        # Divide uncertainties by PFB shape, hence multiply weights by square
+        # of PFB shape, and place in output container.
+        out.weight[:] = weight * pfb_shape[:, np.newaxis] ** 2
+
+        return out
+
+
 def _ensure_list(x):
     if hasattr(x, "__iter__"):
         y = [xx for xx in x]
