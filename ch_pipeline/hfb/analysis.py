@@ -668,12 +668,21 @@ class HFBDopplerShift(task.SingleTask):
                     f"Dec {self.source_dec}"
                 )
 
-        # Use the container time (which is normally the transit time) as the time
-        # used to compute the Doppler correction, unless an override is provided.
-        if self.time_override is None:
-            time = stream.attrs["container_time"]
-        else:
+        # Obtain time used to compute Doppler correction from container time axis,
+        # unless an override is provided.
+        if self.time_override is not None:
             time = self.time_override
+        else:
+            if isinstance(stream.attrs["lsd"], list):
+                raise TypeError(
+                    f"Container includes multiple LSDs: {stream.attrs['lsd']} "
+                    "Use time_override to force Doppler correction."
+                )
+            if "time" in stream.index_map:
+                ctimes = stream._data["index_map/time/ctime"]
+            else:
+                ctimes = [t[1] for t in stream.attrs['time']]
+            time = np.median(ctimes)
 
         # Obtain Doppler shifted frequencies.
         freq_grid = stream.freq
