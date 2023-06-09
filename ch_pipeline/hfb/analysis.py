@@ -132,19 +132,19 @@ class MakeHighFreqRes(task.SingleTask):
 
         Parameters
         ----------
-        stream : HFBData
+        stream : HFBData, HFBTimeAverage
             Data with frequency and subfrequency axis
 
         Returns
         -------
-        out : HFBHighResData
+        out : HFBHighResData, HFBHighResTimeAverage
             Data with single high-resolution frequency axis
         """
 
-        # Retrieve shape of data
-        nfreq = len(stream._data["index_map"]["freq"]["centre"][:])
-        nsubfreq = len(stream._data["index_map"]["subfreq"][:])
-        nbeam = len(stream._data["index_map"]["beam"][:])
+        contmap = {
+            containers.HFBData: containers.HFBHighResData,
+            containers.HFBTimeAverage: containers.HFBHighResTimeAverage,
+        }
 
         # Retrieve data and weights
         data = stream.hfb[:]
@@ -160,18 +160,25 @@ class MakeHighFreqRes(task.SingleTask):
         subfreq = stream._data["index_map"]["subfreq"][:]
         freq = (cfreq[:, np.newaxis] + subfreq).flatten()
 
-        # Retrieve beam and time axes
+        # Retrieve beam and time axes, if available
         beam = stream._data["index_map"]["beam"][:]
-        time = stream.time
+        time = stream.time if hasattr(stream, "time") else None
+
+        # Determine new shape of data with combined frequency axis
+        nfreq = len(cfreq)
+        nsubfreq = len(subfreq)
+        old_shape = data.shape
+        new_shape = (nfreq * nsubfreq, *old_shape[2:])
 
         # Combine frequency and sub-frequency axes
-        data = data.reshape(nfreq * nsubfreq, nbeam, -1)
-        weight = weight.reshape(nfreq * nsubfreq, nbeam, -1)
+        data = data.reshape(new_shape)
+        weight = weight.reshape(new_shape)
+
+        # Get the output container
+        out_cont_type = contmap[stream.__class__]
 
         # Create container to hold output
-        out = containers.HFBHighResData(
-            freq=freq, beam=beam, time=time, attrs_from=stream
-        )
+        out = out_cont_type(freq=freq, beam=beam, time=time, attrs_from=stream)
 
         # Save data to output container
         out.hfb[:] = data
