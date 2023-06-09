@@ -676,28 +676,29 @@ class HFBDopplerShift(task.SingleTask):
             time = self.time_override
 
         # Obtain Doppler shifted frequencies.
-        freq_shifted = get_doppler_shifted_freq(self.source, time, stream.freq)
-        freq_shifted = freq_shifted.squeeze()
+        freq_grid = stream.freq
+        freq_obs_frame = get_doppler_shifted_freq(self.source, time, freq_grid)
+        freq_obs_frame = freq_obs_frame.squeeze()
 
         # Generate a SciPy 1D interpolation function and interpolate data.
         # Use linear interpolation for data.
         _interp_data = interp1d(
-            stream.freq, stream.hfb[:], kind="linear", axis=0, bounds_error=False
+            freq_obs_frame, stream.hfb[:], kind="linear", axis=0, bounds_error=False
         )
-        data_shifted = _interp_data(freq_shifted)
+        data_rest_frame = _interp_data(freq_grid)
 
         # Generate a SciPy 1D interpolation function and interpolate weights.
         # Do not attempt to propagate the errors, use weight from nearest point.
         _interp_weight = interp1d(
-            stream.freq, stream.weight[:], kind="nearest", axis=0, bounds_error=False
+            freq_obs_frame, stream.weight[:], kind="nearest", axis=0, bounds_error=False
         )
-        weight_shifted = _interp_weight(freq_shifted)
+        weight_rest_frame = _interp_weight(freq_grid)
 
         # Create container to hold output
         out = dcontainers.empty_like(stream)
 
-        out.hfb[:] = data_shifted
-        out.weight[:] = weight_shifted
+        out.hfb[:] = data_rest_frame
+        out.weight[:] = weight_rest_frame
 
         return out
 
