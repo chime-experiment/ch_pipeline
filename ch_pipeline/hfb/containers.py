@@ -53,6 +53,12 @@ class HFBData(RawContainer, FreqContainer):
             "initialise": False,
             "distributed": False,
         },
+        "nsample": {
+            "axes": ["freq", "subfreq", "beam", "time"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
     }
 
     @property
@@ -64,6 +70,11 @@ class HFBData(RawContainer, FreqContainer):
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
         return self["flags/hfb_weight"]
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
 
 
 class HFBReader(tod.Reader):
@@ -212,6 +223,12 @@ class HFBTimeAverage(FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
+        "nsample": {
+            "axes": ["freq", "subfreq", "beam"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
     }
 
     @property
@@ -223,6 +240,11 @@ class HFBTimeAverage(FreqContainer):
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
         return self["weight"]
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
 
 
 class HFBHighResData(TODContainer, FreqContainer):
@@ -245,6 +267,12 @@ class HFBHighResData(TODContainer, FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
+        "nsample": {
+            "axes": ["freq", "beam", "time"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
     }
 
     @property
@@ -256,6 +284,11 @@ class HFBHighResData(TODContainer, FreqContainer):
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
         return self["hfb_weight"]
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
 
 
 class HFBHighResTimeAverage(FreqContainer):
@@ -278,6 +311,12 @@ class HFBHighResTimeAverage(FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
+        "nsample": {
+            "axes": ["freq", "beam"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
     }
 
     @property
@@ -289,6 +328,11 @@ class HFBHighResTimeAverage(FreqContainer):
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
         return self["hfb_weight"]
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
 
 
 class HFBHighResSpectrum(FreqContainer):
