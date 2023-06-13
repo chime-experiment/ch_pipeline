@@ -246,7 +246,7 @@ class HFBStackDays(task.SingleTask):
 
         Parameters
         ----------
-        sdata : hfb.containers.HFBHighResSpectrum
+        sdata : any HFB data container
             Individual (time-averaged) day to add to stack.
         """
 
@@ -318,7 +318,7 @@ class HFBStackDays(task.SingleTask):
 
         Returns
         -------
-        stack : hfb.containers.HFBHighResSpectrum
+        stack : same as sdata
             Stack of sidereal days.
         """
         self.stack.attrs["tag"] = self.tag
