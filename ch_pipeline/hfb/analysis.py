@@ -181,6 +181,60 @@ class MakeHighFreqRes(task.SingleTask):
         return out
 
 
+class HFBDivideBySingleTemplate(task.SingleTask):
+    """Divide HFB data by template of time-averaged and stacked HFB data.
+
+    Used for flattening sub-frequency band shape by dividing on-source data by a
+    template.
+    """
+
+    def setup(self, template):
+        """Load template.
+
+        Parameters
+        ----------
+        template : containers.HFBTimeAverage
+            Container with time-averaged HFB data and weights; the denominator in the
+            division.
+        """
+
+        template_array = template.hfb[:]
+
+        # Precompute factors to multiply data and weights with
+        self.template_factor_data = tools.invert_no_zero(template_array[:, :, :, np.newaxis])
+        self.template_factor_weight = template_array[:, :, :, np.newaxis] ** 2
+
+    def process(self, stream):
+        """Divide data by template and place in HFBData container.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights; the numerator in the division.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights; the result of the division.
+        """
+
+        # Divide data by template
+        data = stream.hfb[:] * self.template_factor_data
+
+        # Divide variance by square of template, which means to
+        # multiply weight by square of template
+        weight = stream.weight[:] * self.template_factor_weight
+
+        # Create container to hold output
+        out = containers.HFBData(axes_from=stream, attrs_from=stream)
+
+        # Save data and weights to output container
+        out.hfb[:] = data
+        out.weight[:] = weight
+
+        return out
+
+
 class HFBDivideByTemplate(task.SingleTask):
     """Divide HFB data by template of time-averaged HFB data.
 
