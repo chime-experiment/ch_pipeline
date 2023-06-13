@@ -703,22 +703,21 @@ class HFBDopplerShift(task.SingleTask):
         # Obtain Doppler shifted frequencies.
         freq_obs_frame = get_doppler_shifted_freq(
             source=self.source, date=time, freq_rest=stream.freq, obs=self.observer
-        )
-        freq_obs_frame = freq_obs_frame.squeeze()
+        ).squeeze()
 
         # Generate a SciPy 1D interpolation function and interpolate data.
         # Use linear interpolation for data.
         _interp_data = interp1d(
-            freq_obs_frame, stream.hfb[:], kind="linear", axis=0, bounds_error=False
+            stream.freq, stream.hfb[:], kind="linear", axis=0, bounds_error=False
         )
-        data_rest_frame = _interp_data(stream.freq)
+        data_rest_frame = _interp_data(freq_obs_frame)
 
         # Generate a SciPy 1D interpolation function and interpolate weights.
         # Do not attempt to propagate the errors, use weight from nearest point.
         _interp_weight = interp1d(
-            freq_obs_frame, stream.weight[:], kind="nearest", axis=0, bounds_error=False
+            stream.freq, stream.weight[:], kind="nearest", axis=0, bounds_error=False
         )
-        weight_rest_frame = _interp_weight(stream.freq)
+        weight_rest_frame = _interp_weight(freq_obs_frame)
 
         # Create container to hold output
         out = dcontainers.empty_like(stream)
