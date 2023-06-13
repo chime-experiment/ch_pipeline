@@ -57,7 +57,7 @@ class HFBData(RawContainer, FreqContainer):
             "axes": ["freq", "subfreq", "beam", "time"],
             "dtype": np.uint16,
             "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
     }
 
@@ -227,7 +227,7 @@ class HFBTimeAverage(FreqContainer):
             "axes": ["freq", "subfreq", "beam"],
             "dtype": np.uint16,
             "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
     }
 
@@ -271,7 +271,7 @@ class HFBHighResData(TODContainer, FreqContainer):
             "axes": ["freq", "beam", "time"],
             "dtype": np.uint16,
             "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
     }
 
@@ -315,7 +315,7 @@ class HFBHighResTimeAverage(FreqContainer):
             "axes": ["freq", "beam"],
             "dtype": np.uint16,
             "initialise": False,
-            "distributed": False,
+            "distributed": True,
         },
     }
 
