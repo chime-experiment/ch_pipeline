@@ -694,31 +694,97 @@ class HFBDopplerShift(task.SingleTask):
             time = self.observer.lsd_to_unix(lsd_float)
 
         # Obtain Doppler shifted frequencies.
-        freq_obs_frame = get_doppler_shifted_freq(
-            source=self.source, date=time, freq_rest=stream.freq, obs=self.observer
+        freq_shifted = get_doppler_shifted_freq(
+            source=self.source,
+            date=time,
+            freq_rest=stream.freq,
+            obs=self.observer,
         ).squeeze()
 
-        # Generate a SciPy 1D interpolation function and interpolate data.
-        # Use linear interpolation for data.
-        _interp_data = interp1d(
-            stream.freq, stream.hfb[:], kind="linear", axis=0, bounds_error=False
-        )
-        data_rest_frame = _interp_data(freq_obs_frame)
+        # Extract data and weights from input container.
+        data_obs = stream.hfb[:]
+        weight_obs = stream.weight[:]
 
-        # Generate a SciPy 1D interpolation function and interpolate weights.
-        # Do not attempt to propagate the errors, use weight from nearest point.
-        _interp_weight = interp1d(
-            stream.freq, stream.weight[:], kind="nearest", axis=0, bounds_error=False
-        )
-        weight_rest_frame = _interp_weight(freq_obs_frame)
+        # Find data points that can be included in interpolation
+        to_interp = np.flatnonzero(weight_obs > 0.0)
 
-        # Create container to hold output
+        # Select data points that can be included in interpolation
+        freq_obs = stream.freq[to_interp]
+        data_obs = data_obs[to_interp, ...]
+        weight_obs = weight_obs[to_interp, ...]
+
+        # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
+        # using linear interpolation and moving these to the observed frequencies.
+        # Reverse frequency dimension, because the interpolation function requires
+        # ascending x arrays. Zero out data points that need to be extrapolated.
+        data_shifted, weight_shifted = _interpolation_linear(
+            x=freq_obs[::-1],
+            y=data_obs[::-1, ...],
+            var=tools.invert_no_zero(weight_obs[::-1, ...]),
+            xeval=freq_shifted[::-1],
+            zero_outside=True,
+        )
+
+        # Reverse back frequency dimension.
+        data_shifted = data_shifted[::-1, ...]
+        weight_shifted = weight_shifted[::-1, ...]
+
+        # Create container to hold output.
         out = dcontainers.empty_like(stream)
 
-        out.hfb[:] = data_rest_frame
-        out.weight[:] = weight_rest_frame
+        out.hfb[:] = data_shifted
+        out.weight[:] = weight_shifted
 
         return out
+
+
+def _interpolation_linear(x, y, var, xeval, zero_outside=True):
+    """Linear interpolation with handling of uncertainties."""
+
+    # Find indices of x points left and right of xeval points
+    index = np.searchsorted(x, xeval, side="left")
+    ind1 = index - 1
+    ind2 = index
+
+    # Find points below the range of x and overwrite left and right indices
+    # with the two indices at the start of x for extrapolation
+    below = np.flatnonzero(ind1 == -1)
+    if below.size > 0:
+        ind1[below] = 0
+        ind2[below] = 1
+
+    # Find points above the range of x and overwrite left and right indices
+    # with the two indices at the end of x for extrapolation
+    above = np.flatnonzero(ind2 == x.size)
+    if above.size > 0:
+        ind1[above] = x.size - 2
+        ind2[above] = x.size - 1
+
+    # Compute intervals
+    adx1 = xeval - x[ind1]
+    adx2 = x[ind2] - xeval
+
+    # Compute relative weights of left and right points
+    norm = tools.invert_no_zero(adx1 + adx2)
+    a1 = adx2 * norm
+    a2 = adx1 * norm
+
+    # Adjust shape of a1 and a2 to allow broadcasting with y and var
+    new_axes_pos = tuple(range(1, len(y.shape)))
+    a1 = np.expand_dims(a1, axis=new_axes_pos)
+    a2 = np.expand_dims(a2, axis=new_axes_pos)
+
+    # Do interpolation and extrapolation
+    yeval = a1 * y[ind1, ...] + a2 * y[ind2, ...]
+    weval = tools.invert_no_zero(a1**2 * var[ind1, ...] + a2**2 * var[ind2, ...])
+
+    if zero_outside:
+        # Overwrite extrapolated points with zeros
+        outside = np.concatenate((below, above))
+        yeval[outside] = 0.0
+        weval[outside] = 0.0
+
+    return yeval, weval
 
 
 def _ensure_list(x):
