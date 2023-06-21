@@ -693,25 +693,18 @@ class HFBDopplerShift(task.SingleTask):
             lsd_float = stream.attrs["lsd"] + self.source.ra.hours / 24.0
             time = self.observer.lsd_to_unix(lsd_float)
 
+        # Extract frequencies, data, and weights from input container.
+        freq_obs = stream.freq
+        data_obs = stream.hfb[:]
+        weight_obs = stream.weight[:]
+
         # Obtain Doppler shifted frequencies.
         freq_shifted = get_doppler_shifted_freq(
             source=self.source,
             date=time,
-            freq_rest=stream.freq,
+            freq_rest=freq_obs,
             obs=self.observer,
         ).squeeze()
-
-        # Extract data and weights from input container.
-        data_obs = stream.hfb[:]
-        weight_obs = stream.weight[:]
-
-        # Find data points that can be included in interpolation
-        to_interp = np.flatnonzero(weight_obs > 0.0)
-
-        # Select data points that can be included in interpolation
-        freq_obs = stream.freq[to_interp]
-        data_obs = data_obs[to_interp, ...]
-        weight_obs = weight_obs[to_interp, ...]
 
         # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
         # using linear interpolation and moving these to the observed frequencies.
@@ -720,7 +713,7 @@ class HFBDopplerShift(task.SingleTask):
         data_shifted, weight_shifted = _interpolation_linear(
             x=freq_obs[::-1],
             y=data_obs[::-1, ...],
-            var=tools.invert_no_zero(weight_obs[::-1, ...]),
+            w=weight_obs[::-1, ...],
             xeval=freq_shifted[::-1],
             zero_outside=True,
         )
@@ -738,8 +731,11 @@ class HFBDopplerShift(task.SingleTask):
         return out
 
 
-def _interpolation_linear(x, y, var, xeval, zero_outside=True):
-    """Linear interpolation with handling of uncertainties."""
+def _interpolation_linear(x, y, w, xeval, zero_outside=True):
+    """Linear interpolation with handling of uncertainties and flagged data."""
+
+    # Invert weights to obtain variances
+    var = tools.invert_no_zero(w)
 
     # Find indices of x points left and right of xeval points
     index = np.searchsorted(x, xeval, side="left")
@@ -777,6 +773,11 @@ def _interpolation_linear(x, y, var, xeval, zero_outside=True):
     # Do interpolation and extrapolation
     yeval = a1 * y[ind1, ...] + a2 * y[ind2, ...]
     weval = tools.invert_no_zero(a1**2 * var[ind1, ...] + a2**2 * var[ind2, ...])
+
+    # Set interpolated weight to zero if either of the two weights going into
+    # the interpolation is zero, indicated data flagged as bad
+    flags = (w[ind1, ...] == 0.0) | (w[ind2, ...] == 0.0)
+    weval[flags] = 0.0
 
     if zero_outside:
         # Overwrite extrapolated points with zeros
