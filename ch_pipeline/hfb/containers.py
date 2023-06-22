@@ -15,7 +15,35 @@ from ..core.containers import RawContainer, FreqContainer
 from draco.core.containers import TODContainer
 
 
-class HFBData(RawContainer, FreqContainer):
+class HFBContainer(FreqContainer):
+    """A base class for all HFB containers.
+
+    Like :class:`FreqContainer`, but with some properties specific to HFB data.
+    """
+
+    @property
+    def hfb(self) -> memh5.MemDataset:
+        """The main hfb dataset."""
+        return self.datasets["hfb"]
+
+    @property
+    def weight(self) -> memh5.MemDataset:
+        """The inverse variance weight dataset."""
+        if "weight" in self:
+            weight = self["weight"]
+        elif "hfb_weight" in self:
+            weight = self["hfb_weight"]
+        else:
+            weight = self["flags/hfb_weight"]
+        return weight
+
+    @property
+    def nsample(self) -> memh5.MemDataset:
+        """The number of non-zero samples."""
+        return self.datasets["nsample"]
+
+
+class HFBData(RawContainer, HFBContainer):
     """A container for HFB data.
 
     This attempts to wrap the HFB archive format.
@@ -60,21 +88,6 @@ class HFBData(RawContainer, FreqContainer):
             "distributed": True,
         },
     }
-
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
-
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self["flags/hfb_weight"]
-
-    @property
-    def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
 
 
 class HFBReader(tod.Reader):
@@ -203,7 +216,7 @@ class HFBRFIMask(TODContainer, FreqContainer):
         return self.datasets["sens"]
 
 
-class HFBTimeAverage(FreqContainer):
+class HFBTimeAverage(HFBContainer):
     """Container for holding average data for flattening sub-frequency band shape."""
 
     _axes = ("subfreq", "beam")
@@ -231,23 +244,8 @@ class HFBTimeAverage(FreqContainer):
         },
     }
 
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
 
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self["weight"]
-
-    @property
-    def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
-
-
-class HFBHighResData(TODContainer, FreqContainer):
+class HFBHighResData(TODContainer, HFBContainer):
     """Container for holding high-resolution frequency data"""
 
     _axes = ("beam",)
@@ -260,7 +258,7 @@ class HFBHighResData(TODContainer, FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "hfb_weight": {
+        "weight": {
             "axes": ["freq", "beam", "time"],
             "dtype": np.float32,
             "initialise": True,
@@ -275,23 +273,8 @@ class HFBHighResData(TODContainer, FreqContainer):
         },
     }
 
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
 
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self["hfb_weight"]
-
-    @property
-    def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
-
-
-class HFBHighResTimeAverage(FreqContainer):
+class HFBHighResTimeAverage(HFBContainer):
     """Container for holding time-averaged high-resolution frequency data"""
 
     _axes = ("beam",)
@@ -304,7 +287,7 @@ class HFBHighResTimeAverage(FreqContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "hfb_weight": {
+        "weight": {
             "axes": ["freq", "beam"],
             "dtype": np.float32,
             "initialise": True,
@@ -319,23 +302,8 @@ class HFBHighResTimeAverage(FreqContainer):
         },
     }
 
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
 
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self["hfb_weight"]
-
-    @property
-    def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
-
-
-class HFBHighResSpectrum(FreqContainer):
+class HFBHighResSpectrum(HFBContainer):
     """Container for holding high-resolution frequency spectrum"""
 
     _dataset_spec = {
@@ -345,7 +313,7 @@ class HFBHighResSpectrum(FreqContainer):
             "initialise": True,
             "distributed": False,
         },
-        "hfb_weight": {
+        "weight": {
             "axes": ["freq"],
             "dtype": np.float32,
             "initialise": True,
@@ -358,18 +326,3 @@ class HFBHighResSpectrum(FreqContainer):
             "distributed": False,
         },
     }
-
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
-
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self["hfb_weight"]
-
-    @property
-    def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
