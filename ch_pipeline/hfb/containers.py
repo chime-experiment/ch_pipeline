@@ -29,7 +29,13 @@ class HFBContainer(FreqContainer):
     @property
     def weight(self) -> memh5.MemDataset:
         """The inverse variance weight dataset."""
-        return self["weight"] if "weight" in self else self["flags/hfb_weight"]
+        if "weight" in self:
+            weight = self["weight"]
+        elif "hfb_weight" in self:
+            weight = self["hfb_weight"]
+        else:
+            weight = self["flags/hfb_weight"]
+        return weight
 
     @property
     def nsample(self) -> memh5.MemDataset:
