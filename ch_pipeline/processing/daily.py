@@ -198,18 +198,9 @@ pipeline:
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
       in: sensitivity
-      out: sensitivity_day
       params:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
-
-    # Save out the sensitivity-based RFI Mask for analysis
-    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
-      in: sensitivity_day
-      out: rfi_sensitivity_mask
-      params:
-        save: true
-        output_name: "rfi_sensitivity_mask_{{tag}}.h5"
 
     # Concatenate together all the masks for bad baselines
     - type: draco.analysis.sidereal.SiderealGrouper
