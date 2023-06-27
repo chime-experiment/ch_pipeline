@@ -165,7 +165,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         SIDEREAL_DAY = ephemeris.SIDEREAL_S * 24 * 3600
 
         # Select Sun transit times
-        suntt = ephemeris.solar_transit(times[0])  # Sun transit time
+        suntt = ephemeris.solar_transit(times[0], times[-1])
 
         # Mask the sun for the maximum aparent dec of ~24 deg
         ra_window = beam_window / np.cos(np.deg2rad(24))
