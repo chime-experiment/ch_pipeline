@@ -620,7 +620,7 @@ pipeline:
       in: ringmap_int_hpf
       out: ringmap_int_hpf_sel
       params:
-        channel_index: [65, 250, 325, 399, 470, 605, 730, 830, 950, 990]
+        channel_index: {val_freq}
 
     # Precision truncate and write out the chunked filtered ringmap.
     # Don't truncate the map itself, to preserve low-amplitude pixels.
@@ -765,6 +765,8 @@ class DailyProcessing(base.ProcessingType):
         "num_recent_days_first": 0,
         # Frequencies to process
         "freq": [0, 1024],
+        # Frequencies to save for validation ringmaps
+        "val_freq": [65, 250, 325, 399, 470, 605, 730, 830, 950, 990],
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # Calibration times for thermal correction
@@ -1019,6 +1021,7 @@ class TestDailyProcessing(DailyProcessing):
                 {"start": "20181224T000000Z", "end": "20181228T000000Z"},
             ],
             "freq": [400, 416],
+            "val_freq": [2, 3, 7],
             "nfreq_delay": 17,
             "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
