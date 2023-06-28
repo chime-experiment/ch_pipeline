@@ -1,7 +1,6 @@
 """Tasks for simulating timing distribution errors."""
 
 import numpy as np
-
 from caput import config, mpiarray, mpiutil
 from draco.synthesis import gain
 

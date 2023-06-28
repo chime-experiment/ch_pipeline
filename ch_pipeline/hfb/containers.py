@@ -1,19 +1,14 @@
-"""HFB containers
-"""
+"""HFB containers."""
 
 from functools import cached_property
-from typing import Union
+from typing import ClassVar, Union
 
 import numpy as np
-
-from caput import tod
-from caput import memh5
-
+from caput import memh5, tod
 from ch_util import andata
+from draco.core.containers import DataWeightContainer, SiderealContainer, TODContainer
 
-from ..core.containers import ContainerBase, RawContainer, FreqContainer
-
-from draco.core.containers import TODContainer, SiderealContainer, DataWeightContainer
+from ..core.containers import FreqContainer, RawContainer
 
 
 class HFBContainer(DataWeightContainer):
@@ -30,8 +25,8 @@ class HFBContainer(DataWeightContainer):
         """Convenience access to the main hfb dataset."""
         if "hfb" in self.datasets:
             return self.datasets["hfb"]
-        else:
-            raise KeyError("Dataset 'hfb' not initialised.")
+
+        raise KeyError("Dataset 'hfb' not initialised.")
 
     @property
     def weight(self) -> memh5.MemDataset:
@@ -51,8 +46,8 @@ class HFBContainer(DataWeightContainer):
         """Get the nsample dataset (number of non-zero samples) if it exists."""
         if "nsample" in self.datasets:
             return self.datasets["nsample"]
-        else:
-            raise KeyError("Dataset 'nsample' not initialised.")
+
+        raise KeyError("Dataset 'nsample' not initialised.")
 
 
 class HFBBeamContainer(HFBContainer):
@@ -91,7 +86,7 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
 
     _axes = ("subfreq",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq", "subfreq", "beam", "time"],
             "dtype": np.float32,
@@ -133,7 +128,6 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
         This overrides the default implementation to forcibly hint that the datasets
         should be distributed.
         """
-
         # If hints exist, then don't modify them. This allows hints=False to override this override!
         if "hints" not in kwargs:
             hints = {}
@@ -177,7 +171,6 @@ class HFBReader(tod.Reader):
         freq_sel
             A frequency selection.
         """
-
         return self._freq_sel
 
     @freq_sel.setter
@@ -202,7 +195,6 @@ class HFBReader(tod.Reader):
         beam_sel
             The current beam selection.
         """
-
         return self._beam_sel
 
     @beam_sel.setter
@@ -253,15 +245,14 @@ class HFBReader(tod.Reader):
 
 
 class HFBRFIMask(TODContainer, FreqContainer):
-    """Container for holding a mask that indicates HFB data that is free of
-    RFI events.
+    """Container for holding a mask indicating HFB data free of RFI events.
 
     The `sens` dataset (if initialized) holds the sensitivity metric data.
     """
 
     _axes = ("subfreq",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "mask": {
             "axes": ["freq", "subfreq", "time"],
             "dtype": bool,
@@ -280,10 +271,12 @@ class HFBRFIMask(TODContainer, FreqContainer):
 
     @property
     def mask(self):
+        """Get the mask dataset."""
         return self.datasets["mask"]
 
     @property
     def sens(self):
+        """Get the sensitivity metric dataset."""
         return self.datasets["sens"]
 
 
@@ -292,7 +285,7 @@ class HFBTimeAverage(FreqContainer, HFBBeamContainer):
 
     _axes = ("subfreq",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq", "subfreq", "beam"],
             "dtype": np.float32,
@@ -323,7 +316,7 @@ class HFBHighResContainer(FreqContainer, HFBContainer):
 class HFBHighResData(TODContainer, HFBHighResContainer, HFBBeamContainer):
     """Container for holding high-resolution frequency data."""
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq", "beam", "time"],
             "dtype": np.float32,
@@ -350,7 +343,7 @@ class HFBHighResData(TODContainer, HFBHighResContainer, HFBBeamContainer):
 class HFBHighResTimeAverage(HFBHighResContainer, HFBBeamContainer):
     """Container for holding time-averaged high-resolution frequency data."""
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq", "beam"],
             "dtype": np.float32,
@@ -377,7 +370,7 @@ class HFBHighResTimeAverage(HFBHighResContainer, HFBBeamContainer):
 class HFBHighResSpectrum(HFBHighResContainer):
     """Container for holding high-resolution frequency spectrum."""
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq"],
             "dtype": np.float32,
@@ -456,7 +449,7 @@ class HFBRingMap(FreqContainer, HFBBeamRingMap):
 
     _axes = ("subfreq",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["freq", "subfreq", "beam_ew", "el", "ra"],
             "dtype": np.float32,
@@ -490,7 +483,7 @@ class HFBHighResRingMap(HFBBeamRingMap, HFBHighResContainer):
     along the frequency axis.
     """
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
@@ -518,7 +511,7 @@ class HFBHighResRingMap(HFBBeamRingMap, HFBHighResContainer):
 class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
     """Container for holding EW-beam-averaged high-resolution frequency ringmap data."""
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "hfb": {
             "axes": ["el", "ra", "freq"],
             "dtype": np.float32,
@@ -548,7 +541,7 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
 
     _axes = ("width",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "ln_lambda": {
             "axes": ["width", "beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,

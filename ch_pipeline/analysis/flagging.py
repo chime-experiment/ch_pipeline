@@ -1,4 +1,4 @@
-"""Tasks for Flagging Data
+"""Tasks for Flagging Data.
 
 Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
@@ -7,19 +7,17 @@ pre-map making flagging on m-modes.
 
 from typing import Union
 
-import numpy as np
-
-from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
 import caput.time as ctime
+import numpy as np
+from caput import config, memh5, mpiarray, mpiutil, pipeline, tod
 from ch_ephem import sources
 from ch_ephem.observers import chime
-from ch_util import rfi, data_quality, tools, cal_utils, andata, finder
+from ch_util import andata, cal_utils, data_quality, finder, rfi, tools
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
-
 from draco.analysis import flagging as dflagging
-from draco.core import task, io
 from draco.core import containers as dcontainers
+from draco.core import io, task
 
 from ..core import containers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -75,9 +73,10 @@ class RFIFilter(task.SingleTask):
     use_draco_container = config.Property(proptype=bool, default=False)
 
     def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
-        """Creates a mask by identifying outliers in the
-        autocorrelation data.  This mask can be used to zero out
-        frequencies and time samples that are contaminated by RFI.
+        """Create a mask by identifying outliers in the autocorrelation data.
+
+        This mask can be used to zero out frequencies and time samples that are
+        contaminated by RFI.
 
         Parameters
         ----------
@@ -431,13 +430,14 @@ class ChannelFlagger(task.SingleTask):
         ----------
         timestream : andata.CorrData
             Timestream to flag.
+        inputmap
+            associate inputs with CHIME inputs
 
         Returns
         -------
         timestream : andata.CorrData
             Returns the same timestream object with a modified weight dataset.
         """
-
         # Redistribute over the frequency direction
         timestream.redistribute("freq")
 
@@ -536,8 +536,7 @@ class MonitorCorrInput(task.SingleTask):
         files : list
             List of filenames to monitor good correlator inputs.
         """
-
-        from .sidereal import get_times, _days_in_csd
+        from .sidereal import _days_in_csd, get_times
 
         self.files = np.array(files)
 
@@ -634,7 +633,6 @@ class MonitorCorrInput(task.SingleTask):
             Contains the correlator input mask obtained from taking AND
             of the masks from the (good) sidereal days.
         """
-
         from ch_util import chan_monitor
 
         # Check if we should stop
@@ -801,10 +799,7 @@ class TestCorrInput(task.SingleTask):
     known_bad = config.Property(proptype=list, default=[])
 
     def __init__(self):
-        """Set up variables that gives names to the various test
-        and specify which tests will be applied.
-        """
-
+        """Set up variables that gives names to tests and specify tests to be applied."""
         # Gives names to the tests that will be run
         self.test = np.array(
             ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
@@ -832,7 +827,6 @@ class TestCorrInput(task.SingleTask):
             Container with the results of all tests and a
             input mask that combines all tests and frequencies.
         """
-
         # Redistribute over the frequency direction
         timestream.redistribute("freq")
 
@@ -961,11 +955,11 @@ class AccumulateCorrInputMask(task.SingleTask):
     n_cut = config.Property(proptype=int, default=5)
 
     def __init__(self):
-        """Create empty list.  As we iterate through
-        sidereal days, we will append the corr_input_mask
+        """Create empty lists.
+
+        As we iterate through sidereal days, we will append the corr_input_mask
         from each day to this list.
         """
-
         self._accumulated_input_mask = []
         self._csd = []
 
@@ -975,8 +969,8 @@ class AccumulateCorrInputMask(task.SingleTask):
         Parameters
         ----------
         corr_input_mask : containers.CorrInputMask
+            Mask flagging good correlator inputs
         """
-
         if not self._accumulated_input_mask:
             self.input = corr_input_mask.input[:]
 
@@ -984,14 +978,16 @@ class AccumulateCorrInputMask(task.SingleTask):
         self._csd.append(corr_input_mask.attrs["csd"])
 
     def process_finish(self):
-        """Determine good days as those where the fraction
+        """Get the product of the input mask for all good days.
+
+        Determine good days as those where the fraction
         of good inputs is above some user specified
         threshold.  Then create accumulated input mask
         by taking the product of the input mask for all
         good days.
 
         Returns
-        --------
+        -------
         corr_input_mask : containers.CorrInputMask
         """
         ncsd = len(self._csd)
@@ -1055,14 +1051,15 @@ class ApplyCorrInputMask(task.SingleTask):
         Parameters
         ----------
         timestream : andata.CorrData or dcontainers.SiderealStream
+            timestream data container
 
         cmask : containers.RFIMask, containers.CorrInputMask, etc.
+            input mask container
 
         Returns
         -------
         timestream : andata.CorrData or dcontainers.SiderealStream
         """
-
         # Make sure containers are distributed across frequency
         timestream.redistribute("freq")
         cmask.redistribute("freq")
@@ -1122,20 +1119,21 @@ class ApplyCorrInputMask(task.SingleTask):
 
 
 class ApplySiderealDayFlag(task.SingleTask):
-    """Prevent certain sidereal days from progressing
-    further in the pipeline processing (e.g.,
-    exclude certain sidereal days from the sidereal stack).
+    """Prevent certain sidereal days from progressing further in the pipeline.
+
+    example: exclude certain sidereal days from the sidereal stack.
     """
 
     def setup(self, csd_flag):
         """Create dictionary from input ."""
-
         self.csd_dict = {}
         for cc, csd in enumerate(csd_flag.csd[:]):
             self.csd_dict[csd] = csd_flag.csd_flag[cc]
 
     def process(self, timestream):
-        """If this sidereal day is flagged as good or
+        """Check if this sidereal day should continue processing.
+
+        If this sidereal day is flagged as good or
         if no flag is specified for this sidereal day,
         then return the timestream.  If this sidereal day
         is flagged as bad, then return None.
@@ -1143,12 +1141,12 @@ class ApplySiderealDayFlag(task.SingleTask):
         Parameters
         ----------
         timestream : andata.CorrData / dcontainers.SiderealStream
+            timestream data container. Should have a 'lsd' or 'csd' attribute.
 
         Returns
         -------
         timestream : andata.CorrData / dcontainers.SiderealStream or None
         """
-
         # Fetch the csd from the timestream attributes
         if "lsd" in timestream.attrs:
             this_csd = timestream.attrs["lsd"]
@@ -1200,18 +1198,17 @@ class NanToNum(task.SingleTask):
     """Finds NaN and replaces with 0."""
 
     def process(self, timestream):
-        """Converts any NaN in the vis dataset and weight dataset
-        to the value 0.0.
+        """Converts any NaN in the vis dataset and weight dataset to the value 0.0.
 
         Parameters
         ----------
         timestream : andata.CorrData or dcontainers.SiderealStream
+            timestream container to check
 
         Returns
-        --------
+        -------
         timestream : andata.CorrData or dcontainers.SiderealStream
         """
-
         # Make sure we are distributed over frequency
         timestream.redistribute("freq")
 
@@ -1242,25 +1239,27 @@ class NanToNum(task.SingleTask):
 
 
 class RadiometerWeight(task.SingleTask):
-    """Update vis_weight according to the radiometer equation:
+    """Update vis_weight according to the radiometer equation.
 
     vis_weight_ij = Nsamples / V_ii V_jj
     """
 
     def process(self, timestream):
-        """Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
+        """Update the `vis_weight` dataset.
+
+        Takes the input timestream.flags['vis_weight'], recasts it from uint8 to float32,
         multiplies by the total number of samples, and divides by the autocorrelations of the
         two feeds that form each baseline.
 
         Parameters
         ----------
         timestream : andata.CorrData
+            timestream data to process
 
         Returns
-        --------
+        -------
         timestream : andata.CorrData
         """
-
         from .calibration import _extract_diagonal as diag
 
         # Redistribute over the frequency direction
@@ -1350,12 +1349,12 @@ class BadNodeFlagger(task.SingleTask):
         Parameters
         ----------
         timestream : andata.CorrData or dcontainers.SiderealStream
+            timestream data to process
 
         Returns
         -------
         flagged_timestream : same type as timestream
         """
-
         # Redistribute over frequency
         timestream.redistribute("freq")
 
@@ -1508,6 +1507,7 @@ def transit_flag(body, time, nsigma=2.0, freq=400.0):
 
 
 def taper_mask(mask, nwidth, outer=False):
+    """Apply a taper to a mask via a Hanning window."""
     num = len(mask)
     if outer:
         tapered_mask = 1.0 - mask.astype(np.float64)
@@ -1601,10 +1601,7 @@ class MaskDay(task.SingleTask):
                 flag |= self._flag(time)
 
         # Log how much data were masking
-        self.log.info(
-            "%0.2f percent of data will be masked."
-            % (100.0 * np.sum(flag) / float(flag.size),)
-        )
+        self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
 
         # Apply the mask
         if np.any(flag):
@@ -1654,7 +1651,8 @@ class MaskSource(MaskDay):
             raise ValueError(
                 "Must specify name of the source to mask as config property."
             )
-        elif isinstance(self.source, list):
+
+        if isinstance(self.source, list):
             source = self.source
         else:
             source = [self.source]
@@ -1726,7 +1724,6 @@ class MaskRA(task.SingleTask):
         mstream : dcontainers.SiderealStream
             Masked sidereal stream.
         """
-
         sstream.redistribute("freq")
 
         ra_shift = (sstream.ra[:] - self.start) % 360.0
@@ -1802,17 +1799,17 @@ class MaskCHIMEData(task.SingleTask):
         self.telescope = io.get_telescope(tel)
 
     def process(self, mmodes):
-        """Mask out unwanted datain the m-modes.
+        """Mask out unwanted data in the m-modes.
 
         Parameters
         ----------
         mmodes : dcontainers.MModes
+            mmode dataset to process
 
         Returns
         -------
         mmodes : dcontainers.MModes
         """
-
         tel = self.telescope
 
         mmodes.redistribute("m")
@@ -1846,12 +1843,17 @@ class MaskCHIMEMisc(task.SingleTask):
     """Some miscellaneous data masking routines."""
 
     mask_clock = config.Property(proptype=bool, default=True)
-
     mask_nodes = config.Property(proptype=list, default=None)
-
     mask_freq = config.Property(proptype=list, default=None)
 
     def process(self, ss):
+        """Mask the 10 MHz clock line, specific nodes, and/or specified freqeuncies.
+
+        Parameters
+        ----------
+        ss : containers.SiderealStream
+            sidereal stream data to mask
+        """
         ss.redistribute("prod")
 
         # Mask out the 10 MHz lines
@@ -1936,7 +1938,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
             Mask with True indicating that a cylinder decorrelated
             at that frequency and time.
         """
-
         from draco.analysis.ringmapmaker import find_grid_indices
 
         # Distribute over frequencies
@@ -2099,8 +2100,8 @@ class MaskDecorrelatedCylinder(task.SingleTask):
 
         # Print the fraction of data that has been masked by this task
         self.log.info(
-            "%0.2f percent of data was masked due to a decorrelated cylinder."
-            % (100.0 * np.sum(mask) / np.prod(mask.shape),)
+            f"{(100.0 * np.mean(mask)):.2f} percent of data was masked due "
+            "to a decorrelated cylinder."
         )
 
         # Create output container and store final mask
@@ -2135,12 +2136,12 @@ class ExpandMask(task.SingleTask):
         Parameters
         ----------
         raw_mask : RFIMask or SiderealRFIMask
+            original mask to expand
 
         Returns
         -------
         exp_mask : RFIMask or SiderealRFIMask
         """
-
         nfreq, ntime = raw_mask.mask[:].shape
 
         mraw = np.zeros((nfreq, ntime + 2 * self.nexpand), dtype=bool)
@@ -2194,14 +2195,14 @@ class DataFlagger(task.SingleTask):
             for ft in flag_types:
                 possible_flags.append(ft.name)
                 if ft.name in self.flag_type or "all" in self.flag_type:
-                    self.log.info("Querying for %s Flags" % ft.name)
+                    self.log.info(f"Querying for {ft.name} Flags")
                     new_flags = df.DataFlag.select().where(df.DataFlag.type == ft)
                     flags[ft.name] = list(new_flags)
 
             # Check that user-proved flag names are valid
             for flag_name in self.flag_type:
                 if flag_name != "all" and flag_name not in possible_flags:
-                    self.log.warning("Warning: Unrecognized Flag %s" % flag_name)
+                    self.log.warning(f"Warning: Unrecognized Flag {flag_name}")
 
         # Share flags with other nodes
         flags = self.comm.bcast(flags, root=0)
@@ -2326,8 +2327,7 @@ class DataFlagger(task.SingleTask):
             tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
 
         self.log.info(
-            "%0.2f percent of data was flagged as bad."
-            % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
+            f"{(100.0 * (1 - np.mean(weight_mask))):.2f} percent of data was flagged as bad."
         )
 
         return timestream
@@ -2402,7 +2402,6 @@ class ApplyInputFlag(task.SingleTask):
 
     def _get_timestamp(self, data):
         """Determine the timestamp based on the container type."""
-
         if issubclass(type(data), tod.TOData):
             timestamp = data.time
             time_axis = "time"
@@ -2482,7 +2481,6 @@ def load_rainfall(start_time, end_time, node_spoof=_DEFAULT_NODE_SPOOF):
     times, rainfall : np.ndarray
         Arrays of Unix timestamps and rainfall measurements (in mm).
     """
-
     # Use Finder to fetch weather data files overlapping with specified time interval
     f = finder.Finder(node_spoof=node_spoof)
     f.only_chime_weather()
@@ -2533,7 +2531,6 @@ def compute_cumulative_rainfall(
     rainfall : np.ndarray
         Cumulative rainfall totals, in mm.
     """
-
     # Extra buffer (in s) for reading rainfall measurements, to ensure that range of
     # input times is always fully within range of rainfall timestamps
     _TIME_BUFFER = 600
@@ -2577,9 +2574,8 @@ def compute_cumulative_rainfall(
     time_timestamp_idx[time_timestamp_idx >= len(rain_timestamps)] = (
         len(rain_timestamps) - 1
     )
-    cumu_rainfall = cumu_rainfall[time_timestamp_idx]
 
-    return cumu_rainfall
+    return cumu_rainfall[time_timestamp_idx]
 
 
 class FlagRainfall(task.SingleTask):
