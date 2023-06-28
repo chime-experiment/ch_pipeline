@@ -1,4 +1,4 @@
-"""Parallel data containers
+"""Parallel data containers.
 
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
@@ -24,24 +24,25 @@ Tasks
 - :py:class:`MonkeyPatchContainers`
 """
 
+# Ignore missing docstrings in container @property methods.
+# These are generally just convenience methods for datasets
+# ruff: noqa: D102
+
 import posixpath
-from typing import List, Optional, Union
-from functools import cached_property
-from draco.core.task import MPILoggedTask
+from typing import ClassVar, Optional, Union
 
 import numpy as np
-
 from caput import memh5
 from ch_util import andata
-
 from draco.core.containers import (
     ContainerBase,
-    StaticGainData,
-    TODContainer,
-    FreqContainer,
-    TimeStream,
     FormedBeam,
+    FreqContainer,
+    StaticGainData,
+    TimeStream,
+    TODContainer,
 )
+from draco.core.task import MPILoggedTask
 
 
 class FrequencyMapSingle(FreqContainer):
@@ -58,7 +59,7 @@ class FrequencyMapSingle(FreqContainer):
 
     _axes = ("level",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "stream": {
             "axes": ["freq", "level"],
             "dtype": np.int32,
@@ -113,7 +114,7 @@ class FrequencyMap(FreqContainer, TODContainer):
 
     _axes = ("level",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "stream": {
             "axes": ["time", "freq", "level"],
             "dtype": int,
@@ -142,13 +143,11 @@ class FrequencyMap(FreqContainer, TODContainer):
 
 
 class RFIMask(ContainerBase):
-    """Container for holding a mask that indicates
-    data that is free of RFI events.
-    """
+    """Container for holding a mask that indicates data that is free of RFI events."""
 
     _axes = ("freq", "input", "time")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "mask": {
             "axes": ["freq", "input", "time"],
             "dtype": bool,
@@ -190,7 +189,7 @@ class CorrInputMask(ContainerBase):
 
     _axes = ("input",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
             "dtype": bool,
@@ -213,7 +212,7 @@ class CorrInputTest(ContainerBase):
 
     _axes = ("freq", "input", "test")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
             "dtype": bool,
@@ -234,7 +233,7 @@ class CorrInputTest(ContainerBase):
                 ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
             )
 
-        super(CorrInputTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -262,7 +261,7 @@ class CorrInputMonitor(ContainerBase):
 
     _axes = ("freq", "input", "coord")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
             "dtype": bool,
@@ -305,7 +304,7 @@ class CorrInputMonitor(ContainerBase):
         if "coord" not in kwargs:
             kwargs["coord"] = np.array(["east_west", "north_south"])
 
-        super(CorrInputMonitor, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -345,13 +344,11 @@ class CorrInputMonitor(ContainerBase):
 
 
 class SiderealDayFlag(ContainerBase):
-    """Container for holding flag that indicates
-    good chime sidereal days.
-    """
+    """Container for holding flag that indicates good chime sidereal days."""
 
     _axes = ("csd",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "csd_flag": {
             "axes": ["csd"],
             "dtype": bool,
@@ -374,7 +371,7 @@ class TransitFitParams(ContainerBase):
 
     _axes = ("freq", "input", "param", "component")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "parameter": {
             "axes": ["freq", "input", "param"],
             "dtype": np.float32,
@@ -457,7 +454,7 @@ class PointSourceTransit(StaticGainData):
         "param_cov2",
     )
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "gain": {
             "axes": ["freq", "input"],
             "dtype": np.complex128,
@@ -534,7 +531,7 @@ class PointSourceTransit(StaticGainData):
             ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
         )
 
-        super(PointSourceTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def gain(self):
@@ -602,7 +599,7 @@ class SourceModel(FreqContainer):
 
     _axes = ("pol", "time", "param", "source")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "amplitude": {
             "axes": ["freq", "pol", "time", "source"],
             "dtype": np.complex64,
@@ -658,7 +655,7 @@ class SunTransit(ContainerBase):
         "param",
     )
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "coord": {
             "axes": ["time", "coord"],
             "dtype": np.float64,
@@ -746,7 +743,7 @@ class SunTransit(ContainerBase):
         )
         kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
-        super(SunTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def coord(self):
@@ -834,7 +831,9 @@ class SunTransit(ContainerBase):
 
 
 class FormedBeamTime(FormedBeam, TODContainer):
-    _dataset_spec = {
+    """Container for formed beams with a time axis."""
+
+    _dataset_spec: ClassVar = {
         "beam": {
             "axes": ["object_id", "pol", "freq", "time"],
             "dtype": np.complex128,
@@ -869,7 +868,7 @@ class RingMap(ContainerBase):
 
     _axes = ("freq", "pol", "ra", "beam", "el")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "map": {
             "axes": ["beam", "pol", "freq", "ra", "el"],
             "dtype": np.float64,
@@ -894,7 +893,7 @@ class RingMap(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-        super(RingMap, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def freq(self):
@@ -930,7 +929,7 @@ class Photometry(ContainerBase):
 
     _axes = ("freq", "pol", "param", "source")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "parameter": {
             "axes": ["freq", "pol", "param", "source"],
             "dtype": np.float64,
@@ -986,11 +985,10 @@ class RawContainer(TODContainer):
     flags group.
     """
 
-    _allowed_groups = ["flags"]
+    _allowed_groups: ClassVar[str] = ["flags"]
 
     def group_name_allowed(self, name: str) -> bool:
         """Allow access to the flags group."""
-
         # Strip leading and trailing "/"
         name = name.strip("/")
 
@@ -998,14 +996,13 @@ class RawContainer(TODContainer):
 
     def dataset_name_allowed(self, name: str) -> bool:
         """Allow access to datasets under both / and /flags."""
-
         parent_name, name = posixpath.split(name)
         return parent_name == "/" or self.group_name_allowed(parent_name)
 
     @classmethod
     def from_acq_h5(
         cls,
-        acq_files: Union[str, List[str]],
+        acq_files: Union[str, list[str]],
         start: Optional[int] = None,
         stop: Optional[int] = None,
         **kwargs,
@@ -1028,13 +1025,14 @@ class RawContainer(TODContainer):
             Path or glob to files (or list of).
         start, stop
             Indices into the full set of files to select.
+        **kwargs
+            Additional keyword arguments to pass to `from_file`
 
         Returns
         -------
         cont
             A single container instance.
         """
-
         if start is None and stop is None:
             pass
         elif start is not None and stop is not None:
@@ -1055,7 +1053,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     """
 
     # Add in the extra datasets contained within the CHIME corrdata time streams
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "flags/dataset_id": {
             "axes": ["freq", "time"],
             "dtype": "S32",
@@ -1182,7 +1180,6 @@ def make_empty_corrdata(
     -------
     data : andata.CorrData
     """
-
     # Setup frequency axis
     if freq is None:
         if axes_from is not None and "freq" in axes_from.index_map:
@@ -1318,8 +1315,9 @@ class MonkeyPatchContainers(MPILoggedTask):
 
         self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
-        import ch_pipeline.core.containers as ccontainers
         import draco.core.containers as dcontainers
+
+        import ch_pipeline.core.containers as ccontainers
 
         # Replace the routine for making an empty timestream. This needs to be replaced
         # in both draco and ch_pipeline because of the ways the imports work
@@ -1357,7 +1355,6 @@ class MonkeyPatchContainers(MPILoggedTask):
             newobj : container.ContainerBase or CorrData
                 New data container.
             """
-
             from ch_util import andata
 
             self.log.warning(
@@ -1368,8 +1365,8 @@ class MonkeyPatchContainers(MPILoggedTask):
                 return dcontainers.empty_timestream(
                     axes_from=obj, attrs_from=obj, **kwargs
                 )
-            else:
-                return _make_empty_like(obj, **kwargs)
+
+            return _make_empty_like(obj, **kwargs)
 
         # Replace the empty_like routine
         dcontainers.empty_like = empty_like_patch

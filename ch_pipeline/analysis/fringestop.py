@@ -1,4 +1,4 @@
-"""Tasks for fringestopping CHIME data
+"""Tasks for fringestopping CHIME data.
 
 Tasks for taking the timestream data and fringestop it to a given source
 
@@ -15,16 +15,15 @@ Use this task together with:
   of the timestream data
 """
 
-from datetime import datetime
-from caput import config, mpiutil
-from ch_ephem.observers import chime
+from caput import config
 from ch_ephem import sources
+from ch_ephem.observers import chime
 from ch_util import tools
 from draco.core import containers, task
 
 
 class FringeStop(task.SingleTask):
-    """Fringe stop CHIME data to a given source
+    """Fringe stop CHIME data to a given source.
 
     Parameters
     ----------
@@ -46,7 +45,7 @@ class FringeStop(task.SingleTask):
     wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
-        """Apply the fringe stop of CHIME data to a given source
+        """Apply the fringe stop of CHIME data to a given source.
 
         Parameters
         ----------
@@ -61,7 +60,6 @@ class FringeStop(task.SingleTask):
         tstream : andata.CorrData
             Returns the same timestream object but fringestopped
         """
-
         tstream.redistribute("freq")
 
         start_freq = tstream.vis.local_offset[0]
@@ -91,8 +89,9 @@ class FringeStop(task.SingleTask):
 
         if self.overwrite:
             return tstream
-        else:
-            tstream_fs = containers.empty_like(tstream)
-            tstream_fs.vis[:] = fs_vis
-            tstream_fs.weight[:] = tstream.weight
-            return tstream_fs
+
+        tstream_fs = containers.empty_like(tstream)
+        tstream_fs.vis[:] = fs_vis
+        tstream_fs.weight[:] = tstream.weight
+
+        return tstream_fs

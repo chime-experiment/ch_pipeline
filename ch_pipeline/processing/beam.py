@@ -1,9 +1,17 @@
+"""Holography pipeline processing type.
+
+Classes
+=======
+- :py:class:`HolographyFringestop`
+"""
+
+from typing import ClassVar
+
 from caput import time as ctime
 from ch_util import holography as holo
 from chimedb.core import connect as connect_db
 
 from . import base
-
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -131,14 +139,14 @@ pipeline:
 
 
 class HolographyFringestop(base.ProcessingType):
-    """ """
+    """Holography beam pipeline processing type."""
 
     type_name = "holo_fstop"
     # tag by name of source and processing run
     tag_pattern = r"(.+)_run(\d{3})"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         "src": ["CYG_A", "CAS_A"],
         "src_db": ["CygA", "CasA"],
         "start_time": "20180101T000000",
@@ -175,7 +183,7 @@ class HolographyFringestop(base.ProcessingType):
                 )
                 .where(
                     (holo.HolographyObservation.quality_flag == 0)
-                    | (holo.HolographyObservation.quality_flag == None)
+                    | (holo.HolographyObservation.quality_flag == None)  # noqa: E711
                 )
                 .order_by(holo.HolographyObservation.start_time)
             )
@@ -184,7 +192,7 @@ class HolographyFringestop(base.ProcessingType):
             n_per = self._revparams["transits_per_run"]
             n_groups = len(db_obs) // n_per + (len(db_obs) % n_per != 0)
             for i in range(n_groups):
-                tag = "{}_run{:0>3d}".format(src, i)
+                tag = f"{src}_run{i:0>3d}"
                 # set up time range for these transits, with 1h padding
                 i *= n_per
                 j = i + n_per - 1

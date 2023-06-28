@@ -1,18 +1,14 @@
-"""Map making tasks
+"""Map making tasks.
 
 Tools for making maps from CHIME data.
 """
 
 import numpy as np
 import scipy.constants
-
 from caput import config
-
-from draco.core import task
-from draco.core import io
-from draco.util import tools
-
 from ch_ephem.observers import chime
+from draco.core import io, task
+from draco.util import tools
 
 from ..core import containers
 
@@ -49,15 +45,10 @@ class RingMapMaker(task.SingleTask):
     """
 
     npix = config.Property(proptype=int, default=512)
-
     span = config.Property(proptype=float, default=1.0)
-
     weight = config.Property(proptype=str, default="natural")
-
     exclude_intracyl = config.Property(proptype=bool, default=False)
-
     include_auto = config.Property(proptype=bool, default=False)
-
     single_beam = config.Property(proptype=bool, default=False)
 
     def setup(self, tel):
@@ -66,15 +57,15 @@ class RingMapMaker(task.SingleTask):
         Parameters
         ----------
         tel : TransitTelescope
+            telescope/observer object
         """
-
         self.log.warning(
             "This task is deprecated.  Please use "
             "draco.analysis.ringmapmaker.RingMapMaker instead."
         )
 
         if self.weight not in ["natural", "uniform", "inverse_variance"]:
-            KeyError("Do not recognize weight = %s" % self.weight)
+            raise KeyError(f"Do not recognize weight = {self.weight}")
 
         self.telescope = io.get_telescope(tel)
 
@@ -90,7 +81,6 @@ class RingMapMaker(task.SingleTask):
         -------
         rm : containers.RingMap
         """
-
         # Redistribute over frequency
         sstream.redistribute("freq")
         nfreq = sstream.vis.local_shape[0]
@@ -288,7 +278,6 @@ class ConvertRingMap(task.SingleTask):
         rmap_out : draco.core.containers.RingMap
             converted ringmap.
         """
-
         from draco.core.containers import RingMap
 
         rmap_in.redistribute("freq")

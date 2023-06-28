@@ -3,9 +3,8 @@
 from typing import Callable
 
 import numpy as np
-import scipy.sparse as ss
 import scipy.linalg as la
-
+import scipy.sparse as ss
 from caput import pfb
 from draco.util import tools
 
