@@ -986,7 +986,9 @@ class DailyProcessing(base.ProcessingType):
         if self._num_recent_days:
             today = math.floor(ephemeris.chime.get_current_lsd())
             priority = [
-                csd for csd in to_run if today - int(csd) <= self._num_recent_days
+                csd
+                for csd in to_run
+                if today - int(csd) <= self._num_recent_days and int(csd) != today
             ]
             to_run = priority + [csd for csd in to_run if csd not in priority]
 
