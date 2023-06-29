@@ -1,9 +1,8 @@
+"""Command line client for Chime Pipeline processing."""
+
 import click
 
 from . import base
-from . import daily
-from . import beam
-from . import quarterstack
 
 click.disable_unicode_literals_warning = True
 
@@ -18,10 +17,11 @@ class PType(click.ParamType):
     name = "processing type"
 
     def convert(self, value, param, ctx):
+        """Get a processing type from a string."""
         if value not in _typedict:
             self.fail(
-                'processing type "%s" unknown. See `chp type list` '
-                "for valid options." % value
+                f"processing type '{value}' unknown. See `chp type list` "
+                "for valid options."
             )
 
         return _typedict[value]
@@ -34,33 +34,29 @@ class PRev(click.ParamType):
 
     def convert(self, value, param, ctx):
         """Parses `value` as {type}:{revision}."""
-
         r = value.split(":")
 
         typename = r[0]
 
         if typename not in _typedict:
             self.fail(
-                'processing type "%s" unknown. See `chp type list` '
-                "for valid options." % value
+                f"processing type '{value}' unknown. See `chp type list` "
+                "for valid options."
             )
 
         _type = _typedict[typename]
 
         if len(r) == 1:
             return _type.latest()
-        else:
-            rev = r[1]
-            if rev not in _type.ls_rev():
-                self.fail(
-                    (
-                        "revision not found for spec %s in type %s. "
-                        "See `chp rev list %s` for valid revisions."
-                    )
-                    % (rev, typename, typename)
-                )
 
-            return _type(rev)
+        rev = r[1]
+        if rev not in _type.ls_rev():
+            self.fail(
+                f"revision not found for spec {rev} in type {typename}. "
+                f"See `chp rev list {typename}` for valid revisions."
+            )
+
+        return _type(rev)
 
 
 PTYPE = PType()
@@ -107,7 +103,6 @@ def item():
 )
 def type_list(show_all):
     """List known processing types."""
-
     for type_ in base.ProcessingType.ls_type(existing=(not show_all)):
         click.echo(type_)
 
@@ -116,7 +111,6 @@ def type_list(show_all):
 @click.argument("type_", type=PTYPE, metavar="TYPE")
 def rev_list(type_):
     """List known revisions of TYPE."""
-
     for rev in type_.ls_rev():
         click.echo(rev)
 
@@ -125,14 +119,11 @@ def rev_list(type_):
 @click.argument("type_", type=PTYPE, metavar="TYPE")
 def create(type_):
     """Create a new revision of TYPE."""
-
     rev = type_.create_rev()
-    click.echo("Created {}".format(rev.revision))
+    click.echo(f"Created {rev.revision}")
     click.echo(
-        (
-            "You must create a virtual environment in {} "
-            "before you can run any jobs."
-        ).format(rev.venv_path)
+        f"You must create a virtual environment in {rev.venv_path} "
+        "before you can run any jobs."
     )
 
 
@@ -154,7 +145,7 @@ def item_list(revision, long, human, time):
         if long:
             n, size = dirstats(revision.base_path / tag)
             size = humansize(size, width=10) if human else str(size)
-            click.echo("{:8s}{:10d}{:10s}".format(tag, n, size))
+            click.echo(f"{tag:8s}{n:10d}{size:10s}")
         else:
             click.echo(tag)
 
@@ -247,7 +238,7 @@ def generate(
         )
         return
 
-    number_in_queue, number_running = [len(l) for l in revision.queued()]
+    number_in_queue, number_running = (len(l) for l in revision.queued())
     number_to_submit = max(
         min(number, max_number - number_in_queue - number_running), 0
     )
@@ -313,9 +304,10 @@ def update_files(revision, clear, retrieve):
     ),
 )
 def status(revision, user, verbose, time, category):
-    """Show metrics about currently running jobs for
-    REVISION (given as (type:revision)."""
+    """Show metrics about currently running jobs for REVISION.
 
+    Given as (type:revision)
+    """
     fs = base.slurm_fairshare("rpp-chime_cpu")
     tag_status = revision.status(user, time)
 
@@ -352,8 +344,7 @@ def status(revision, user, verbose, time, category):
 )
 @click.option("-t", "--time", is_flag=True)
 def crashed(revision, user, verbose, time):
-    """List all crashed tags for REVISION, associated with available
-    category matches."""
+    """List crashed tags for REVISION, associated with available category matches."""
     failed = revision.failed(user, time)
 
     for k, tags in failed.items():
@@ -394,7 +385,6 @@ def crashed(revision, user, verbose, time):
 )
 def run_pipeline(revision, update, max_number, fairshare, user, run_indefinitely):
     """Run the pipeline service for this revision."""
-
     from . import runner
 
     # Set up and update the config
@@ -436,12 +426,11 @@ def dirstats(path):
     total_size : int
         Total size in bytes of all files under the directory (recursive).
     """
-
     total_size = 0
     num_files = 0
 
     if not path.is_dir():
-        raise ValueError("path %s must be an exisiting directory" % path)
+        raise ValueError(f"path {path!s} must be an exisiting directory")
 
     for p in path.rglob("*"):
         num_files += 1
@@ -457,6 +446,12 @@ def humansize(num, suffix="", precision=1, width=5):
     ----------
     num : int
         Size in bytes.
+    suffix : str
+        unit suffix to include
+    precision : int
+        number of decimal places to include
+    width : int
+        minimum number of characters to include
 
     Returns
     -------

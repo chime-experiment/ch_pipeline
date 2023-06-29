@@ -1,12 +1,10 @@
 """Regrid the data to sidereal time."""
 
 import numpy as np
-
+from beam_model.formed import FFTFormedActualBeamModel
 from caput import mpiarray
 from ch_util import ephemeris
 from draco.analysis.sidereal import SiderealRegridderLinear
-
-from beam_model.formed import FFTFormedActualBeamModel
 
 from .containers import HFBData, HFBRingMap
 
@@ -22,7 +20,6 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Set up the default Observer
         self.observer = ephemeris.chime if observer is None else observer
 

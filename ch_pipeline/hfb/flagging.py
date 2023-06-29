@@ -1,12 +1,8 @@
-"""HFB Tasks for flagging data
-"""
+"""HFB Tasks for flagging data."""
 
 import numpy as np
-
-from caput import config
-
+from caput import config, tools
 from draco.core import task
-from caput import tools
 
 from .containers import HFBRFIMask
 
@@ -42,7 +38,6 @@ class HFBRadiometerRFIFlagging(task.SingleTask):
             with the task `ApplyHFBMask` to mask contaminated
             frequencies, subfrequencies and time samples.
         """
-
         # Extract data and weight arrays, averaging over beams
         data = np.mean(stream.hfb[:], axis=2)
         weight = np.mean(stream.weight[:], axis=2)
@@ -112,8 +107,8 @@ class ApplyHFBMask(task.SingleTask):
         -------
         stream : containers.HFBData
             Container with HFB data and weights, with weights of flagged data
-            set to zero."""
-
+        set to zero.
+        """
         # flag = mask[:, :, np.newaxis, :]
 
         # Create a slice that will expand the mask to
@@ -132,10 +127,7 @@ class ApplyHFBMask(task.SingleTask):
         flag = flag[tuple(slc)]
 
         # Log how much data we're masking
-        self.log.info(
-            "%0.2f percent of data will be masked."
-            % (100.0 * np.sum(flag) / float(flag.size),)
-        )
+        self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
 
         # Apply the mask
         if np.any(flag):

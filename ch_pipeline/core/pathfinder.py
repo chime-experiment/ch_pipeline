@@ -1,12 +1,12 @@
-"""
-Pathfinder Telescope
+"""Pathfinder Telescope.
 
 .. deprecated:: pass1
     Use :mod:`ch_pipeline.core.telescope` instead.
 """
 
 import warnings
-from .telescope import *
+
+from .telescope import *  # noqa
 
 warnings.warn(
     "`ch_pipeline.core.pathfinder module deprecated. "
