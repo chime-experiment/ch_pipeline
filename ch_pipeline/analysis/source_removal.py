@@ -4,15 +4,14 @@ Tasks for constructing models for bright sources and subtracting them from the d
 """
 
 import json
+
 import numpy as np
-
-from scipy.constants import c as speed_of_light
 import scipy.signal
-
 from caput import config
-from ch_util import andata, ephemeris, tools
+from ch_util import ephemeris, tools
 from ch_util.fluxcat import FluxCatalog
-from draco.core import task, io
+from draco.core import io, task
+from scipy.constants import c as speed_of_light
 
 from ..core import containers
 
@@ -56,6 +55,8 @@ def model_extended_sources(
     max_ha : float
         Do not include a source in the model if it has an hour angle greater than
         this value in degrees.
+    kwargs : dict
+        Additional optional arguments shown below
     scale_x : nsource element list
         Angular extent of each source in arcmin in the W-E direction
     scale_y : nsource element list
@@ -133,7 +134,7 @@ def model_extended_sources(
         src_altaz = obs.altaz()
 
         src_ra, src_dec = src_radec[0], src_radec[1]
-        src_alt, src_az = src_altaz[0], src_altaz[1]
+        src_alt, _ = src_altaz[0], src_altaz[1]
 
         ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians)
         dec = src_dec.radians
@@ -230,9 +231,7 @@ def solve_multiple_times(vis, weight, source_model):
     C = np.dot(S.T.conj(), weight[:, np.newaxis] * S)
 
     # Solve for model coefficients
-    coeff = np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
-
-    return coeff
+    return np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
 
 
 class SolveSources(task.SingleTask):
@@ -299,6 +298,7 @@ class SolveSources(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -348,6 +348,7 @@ class SolveSources(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            Timestream or Sidereal stream with visibilities
 
         Returns
         -------
@@ -420,7 +421,6 @@ class SolveSources(task.SingleTask):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []
@@ -587,7 +587,6 @@ class LPFSourceAmplitude(task.SingleTask):
             zero will be interpolated to a non-zero value if more than
             frac_required of the nearby data points are non-zero.
         """
-
         model.redistribute("pol")
         npol = model.amplitude.local_shape[1]
 
@@ -628,6 +627,7 @@ class SubtractSources(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -638,6 +638,7 @@ class SubtractSources(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         model : core.containers.SourceModel
             Best-fit parameters of the source model.
@@ -756,19 +757,16 @@ class AccumulateBeam(task.SingleTask):
 
     def setup(self):
         """Create a class dictionary to hold the beam for each source."""
-
         self.beam_stack = {}
 
     def process(self, beam_stack):
         """Add the beam for this source to the class dictionary."""
-
         self.beam_stack[beam_stack.attrs["source_name"]] = beam_stack
 
-        return None
+        return
 
     def process_finish(self):
         """Return the class dictionary containing the beam for all sources."""
-
         return self.beam_stack
 
 
@@ -787,6 +785,7 @@ class SolveSourcesWithBeam(SolveSources):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescpe model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -821,6 +820,7 @@ class SolveSourcesWithBeam(SolveSources):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         beams : dict of andata.CorrData, core.containers.SiderealSteam, or equivalent
             Dictionary containing the beam measurements.  The keys must be
@@ -899,7 +899,6 @@ class SolveSourcesWithBeam(SolveSources):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []
@@ -982,6 +981,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -992,6 +992,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         model : core.containers.SourceModel
             Best-fit parameters of the source model.
@@ -1125,7 +1126,6 @@ def kz_coeffs(m, k):
     coeff : np.ndarray
         Array of size k * (m - 1) + 1 containing the filter coefficients.
     """
-
     # Coefficients at degree one
     coef = np.ones(m, dtype=np.float64)
 
@@ -1185,7 +1185,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
         The low-pass filtered data.  The value of the array is set to zero
         if the data is determined invalid based on frac_required argument.
     """
-
     # Parse inputs
     if np.isscalar(window):
         window = [window] * 2

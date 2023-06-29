@@ -1,30 +1,15 @@
 """Tasks for calibrating the data."""
 
-from datetime import datetime
 import json
-from typing import List
-from ch_util.andata import CorrData
 
 import numpy as np
+from caput import config, memh5, mpiarray, mpiutil
+from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
+from draco.core import containers, task
+from draco.util import _fast_tools
+from mpi4py import MPI
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
-from mpi4py import MPI
-
-from caput import config, pipeline, memh5
-from caput import mpiarray, mpiutil
-
-from ch_util import andata
-from ch_util import tools
-from ch_util import ephemeris
-from ch_util import ni_utils
-from ch_util import cal_utils
-from ch_util import fluxcat
-from ch_util import finder
-from ch_util import rfi
-from ch_util import cal_utils
-
-from draco.core import task, containers
-from draco.util import _fast_tools
 
 from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -65,10 +50,9 @@ def _extract_diagonal(utmat, axis=1):
     slice1 = (np.s_[:],) * (len(utmat.shape) - axis - 1)
 
     # Extract wanted elements with a giant slice
-    sl = slice0 + (diag_ind,) + slice1
-    diag_array = utmat[sl]
+    sl = (*slice0, diag_ind, *slice1)
 
-    return diag_array
+    return utmat[sl]
 
 
 def solve_gain(data, feeds=None, norm=None):
@@ -121,8 +105,8 @@ def solve_gain(data, feeds=None, norm=None):
 
     elif norm.shape != gain.shape:
         ValueError(
-            "Input normalization matrix has shape %s, should have shape %s."
-            % (norm.shape, gain.shape)
+            f"Input normalization matrix has shape {norm.shape}, "
+            f"should have shape {gain.shape}."
         )
 
     # Pre-generate the array of inverted norms
@@ -290,11 +274,9 @@ class NoiseSourceFold(task.SingleTask):
         else:
             ni_params = {"ni_period": self.period, "ni_on_bins": self.phase}
 
-        folded_ts = ni_utils.process_synced_data(
+        return ni_utils.process_synced_data(
             ts, ni_params=ni_params, only_off=self.only_off
         )
-
-        return folded_ts
 
 
 class NoiseInjectionCalibration(task.MPILoggedTask):
@@ -507,11 +489,10 @@ class DetermineSourceTransit(task.SingleTask):
 
     def setup(self):
         """Set list of sources, sorted by flux in descending order."""
-        self.source_list = reversed(
-            sorted(
-                self.source_list or ephemeris.source_dictionary.keys(),
-                key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
-            )
+        self.source_list = sorted(
+            self.source_list or ephemeris.source_dictionary.keys(),
+            key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
+            reverse=True,
         )
 
     def process(self, sstream):
@@ -555,8 +536,8 @@ class DetermineSourceTransit(task.SingleTask):
 
         if contains_transit or not self.require_transit:
             return sstream
-        else:
-            return None
+
+        return None
 
 
 class EigenCalibration(task.SingleTask):
@@ -622,7 +603,6 @@ class EigenCalibration(task.SingleTask):
         response : containers.SiderealStream
             Response of each feed to the point source.
         """
-
         # Ensure that we are distributed over frequency
         data.redistribute("freq")
 
@@ -729,10 +709,7 @@ class EigenCalibration(task.SingleTask):
             ]
         )
 
-        nfeed = xfeeds.size + yfeeds.size
-
         pol = [yfeeds, xfeeds]
-        polstr = ["Y", "X"]
         npol = len(pol)
 
         phase_ref_by_pol = [
@@ -989,8 +966,8 @@ class TransitFit(task.SingleTask):
 
         else:
             raise ValueError(
-                "Do not recognize model %s.  Options are %s and %s."
-                % (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase")
+                f"Do not recognize model {self.model}.  Options are "
+                "`gauss_amp_poly_phase` and `poly_log_amp_poly_phase`."
             )
 
     def process(self, response, inputmap):
@@ -1261,7 +1238,6 @@ class FlagAmplitude(task.SingleTask):
         gain : containers.StaticGainData
             The input gain container with modified weights.
         """
-
         # Distribute over frequency
         gain.redistribute("freq")
 
@@ -1372,8 +1348,8 @@ class FlagAmplitude(task.SingleTask):
         frac_good_freq = good_freq.size / float(gain.freq.size)
         if frac_good_freq < self.valid_gains_frac_good_freq:
             self.log.info(
-                "Only %0.1f%% of frequencies remain after flagging amplitude.  Will "
-                "not process this sidereal day further." % (100.0 * frac_good_freq,)
+                "Only {:0.1f}% of frequencies remain after flagging amplitude.  Will "
+                "not process this sidereal day further.".format(100.0 * frac_good_freq)
             )
             return None
 
@@ -1726,7 +1702,6 @@ def find_contiguous_time_ranges(timestamp, dt=3600.0):
         containing the start and stop time covering
         a contiguous range of timestamps.
     """
-
     timestamp = np.sort(timestamp)
 
     start = [timestamp[0] - dt]
@@ -1855,18 +1830,19 @@ class ThermalCalibration(task.SingleTask):
         self._file_end = self.caltime_file["tend"][-1]
 
     def _ra2unix(self, csd, ra):
-        """csd must be integer"""
+        """CSD must be integer."""
         return ephemeris.csd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime_result, timestamp, frequency):
-        """
+        """Get gain corrections based on source transit times.
+
         Parameters
         ----------
-        timestamp : array of foats
-            Unix time of data points to be calibrated.
-        reftime : array of floats
+        reftime_result : array of floats
             Unix time of same length as `timestamp'. Reference times of transit of the
             source used to calibrate the data at each time in `times'.
+        timestamp : array of foats
+            Unix time of data points to be calibrated.
         frequency : array of floats
             Frequencies to obtain the gain corrections for, in MHz.
 
@@ -2086,6 +2062,7 @@ class InvertGain(task.SingleTask):
         Parameters
         ----------
         gain: StaticGainData or GainData
+            gain data container
 
         Returns
         -------
@@ -2116,7 +2093,6 @@ class BaseCommonMode(task.SingleTask):
         pm : ProductManager
             Object describing the telescope.
         """
-
         self.input_map = pm.telescope.feeds
 
         self._set_groups(self.input_map)
@@ -2135,6 +2111,7 @@ class BaseCommonMode(task.SingleTask):
         Parameters
         ----------
         inputmap: list of CorrInput
+            map of inputs
 
         Attributes
         ----------
@@ -2148,7 +2125,6 @@ class BaseCommonMode(task.SingleTask):
         glookup: dict
             Dictionary of the format {input_index: group_index}.
         """
-
         index = np.flatnonzero([tools.is_chime(inp) for inp in inputmap])
 
         fmt = "{inp.pol}"
@@ -2190,6 +2166,7 @@ class ComputeCommonMode(BaseCommonMode):
         Parameters
         ----------
         data: StaticGainData or GainData
+            gain data container
 
         Returns
         -------
@@ -2197,7 +2174,6 @@ class ComputeCommonMode(BaseCommonMode):
             The common-mode gain *amplitude* for the different
             groups of inputs.
         """
-
         # Determine what dataset we are dealing with based on the
         # input container type and find the input axis of that dataset.
         dset = self.dataset_map[data.__class__]
@@ -2295,7 +2271,6 @@ class ExpandCommonMode(BaseCommonMode):
             The common-mode gain amplitude replicated for all inputs
             in a group.
         """
-
         dset = self.dataset_map[cmn.__class__]
         inp_axis = list(cmn[dset].attrs["axis"]).index("input")
 
@@ -2594,7 +2569,6 @@ class FlagNarrowbandGainError(task.SingleTask):
             Narrowband gain errors generated by the
             EstimateNarrowbandGainError task.
         """
-
         gains.redistribute("freq")
         self.gains = gains
 
@@ -2619,7 +2593,6 @@ class FlagNarrowbandGainError(task.SingleTask):
         out: RFIMask or SiderealRFIMask
             Mask that removes frequencies and times.
         """
-
         # Make sure the frequencies are the same
         if not np.array_equal(self.gains.freq, data.freq):
             raise ValueError("Frequencies do not match for gain error and timestream.")
@@ -2811,7 +2784,7 @@ class CalibrationCorrection(task.SingleTask):
             `tools.get_correlator_inputs()`
 
         Returns
-        ----------
+        -------
         sstream_out : same as sstream
             The input container with the correction applied.
         """
@@ -2928,8 +2901,8 @@ class CorrectTimeOffset(CalibrationCorrection):
         time_offset = kwargs["time_offset"]
         calibrator = kwargs["calibrator"]
         self.log.info(
-            "Applying a phase correction for a %0.2f second "
-            "time offset on the calibrator %s." % (time_offset, calibrator)
+            f"Applying a phase correction for a {time_offset:0.2f} second "
+            f"time offset on the calibrator {calibrator}."
         )
 
         body = ephemeris.source_dictionary[calibrator]
@@ -2982,8 +2955,7 @@ class CorrectTelescopeRotation(CalibrationCorrection):
 
         self.log.info(
             "Applying a phase correction to convert from a telescope rotation "
-            "of %0.3f deg to %0.3f deg for the calibrator %s."
-            % (rotation, self.rotation, calibrator)
+            f"of {rotation:.3f} deg to {self.rotation:.3f} deg for the calibrator {calibrator}."
         )
 
         body = ephemeris.source_dictionary[calibrator]
@@ -3021,6 +2993,5 @@ def _calculate_uv(freq, prod, inputmap):
     dist = feedpos[:, prod["input_a"]] - feedpos[:, prod["input_b"]]
 
     lmbda = speed_of_light * 1e-6 / freq
-    uv = dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
 
-    return uv
+    return dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
