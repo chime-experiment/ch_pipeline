@@ -413,6 +413,95 @@ class HFBStackDays(task.SingleTask):
         return self.stack
 
 
+class MakeSiderialArray(task.SingleTask):
+    """Combine HFB data of multiple days into a container without averaging.
+
+    Attributes
+    ----------
+    tag : str (default: "stack")
+        The tag to give the stack.
+    """
+
+    out = None
+
+    def setup(self, filelist):
+        """Know how many siderial days are coming."""
+
+        self.nlsd = len(filelist)
+
+        self.ilsd = 0
+
+    def process(self, stream):
+        """
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResTimeAverage or containers.HFBHighResSpectrum
+            Individual (time-averaged) day to add to array.
+        """
+
+        # If this is our first sidereal day, then initialize the
+        # container that will hold the array.
+        if self.out is None:
+
+            contmap = {
+                containers.HFBHighResTimeAverage: containers.HFBSiderialArrayTimeAverage,
+                containers.HFBHighResSpectrum: containers.HFBSiderialArraySpectrum,
+            }
+
+            out_cont_type = contmap[stream.__class__]
+
+            # Create temporary LSD axis, to be overwritten
+            lsd = np.arange(self.nlsd)
+
+            # Retrieve frequency and beam axes, if available
+            freq = stream.freq
+            if "beam" in stream._data["index_map"]:
+                beam = stream._data["index_map"]["beam"][:]
+            else:
+                beam = None
+
+            self.out = out_cont_type(lsd=lsd, freq=freq, beam=beam, attrs_from=stream)
+
+            # # Create temporary LSD axis, to be overwritten
+            # self.out._data["index_map"]["lsd"] = np.arange(self.nlsd)
+
+            self.out.add_dataset("hfb")
+            self.out.add_dataset("weight")
+            if "nsample" in stream._data:
+                self.out.add_dataset("nsample")
+
+            self.lsd_list = []
+
+        # Get the LSD label out of the input's attributes.
+        input_lsd = stream.attrs["lsd"]
+
+        # Accumulate
+        self.log.info("Adding to array LSD: %s" % input_lsd)
+
+        self.lsd_list.append(input_lsd)
+
+        self.out.hfb[self.ilsd, ...] = stream.hfb[:]
+        self.out.weight[self.ilsd, ...] = stream.weight[:]
+        if "nsample" in stream._data:
+            self.out.nsample[self.ilsd, ...] = stream.nsample[:]
+
+        self.ilsd += 1
+
+    def process_finish(self):
+        """Return array of siderial days.
+
+        Returns
+        -------
+        out : containers.HFBSiderialArrayTimeAverage or containers.HFBSiderialArraySpectrum
+            Array of sidereal days.
+        """
+
+        self.out._data["index_map/lsd"][:] = self.lsd_list
+
+        return self.out
+
+
 class HFBSelectTransit(task.SingleTask):
     """Find transit data through FRB beams.
 
