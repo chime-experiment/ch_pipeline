@@ -338,3 +338,63 @@ class HFBHighResSpectrum(HFBHighResContainer):
             "distributed": False,
         },
     }
+
+
+class HFBSiderialArrayBase(HFBContainer):
+    """Base class for HFB containers with LSD array of high-resolution frequency data"""
+
+    _axes = ("lsd",)
+
+
+class HFBSiderialArrayTimeAverage(FreqContainer, HFBSiderialArrayBase):
+    """Container for holding LSD array of time-averaged high-resolution frequency data"""
+
+    _axes = ("beam",)
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["lsd", "freq", "beam"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["lsd", "freq", "beam"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+            "distributed_axis": "freq",
+        },
+        "nsample": {
+            "axes": ["lsd", "freq", "beam"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+
+class HFBSiderialArraySpectrum(FreqContainer, HFBSiderialArrayBase):
+    """Container for holding LSD array of time-averaged high-resolution frequency spectrum"""
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["lsd", "freq"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+        "weight": {
+            "axes": ["lsd", "freq"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+        "nsample": {
+            "axes": ["lsd", "freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
