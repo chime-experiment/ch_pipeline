@@ -10,15 +10,15 @@ from caput import memh5
 
 from ch_util import andata
 
-from ..core.containers import RawContainer, FreqContainer
+from ..core.containers import ContainerBase, RawContainer, FreqContainer
 
 from draco.core.containers import TODContainer
 
 
-class HFBContainer(FreqContainer):
+class HFBContainer(ContainerBase):
     """A base class for all HFB containers.
 
-    Like :class:`FreqContainer`, but with some properties specific to HFB data.
+    Like :class:`ContainerBase`, but with some properties specific to HFB data.
     """
 
     @property
@@ -43,7 +43,7 @@ class HFBContainer(FreqContainer):
         return self.datasets["nsample"]
 
 
-class HFBData(RawContainer, HFBContainer):
+class HFBData(RawContainer, FreqContainer, HFBContainer):
     """A container for HFB data.
 
     This attempts to wrap the HFB archive format.
@@ -216,7 +216,7 @@ class HFBRFIMask(TODContainer, FreqContainer):
         return self.datasets["sens"]
 
 
-class HFBTimeAverage(HFBContainer):
+class HFBTimeAverage(FreqContainer, HFBContainer):
     """Container for holding average data for flattening sub-frequency band shape."""
 
     _axes = ("subfreq", "beam")
@@ -245,8 +245,12 @@ class HFBTimeAverage(HFBContainer):
     }
 
 
-class HFBHighResData(TODContainer, HFBContainer):
-    """Container for holding high-resolution frequency data"""
+class HFBHighResContainer(FreqContainer, HFBContainer):
+    """Base class for HFB containers with high-resolution frequency data."""
+
+
+class HFBHighResData(TODContainer, HFBHighResContainer):
+    """Container for holding high-resolution frequency data."""
 
     _axes = ("beam",)
 
@@ -274,8 +278,8 @@ class HFBHighResData(TODContainer, HFBContainer):
     }
 
 
-class HFBHighResTimeAverage(HFBContainer):
-    """Container for holding time-averaged high-resolution frequency data"""
+class HFBHighResTimeAverage(HFBHighResContainer):
+    """Container for holding time-averaged high-resolution frequency data."""
 
     _axes = ("beam",)
 
@@ -303,8 +307,8 @@ class HFBHighResTimeAverage(HFBContainer):
     }
 
 
-class HFBHighResSpectrum(HFBContainer):
-    """Container for holding high-resolution frequency spectrum"""
+class HFBHighResSpectrum(HFBHighResContainer):
+    """Container for holding high-resolution frequency spectrum."""
 
     _dataset_spec = {
         "hfb": {
