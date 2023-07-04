@@ -245,8 +245,12 @@ class HFBTimeAverage(FreqContainer, HFBContainer):
     }
 
 
-class HFBHighResData(TODContainer, FreqContainer, HFBContainer):
-    """Container for holding high-resolution frequency data"""
+class HFBHighResContainer(FreqContainer, HFBContainer):
+    """Base class for HFB containers with high-resolution frequency data."""
+
+
+class HFBHighResData(TODContainer, HFBHighResContainer):
+    """Container for holding high-resolution frequency data."""
 
     _axes = ("beam",)
 
@@ -274,8 +278,8 @@ class HFBHighResData(TODContainer, FreqContainer, HFBContainer):
     }
 
 
-class HFBHighResTimeAverage(FreqContainer, HFBContainer):
-    """Container for holding time-averaged high-resolution frequency data"""
+class HFBHighResTimeAverage(HFBHighResContainer):
+    """Container for holding time-averaged high-resolution frequency data."""
 
     _axes = ("beam",)
 
@@ -303,8 +307,8 @@ class HFBHighResTimeAverage(FreqContainer, HFBContainer):
     }
 
 
-class HFBHighResSpectrum(FreqContainer, HFBContainer):
-    """Container for holding high-resolution frequency spectrum"""
+class HFBHighResSpectrum(HFBHighResContainer):
+    """Container for holding high-resolution frequency spectrum."""
 
     _dataset_spec = {
         "hfb": {
