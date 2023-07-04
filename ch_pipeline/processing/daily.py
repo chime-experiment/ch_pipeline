@@ -984,11 +984,13 @@ class DailyProcessing(base.ProcessingType):
         to_run = self.status(user=user)["not_yet_submitted"]
 
         if self._num_recent_days:
-            today = math.floor(ephemeris.chime.get_current_lsd())
+            buffer = 2
+            today = math.floor(ephemeris.chime.get_current_lsd()) - buffer
+
             priority = [
                 csd
                 for csd in to_run
-                if today - int(csd) <= self._num_recent_days and int(csd) != today
+                if today - int(csd) <= self._num_recent_days and today - int(csd) >= 0
             ]
             to_run = priority + [csd for csd in to_run if csd not in priority]
 
