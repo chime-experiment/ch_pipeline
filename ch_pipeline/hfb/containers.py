@@ -23,8 +23,11 @@ class HFBContainer(ContainerBase):
 
     @property
     def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
+        """Convenience access to the main hfb dataset."""
+        if "hfb" in self.datasets:
+            return self.datasets["hfb"]
+        else:
+            raise KeyError("Dataset 'hfb' not initialised.")
 
     @property
     def weight(self) -> memh5.MemDataset:
@@ -33,14 +36,19 @@ class HFBContainer(ContainerBase):
             weight = self["weight"]
         elif "hfb_weight" in self:
             weight = self["hfb_weight"]
-        else:
+        elif "flags" in self and "hfb_weight" in self["flags"]:
             weight = self["flags/hfb_weight"]
+        else:
+            raise KeyError("Cannot find weight dataset.")
         return weight
 
     @property
     def nsample(self) -> memh5.MemDataset:
-        """The number of non-zero samples."""
-        return self.datasets["nsample"]
+        """Get the nsample dataset (number of non-zero samples) if it exists."""
+        if "nsample" in self.datasets:
+            return self.datasets["nsample"]
+        else:
+            raise KeyError("Dataset 'nsample' not initialised.")
 
 
 class HFBData(RawContainer, FreqContainer, HFBContainer):
