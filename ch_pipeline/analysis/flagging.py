@@ -6,6 +6,7 @@ pre-map making flagging on m-modes.
 """
 from typing import Union
 import numpy as np
+from scipy.interpolate import interp1d
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
 from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
@@ -2259,3 +2260,128 @@ class SetInputFlag(ApplyInputFlag):
         data.input_flags[:] = flag
 
         return data
+
+
+class ApplyRFIMaskHolography(task.SingleTask):
+    mask_type = config.enum(["static", "frequency", "frequency-time"])
+    masks_from_daily_rev = config.Property(proptype=str, default="06")
+
+    def process(self, transit):
+        transit.redistribute("freq")
+
+        self.transit_attrs = transit.attrs
+        self.transit_index_map = transit.index_map
+
+        # Get the beam dataset shape
+        self.local_shape = transit.beam.local_shape
+        self.nfreq = self.local_shape[0]
+
+        # Examine only the MPI-local frequency slice
+        self.local_offset = transit.beam.local_offset[0]
+        self.local_slice = slice(
+            self.local_offset,
+            self.local_offset + self.nfreq
+        )
+
+        # Get the appropriate RFI mask
+        mask = self._rfi_mask()
+
+        # Apply the mask
+        transit.beam.local_data[:] *= mask
+        transit.weight.local_data[:] *= mask
+
+        return transit
+
+    def _rfi_mask(self):
+
+        # If asking for an external mask...
+        if self.mask_type in ["frequency", "frequency-time"]:
+
+            # Determine the `csd` of the transit
+            transit_time = self.transit_attrs["transit_time"]
+            transit_csd = ephemeris.unix_to_csd(transit_time)
+            csd_str = f"{transit_csd:.0f}"
+
+            import os
+
+            # Look for daily masks from rev_06
+            # TODO: let user specify which daily rev to check for masks from
+            daily_dir = "/project/rpp-chime/chime/chime_processed/daily/"
+            daily_rev = f"{daily_dir}rev_{self.masks_from_daily_rev}/"
+            available_csds = os.listdir(daily_rev)
+
+            # If that CSD was processed in the daily pipeline...
+            if csd_str not in available_csds:
+
+                msg = (f"Daily pipeline mask not available for CSD {csd_str}"
+                       "using `ch_util` static mask.")
+                self.log.warning(msg)
+
+                # ...fallback to static mask...
+                return self._static_mask()
+
+            # ...or load in mask if it is available
+            mask = containers.RFIMask.from_file(
+                f"{daily_rev}{csd_str}/rfi_mask2_lsd_{csd_str}.h5"
+            )
+
+            # Negate so that 1 = clean, 0 = RFI contaminated
+            ma = (~(mask.mask[:].view(np.ndarray))).astype(np.float32)
+
+            # Mask out the entire frequency if most time samples are bad
+            if self.mask_type == "frequency":
+
+                rfi_mask_1d = np.median(ma, axis=1)
+                rfi_mask_1d_local = np.expand_dims(
+                    rfi_mask_1d[self.local_slice],
+                    axis=(1, 2, 3),
+                )
+
+                return rfi_mask_1d_local
+
+            # Otherwise use the full frequency resolution
+            else:
+                # Need to interpolate onto common pixels
+                src_ra = self.transit_attrs["cirs_ra"]
+
+                ha = self.transit_index_map["pix"]["phi"][:]
+                mask_ra = mask.index_map["ra"][:]
+
+                # Locate the relevant portion of the daily mask
+                transit_range = np.where(np.abs(mask_ra - src_ra) < 30.0)
+
+                mask_interp = np.zeros((self.nfreq, ha.shape[-1]))
+
+                # Step through frequency-by-frequency and do
+                # nearest neighbors interpolation
+                for fr in range(self.nfreq):
+                    mask_interp_f = interp1d(
+                        (mask_ra - src_ra)[transit_range],
+                        ma[self.local_slice][fr, transit_range],
+                        kind="nearest",
+                        bounds_error=False,
+                        fill_value=1.0,
+                    )
+                    mask_interp[fr] = mask_interp_f(ha)
+
+                mask_interp = np.expand_dims(
+                    mask_interp,
+                    axis=(1, 2),
+                )
+
+                return mask_interp
+
+        else:
+            return self._static_mask()
+
+    def _static_mask(self):
+        transit_time = self.transit_attrs["transit_time"]
+
+        mask = rfi.frequency_mask(
+            self.transit_index_map["freq"][self.local_slice],
+            timestamp=transit_time,
+        )
+
+        mask = np.expand_dims(~mask, axis=(1, 2, 3))
+
+        return mask

@@ -45,10 +45,16 @@ import numpy as np
 
 from caput import mpiutil, config, pipeline
 from draco.core import task
+<<<<<<< Updated upstream
 from chimedb import data_index as di, dataset as ds
 from chimedb.core import exceptions
 from ch_util import tools, ephemeris, finder, layout, andata
 from ch_pipeline.core import containers
+=======
+from draco.core import containers as dcontainers
+from chimedb import data_index as di
+from ch_util import tools, ephemeris, finder, layout
+>>>>>>> Stashed changes
 
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
@@ -662,10 +668,13 @@ class QueryInputs(task.MPILoggedTask):
 
         if mpiutil.rank0:
             # Get the datetime of the middle of the file
-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
-            inputs = tools.get_correlator_inputs(time)
-
-            inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
+            if isinstance(ts, dcontainers.TrackBeam):
+                time = ephemeris.unix_to_datetime(ts.attrs["transit_time"])
+                inputs = tools.get_correlator_inputs(time, correlator="chime")
+            else:
+                time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+                inputs = tools.get_correlator_inputs(time)
+                inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
 
         # Broadcast input description to all ranks
         inputs = mpiutil.world.bcast(inputs, root=0)

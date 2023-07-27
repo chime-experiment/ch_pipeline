@@ -15,6 +15,7 @@ Use this task together with:
   of the timestream data
 """
 
+import numpy as np
 from datetime import datetime
 from caput import config, mpiutil
 from ch_util import tools, ephemeris
@@ -94,3 +95,69 @@ class FringeStop(task.SingleTask):
             tstream_fs.vis[:] = fs_vis
             tstream_fs.weight[:] = tstream.weight
             return tstream_fs
+
+
+class ApplyBTermCorrection(task.SingleTask):
+    overwrite = config.Property(proptype=bool, default=True)
+
+    def process(self, track_in, feeds):
+        if self.overwrite:
+            track = track_in
+        else:
+            track = containers.TrackBeam(
+                axes_from=track_in,
+                attrs_from=track_in,
+                distributed=track_in.distributed,
+                comm=track_in.comm,
+            )
+            track["beam"] = track_in["beam"][:]
+            track["weight"] = track_in["weight"][:]
+
+        track.redistribute("freq")
+
+        src_dec = np.radians(track.attrs["dec"])
+
+        self.log.warning("The number of feeds is %d" % len(feeds))
+        self.log.warning(f"The feeds are {feeds}")
+        prod_map = _construct_holography_prod_map(feeds)
+
+        self.log.warning(f"The shape of the product map is {prod_map.shape}")
+
+        nfreq = track.beam.local_shape[0]
+        local_slice = slice(track.beam.local_offset[0], track.beam.local_offset[0] + nfreq)
+
+        freq = track.freq[local_slice]
+
+        bterm_delay = tools.bterm(src_dec, feeds, prod_map)
+        self.log.warning(f"The shape of the delay term is {bterm_delay.shape}")
+        bterm_phase = np.exp(2.j * np.pi * bterm_delay * freq * 1e6)
+        self.log.warning(f"The shape of the delay phase is {bterm_delay.shape}")
+
+        track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, 2, 2048)))[..., np.newaxis]
+
+        return track
+
+
+def _construct_holography_prod_map(feeds):
+    nfeeds = len(feeds)
+    holo_indices = tools.get_holographic_index(feeds)
+
+    input_pols = tools.get_feed_polarisations(feeds)
+
+    prod_map_dtype = np.dtype([("input_a", np.int32), ("input_b", np.int32)])
+
+    prod_map = np.zeros(2 * nfeeds, dtype=prod_map_dtype)
+
+    for pp in range(prod_map.shape[0]):
+        ii = pp % nfeeds
+        copol = ~(pp // nfeeds)
+        if copol:
+            holo_input = holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
+        else:
+            holo_input = holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
+
+        input_pair = (ii, holo_input)
+
+        prod_map[pp] = (min(input_pair), max(input_pair))
+
+    return prod_map
