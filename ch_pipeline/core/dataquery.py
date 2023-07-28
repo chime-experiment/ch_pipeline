@@ -45,16 +45,16 @@ import numpy as np
 
 from caput import mpiutil, config, pipeline
 from draco.core import task
-<<<<<<< Updated upstream
+# <<<<<<< Updated upstream
 from chimedb import data_index as di, dataset as ds
 from chimedb.core import exceptions
 from ch_util import tools, ephemeris, finder, layout, andata
 from ch_pipeline.core import containers
-=======
+# =======
 from draco.core import containers as dcontainers
 from chimedb import data_index as di
 from ch_util import tools, ephemeris, finder, layout
->>>>>>> Stashed changes
+# >>>>>>> Stashed changes
 
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
