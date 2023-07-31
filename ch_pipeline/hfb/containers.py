@@ -12,7 +12,7 @@ from ch_util import andata
 
 from ..core.containers import ContainerBase, RawContainer, FreqContainer
 
-from draco.core.containers import TODContainer
+from draco.core.containers import TODContainer, SiderealContainer
 
 
 class HFBContainer(ContainerBase):
@@ -340,17 +340,14 @@ class HFBHighResSpectrum(HFBHighResContainer):
     }
 
 
-class HFBRingMapBase(HFBContainer):
+class HFBRingMapBase(SiderealContainer, HFBContainer):
     """Base class for HFB ringmaps."""
 
-    _axes = ("beam", "el", "ra")
-
-    @property
-    def ra(self):
-        return self.index_map["ra"]
+    _axes = ("beam", "el")
 
     @property
     def el(self):
+        """The elevation in degrees associated with each sample of the elevation axis."""
         return self.index_map["el"]
 
 
