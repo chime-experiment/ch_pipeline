@@ -382,7 +382,13 @@ class HFBRingMap(FreqContainer, HFBRingMapBase):
 
 
 class HFBHighResRingMap(FreqContainer, HFBRingMapBase, HFBHighResContainer):
-    """Container for holding high-resolution frequency ringmap data."""
+    """Container for holding high-resolution frequency ringmap data.
+
+    With respect to :class:`HFBRingMap`, the (combined) frequency axis is moved
+    to the back, and the distributed axis is changed to the elevation axis.
+    This is because further downstream in the pipeline, we will look for features
+    along the frequency axis.
+    """
 
     _dataset_spec = {
         "hfb": {
