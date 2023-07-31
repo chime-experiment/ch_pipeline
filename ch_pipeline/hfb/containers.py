@@ -338,3 +338,75 @@ class HFBHighResSpectrum(HFBHighResContainer):
             "distributed": False,
         },
     }
+
+
+class HFBRingMapBase(HFBContainer):
+    """Base class for HFB ringmaps."""
+
+    _axes = ("beam", "el", "ra")
+
+    @property
+    def ra(self):
+        return self.index_map["ra"]
+
+    @property
+    def el(self):
+        return self.index_map["el"]
+
+
+class HFBRingMap(FreqContainer, HFBRingMapBase):
+    """Container for holding HFB ringmap data."""
+
+    _axes = ("subfreq",)
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "nsample": {
+            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+
+class HFBHighResRingMap(FreqContainer, HFBRingMapBase, HFBHighResContainer):
+    """Container for holding high-resolution frequency ringmap data."""
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["beam", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "weight": {
+            "axes": ["beam", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "nsample": {
+            "axes": ["beam", "el", "ra", "freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+    }
