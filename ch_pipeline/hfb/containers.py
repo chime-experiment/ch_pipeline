@@ -381,7 +381,7 @@ class HFBRingMap(FreqContainer, HFBRingMapBase):
     }
 
 
-class HFBHighResRingMap(FreqContainer, HFBRingMapBase, HFBHighResContainer):
+class HFBHighResRingMap(HFBRingMapBase, HFBHighResContainer):
     """Container for holding high-resolution frequency ringmap data.
 
     With respect to :class:`HFBRingMap`, the (combined) frequency axis is moved
