@@ -330,8 +330,6 @@ class HFBStackDays(task.SingleTask):
                 self.stack.add_dataset("nsample")
                 self.stack.nsample[:] = 0
 
-            self.stack.redistribute("freq")
-
             self.lsd_list = []
 
         # Accumulate
