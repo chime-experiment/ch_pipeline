@@ -3,6 +3,8 @@
 
 import os
 import gc
+from pathlib import Path
+
 import numpy as np
 
 from caput import pipeline
@@ -279,7 +281,7 @@ class LoadFilesFromParams(BaseLoadFiles):
         ts = self._load_filelist(filegroup["files"], time_range)
 
         # Find the time to use to compute the container's LSD
-        if time_range:
+        if time_range and time_range != (None, None):
             # Use middle of time_range, which normally corresponds to the transit time
             container_time = np.mean(time_range)
         else:
@@ -312,22 +314,47 @@ class LoadFilesFromParams(BaseLoadFiles):
 
 
 class LoadFiles(LoadFilesFromParams):
-    """Load CHIME HFB data from file lists passed into the setup routine."""
+    """Load CHIME HFB data from file lists passed into the setup routine.
+
+    Attributes
+    ----------
+    single_group : bool
+        If this task receives a single list of files should they be considered
+        as forming a single group (True), or is each file its own group (False,
+        default).
+    """
+
+    single_group = config.Property(proptype=bool, default=False)
 
     filelists = None
 
     def setup(self, filelists):
-        """Convert lists of files to list of filegroups; set up frequency and beam selection.
+        """Parse the file lists and set up frequency and beam selection.
 
         Parameters
         ----------
         filelists : list
-            List of lists of filenames, or list of tuples, where each tuple
-            consists of a list of filenames and a tuple of time bounds. Each
-            item in the main list will be placed in a single HFBData container.
+            A specification of the set of files to load and how they should be
+            grouped. Entries in the list must be a homogeneous set of:
+
+            - Lists of filenames. Each of these forms a filegroup where the
+              member files will be loaded into and returned in a single
+              container.
+            - 2-tuples. The first entry is a list of filenames that forms
+              the filegroup, the second entry gives the time range of data in
+              the group to read (given as float UTC Unix seconds).
+            - String filenames/Path objects. Depending on the `single_group`
+              config option this will either interpret the parent list as a
+              single filegroup incorporating all entries, or as each entry
+              forming its own filegroup.
         """
         if not isinstance(filelists, list):
-            raise RuntimeError("Argument must be list of lists of files.")
+            raise RuntimeError("Argument must be a list.")
+
+        # If we just get a single list of files then convert into a single
+        # group is specified. Otherwise each file will be its own group.
+        if filelists and not isinstance(filelists[0], list) and self.single_group:
+            filelists = [filelists]
 
         # Convert list of filelists to list of filegroups
         self.filegroups = []
@@ -335,8 +362,14 @@ class LoadFiles(LoadFilesFromParams):
             # Handle lists including time ranges
             if isinstance(flist, tuple):
                 fgroup = {"files": flist[0], "time_range": flist[1]}
-            else:
+            elif isinstance(flist, list):
                 fgroup = {"files": flist, "time_range": (None, None)}
+            elif isinstance(flist, (str, Path)):
+                fgroup = {"files": [flist], "time_range": (None, None)}
+            else:
+                raise ValueError(
+                    f"Did not expect to get an object of type {type(flist)}"
+                )
 
             # Avoid adding filegroups with empty filelists (the output of
             # QueryDatabase with return_intervals can include days with no files)
