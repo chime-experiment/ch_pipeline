@@ -872,6 +872,114 @@ class HFBDopplerShift(task.SingleTask):
         return out
 
 
+class HFBDopplerShiftRingMap(task.SingleTask):
+    """Correct HFB ringmap for Doppler shifts due to Earth's motion and rotation.
+
+    Attributes
+    ----------
+    time_override : float
+        Unix time used to calculate Doppler shift, to override the time calculated
+        from the LSD found in the container attributes and the beam RA.
+    """
+
+    time_override = config.Property(proptype=float, default=None)
+
+    def setup(self, observer=None):
+        """Setup the class HFBDopplerShiftRingMap task.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Details of the observer, if not set default to CHIME.
+        """
+
+        # Set up the default Observer
+        self.observer = chime if observer is None else observer
+
+    def process(self, stream):
+        """Doppler shift a container with high-resolution HFB data.
+
+        Parameters
+        ----------
+        stream : HFBHighResRingMap
+            Ringmap with high-resolution frequency axis.
+
+        Returns
+        -------
+        out : HFBHighResRingMap
+            Doppler shifted ringmap.
+        """
+
+        from ch_util.cal_utils import _el_to_dec
+
+        # Extract frequencies, data, and weights from input container.
+        freq_obs = stream.freq
+        data_obs = stream.hfb[:]
+        weight_obs = stream.weight[:]
+
+        # Initialize arrays to hold output data and weights
+        data_out = np.empty_like(data_obs)
+        weight_out = np.empty_like(weight_obs)
+
+        for ira, ra in enumerate(stream.index_map["ra"]):
+            # Go through RA axis.
+
+            # Obtain time used to compute Doppler correction from container LSD
+            # and beam RA, unless an override is provided.
+            if self.time_override is not None:
+                time = self.time_override
+            else:
+                if isinstance(stream.attrs["lsd"], list):
+                    raise TypeError(
+                        f"Container includes multiple LSDs: {stream.attrs['lsd']} "
+                        "Use time_override to force Doppler correction."
+                    )
+                lsd_float = stream.attrs["lsd"] + ra.hours / 24.0
+                time = self.observer.lsd_to_unix(lsd_float)
+
+            for iel, el in enumerate(stream.index_map["el"]):
+                # Go through el = sin(zenith angle) axis.
+
+                # Get pointing of beam.
+                pointing = Star(ra=Angle(degrees=ra), dec_degrees=_el_to_dec(el))
+
+                # Obtain Doppler shifted frequencies.
+                freq_shifted = get_doppler_shifted_freq(
+                    source=pointing,
+                    date=time,
+                    freq_rest=freq_obs,
+                    obs=self.observer,
+                ).squeeze()
+
+                # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
+                # using linear interpolation and moving these to the observed frequencies.
+                # Reverse frequency dimension, because the interpolation function requires
+                # ascending x arrays. Zero out data points that need to be extrapolated.
+                data_shifted, weight_shifted = _interpolation_linear(
+                    x=freq_obs[::-1],
+                    y=data_obs[:, iel, ira, ::-1],
+                    w=weight_obs[:, iel, ira, ::-1],
+                    xeval=freq_shifted[::-1],
+                    zero_outside=True,
+                )
+
+                # Reverse back frequency dimension.
+                data_shifted = data_shifted[..., ::-1]
+                weight_shifted = weight_shifted[..., ::-1]
+
+                # Add individual beam to output array
+                data_out[:, iel, ira, :] = data_shifted
+                weight_out[:, iel, ira, :] = weight_shifted
+
+        # Create container to hold output.
+        out = dcontainers.empty_like(stream)
+
+        out.hfb[:] = data_shifted
+        out.weight[:] = weight_shifted
+
+        return out
+
+
 def _interpolation_linear(x, y, w, xeval, zero_outside=True):
     """Linear interpolation with handling of uncertainties and flagged data."""
 
