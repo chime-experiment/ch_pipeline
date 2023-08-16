@@ -1099,7 +1099,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] = coeff * transit.beam[:]
             self.stack.weight[:] = (coeff**2) * invert_no_zero(transit.weight[:])
-            self.stack.nsample[:] = flag.astype(np.int64)
+            self.stack.nsample[:] = flag.astype(np.uint8)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1123,7 +1123,7 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs["archivefiles"] += list(transit.attrs["archivefiles"])
 
             # Accumulate transit data
-            flag = (transit.weight[:] > 0.0).astype(np.int64)
+            flag = (transit.weight[:] > 0.0).astype(np.uint8)
             if self.weight == "inverse_variance":
                 coeff = transit.weight[:]
             else:
