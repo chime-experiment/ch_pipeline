@@ -17,7 +17,7 @@ from draco.core import io
 
 from beam_model.formed import FFTFormedActualBeamModel
 
-from .containers import HFBReader
+from .containers import HFBData, HFBReader
 
 
 class BaseLoadFiles(io.BaseLoadFiles):
@@ -202,20 +202,29 @@ class BaseLoadFiles(io.BaseLoadFiles):
         self.log.debug(f"Reading with freq selections: {self.freq_sel}")
         self.log.debug(f"Reading with beam selections: {self.beam_sel}")
 
-        # Set up the reader
-        rd = HFBReader(files)
+        if len(files) > 1 or time_range != (None, None):
+            # Set up the reader
+            rd = HFBReader(files)
 
-        # Select time range
-        rd.select_time_range(time_range[0], time_range[1])
+            # Select time range
+            rd.select_time_range(time_range[0], time_range[1])
 
-        # Select frequency range
-        rd.freq_sel = self.freq_sel
+            # Select frequency range
+            rd.freq_sel = self.freq_sel
 
-        # Select beams
-        rd.beam_sel = self.beam_sel
+            # Select beams
+            rd.beam_sel = self.beam_sel
 
-        # Read files
-        cont = rd.read()
+            # Read files
+            cont = rd.read()
+        else:
+            kwargs = {}
+            if self.freq_sel:
+                kwargs["freq_sel"] = self.freq_sel
+            if self.beam_sel:
+                kwargs["beam_sel"] = self.beam_sel
+
+            cont = HFBData.from_file(files[0], distributed=self.distributed, **kwargs)
 
         if self.redistribute is not None:
             cont.redistribute(self.redistribute)
