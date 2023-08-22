@@ -12,14 +12,17 @@ from ch_util import andata
 
 from ..core.containers import ContainerBase, RawContainer, FreqContainer
 
-from draco.core.containers import TODContainer, SiderealContainer
+from draco.core.containers import TODContainer, SiderealContainer, DataWeightContainer
 
 
-class HFBContainer(ContainerBase):
+class HFBContainer(DataWeightContainer):
     """A base class for all HFB containers.
 
     Like :class:`ContainerBase`, but with some properties specific to HFB data.
     """
+
+    _data_dset_name = "hfb"
+    _weight_dset_name = None  # Leave as None as this could potentially change location
 
     @property
     def hfb(self) -> memh5.MemDataset:
