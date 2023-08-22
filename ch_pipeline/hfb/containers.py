@@ -126,6 +126,40 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
         },
     }
 
+    @classmethod
+    def from_file(cls, *args, **kwargs) -> "HFBData":
+        """Load an HFB file.
+
+        This overrides the default implementation to forcibly hint that the datasets
+        should be distributed.
+        """
+
+        # If hints exist, then don't modify them. This allows hints=False to override this override!
+        if "hints" not in kwargs:
+            hints = {}
+
+            # Try and extract the hint information from the dataset spec
+            # TODO: move this into base classes
+            for dname, dspec in cls._class_dataset_spec().items():
+                if not dspec.get("distributed", False):
+                    continue
+
+                hspec = {"distributed": True}
+
+                if "distributed_axis" in dspec:
+                    ax = dspec["distributed_axis"]
+
+                    if isinstance(ax, str) and ax in dspec["axes"]:
+                        ax = dspec["axes"].index(ax)
+
+                    hspec["axis"] = ax
+
+                dname = dname if dname[0] == "/" else "/" + dname
+                hints[dname] = hspec
+                kwargs["hints"] = hints
+
+        return super().from_file(*args, **kwargs)
+
 
 class HFBReader(tod.Reader):
     """A reader for HFB type data."""
