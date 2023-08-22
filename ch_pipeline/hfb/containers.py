@@ -1,12 +1,16 @@
 """HFB containers
 """
 
+import warnings
+
 from typing import Union
 
 import numpy as np
 
 from caput import tod
 from caput import memh5
+from caput import mpiutil
+from caput import fileformats
 
 from ch_util import andata
 
@@ -96,6 +100,108 @@ class HFBData(RawContainer, FreqContainer, HFBContainer):
             "distributed": True,
         },
     }
+
+    @classmethod
+    def from_file(
+        cls,
+        filename,
+        distributed=False,
+        hints=True,
+        comm=None,
+        convert_dataset_strings=False,
+        convert_attribute_strings=True,
+        file_format=None,
+        **kwargs,
+    ):
+        """Create a new instance by copying from a file group.
+
+        Any keyword arguments are passed on to the constructor for `h5py.File` or
+        `zarr.File`.
+
+        Parameters
+        ----------
+        filename : string
+            Name of file to load.
+        distributed : boolean, optional
+            Whether to load file in distributed mode.
+        hints : boolean, optional
+            If in distributed mode use hints to determine whether datasets are
+            distributed or not.
+        comm : MPI.Comm, optional
+            MPI communicator to distributed over. If :obj:`None` use
+            :obj:`MPI.COMM_WORLD`.
+        convert_attribute_strings : bool, optional
+            Try and convert attribute string types to unicode. Default is `True`.
+        convert_dataset_strings : bool, optional
+            Try and convert dataset string types to unicode. Default is `False`.
+        file_format : `fileformats.FileFormat`, optional
+            File format to use. Default is `None`, i.e. guess from the name.
+        **kwargs : dict
+            Arbitrary keyword arguments.
+
+        Returns
+        -------
+        group : HFBData
+            Container with HFB data.
+        """
+        if comm is None:
+            comm = mpiutil.world
+
+        if file_format is None:
+            file_format = fileformats.guess_file_format(filename)
+
+        if comm is None:
+            if distributed:
+                warnings.warn(
+                    "Cannot load file in distributed mode when there is no MPI"
+                    "communicator!!"
+                )
+            distributed = False
+
+        # Parse _dataset_spec into hints
+        hints = {}
+        for key, ds_spec in cls._dataset_spec.items():
+            hints_dict = {}
+            hints_dict["distributed"] = ds_spec["distributed"]
+            if "distributed_axis" in ds_spec:
+                distributed_axis = ds_spec["distributed_axis"]
+                hints_dict["axis"] = ds_spec["axes"].index(distributed_axis)
+            ds_path = "/" + key
+            hints[ds_path] = hints_dict
+
+        # Look for *_sel parameters in kwargs, collect and remove them from kwargs
+        sel_args = {}
+        for a in list(kwargs):
+            if a.endswith("_sel"):
+                sel_args[a[:-4]] = kwargs.pop(a)
+
+        # Map selections to datasets
+        sel = cls._make_selections(sel_args)
+
+        if not distributed or not hints:
+            kwargs["mode"] = "r"
+            with file_format.open(filename, **kwargs) as f:
+                self = cls(distributed=distributed, comm=comm)
+                memh5.deep_group_copy(
+                    f,
+                    self,
+                    selections=sel,
+                    convert_attribute_strings=convert_attribute_strings,
+                    convert_dataset_strings=convert_dataset_strings,
+                    file_format=file_format,
+                )
+        else:
+            self = memh5._distributed_group_from_file(
+                filename,
+                comm=comm,
+                hints=hints,
+                selections=sel,
+                convert_attribute_strings=convert_attribute_strings,
+                convert_dataset_strings=convert_dataset_strings,
+                file_format=file_format,
+            )
+
+        return self
 
 
 class HFBReader(tod.Reader):
