@@ -434,3 +434,13 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
             "distributed_axis": "el",
         },
     }
+
+    @property
+    def max_snr(self):
+        """Get the dataset of maximum SNR over template widths."""
+        return self.datasets["max_snr"]
+
+    @property
+    def best_width(self):
+        """Get the dataset of the template width corresponding to the maximum SNR."""
+        return self.datasets["best_width"]
