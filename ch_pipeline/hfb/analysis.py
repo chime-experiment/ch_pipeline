@@ -4,6 +4,7 @@
 import numpy as np
 
 from scipy.interpolate import interp1d
+from scipy.signal import convolve
 
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
@@ -1120,4 +1121,123 @@ class HFBMedianSubtraction(task.SingleTask):
         out.hfb[:] = diff
         out.weight[:] = weight
 
+        return out
+
+
+class HFBSearch(task.SingleTask):
+    """Search spectra for absorption lines.
+
+
+
+    Attributes
+    ----------
+
+    """
+
+    def setup(self, std, length):
+        """Gaussian template centred at zero"""
+        self.length = length
+        self.std = std
+        n = np.arange(self.length)
+        self.template = -1 * np.exp(-((n) ** 2) / 2 * (self.std) ** 2)
+
+    def process(self, stream):
+        """Signal to noise ratio at every single frequency for each spectrum.
+
+        Parameters
+        ----------
+        stream : HFBData, HFBHighResData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBSearchResult
+            Signal to noise ratio.
+        """
+        # Load data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Extract axes lengths
+        nbeam, nel, nra, _ = stream.hfb.shape
+
+        # Signal to noise ratio array
+        SN = np.zeros(stream.hfb.shape)
+        # Half length of the template
+        hl = int(self.length / 2)
+
+        # Signal to noise ratio for each spectrum. nbeam is number of EW beams.
+        for ibeam in range(nbeam):
+            for iel in range(nel):
+                for ira in range(nra):
+                    num = convolve(
+                        self.template, data[ibeam, iel, ira, :], "full", method="direct"
+                    ) - (
+                        np.sum(data[ibeam, iel, ira, :])
+                        / np.sum(weight[ibeam, iel, ira, :])
+                    ) * (
+                        convolve(
+                            self.template,
+                            weight[ibeam, iel, ira, :],
+                            "full",
+                            method="direct",
+                        )
+                    )
+                    denom = convolve(
+                        self.template**2,
+                        weight[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
+                    ) - (
+                        (
+                            convolve(
+                                self.template,
+                                weight[ibeam, iel, ira, :],
+                                "full",
+                                method="direct",
+                            )
+                        )
+                        ** 2
+                        / np.sum(weight[ibeam, iel, ira, :])
+                    )
+                    A = num / denom
+                    c1 = np.sum(data[ibeam, iel, ira, :]) / np.sum(
+                        weight[ibeam, iel, ira, :]
+                    )
+                    c2 = (
+                        np.sum(data[ibeam, iel, ira, :])
+                        / np.sum(weight[ibeam, iel, ira, :])
+                    ) - A * np.sum(self.template) / np.sum(weight[ibeam, iel, ira, :])
+                    Lambda = (
+                        (c1**2 - c2**2) * (np.sum(weight[ibeam, iel, ira, :]))
+                        - 2 * (c1 - c2) * (np.sum(data[ibeam, iel, ira, :]))
+                        - (
+                            A**2
+                            * convolve(
+                                self.template**2,
+                                weight[ibeam, iel, ira, :],
+                                "full",
+                                method="direct",
+                            )
+                        )
+                        - 2
+                        * A
+                        * c2
+                        * (
+                            convolve(
+                                self.template,
+                                weight[ibeam, iel, ira, :],
+                                "full",
+                                method="direct",
+                            )
+                        )
+                        + 2
+                        * A
+                        * convolve(
+                            self.template, data[ibeam, iel, ira, :], method="direct"
+                        )
+                    )
+                    SN[ibeam, iel, ira, :] = Lambda[hl + 1 : -hl]
+        out = containers.HFBSearchResult(axes_from=stream, attrs_from=stream)
+        out.max_snr[:] = SN[:]
         return out
