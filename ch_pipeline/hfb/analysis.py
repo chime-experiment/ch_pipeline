@@ -710,6 +710,55 @@ class HFBFlattenPFB(task.SingleTask):
         return out
 
 
+class HFBFlattenRingMapPFB(task.SingleTask):
+    """Flatten HFB ringmap using PFB deconvolution."""
+
+    def process(self, stream):
+        """Flatten HFB ringmap.
+
+        Parameters
+        ----------
+        stream : containers.HFBRingMap
+            Container with HFB ringmap.
+
+        Returns
+        -------
+        out : containers.HFBRingMap
+            Container with flattened HFB ringmap.
+        """
+
+        # Extract data and weight from container
+        data = stream.hfb
+        weight = stream.weight
+
+        # Mask out DC bin (subfrequency bin 64) by setting weight to zero
+        weight[:, 64, :, :] = 0
+
+        # Instantiate PFB-deconvolution class with default parameters
+        pfb_deconvolve = DeconvolvePFB()
+
+        # Create output container
+        out = containers.HFBRingMap(axes_from=stream, attrs_from=stream)
+
+        # Flatten one EW beam and one elevation at a time
+        for ibeam, _ in enumerate(stream.index_map["beam"]):
+            for iel, _ in enumerate(stream.index_map["el"]):
+                # Select data and weights for beam
+                data_beam = data[:, :, ibeam, iel, :]
+                weight_beam = weight[:, :, ibeam, iel, :]
+
+                # Apply PFB deconvolution
+                flat_data, flat_weight = pfb_deconvolve.flatten(
+                    data_beam, weight_beam, centered=True
+                )
+
+                # Add flattened data and weights to output container
+                out.hfb[:, :, ibeam, iel, :] = flat_data
+                out.weight[:, :, ibeam, iel, :] = flat_weight
+
+        return out
+
+
 class HFBDividePFB(task.SingleTask):
     """Flatten HFB data by dividing out the PFB shape."""
 
