@@ -1134,11 +1134,13 @@ class HFBSearch(task.SingleTask):
 
     """
 
-    def setup(self, std, length):
+    length = config.Property(proptype=int, default=None)
+    std = config.Property(proptype=float, default=None)
+
+    def setup(self):
         """Gaussian template centred at zero"""
-        self.length = length
-        self.std = std
-        n = np.arange(self.length)
+        half_length = int(self.length / 2)
+        n = np.arange(-1 * half_length, half_length)
         self.template = -1 * np.exp(-((n) ** 2) / 2 * (self.std) ** 2)
 
     def process(self, stream):
@@ -1155,8 +1157,9 @@ class HFBSearch(task.SingleTask):
             Signal to noise ratio.
         """
         # Load data and weights
-        data = stream.hfb[:]
-        weight = stream.weight[:]
+        weight = stream.weight[:].local_array
+        data = stream.hfb[:].local_array
+        weighted_data = data * weight
 
         # Extract axes lengths
         nbeam, nel, nra, _ = stream.hfb.shape
@@ -1170,74 +1173,46 @@ class HFBSearch(task.SingleTask):
         for ibeam in range(nbeam):
             for iel in range(nel):
                 for ira in range(nra):
-                    num = convolve(
-                        self.template, data[ibeam, iel, ira, :], "full", method="direct"
-                    ) - (
-                        np.sum(data[ibeam, iel, ira, :])
-                        / np.sum(weight[ibeam, iel, ira, :])
-                    ) * (
-                        convolve(
-                            self.template,
-                            weight[ibeam, iel, ira, :],
-                            "full",
-                            method="direct",
-                        )
+                    # Sums
+                    sum_data = np.sum(weighted_data[ibeam, iel, ira, :])
+                    sum_weight = np.sum(weight[ibeam, iel, ira, :])
+                    inv_sum_weight = tools.invert_no_zero(sum_weight)
+                    # Convolutions
+                    template_data = convolve(
+                        self.template,
+                        weighted_data[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
                     )
-                    denom = convolve(
+                    template_weight = convolve(
+                        self.template,
+                        weight[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
+                    )
+                    template2_weight = convolve(
                         self.template**2,
                         weight[ibeam, iel, ira, :],
                         "full",
                         method="direct",
-                    ) - (
-                        (
-                            convolve(
-                                self.template,
-                                weight[ibeam, iel, ira, :],
-                                "full",
-                                method="direct",
-                            )
-                        )
-                        ** 2
-                        / np.sum(weight[ibeam, iel, ira, :])
                     )
-                    A = num / denom
-                    c1 = np.sum(data[ibeam, iel, ira, :]) / np.sum(
-                        weight[ibeam, iel, ira, :]
-                    )
+                    # Amplitude A
+                    num = template_data - sum_data * inv_sum_weight * template_weight
+                    denom = template2_weight - (template_weight) ** 2 * inv_sum_weight
+                    A = num * tools.invert_no_zero(denom)
+                    # Signal to noise ratio, Lambda
+                    c1 = sum_data * inv_sum_weight
                     c2 = (
-                        np.sum(data[ibeam, iel, ira, :])
-                        / np.sum(weight[ibeam, iel, ira, :])
-                    ) - A * np.sum(self.template) / np.sum(weight[ibeam, iel, ira, :])
-                    Lambda = (
-                        (c1**2 - c2**2) * (np.sum(weight[ibeam, iel, ira, :]))
-                        - 2 * (c1 - c2) * (np.sum(data[ibeam, iel, ira, :]))
-                        - (
-                            A**2
-                            * convolve(
-                                self.template**2,
-                                weight[ibeam, iel, ira, :],
-                                "full",
-                                method="direct",
-                            )
-                        )
-                        - 2
-                        * A
-                        * c2
-                        * (
-                            convolve(
-                                self.template,
-                                weight[ibeam, iel, ira, :],
-                                "full",
-                                method="direct",
-                            )
-                        )
-                        + 2
-                        * A
-                        * convolve(
-                            self.template, data[ibeam, iel, ira, :], method="direct"
-                        )
+                        sum_data * inv_sum_weight - A * template_weight * inv_sum_weight
                     )
-                    SN[ibeam, iel, ira, :] = Lambda[hl + 1 : -hl]
+                    Lambda = (
+                        (c1**2 - c2**2) * (sum_weight)
+                        - 2 * (c1 - c2) * (sum_data)
+                        - (A**2 * template2_weight)
+                        - 2 * A * c2 * (template_weight)
+                        + 2 * A * template_data
+                    )
+                    SN[ibeam, iel, ira, :] = Lambda[hl - 1 : -hl]
         out = containers.HFBSearchResult(axes_from=stream, attrs_from=stream)
         out.max_snr[:] = SN[:]
         return out
