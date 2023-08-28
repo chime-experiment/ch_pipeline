@@ -950,7 +950,7 @@ class TransitFit(task.SingleTask):
     """
 
     model = config.enum(
-        ["gauss_amp_poly_phase", "poly_log_amp_poly_phase"],
+        ["gauss_amp_poly_phase", "poly_log_amp_poly_phase", "poly_real_poly_imag"],
         default="gauss_amp_poly_phase",
     )
     nsigma = config.Property(
@@ -960,6 +960,7 @@ class TransitFit(task.SingleTask):
     poly_type = config.Property(proptype=str, default="standard")
     poly_deg_amp = config.Property(proptype=int, default=5)
     poly_deg_phi = config.Property(proptype=int, default=5)
+    poly_deg_r_i = config.Property(proptype=int, default=5)
     niter = config.Property(proptype=int, default=5)
     moving_window = config.Property(
         proptype=(lambda x: x if x is None else float(x)), default=0.30
@@ -986,6 +987,12 @@ class TransitFit(task.SingleTask):
             self.fit_kwargs.update(
                 {"niter": self.niter, "moving_window": self.moving_window}
             )
+
+        elif self.model == "poly_real_poly_imag":
+            self.ModelClass = cal_utils.FitPolyRealPolyImag
+            self.model_kwargs = {
+                "poly_deg": self.poly_deg_r_i,
+            }
 
         else:
             raise ValueError(

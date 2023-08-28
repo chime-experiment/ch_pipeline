@@ -1178,6 +1178,106 @@ class TransitStacker(task.SingleTask):
         return self.stack
 
 
+class HolographyCrossPolNSPhaseFit(TransitFit):
+    fit_bounds = config.Property(proptype=float, default=3.)
+
+    def process(self, stack_pre, stack_post):
+        stack_pre.redistribute("freq")
+        stack_post.redistribute("freq")
+
+        nfreq, _, nfeed, _ = stack_pre.beam.local_shape
+        _local_freq_debug_pre = stack_pre.beam.local_offset[0]
+        _local_freq_debug_post = stack_post.beam.local_offset[0]
+
+        beam_pre = stack_pre.beam[:].view(np.ndarray)
+        weight_pre = stack_pre.weight[:].view(np.ndarray)
+
+        self.log.debug(f"The beam shape is {beam_pre.shape}")
+
+        beam_post = stack_post.beam[:].view(np.ndarray)
+        weight_post = stack_post.weight[:].view(np.ndarray)
+
+        # Get the hour angle axis
+        ha = stack_pre.index_map["pix"]["phi"][:]
+
+        fit_inds = np.flatnonzero(np.abs(ha) <= self.fit_bounds)
+        fit_slice = slice(fit_inds[0], fit_inds[-1] + 1)
+
+        # Restrict the fit to within the specified bounds in HA
+        ha_fit = ha[fit_slice]
+
+        # Select only the cross-polar response
+        resp_pre = beam_pre[:, 1, :, fit_slice]
+        weight_pre_x = weight_pre[:, 1, :, fit_slice]
+        resp_pre_err = invert_no_zero(np.sqrt(weight_pre_x))
+
+        self.log.debug(f"After bounding in HA, the beam shape is {resp_pre.shape}")
+        self.log.debug(f"The shape of the HA axis is {ha_fit.shape}")
+
+        resp_post = beam_post[:, 1, :, fit_slice]
+        weight_post_x = weight_post[:, 1, :, fit_slice]
+        resp_post_err = invert_no_zero(np.sqrt(weight_post_x))
+
+        if 212 in np.arange(_local_freq_debug_post, _local_freq_debug_post + nfreq):
+            pass
+            #self.log.debug(f"The good data is {invert_no_zero(np.sqrt(weight_post[212 - _local_freq_debug_post, 1, 1545, fit_slice]))}")
+            #self.log.debug(f"The problematic version is {resp_post_err.reshape(nfreq, nfeed, len(ha_fit))[212 - _local_freq_debug_post, 1545]}")
+            #self.log.debug(f"The maybe fixed version is {np.transpose(resp_post_err, axes=(1, 2, 0))[212 - _local_freq_debug_post, 1545]}")
+
+        model_pre = self.ModelClass(**self.model_kwargs)
+        model_post = self.ModelClass(**self.model_kwargs)
+
+        model_pre.fit(
+            ha_fit,
+            resp_pre,
+            resp_pre_err,
+            _local_freq_debug_pre,
+        )
+
+        model_post.fit(
+            ha_fit,
+            resp_post,
+            resp_post_err,
+            _local_freq_debug_post,
+        )
+
+        self.log.debug(f"The shape of the model params is {model_pre.param.shape}")
+
+        transit_phase_fit_pre = np.arctan2(model_pre.param[..., 6], model_pre.param[..., 0])
+        transit_phase_fit_post = np.arctan2(model_post.param[..., 6], model_post.param[..., 0])
+
+        phase_correction = np.exp(-1.j * (transit_phase_fit_pre - transit_phase_fit_post))
+
+        # Align the cross-polar data
+        stack_pre.beam[:, 1] = beam_pre[:, 1] * phase_correction[..., np.newaxis]
+
+        # Correct the pseudo-variance; first form the pseudo-variance
+        var_r = stack_pre.sample_variance[0, :, 1]
+        var_i = stack_pre.sample_variance[2, :, 1]
+        cov_ri = stack_pre.sample_variance[1, :, 1]
+
+        self.log.debug("Loaded variance components, proceeding with correction.")
+
+        variance = var_r + var_i
+        pseudo_variance = (var_r - var_i) + 2.j*cov_ri
+
+        # Apply the effective rotation of the uncertainty distribution
+        pseudo_variance *= phase_correction[..., np.newaxis]**2
+
+        self.log.debug("Saving to container.")
+
+        # Save to the output container
+        stack_pre.sample_variance[0, :, 1] = 0.5 * (
+            variance + pseudo_variance.real
+        )
+        stack_pre.sample_variance[1, :, 1] = 0.5 * pseudo_variance.imag
+        stack_pre.sample_variance[2, :, 1] = 0.5 * (
+            variance - pseudo_variance.real
+        )
+
+        return stack_pre
+
+
 class FilterHolographyProcessed(task.MPILoggedTask):
     """Filter holography transit DataIntervals produced by `io.QueryDatabase`
     to exclude those already processed.
