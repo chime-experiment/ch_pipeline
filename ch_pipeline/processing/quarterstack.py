@@ -308,7 +308,7 @@ class QuarterStackProcessing(base.ProcessingType):
         # TODO: find a better way to do this. Some kind of configuration language
         # (Jsonnet/YTT/...) seems like it would be a better idea here
         day_list_str = "\n" + "\n".join(
-            [f"- {paths[day]}/sstream_lsd_{day}.h5" for day in days]
+            [f"- {paths[day]}/sstream_lsd_{day}.*" for day in days]
         )
 
         quarter = self._parse_tag(tag)[1]
