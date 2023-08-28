@@ -284,9 +284,14 @@ class LoadFilesFromParams(BaseLoadFiles):
         if time_range and time_range != (None, None):
             # Use middle of time_range, which normally corresponds to the transit time
             container_time = np.mean(time_range)
-        else:
+        elif hasattr(ts, "time"):
             # Use the start time of the container
             container_time = ts.time[0]
+        elif "lsd" in ts.attrs:
+            # Use start of LSD as container time
+            container_time = self.observer.lsd_to_unix(ts.attrs["lsd"])
+        else:
+            raise ValueError(f"Cannot obtain container_time from {ts}")
 
         # Compute LSD and add to container attributes.
         lsd = int(self.observer.unix_to_lsd(container_time))
