@@ -157,7 +157,7 @@ class ProcessingType(object):
         base = self.base_path
 
         if not base.exists():
-            raise ValueError("Base path %s does not exist." % base)
+            raise ValueError(f"Base path {base} does not exist.")
 
         file_regex = re.compile(f"^{self.tag_pattern}$")
 
@@ -511,13 +511,21 @@ class ProcessingType(object):
 
         if time_sort:
             # Get the tag and associated completed time
-            tags, times = zip(
-                *[
-                    (path.name, (path / "job/STATUS").stat().st_mtime)
-                    for path in working_tags
-                    if path.name in crashed_tags
-                ]
-            )
+            # There's always a chance that a failed job won't have a STATUS file,
+            # in which case we assume that it failed at the time of creation
+            tags, times = [], []
+            for path in working_tags:
+                if path.name not in crashed_tags:
+                    continue
+                tags.append(path.name)
+                try:
+                    # Stat the last time the STATUS was updated, which should
+                    # correspond to the time of failure
+                    times.append((path / "job/STATUS").stat().st_mtime)
+                except FileNotFoundError:
+                    # Stat the time that this job was created
+                    times.append((path / "job/config.yaml").stat().st_mtime)
+
             # Get the tags sorted by completion time
             crashed_tags = [x for _, x in sorted(zip(times, tags), reverse=True)]
         else:
