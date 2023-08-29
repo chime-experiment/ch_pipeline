@@ -1191,8 +1191,8 @@ class HFBSearch(task.SingleTask):
             Signal to noise ratio.
         """
         # Load data and weights
-        weight = stream.weight[:]
-        data = stream.hfb[:]
+        weight = stream.weight[:].local_array
+        data = stream.hfb[:].local_array
         weighted_data = data * weight
 
         # Extract axes lengths
@@ -1210,6 +1210,7 @@ class HFBSearch(task.SingleTask):
                     sum_data = np.sum(weighted_data[ibeam, iel, ira, :])
                     sum_weight = np.sum(weight[ibeam, iel, ira, :])
                     sum_template = np.sum(self.template)
+                    inv_sum_weight = tools.invert_no_zero(sum_weight)
                     # Convolutions
                     template_data = convolve(
                         self.template,
@@ -1230,12 +1231,12 @@ class HFBSearch(task.SingleTask):
                         method="direct",
                     )
                     # Amplitude A
-                    num = template_data - (sum_data / sum_weight) * (template_weight)
-                    denom = template2_weight - ((template_weight) ** 2 / sum_weight)
-                    A = num / denom
+                    num = template_data - sum_data * inv_sum_weight * template_weight
+                    denom = template2_weight - (template_weight) ** 2 * inv_sum_weight
+                    A = num * tools.invert_no_zero(denom)
                     # Signal to noise ratio, Lambda
-                    c1 = sum_data / sum_weight
-                    c2 = (sum_data / sum_weight) - A * sum_template / sum_weight
+                    c1 = sum_data * inv_sum_weight
+                    c2 = sum_data * inv_sum_weight - A * sum_template * inv_sum_weight
                     Lambda = (
                         (c1**2 - c2**2) * (sum_weight)
                         - 2 * (c1 - c2) * (sum_data)
@@ -1243,7 +1244,7 @@ class HFBSearch(task.SingleTask):
                         - 2 * A * c2 * (template_weight)
                         + 2 * A * template_data
                     )
-                    SN[ibeam, iel, ira, :] = Lambda[hl + 1 : -hl]
+                    SN[ibeam, iel, ira, :] = Lambda[hl - 1 : -hl]
         out = containers.HFBSearchResult(axes_from=stream, attrs_from=stream)
         out.max_snr[:] = SN[:]
         return out
