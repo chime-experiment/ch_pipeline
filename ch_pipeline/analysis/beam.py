@@ -1178,7 +1178,7 @@ class TransitStacker(task.SingleTask):
         return self.stack
 
 
-class HolographyCrossPolNSPhaseFit(TransitFit):
+class CombineHolographyPrePostNSStacks(TransitFit):
     fit_bounds = config.Property(proptype=float, default=3.0)
 
     def process(self, stack_pre, stack_post):
