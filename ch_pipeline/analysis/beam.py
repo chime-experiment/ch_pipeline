@@ -1179,21 +1179,15 @@ class TransitStacker(task.SingleTask):
 
 
 class HolographyCrossPolNSPhaseFit(TransitFit):
-    fit_bounds = config.Property(proptype=float, default=3.)
+    fit_bounds = config.Property(proptype=float, default=3.0)
 
     def process(self, stack_pre, stack_post):
         stack_pre.redistribute("freq")
         stack_post.redistribute("freq")
 
-        nfreq, _, nfeed, _ = stack_pre.beam.local_shape
-        _local_freq_debug_pre = stack_pre.beam.local_offset[0]
-        _local_freq_debug_post = stack_post.beam.local_offset[0]
-
         beam_pre = stack_pre.beam[:].view(np.ndarray)
         weight_pre = stack_pre.weight[:].view(np.ndarray)
         nobs_pre = stack_pre.nsample[:].view(np.ndarray).astype(float)
-
-        self.log.debug(f"The beam shape is {beam_pre.shape}")
 
         beam_post = stack_post.beam[:].view(np.ndarray)
         weight_post = stack_post.weight[:].view(np.ndarray)
@@ -1213,18 +1207,9 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
         weight_pre_x = weight_pre[:, 1, :, fit_slice]
         resp_pre_err = invert_no_zero(np.sqrt(weight_pre_x))
 
-        self.log.debug(f"After bounding in HA, the beam shape is {resp_pre.shape}")
-        self.log.debug(f"The shape of the HA axis is {ha_fit.shape}")
-
         resp_post = beam_post[:, 1, :, fit_slice]
         weight_post_x = weight_post[:, 1, :, fit_slice]
         resp_post_err = invert_no_zero(np.sqrt(weight_post_x))
-
-        if 212 in np.arange(_local_freq_debug_post, _local_freq_debug_post + nfreq):
-            pass
-            #self.log.debug(f"The good data is {invert_no_zero(np.sqrt(weight_post[212 - _local_freq_debug_post, 1, 1545, fit_slice]))}")
-            #self.log.debug(f"The problematic version is {resp_post_err.reshape(nfreq, nfeed, len(ha_fit))[212 - _local_freq_debug_post, 1545]}")
-            #self.log.debug(f"The maybe fixed version is {np.transpose(resp_post_err, axes=(1, 2, 0))[212 - _local_freq_debug_post, 1545]}")
 
         model_pre = self.ModelClass(**self.model_kwargs)
         model_post = self.ModelClass(**self.model_kwargs)
@@ -1233,22 +1218,24 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
             ha_fit,
             resp_pre,
             resp_pre_err,
-            _local_freq_debug_pre,
         )
 
         model_post.fit(
             ha_fit,
             resp_post,
             resp_post_err,
-            _local_freq_debug_post,
         )
 
-        self.log.debug(f"The shape of the model params is {model_pre.param.shape}")
+        transit_phase_fit_pre = np.arctan2(
+            model_pre.param[..., 6], model_pre.param[..., 0]
+        )
+        transit_phase_fit_post = np.arctan2(
+            model_post.param[..., 6], model_post.param[..., 0]
+        )
 
-        transit_phase_fit_pre = np.arctan2(model_pre.param[..., 6], model_pre.param[..., 0])
-        transit_phase_fit_post = np.arctan2(model_post.param[..., 6], model_post.param[..., 0])
-
-        phase_correction = np.exp(-1.j * (transit_phase_fit_pre - transit_phase_fit_post))
+        phase_correction = np.exp(
+            -1.0j * (transit_phase_fit_pre - transit_phase_fit_post)
+        )
 
         # Align the cross-polar data
         stack_pre.beam[:, 1] = beam_pre[:, 1] * phase_correction[..., np.newaxis]
@@ -1256,17 +1243,19 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
         # In what follows we propagate this phase rotation to the pseudo-variance of the xpol data, and
         # we combine the two stacks and compute the statistics of the overall population
 
-        # First, form the variance and sample variance from each stack using their saved statistics 
+        # First, form the variance and sample variance from each stack using their saved statistics
         sample_variance_pre = stack_pre.sample_variance[:].view(np.ndarray)
         sample_variance_post = stack_post.sample_variance[:].view(np.ndarray)
 
-        variance_pre, pseudo_variance_pre = _extract_variance_pseudovariance(sample_variance_pre) 
-        variance_post, pseudo_variance_post = _extract_variance_pseudovariance(sample_variance_post)
-
-        self.log.debug("Loaded variance components, proceeding with correction.")
+        variance_pre, pseudo_variance_pre = _extract_variance_pseudovariance(
+            sample_variance_pre
+        )
+        variance_post, pseudo_variance_post = _extract_variance_pseudovariance(
+            sample_variance_post
+        )
 
         # Apply the effective rotation of the uncertainty distribution
-        pseudo_variance_pre[:, 1] *= phase_correction[..., np.newaxis]**2
+        pseudo_variance_pre[:, 1] *= phase_correction[..., np.newaxis] ** 2
 
         # Now we combine the two stacks; first, initialize an output container
         stack_combined = TrackBeam(
@@ -1283,21 +1272,39 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
 
         total_nobs = nobs_pre + nobs_post
 
-        stack_combined.beam[:] = invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post)
-        stack_combined.weight[:] = (total_nobs)**2 * (weight_pre * weight_post) * invert_no_zero(nobs_pre**2 * weight_post + nobs_post**2 * weight_pre)
+        stack_combined.beam[:] = invert_no_zero(total_nobs) * (
+            nobs_pre * beam_pre + nobs_post * beam_post
+        )
+        stack_combined.weight[:] = (
+            (total_nobs) ** 2
+            * (weight_pre * weight_post)
+            * invert_no_zero(nobs_pre**2 * weight_post + nobs_post**2 * weight_pre)
+        )
 
         stack_combined.nsample[:] = total_nobs.astype(np.uint8)
 
         # Here we mean the sample variance we would get if we calculated from the entire population of data
-        combined_variance = nobs_pre * (variance_pre + np.abs(beam_pre)**2) + nobs_post * (variance_post + np.abs(beam_post)**2)
+        combined_variance = nobs_pre * (
+            variance_pre + np.abs(beam_pre) ** 2
+        ) + nobs_post * (variance_post + np.abs(beam_post) ** 2)
         combined_variance *= invert_no_zero(total_nobs)
-        combined_variance -= np.abs(invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post))**2
+        combined_variance -= (
+            np.abs(
+                invert_no_zero(total_nobs)
+                * (nobs_pre * beam_pre + nobs_post * beam_post)
+            )
+            ** 2
+        )
 
-        combined_pseudo_variance = nobs_pre * (pseudo_variance_pre + beam_pre**2) + nobs_post * (pseudo_variance_post + beam_post**2)
+        combined_pseudo_variance = nobs_pre * (
+            pseudo_variance_pre + beam_pre**2
+        ) + nobs_post * (pseudo_variance_post + beam_post**2)
         combined_pseudo_variance *= invert_no_zero(total_nobs)
-        combined_pseudo_variance -= (invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post))**2
+        combined_pseudo_variance -= (
+            invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post)
+        ) ** 2
 
-        self.log.debug("Saving to container.")
+        self.log.info("Saving to container.")
 
         # Save to the output container
         stack_combined.sample_variance[0] = 0.5 * (
@@ -1339,7 +1346,7 @@ def _extract_variance_pseudovariance(sample_variance):
     cov_ri = sample_variance[1]
 
     variance = var_r + var_i
-    pseudo_variance = (var_r - var_i) + 2.j*cov_ri
+    pseudo_variance = (var_r - var_i) + 2.0j * cov_ri
 
     return variance, pseudo_variance
 
