@@ -1191,11 +1191,13 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
 
         beam_pre = stack_pre.beam[:].view(np.ndarray)
         weight_pre = stack_pre.weight[:].view(np.ndarray)
+        nobs_pre = stack_pre.nsample[:].view(np.ndarray).astype(float)
 
         self.log.debug(f"The beam shape is {beam_pre.shape}")
 
         beam_post = stack_post.beam[:].view(np.ndarray)
         weight_post = stack_post.weight[:].view(np.ndarray)
+        nobs_post = stack_post.nsample[:].view(np.ndarray).astype(float)
 
         # Get the hour angle axis
         ha = stack_pre.index_map["pix"]["phi"][:]
@@ -1251,31 +1253,95 @@ class HolographyCrossPolNSPhaseFit(TransitFit):
         # Align the cross-polar data
         stack_pre.beam[:, 1] = beam_pre[:, 1] * phase_correction[..., np.newaxis]
 
-        # Correct the pseudo-variance; first form the pseudo-variance
-        var_r = stack_pre.sample_variance[0, :, 1]
-        var_i = stack_pre.sample_variance[2, :, 1]
-        cov_ri = stack_pre.sample_variance[1, :, 1]
+        # In what follows we propagate this phase rotation to the pseudo-variance of the xpol data, and
+        # we combine the two stacks and compute the statistics of the overall population
+
+        # First, form the variance and sample variance from each stack using their saved statistics 
+        sample_variance_pre = stack_pre.sample_variance[:].view(np.ndarray)
+        sample_variance_post = stack_post.sample_variance[:].view(np.ndarray)
+
+        variance_pre, pseudo_variance_pre = _extract_variance_pseudovariance(sample_variance_pre) 
+        variance_post, pseudo_variance_post = _extract_variance_pseudovariance(sample_variance_post)
 
         self.log.debug("Loaded variance components, proceeding with correction.")
 
-        variance = var_r + var_i
-        pseudo_variance = (var_r - var_i) + 2.j*cov_ri
-
         # Apply the effective rotation of the uncertainty distribution
-        pseudo_variance *= phase_correction[..., np.newaxis]**2
+        pseudo_variance_pre[:, 1] *= phase_correction[..., np.newaxis]**2
+
+        # Now we combine the two stacks; first, initialize an output container
+        stack_combined = TrackBeam(
+            axes_from=stack_pre,
+            attrs_from=stack_pre,
+            distributed=stack_pre.distributed,
+            comm=stack_pre.comm,
+        )
+
+        stack_combined.add_dataset("nsample")
+        stack_combined.add_dataset("sample_variance")
+
+        stack_combined.redistribute("freq")
+
+        total_nobs = nobs_pre + nobs_post
+
+        stack_combined.beam[:] = invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post)
+        stack_combined.weight[:] = (total_nobs)**2 * (weight_pre * weight_post) * invert_no_zero(nobs_pre**2 * weight_post + nobs_post**2 * weight_pre)
+
+        stack_combined.nsample[:] = total_nobs.astype(np.uint8)
+
+        # Here we mean the sample variance we would get if we calculated from the entire population of data
+        combined_variance = nobs_pre * (variance_pre + np.abs(beam_pre)**2) + nobs_post * (variance_post + np.abs(beam_post)**2)
+        combined_variance *= invert_no_zero(total_nobs)
+        combined_variance -= np.abs(invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post))**2
+
+        combined_pseudo_variance = nobs_pre * (pseudo_variance_pre + beam_pre**2) + nobs_post * (pseudo_variance_post + beam_post**2)
+        combined_pseudo_variance *= invert_no_zero(total_nobs)
+        combined_pseudo_variance -= (invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post))**2
 
         self.log.debug("Saving to container.")
 
         # Save to the output container
-        stack_pre.sample_variance[0, :, 1] = 0.5 * (
-            variance + pseudo_variance.real
+        stack_combined.sample_variance[0] = 0.5 * (
+            combined_variance + combined_pseudo_variance.real
         )
-        stack_pre.sample_variance[1, :, 1] = 0.5 * pseudo_variance.imag
-        stack_pre.sample_variance[2, :, 1] = 0.5 * (
-            variance - pseudo_variance.real
+        stack_combined.sample_variance[1] = 0.5 * combined_pseudo_variance.imag
+        stack_combined.sample_variance[2] = 0.5 * (
+            combined_variance - combined_pseudo_variance.real
         )
 
-        return stack_pre
+        # Replace the list attributes with the proper concatenations
+        stack_combined.attrs["archivefiles"] = np.concatenate(
+            (stack_pre.attrs["archivefiles"], stack_post.attrs["archivefiles"])
+        )
+        stack_combined.attrs["transit_time"] = np.concatenate(
+            (stack_pre.attrs["transit_time"], stack_post.attrs["transit_time"])
+        )
+        stack_combined.attrs["filename"] = np.concatenate(
+            (stack_pre.attrs["filename"], stack_post.attrs["filename"])
+        )
+        stack_combined.attrs["observation_id"] = np.concatenate(
+            (stack_pre.attrs["observation_id"], stack_post.attrs["observation_id"])
+        )
+
+        # Create a tag for the combined stack using the earliest and latest observation times in the set
+        time_range = np.percentile(stack_combined.attrs["transit_time"], [0, 100])
+        stack_combined.attrs["tag"] = "{}_combined-stack_{}_to_{}".format(
+            stack_combined.attrs["source_name"],
+            ephem.unix_to_datetime(time_range[0]).strftime("%Y%m%dT%H%M%S"),
+            ephem.unix_to_datetime(time_range[1]).strftime("%Y%m%dT%H%M%S"),
+        )
+
+        return stack_combined
+
+
+def _extract_variance_pseudovariance(sample_variance):
+    var_r = sample_variance[0]
+    var_i = sample_variance[2]
+    cov_ri = sample_variance[1]
+
+    variance = var_r + var_i
+    pseudo_variance = (var_r - var_i) + 2.j*cov_ri
+
+    return variance, pseudo_variance
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
