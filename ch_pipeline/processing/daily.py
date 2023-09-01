@@ -983,16 +983,14 @@ class DailyProcessing(base.ProcessingType):
     def _generate_hook(self, user=None):
         to_run = self.status(user=user)["not_yet_submitted"]
 
-        if self._num_recent_days:
-            buffer = 2
-            today = math.floor(ephemeris.chime.get_current_lsd()) - buffer
+        buffer = 2
+        today = math.floor(ephemeris.chime.get_current_lsd()) - buffer
 
-            priority = [
-                csd
-                for csd in to_run
-                if today - int(csd) <= self._num_recent_days and today - int(csd) >= 0
-            ]
-            to_run = priority + [csd for csd in to_run if csd not in priority]
+        # Remove any days which are within the buffer window
+        to_run = [csd for csd in to_run if today - int(csd) > 0]
+        # Get any recent tags to run first
+        priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
+        to_run = priority + [csd for csd in to_run if csd not in priority]
 
         return to_run
 
