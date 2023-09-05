@@ -71,7 +71,7 @@ PREV = PRev()
 @click.option(
     "--root",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    default="/project/rpp-chime/chime/chime_processed/",  # TODO: put elsewhere
+    default=base.DEFAULT_ROOT,
     help="Set the root directory to save processed data.",
 )
 def cli(root):
@@ -206,7 +206,6 @@ def pending(revision):
 )
 def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     """Submit pending jobs for REVISION (given as type:revision)."""
-
     if fairshare or user_fairshare:
         # TODO: find a better way of supplying the account
         fs = base.slurm_fairshare("rpp-chime_cpu")
@@ -295,6 +294,52 @@ def crashed(revision, user, verbose, time):
         if verbose:
             for tag in tags:
                 click.echo(tag)
+
+
+@item.command("run")
+@click.argument("revision", type=PREV)
+@click.option("--update", type=int, default=None, help="Minute refresh time.")
+@click.option(
+    "-m",
+    "--max-number",
+    type=int,
+    default=None,
+    help="The maximum number of jobs to end up in the queue.",
+)
+@click.option(
+    "-f",
+    "--fairshare",
+    type=float,
+    default=None,
+    help="Only submit jobs above this threshold",
+)
+def run_pipeline(revision, update, max_number, fairshare):
+    """Run the pipeline service for this revision."""
+
+    from . import runner
+
+    # Set up and update the config
+    config = {
+        "update_minutes": update,
+        "max_jobs_number": max_number,
+        "min_fairshare_number": fairshare,
+        "run_indefinitely": run_indefinitely,
+    }
+    if user:
+        existing_user = runner.GLOBAL_CONFIG.get("user")
+        if existing_user is not None:
+            click.echo(
+                f"Existing user {existing_user} found. "
+                f"Job will run as user {existing_user}."
+            )
+            user = existing_user
+        # Set the global user
+        runner.GLOBAL_CONFIG["user"] = user
+
+    # Set up this revision
+    runner.setup(revision, config)
+    # Run the server
+    runner.run()
 
 
 def dirstats(path):
