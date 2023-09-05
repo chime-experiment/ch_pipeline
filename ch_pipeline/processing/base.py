@@ -18,6 +18,7 @@ cluster:
   venv: {venv}
 """
 
+DEFAULT_ROOT = "/project/rpp-chime/chime/chime_processed/"
 
 DESC_HEAD = """# Revision `{}` of type `{}`
 Please describe the purpose/changes of this revision here.
@@ -43,6 +44,7 @@ class ProcessingType(object):
     # Defined in sub-classses
     default_params = {}
     default_script = DEFAULT_SCRIPT
+    runner_config = {}
 
     def __init__(self, revision, create=False, root_path=None):
         self.revision = revision
@@ -337,6 +339,11 @@ class ProcessingType(object):
         """Return the list of tags available for processing."""
         return []
 
+    @property
+    def _all_tags(self) -> list:
+        """Return the list of tags requested by the config."""
+        return []
+
     @classmethod
     def latest(cls):
         """Create an instance to manage the latest revision.
@@ -350,7 +357,7 @@ class ProcessingType(object):
         rev = cls.ls_rev()
 
         if not rev:
-            raise RuntimeError("No revisions of type %s exist." % cls.type_name)
+            raise RuntimeError(f"No revisions of type {cls.type_name} exist.")
 
         # Create instance and set the revision
         return cls(rev[-1])
@@ -378,12 +385,9 @@ class ProcessingType(object):
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
 
-    def pending(self, user: str = None):
-        """Jobs available to run."""
-        warnings.warn(
-            "'pending' method is deprecated. Call 'status()['not_yet_submitted']'."
-        )
-        return self.status(user)["not_yet_submitted"]
+    def update_files(self, user: str = None):
+        """Overwrite to implement functionality to update required files."""
+        pass
 
     def failed(self, user: str = None, time_sort: bool = False) -> Dict[str, list]:
         """Categorize failed jobs.
@@ -533,6 +537,7 @@ class ProcessingType(object):
 
         # Return a dict of all status values
         tags = {
+            "all": self._all_tags,
             "available": available_tags,
             "not_yet_submitted": not_submitted_tags,
             "pending": pending_tags,
