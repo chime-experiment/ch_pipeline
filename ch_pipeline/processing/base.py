@@ -20,6 +20,7 @@ cluster:
   module_list: {modlist}
 """
 
+DEFAULT_ROOT = "/project/rpp-chime/chime/chime_processed/"
 
 DESC_HEAD = """# Revision `{}` of type `{}`
 Please describe the purpose/changes of this revision here.
@@ -45,6 +46,7 @@ class ProcessingType(object):
     # Defined in sub-classses
     default_params = {}
     default_script = DEFAULT_SCRIPT
+    daemon_config = {}
 
     def __init__(self, revision, create=False, root_path=None):
         self.revision = revision
@@ -339,6 +341,11 @@ class ProcessingType(object):
         """Return the list of tags available for processing."""
         return []
 
+    @property
+    def _all_tags(self) -> list:
+        """Return the list of tags requested by the config."""
+        return []
+
     @classmethod
     def latest(cls):
         """Create an instance to manage the latest revision.
@@ -352,7 +359,7 @@ class ProcessingType(object):
         rev = cls.ls_rev()
 
         if not rev:
-            raise RuntimeError("No revisions of type %s exist." % cls.type_name)
+            raise RuntimeError(f"No revisions of type {cls.type_name} exist.")
 
         # Create instance and set the revision
         return cls(rev[-1])
@@ -374,18 +381,23 @@ class ProcessingType(object):
         to_run = self._generate_hook(user=user)[:max]
 
         for tag in to_run:
-            queue_job(self.job_script(tag), submit=submit)
+            try:
+                queue_job(self.job_script(tag), submit=submit)
+            except Exception:
+                import traceback
+
+                warnings.warn(
+                    f"Exception occured while queuing tag [{tag}].\n"
+                    f"{traceback.format_exc()}"
+                )
 
     def _generate_hook(self, user: str = None) -> list:
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
 
-    def pending(self, user: str = None):
-        """Jobs available to run."""
-        warnings.warn(
-            "'pending' method is deprecated. Call 'status()['not_yet_submitted']'."
-        )
-        return self.status(user)["not_yet_submitted"]
+    def update_files(self, user: str = None):
+        """Overwrite to implement functionality to update required files."""
+        pass
 
     def failed(self, user: str = None, time_sort: bool = False) -> Dict[str, list]:
         """Categorize failed jobs.
@@ -452,8 +464,9 @@ class ProcessingType(object):
         Returns
         -------
         status
-            Return the tags associated with each status line: Available,
-            Pending, Waiting, Running, Successful, Failed
+            A dict of statuses: available, not_available, not_yet_submitted, pending,
+            running, successful, failed. The value for each status key is a list of tags
+            with that status.
         """
         file_regex = re.compile(f"^{self.tag_pattern}$")
 
@@ -534,16 +547,17 @@ class ProcessingType(object):
             crashed_tags = sorted(crashed_tags)
 
         # Return a dict of all status values
-        tags = {
+        return {
             "available": available_tags,
+            "not_available": [
+                tag for tag in self._all_tags if str(tag) not in available_tags
+            ],
             "not_yet_submitted": not_submitted_tags,
             "pending": pending_tags,
             "running": running_tags,
             "successful": finished_tags,
             "failed": crashed_tags,
         }
-
-        return tags
 
 
 def find_venv():
