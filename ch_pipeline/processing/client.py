@@ -339,7 +339,12 @@ def crashed(revision, user, verbose, time):
 @click.option(
     "-u", "--user", type=str, default=None, help="User to use when checking slurm jobs."
 )
-def run_pipeline(revision, update, max_number, fairshare, user):
+@click.option(
+    "--run-indefinitely",
+    is_flag=True,
+    help="Set if the runner should continue running even if there are no jobs remaining.",
+)
+def run_pipeline(revision, update, max_number, fairshare, user, run_indefinitely):
     """Run the pipeline service for this revision."""
 
     from . import runner
