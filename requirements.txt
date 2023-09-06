@@ -5,3 +5,4 @@ cora @ git+https://github.com/radiocosmology/cora.git
 driftscan @ git+https://github.com/radiocosmology/driftscan.git
 draco @ git+https://github.com/radiocosmology/draco.git
 pytz
+apscheduler
