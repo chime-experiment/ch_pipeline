@@ -1180,6 +1180,7 @@ class TransitStacker(task.SingleTask):
 
 class CombineHolographyPrePostNSStacks(TransitFit):
     fit_bounds = config.Property(proptype=float, default=3.0)
+    weight = config.Property(proptype=str, default="uniform")
 
     def process(self, stack_pre, stack_post):
         stack_pre.redistribute("freq")
@@ -1270,39 +1271,39 @@ class CombineHolographyPrePostNSStacks(TransitFit):
 
         stack_combined.redistribute("freq")
 
-        total_nobs = nobs_pre + nobs_post
+        stack_combined.nsample[:] = (nobs_pre + nobs_post).astype(np.uint8)
 
-        stack_combined.beam[:] = invert_no_zero(total_nobs) * (
-            nobs_pre * beam_pre + nobs_post * beam_post
-        )
-        stack_combined.weight[:] = (
-            (total_nobs) ** 2
-            * (weight_pre * weight_post)
-            * invert_no_zero(nobs_pre**2 * weight_post + nobs_post**2 * weight_pre)
+        self.log.info(f"Weight type is {self.weight}.")
+
+        if self.weight == "uniform":
+            coeff_pre = nobs_pre
+            coeff_post = nobs_post
+        elif self.weight == "inverse_variance":
+            coeff_pre = weight_pre
+            coeff_post = weight_post
+        
+        stack_combined.beam[:] = invert_no_zero(coeff_pre + coeff_post) * (
+            coeff_pre * beam_pre + coeff_post * beam_post
         )
 
-        stack_combined.nsample[:] = total_nobs.astype(np.uint8)
+        stack_combined.weight[:] = invert_no_zero(
+            coeff_pre**2 * invert_no_zero(weight_pre)
+        + coeff_post**2 * invert_no_zero(weight_post))
+        stack_combined.weight[:] *= (coeff_pre + coeff_post)**2
 
         # Here we mean the sample variance we would get if we calculated from the entire population of data
-        combined_variance = nobs_pre * (
+        combined_variance = coeff_pre * (
             variance_pre + np.abs(beam_pre) ** 2
-        ) + nobs_post * (variance_post + np.abs(beam_post) ** 2)
-        combined_variance *= invert_no_zero(total_nobs)
-        combined_variance -= (
-            np.abs(
-                invert_no_zero(total_nobs)
-                * (nobs_pre * beam_pre + nobs_post * beam_post)
-            )
-            ** 2
-        )
+        ) + coeff_post * (variance_post + np.abs(beam_post) ** 2)
+        combined_variance *= invert_no_zero(coeff_pre + coeff_post)
 
-        combined_pseudo_variance = nobs_pre * (
+        combined_pseudo_variance = coeff_pre * (
             pseudo_variance_pre + beam_pre**2
-        ) + nobs_post * (pseudo_variance_post + beam_post**2)
-        combined_pseudo_variance *= invert_no_zero(total_nobs)
-        combined_pseudo_variance -= (
-            invert_no_zero(total_nobs) * (nobs_pre * beam_pre + nobs_post * beam_post)
-        ) ** 2
+        ) + coeff_post * (pseudo_variance_post + beam_post**2)
+        combined_pseudo_variance *= invert_no_zero(coeff_pre + coeff_post)
+
+        combined_variance -= np.abs(stack_combined.beam.local_data[:])**2
+        combined_pseudo_variance -= stack_combined.beam.local_data[:]**2
 
         self.log.info("Saving to container.")
 
