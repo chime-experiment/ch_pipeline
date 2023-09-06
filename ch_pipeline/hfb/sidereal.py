@@ -52,29 +52,15 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         weight = data.weight[:].local_array
         hfb_data = data.hfb[:].local_array
 
-        # Massage down to a 3D array by combining the subfreq and beam axes, this is to
-        # fit the expectations of the base class
-        lfreq, *sb, ntime = hfb_data.shape
-        hfb_data = hfb_data.reshape(lfreq, -1, ntime)
-        weight = weight.reshape(lfreq, -1, ntime)
-
-        # perform regridding
-        # TODO: regrid each ew beam separately so we can fix up the offsets
-        _, sts, ni = self._regrid(hfb_data, weight, timestamp_lsd)
-
-        # Get back to the 4D shape we need in here
-        sts = sts.reshape(lfreq, *sb, -1)
-        ni = ni.reshape(lfreq, *sb, -1)
+        # Get lengths of dimensions (local for frequency)
+        lfreq, nsubfreq, nbeam, ntime = hfb_data.shape
+        nra = self.samples
 
         # Calculate the EW-NS grid covering the beams in the data container (*_beams),
         # and what indices (*_map) the beams will take in the output
         beams = data.index_map["beam"]
         ew_beams, ew_map = np.unique(beams // 256, return_inverse=True)
         ns_beams, ns_map = np.unique(beams % 256, return_inverse=True)
-
-        # Wrap to produce MPIArray
-        sts = mpiarray.MPIArray.wrap(sts, axis=0)
-        ni = mpiarray.MPIArray.wrap(ni, axis=0)
 
         # TODO: look up the x and y coordinates of the beams and provide a proper el
         # axis
@@ -84,13 +70,35 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
         sdata.attrs["tag"] = "lsd_%i" % self.start
-
         sh = sdata.hfb[:]
         sw = sdata.weight[:]
-        for ii in range(len(beams)):
-            ewi, nsi = ew_map[ii], ns_map[ii]
 
-            sh[:, :, ewi, nsi] = sts[:, :, ii]
-            sw[:, :, ewi, nsi] = ni[:, :, ii]
+        for iewb, ewb in enumerate(ew_beams):
+            # Select data and weights of each EW beam
+            ewb_mask = ew_map == iewb
+            hfb_data_ewb = hfb_data[:, :, ewb_mask, :]
+            weight_ewb = weight[:, :, ewb_mask, :]
+
+            # Massage down to a 3D array by combining the subfreq and beam axes,
+            # this is to fit the expectations of the base class
+            hfb_data_ewb = hfb_data_ewb.reshape(lfreq, -1, ntime)
+            weight_ewb = weight_ewb.reshape(lfreq, -1, ntime)
+
+            # perform regridding
+            # TODO: implement offset for each ew beam
+            _, sts_ewb, ni_ewb = self._regrid(hfb_data_ewb, weight_ewb, timestamp_lsd)
+
+            # Get back to the 4D shape we need in here
+            sts_ewb = sts_ewb.reshape(lfreq, nsubfreq, -1, nra)
+            ni_ewb = ni_ewb.reshape(lfreq, nsubfreq, -1, nra)
+
+            # Wrap to produce MPIArray
+            sts_ewb = mpiarray.MPIArray.wrap(sts_ewb, axis=0)
+            ni_ewb = mpiarray.MPIArray.wrap(ni_ewb, axis=0)
+
+            # Insert regridded data and weights at correct EW and NS beam indices
+            insb = ns_map[ewb_mask]
+            sh[:, :, iewb, insb, :] = sts_ewb
+            sw[:, :, iewb, insb, :] = ni_ewb
 
         return sdata
