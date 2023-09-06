@@ -757,7 +757,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0
@@ -1281,15 +1281,16 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         elif self.weight == "inverse_variance":
             coeff_pre = weight_pre
             coeff_post = weight_post
-        
+
         stack_combined.beam[:] = invert_no_zero(coeff_pre + coeff_post) * (
             coeff_pre * beam_pre + coeff_post * beam_post
         )
 
         stack_combined.weight[:] = invert_no_zero(
             coeff_pre**2 * invert_no_zero(weight_pre)
-        + coeff_post**2 * invert_no_zero(weight_post))
-        stack_combined.weight[:] *= (coeff_pre + coeff_post)**2
+            + coeff_post**2 * invert_no_zero(weight_post)
+        )
+        stack_combined.weight[:] *= (coeff_pre + coeff_post) ** 2
 
         # Here we mean the sample variance we would get if we calculated from the entire population of data
         combined_variance = coeff_pre * (
@@ -1302,8 +1303,8 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         ) + coeff_post * (pseudo_variance_post + beam_post**2)
         combined_pseudo_variance *= invert_no_zero(coeff_pre + coeff_post)
 
-        combined_variance -= np.abs(stack_combined.beam.local_data[:])**2
-        combined_pseudo_variance -= stack_combined.beam.local_data[:]**2
+        combined_variance -= np.abs(stack_combined.beam.local_data[:]) ** 2
+        combined_pseudo_variance -= stack_combined.beam.local_data[:] ** 2
 
         self.log.info("Saving to container.")
 
