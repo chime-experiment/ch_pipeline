@@ -456,7 +456,7 @@ class HFBStackDays(task.SingleTask):
 
             # For uniform weighting, simply normalize accumulated data by number
             # of days to finalize stack.hfb.
-            self.stack.hfb[:] /= norm
+            self.stack.hfb[:] *= tools.invert_no_zero(norm)
 
         else:
             # For inverse variance weighting, the weight dataset doesn't have to
@@ -790,8 +790,8 @@ class HFBFlattenRingMapPFB(task.SingleTask):
         """
 
         # Extract data and weight from container
-        data = stream.hfb
-        weight = stream.weight
+        data = stream.hfb[:].local_array
+        weight = stream.weight[:].local_array
 
         # Mask out DC bin (subfrequency bin 64) by setting weight to zero
         weight[:, 64, :, :] = 0
@@ -843,7 +843,7 @@ class HFBDividePFB(task.SingleTask):
         weight = stream.weight
 
         # Mask out DC bin (subfrequency bin 64) by setting weight to zero
-        weight[:, 64, :] = 0
+        weight[:, 64, ...] = 0
 
         # Get PFB shape, instantiating PFB-deconvolution class with default parameters
         pfb_shape = DeconvolvePFB().Wt2.sum(axis=1)
@@ -853,11 +853,11 @@ class HFBDividePFB(task.SingleTask):
         out = dcontainers.empty_like(stream)
 
         # Divide data by PFB shape and place in output container
-        out.hfb[:] = data / pfb_shape[:, np.newaxis]
+        out.hfb[:] = data / pfb_shape[:, np.newaxis, np.newaxis, np.newaxis]
 
         # Divide uncertainties by PFB shape, hence multiply weights by square
         # of PFB shape, and place in output container.
-        out.weight[:] = weight * pfb_shape[:, np.newaxis] ** 2
+        out.weight[:] = weight * pfb_shape[:, np.newaxis, np.newaxis, np.newaxis] ** 2
 
         return out
 
@@ -1207,9 +1207,9 @@ class HFBSearch(task.SingleTask):
         for ibeam in range(nbeam):
             for iel in range(nel):
                 for ira in range(nra):
+                    # Sums
                     sum_data = np.sum(weighted_data[ibeam, iel, ira, :])
                     sum_weight = np.sum(weight[ibeam, iel, ira, :])
-                    sum_template = np.sum(self.template)
                     inv_sum_weight = tools.invert_no_zero(sum_weight)
                     # Convolutions
                     template_data = convolve(
@@ -1236,7 +1236,7 @@ class HFBSearch(task.SingleTask):
                     A = num * tools.invert_no_zero(denom)
                     # Signal to noise ratio, Lambda
                     c1 = sum_data * inv_sum_weight
-                    c2 = sum_data * inv_sum_weight - A * sum_template * inv_sum_weight
+                    c2 = sum_data * inv_sum_weight - A * template_weight * inv_sum_weight
                     Lambda = (
                         (c1**2 - c2**2) * (sum_weight)
                         - 2 * (c1 - c2) * (sum_data)

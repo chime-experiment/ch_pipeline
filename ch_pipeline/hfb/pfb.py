@@ -6,6 +6,7 @@ import scipy.sparse as ss
 import scipy.linalg as la
 
 from caput import pfb
+from draco.util import tools
 
 
 class DeconvolvePFB:
@@ -214,7 +215,7 @@ class DeconvolvePFB:
         fNi = np.empty_like(Ni)
         for ii in range(x.shape[0]):
             a, b = la.solve(Ci[ii], dirty[ii], assume_a="pos")
-            fx[ii] = (x[ii] - b) / (a * w[:, np.newaxis])
+            fx[ii] = (x[ii] - b) * tools.invert_no_zero(a * w[:, np.newaxis])
             fNi[ii] = (a * w[:, np.newaxis]) ** 2 * Ni[ii]
 
         return fx, Ni
