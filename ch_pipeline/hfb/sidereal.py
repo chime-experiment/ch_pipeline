@@ -5,11 +5,11 @@ from caput import mpiarray
 from ch_util import ephemeris
 from draco.analysis.sidereal import SiderealRegridderLinear
 
+from beam_model.formed import FFTFormedActualBeamModel
+
 from .containers import HFBData, HFBRingMap
 
 
-# TODO: this is really just a copy-paste of much of the underlying .process(...), with
-# some refactoring of the base task this task could probably be eliminated
 class HFBSiderealRegridder(SiderealRegridderLinear):
     """Regrid HFB data."""
 
@@ -24,6 +24,10 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
 
         # Set up the default Observer
         self.observer = ephemeris.chime if observer is None else observer
+
+        # Get hour angles of EW beams (in deg) from beam model
+        beam_mdl = FFTFormedActualBeamModel()
+        self.ew_beam_offset_deg = beam_mdl.config["ew_spacing"]
 
     def process(self, data: HFBData) -> HFBRingMap:
         """Regrid HFB timestream data onto the sidereal day.
@@ -65,7 +69,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         # TODO: look up the x and y coordinates of the beams and provide a proper el
         # axis
         sdata = HFBRingMap(
-            axes_from=data, attrs_from=data, ra=self.samples, beam=ew_beams, el=ns_beams
+            axes_from=data, attrs_from=data, ra=nra, beam=ew_beams, el=ns_beams
         )
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
@@ -84,9 +88,13 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
             hfb_data_ewb = hfb_data_ewb.reshape(lfreq, -1, ntime)
             weight_ewb = weight_ewb.reshape(lfreq, -1, ntime)
 
-            # perform regridding
-            # TODO: implement offset for each ew beam
-            _, sts_ewb, ni_ewb = self._regrid(hfb_data_ewb, weight_ewb, timestamp_lsd)
+            # Implement time offset for each EW beam
+            timestamp_lsd_ewb = timestamp_lsd + self.ew_beam_offset_deg[ewb] / 360.0
+
+            # Perform regridding
+            _, sts_ewb, ni_ewb = self._regrid(
+                hfb_data_ewb, weight_ewb, timestamp_lsd_ewb
+            )
 
             # Get back to the 4D shape we need in here
             sts_ewb = sts_ewb.reshape(lfreq, nsubfreq, -1, nra)
