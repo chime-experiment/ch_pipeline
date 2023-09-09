@@ -52,7 +52,7 @@ from ch_util import tools, ephemeris, finder, layout, andata
 from ch_pipeline.core import containers
 
 
-_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
+_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-chime/chime/chime_online/"}
 
 
 def _force_list(val) -> list:
