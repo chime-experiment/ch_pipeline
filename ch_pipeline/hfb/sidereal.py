@@ -66,10 +66,12 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         ew_beams, ew_map = np.unique(beams // 256, return_inverse=True)
         ns_beams, ns_map = np.unique(beams % 256, return_inverse=True)
 
-        # TODO: look up the x and y coordinates of the beams and provide a proper el
-        # axis
+        # Look up reference zenith angles from beam model and convert to el = sin(za)
+        za_deg = self.beam_mdl.reference_angles[ns_beams]
+        el = np.sin(za_deg / 180.0 * np.pi)
+
         sdata = HFBRingMap(
-            axes_from=data, attrs_from=data, ra=nra, beam=ew_beams, el=ns_beams
+            axes_from=data, attrs_from=data, ra=nra, beam=ew_beams, el=el
         )
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
