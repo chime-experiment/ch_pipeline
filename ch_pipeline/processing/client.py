@@ -4,12 +4,17 @@ from . import base
 from . import daily
 from . import beam
 from . import quarterstack
+from . import sidereal
 
 click.disable_unicode_literals_warning = True
 
 
 # Map the type names to classes
-_typedict = {t.type_name: t for t in base.all_subclasses(base.ProcessingType)}
+_typedict = {
+    t.type_name: t
+    for t in base.all_subclasses(base.ProcessingType)
+    if hasattr(t, "type_name")
+}
 
 
 class PType(click.ParamType):

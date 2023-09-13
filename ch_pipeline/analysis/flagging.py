@@ -4,7 +4,9 @@ Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
-from typing import Union
+from __future__ import annotations
+from typing import overload
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
@@ -68,7 +70,17 @@ class RFIFilter(task.SingleTask):
     threshold_mad = config.Property(proptype=float, default=6.0)
     use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
+    @overload
+    def process(
+        self, data: andata.CorrData | dcontainers.TimeStream
+    ) -> containers.RFIMask | dcontainers.RFIMask:
+        ...
+
+    @overload
+    def process(self, data: dcontainers.SiderealStream) -> dcontainers.SiderealRFIMask:
+        ...
+
+    def process(self, data):
         """Creates a mask by identifying outliers in the
         autocorrelation data.  This mask can be used to zero out
         frequencies and time samples that are contaminated by RFI.
@@ -117,7 +129,10 @@ class RFIFilter(task.SingleTask):
         # Create container to hold output
         if self.use_draco_container:
             # draco RFIMask container is not distributed
-            out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            if "time" in data.index_map:
+                out = dcontainers.RFIMask(axes_from=data, attrs_from=data)
+            elif "ra" in data.index_map:
+                out = dcontainers.SiderealRFIMask(axes_from=data, attrs_from=data)
             mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()[:, 0, :]
         else:
             out = containers.RFIMask(input=minput, axes_from=data, attrs_from=data)
@@ -136,6 +151,69 @@ class RFIFilter(task.SingleTask):
         out.mask[:] = mask
 
         # Return output container
+        return out
+
+
+class MaskStaticRFI(task.SingleTask):
+    """Get the static mask for the time period covered by the data.
+
+    This is the same static mask used in :class:`RFIFilter` and
+    :class:`RFISensitivityMask`.
+
+    Parameters
+    ----------
+    invert : bool, optional
+        Whether to invert the mask. Defaults to False.
+    """
+
+    invert = config.Property(proptype=bool, default=False)
+
+    @overload
+    def process(self, data: dcontainers.TimeStream) -> dcontainers.RFIMask:
+        ...
+
+    @overload
+    def process(self, data: dcontainers.SiderealStream) -> dcontainers.SiderealRFIMask:
+        ...
+
+    def process(self, data):
+        """Create a mask with all static frequency bands for a given day.
+
+        Parameters
+        ----------
+        data
+            container with data to mask. Should have either a time-like axis
+            or a `lsd` attribute which can be converted to a UNIX timestamp.
+
+        Returns
+        -------
+        mask
+            boolean mask that can be applied to the input container
+        """
+        # Redistribute across frequency
+        data.redistribute("freq")
+
+        # Create mask container. draco RFIMask is not distributed.
+        if "ra" in data.axes[:]:
+            timestamp = ephemeris.csd_to_unix(data.attrs["lsd"])
+            out = dcontainers.SiderealRFIMask(copy_from=data)
+        elif "time" in data.axes[:]:
+            timestamp = data.time[0]
+            out = dcontainers.RFIMask(copy_from=data)
+        else:
+            raise ValueError("No definition for `time` or `ra` axes.")
+
+        mask = rfi.frequency_mask(data.freq[:], timestamp=timestamp)
+
+        # Invert if flag is set. The mask is already consistent with
+        # the convention that anything marked True is masked, so inverting
+        # will go against standard convention.
+        if self.invert:
+            mask = ~mask
+
+        # Expand 1D mask to proper shape
+        out.mask[:] = mask[:, np.newaxis]
+
         return out
 
 
