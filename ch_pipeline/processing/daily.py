@@ -980,12 +980,15 @@ class DailyProcessing(base.ProcessingType):
 
         return nfiles
 
-    def _generate_hook(self, user=None):
+    def _generate_hook(self, user=None, priority_only=False):
         # Get the list of tags remaining to run, in order
         to_run = self.status(user=user)["not_yet_submitted"]
         # Prioritize some number of recent days
         today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
         priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
+
+        if priority_only:
+            return priority
 
         return priority + [csd for csd in to_run if csd not in priority]
 

@@ -195,32 +195,54 @@ def pending(revision):
     "-f",
     "--fairshare",
     type=float,
-    default=None,
+    default=0.0,
     help="Only submit jobs if the account LevelFS is above this threshold.",
 )
 @click.option(
     "--user-fairshare",
     type=float,
-    default=None,
+    default=0.0,
     help="Only submit jobs if the user LevelFS is above this threshold.",
 )
-def generate(revision, number, max_number, submit, fairshare, user_fairshare):
+@click.option(
+    "-p",
+    "--priority-fairshare",
+    type=float,
+    default=0.0,
+    help="Fairshare threshold for priority jobs. The smaller of `fairshare` or this is used.",
+)
+def generate(
+    revision, number, max_number, submit, fairshare, user_fairshare, priority_fairshare
+):
     """Submit pending jobs for REVISION (given as type:revision)."""
+    priority_only = False
 
-    if fairshare or user_fairshare:
-        # TODO: find a better way of supplying the account
-        fs = base.slurm_fairshare("rpp-chime_cpu")
+    fs = base.slurm_fairshare("rpp-chime_cpu")
 
-    if fairshare and fairshare > fs[0]:
+    # If a fairshare limit has been set, check that the current fairshare
+    # is below it.
+    if fairshare > fs[0]:
         click.echo(
-            f"Current fairshare {fs[0]} is lower than threshold {fairshare}. Skipping."
+            f"Current fairshare {fs[0]} is lower than threshold {fairshare}. "
+            "Skipping non-priority."
         )
-        return
+        priority_only = True
 
-    if user_fairshare and user_fairshare > fs[1]:
+    # If a user fairshare limit has been set, check that the current user
+    # fairshare is below it.
+    if user_fairshare > fs[1]:
         click.echo(
             f"Current user fairshare {fs[1]} is lower than threshold {user_fairshare}. "
-            "Skipping."
+            "Skipping non-priority."
+        )
+        priority_only = True
+
+    # If a priority fairshare limit has been set, check if priority jobs
+    # can still be processed
+    if priority_only and priority_fairshare > fs[0]:
+        click.echo(
+            f"Current fairshare {fs[0]} is lower than priority threshold {priority_fairshare}. "
+            "Skipping all."
         )
         return
 
@@ -232,7 +254,7 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
-    revision.generate(max=number_to_submit, submit=submit)
+    revision.generate(max=number_to_submit, submit=submit, priority_only=priority_only)
 
 
 @item.command("status")
@@ -295,6 +317,55 @@ def crashed(revision, user, verbose, time):
         if verbose:
             for tag in tags:
                 click.echo(tag)
+
+
+@item.command("run")
+@click.argument("revision", type=PREV)
+@click.option("--update", type=int, default=None, help="Minute refresh time.")
+@click.option(
+    "-m",
+    "--max-number",
+    type=int,
+    default=None,
+    help="The maximum number of jobs to end up in the queue.",
+)
+@click.option(
+    "-f",
+    "--fairshare",
+    type=float,
+    default=None,
+    help="Only submit jobs above this threshold.",
+)
+@click.option(
+    "-u", "--user", type=str, default=None, help="User to use when checking slurm jobs."
+)
+def run_pipeline(revision, update, max_number, fairshare, user):
+    """Run the pipeline service for this revision."""
+
+    from . import runner
+
+    # Set up and update the config
+    config = {
+        "update_minutes": update,
+        "max_jobs_number": max_number,
+        "min_fairshare_number": fairshare,
+        "run_indefinitely": run_indefinitely,
+    }
+    if user:
+        existing_user = runner.GLOBAL_CONFIG.get("user")
+        if existing_user is not None:
+            click.echo(
+                f"Existing user {existing_user} found. "
+                f"Job will run as user {existing_user}."
+            )
+            user = existing_user
+        # Set the global user
+        runner.GLOBAL_CONFIG["user"] = user
+
+    # Set up this revision
+    runner.setup(revision, config)
+    # Run the server
+    runner.run()
 
 
 def dirstats(path):

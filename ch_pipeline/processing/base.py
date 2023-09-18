@@ -364,7 +364,13 @@ class ProcessingType(object):
         # Create instance and set the revision
         return cls(rev[-1])
 
-    def generate(self, max: int = 10, submit: bool = True, user: str = None):
+    def generate(
+        self,
+        max: int = 10,
+        submit: bool = True,
+        user: str = None,
+        priority_only: bool = False,
+    ):
         """Queue up jobs that are available to run.
 
         Parameters
@@ -378,7 +384,7 @@ class ProcessingType(object):
             will default to the current user
         """
 
-        to_run = self._generate_hook(user=user)[:max]
+        to_run = self._generate_hook(user=user, priority_only=priority_only)[:max]
 
         for tag in to_run:
             try:
@@ -391,7 +397,7 @@ class ProcessingType(object):
                     f"{traceback.format_exc()}"
                 )
 
-    def _generate_hook(self, user: str = None) -> list:
+    def _generate_hook(self, user: str = None, **kwargs) -> list:
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
 
