@@ -2259,3 +2259,109 @@ class SetInputFlag(ApplyInputFlag):
         data.input_flags[:] = flag
 
         return data
+
+
+class IterHPFMask(task.SingleTask):
+    """Generate a frequency mask using an iterative HPF method.
+
+    Generate a frequency mask by iteratively high-pass filtering the RMS of the
+    given data and masking the frequencies that exceed a noise threshold
+    estimated from adjacent frequency bins. This task applies the algorithm
+    implemented in `ch_util.rfi.iterative_hpf_masking` to the RMS along a
+    specified axis of the data provided. Flags are derived for every element of
+    the remaining axes, and combined at the end to generate a single frequency
+    mask.
+
+    Attributes
+    ----------
+    dataset: str
+        The dataset to use to derive the mask.
+    rms_axis: str
+        The axis to use to compute the RMS over.
+    niter: int
+        The maximum number of iterations.
+    delay_cut: float
+        The delay cut for the high-pass filter (in micro-seconds).
+    threshold: float
+        The threshold in units of noise standard deviation at which to flag
+        frequencies at every iteration.
+    min_frac_good: float
+        The minimum fraction of unflagged data at a given frequency required for it
+        not to be masked.
+    """
+
+    threshold = config.Property(proptype=float, default=5.0)
+    niter = config.Property(proptype=int, default=10)
+    delay_cut = config.Property(proptype=float, default=0.6)
+    rms_axis = config.Property(proptype=str, default="ra")
+    dataset = config.Property(proptype=str, default="map")
+    min_frac_good = config.Property(proptype=float, default=0.75)
+
+    def process(self, data):
+        """Generate a mask for the data.
+
+        Parameters
+        ----------
+        data: draco.containers.ContainerBase
+            Data to be used to generate the mask.
+        """
+        from mpi4py import MPI
+
+        if self.dataset not in data.datasets:
+            raise ValueError(f"Container {type(data)} has no '{self.dataset}' dataset.")
+        axes = list(data[self.dataset].attrs["axis"])
+        if self.rms_axis not in axes:
+            raise ValueError(
+                f"Dataset '{self.dataset}' has no '{self.rms_axis}' axis'."
+            )
+
+        # figure out what is the largest remaining axis
+        rem_axes = [a for a in axes if a not in ["freq", self.rms_axis]]
+        rem_ind = [axes.index(a) for a in rem_axes]
+        dist_axis = rem_axes[np.argmax([data[self.dataset].shape[i] for i in rem_ind])]
+
+        # redistribute over remaining axis
+        data.redistribute(dist_axis)
+
+        # get view of local array
+        dv = data[self.dataset][:].local_array
+        dw = data["weight"][:].local_array
+
+        # find indices to relevant axes
+        rms_ind = axes.index(self.rms_axis)
+        freq_ind = axes.index("freq")
+        nf, _ = dv.shape[freq_ind], dv.shape[rms_ind]
+
+        # compute RMS and collapse remaining axes
+        rms = np.mean(np.sqrt(np.abs(dv) ** 2 * (dw != 0.0)), axis=rms_ind)
+        freq_ind = freq_ind if rms_ind > freq_ind else freq_ind - 1
+        rms = np.moveaxis(rms, freq_ind, -1).reshape(-1, nf)
+
+        # set initial frequency mask according to missing data
+        flags = ~np.all((rms == 0), axis=0)
+
+        # generate mask
+        masks = np.zeros((rms.shape[0], nf), dtype=np.int)
+        for i in range(rms.shape[0]):
+            yhpf, new_flag, rsigma = rfi.iterative_hpf_masking(
+                data.freq[:],
+                rms[i],
+                tau_cut=self.delay_cut,
+                flag=flags,
+                niter=self.niter,
+                threshold=self.threshold,
+            )
+            masks[i] = new_flag
+
+        # combine masks over ranks
+        mask_sum = np.zeros(nf, dtype=np.int)
+        data.comm.Allreduce(np.sum(masks, axis=0), mask_sum, MPI.SUM)
+        N = data.comm.allreduce(masks.shape[0], MPI.SUM)
+
+        # produce final frequency mask
+        mask = dcontainers.RFIMask(time=1, freq=data.index_map["freq"][:])
+        # NB convention is that True identifies bad data in the RFIMask,
+        # the flags derived above use the opposite convention
+        mask.mask[:, 0] = mask_sum < (N * self.min_frac_good)
+
+        return mask
