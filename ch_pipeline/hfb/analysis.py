@@ -936,3 +936,53 @@ def _ensure_list(x):
         y = [x]
 
     return y
+
+
+class HFBMedianSubtraction(task.SingleTask):
+    """Subtract median along beam axis to remove fluctuations in the data induced by temperature
+    fluctuations in East receiver hut."""
+
+    def process(self, stream):
+        """Flatten HFB data.
+
+        Parameters
+        ----------
+        stream : containers.HFBTimeAverage
+            Container with time-averaged HFB data.
+
+        Returns
+        -------
+        out : containers.HFBTimeAverage
+            Container with flattened time-averaged HFB data.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+
+        
+        # Reshape beam axis to separate NS and EW beams
+        freq, subfreq, _, time = data.shape
+        new_shape = (freq, subfreq, 256, 4, time)
+        data_reshaped = data.reshape(new_shape)    
+
+        # Subtract median along NS-beams from the data
+        diff = data_reshaped - np.median(data_reshaped, axis=2)[:, :, None, :, :]
+        #diff = data_reshaped - np.median(data_reshaped, axis=2)[:, :, None, :, :]
+
+
+        #Reshape to the original
+        diff = diff.reshape(data.shape)
+
+        # Create container to hold output
+        out = containers.HFBData(stream)
+
+        # Place diff in output container
+        out.hfb[:] = diff
+        out.weight[:] = weight
+
+        return out
