@@ -690,7 +690,7 @@ class EigenCalibration(task.SingleTask):
         eps = 10.0 * np.finfo(evec.dtype).eps
         evec_all_zero = np.all(np.abs(evec[:, 0]) < eps, axis=(0, 2))
 
-        input_flags = np.zeros(ninput, dtype=np.bool)
+        input_flags = np.zeros(ninput, dtype=bool)
         for ii in range(ninput):
             input_flags[ii] = np.logical_not(
                 mpiutil.allreduce(evec_all_zero[ii], op=MPI.LAND, comm=data.comm)
@@ -1367,7 +1367,7 @@ class FlagAmplitude(task.SingleTask):
 
                     self.log.info(
                         "Pol %s:  %d frequencies are outliers."
-                        % (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int))
+                        % (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int64))
                     )
 
                 # Broadcast outlier frequencies to other ranks
@@ -1571,7 +1571,9 @@ class SiderealCalibration(task.SingleTask):
 
         # Determine good inputs
         nfeed = len(inputmap)
-        good_input = np.arange(nfeed, dtype=np.int)[inputmask.datasets["input_mask"][:]]
+        good_input = np.arange(nfeed, dtype=np.int64)[
+            inputmask.datasets["input_mask"][:]
+        ]
 
         # Use input map to figure out which are the X and Y feeds
         xfeeds = np.array(
@@ -1648,7 +1650,7 @@ class SiderealCalibration(task.SingleTask):
         if self.model_fit:
             # Only fit ra values above the specified dynamic range threshold
             # that are contiguous about the expected peak position.
-            fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
+            fit_flag = np.zeros([nfreq, nfeed, nra], dtype=bool)
             fit_flag[:, xfeeds, :] = _contiguous_flag(
                 dr_x > self.threshold, centre=slice_centre
             )[:, np.newaxis, :]
@@ -1803,7 +1805,7 @@ class ThermalCalibration(task.SingleTask):
         else:
             timestamp = data.time[:]
             gain = containers.CommonModeGainData(
-                time=timestamp, axes_from=data, distributed=True, comm=data.comm
+                axes_from=data, distributed=True, comm=data.comm
             )
         # Redistribute
         gain.redistribute("freq")
@@ -1822,7 +1824,7 @@ class ThermalCalibration(task.SingleTask):
         try:
             # First attempt to group all dataset_ids for all frequencies on
             # rank=0 so it can do the full lookup
-            dataset_ids = data.flags["dataset_id"][:].gather(rank=0)
+            dataset_ids = data.dataset_id[:].gather(rank=0)
 
             if self.comm.rank == 0:
                 # Try to use the dataset ID scheme in here, if the time range passed won't
@@ -1903,7 +1905,7 @@ class ThermalCalibration(task.SingleTask):
         interp_stop = reftime_result["interp_stop"]
 
         # Ones. Don't modify data where there are no gains
-        g = np.ones((nfreq, ntimes), dtype=np.float)
+        g = np.ones((nfreq, ntimes), dtype=np.float64)
 
         # Simple gains. No interpolation.
         direct_gains = np.isfinite(reftime) & (~np.isfinite(reftime_prev))
@@ -2661,7 +2663,7 @@ class FlagNarrowbandGainError(task.SingleTask):
             # The input container has a time axis.  Use a singleton lsd axis.
             timestamp = data.time[np.newaxis, :]
 
-            out = containers.RFIMask(time=data.time, axes_from=data, attrs_from=data)
+            out = containers.RFIMask(axes_from=data, attrs_from=data)
 
         # Determine dimensions
         nfreq, ninput, nupdate = self.frac_error.shape
@@ -2873,7 +2875,7 @@ class CalibrationCorrection(task.SingleTask):
         prod = sstream.prod[stack_new["prod"]].copy()
 
         # Swap the product pair order for conjugated stack indices
-        cj = np.flatnonzero(stack_new["conjugate"].astype(np.bool))
+        cj = np.flatnonzero(stack_new["conjugate"].astype(bool))
         if cj.size > 0:
             prod["input_a"][cj], prod["input_b"][cj] = (
                 prod["input_b"][cj],

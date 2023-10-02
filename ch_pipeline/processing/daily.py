@@ -1,10 +1,9 @@
-import os
 import math
-import datetime
 
 import chimedb.core as db
-from ch_util import ephemeris
 import chimedb.data_index as di
+from ch_util import ephemeris
+from caput.tools import unique_ordered
 
 from . import base
 
@@ -69,6 +68,7 @@ pipeline:
         accept_all_global_flags: true
         node_spoof:
           cedar_online: "/project/rpp-chime/chime/chime_online/"
+        connection_attempts: 5
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -82,13 +82,6 @@ pipeline:
       out: tcorr
       params:
         files: "{timing_file}"
-        distributed: false
-
-    # Load the frequency map
-    - type: ch_pipeline.core.io.LoadSetupFile
-      out: freqmap
-      params:
-        filename: "{freqmap_file}"
         distributed: false
 
     - type: draco.core.misc.AccumulateList
@@ -145,10 +138,19 @@ pipeline:
       params:
         exclude_intracyl: true
 
+    # Mask out any weights that are abnormally large or small, since these are likely
+    # numerical issues and represent bad data
+    - type: draco.analysis.flagging.SanitizeWeights
+      in: tstream
+      out: tstream_sanitized
+      params:
+        max_thresh: 1e30
+        min_thresh: 1e-30
+
     # Identify individual baselines with much lower weights than expected
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
-      in: tstream
+      in: tstream_sanitized
       out: full_bad_baseline_mask
       params:
         average_type: "median"
@@ -162,10 +164,16 @@ pipeline:
       in: full_bad_baseline_mask
       out: bad_baseline_mask
 
+    # Load the frequency map that was active when this data was collected
+    - type: ch_pipeline.core.dataquery.QueryFrequencyMap
+      in: tstream_sanitized
+      out: freqmap
+      params:
+        cache: false
+
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      requires: freqmap
-      in: [tstream, inputmap]
+      in: [tstream_sanitized, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
@@ -174,7 +182,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream
+      in: tstream_sanitized
       out: tstream_col
       params:
         weight: "natural"
@@ -190,7 +198,6 @@ pipeline:
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
       in: sensitivity
-      out: sensitivity_day
       params:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
@@ -222,13 +229,13 @@ pipeline:
 
     # Apply the mask from the bad baselines. This will modify the data in
     # place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_day, bad_baseline_mask_day]
       out: tstream_bbm
 
     # Apply the mask from the decorrelated cylinders. This will modify the data
     # in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_bbm, decorr_cyl_mask_day_exp]
       out: tstream_dcm
 
@@ -252,7 +259,7 @@ pipeline:
         nan_check: false
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_dcm, rfimask]
       out: tstream_day_rfi
 
@@ -283,30 +290,48 @@ pipeline:
       params:
         samples: 4096
 
-    # Precision truncate the sidereal stream data and write it out
+    # Precision truncate the sidereal stream data
     - type: draco.core.io.Truncate
       in: sstream
+      out: sstream_trunc
       params:
         dataset:
           vis:
             weight_dataset: vis_weight
             variance_increase: 1.0e-3
           vis_weight: 1.0e-5
+
+    # Save the truncated sidereal stream to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: sstream_trunc
+      out: sstream_trunc_handle
+      params:
         compression:
           vis:
             chunks: [32, 512, 512]
           vis_weight:
             chunks: [32, 512, 512]
         save: true
-        output_name: "sstream_{{tag}}.zarr"
+        output_name: "sstream_{{tag}}.zarr.zip"
+        remove: true
 
     # Flag out low weight samples to remove transient RFI artifacts at the edges of
     # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeightBaselineAlt
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
       in: sstream
-      out: sstream_tvwb
+      out: full_tvwb_mask
       params:
         relative_threshold: 0.5
+        ignore_absolute_threshold: -1
+        average_type: "mean"
+        pols_to_flag: "all"
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyBaselineMask
+      in: [sstream, full_tvwb_mask]
+      out: sstream_tvwb
 
     # Generate the second RFI mask using targeted knowledge of the instrument
     - type: draco.analysis.flagging.RFIMask
@@ -318,7 +343,7 @@ pipeline:
         save: true
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [sstream_tvwb, rfimask2]
       out: sstream_mask
 
@@ -336,12 +361,20 @@ pipeline:
     # Precision truncate and write out the chunked normal ringmap
     - type: draco.core.io.Truncate
       in: ringmap
+      out: ringmap_trunc
       params:
         dataset:
           map:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
+
+    # Save the truncated ringmap to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_trunc
+      out: ringmap_trunc_handle
+      params:
         compression:
           map:
             chunks: [1, 1, 32, 512, 512]
@@ -350,7 +383,8 @@ pipeline:
           dirty_beam:
             chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_{{tag}}.zarr"
+        output_name: "ringmap_{{tag}}.zarr.zip"
+        remove: true
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
@@ -369,12 +403,20 @@ pipeline:
     # result in both ringmaps existing in memory at the same time.
     - type: draco.core.io.Truncate
       in: ringmap_int
+      out: ringmap_int_trunc
       params:
         dataset:
           map:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
+
+    # Save the truncated intercylinder ringmap to a .zarr file and start a background
+    # task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_int_trunc
+      out: ringmap_int_trunc_handle
+      params:
         compression:
           map:
             chunks: [1, 1, 32, 512, 512]
@@ -383,7 +425,8 @@ pipeline:
           dirty_beam:
             chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.zarr"
+        output_name: "ringmap_intercyl_{{tag}}.zarr.zip"
+        remove: true
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
@@ -395,6 +438,31 @@ pipeline:
       params:
         share: vis
         mask_short_ew: 1.0
+
+    # Load the source catalogs to measure flux as a function of hour angle
+    - type: draco.core.io.LoadBasicCont
+      out: source_catalog_nocollapse
+      params:
+        files:
+        - "{catalogs[0]}"
+
+    # Measure the beamformed visibility as a function of hour angle
+    - type: draco.analysis.beamform.BeamFormCat
+      requires: [manager, sstream_inter]
+      in: source_catalog_nocollapse
+      out: sourceflux_nocollapse
+      params:
+        timetrack: 300.0
+        collapse_ha: false
+        save: true
+        output_name: "sourceflux_vs_ha_{{tag}}.h5"
+
+    # Wait until the additional catalog is loaded, otherwise this task will
+    # run its setup method and significantly increase memory used
+    - type: draco.core.misc.WaitUntil
+      requires: sourceflux_nocollapse
+      in: sstream_inter
+      out: sstream_inter2
 
     # Load the source catalogs to measure fluxes of
     - type: draco.core.io.LoadBasicCont
@@ -408,7 +476,7 @@ pipeline:
 
     # Measure the observed fluxes of the point sources in the catalogs
     - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_inter]
+      requires: [manager, sstream_inter2]
       in: source_catalog
       params:
         timetrack: 300.0
@@ -470,17 +538,24 @@ pipeline:
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
-    # Also, mask out an additional frequency band which isn't that visible in
-    # the data but generates a lot of high delay power
+    # Also, mask out some additional frequencies:
+    # 506.25 - 511.71 MHz: band which isn't that visible in the data but generates
+    # a lot of high delay power
+    # 519.14 - 525.4 MHz: unmasked band in the stack that seems to generate a lot
+    # of power across all delays
+    # 601.56 - 608.59 MHz: sporadic band which generates some power
+    # 459.38 - 465.23 MHz: another high-power band in the stack
+    # 609.77 - 610.55 MHz: narrow band in stack creating artifacts in delay-filtered
+    # ringmaps 
     - type: draco.analysis.flagging.MaskFreq
       in: sstream_blend3
       out: factmask
       params:
         factorize: true
-        bad_freq_ind: [[738, 753]]
+        bad_freq_ind: [[738, 753], [703, 720], [490, 509], [857, 873], [485, 488]]
 
     # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyRFIMask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [sstream_blend3, factmask]
       out: sstream_blend4
 
@@ -520,16 +595,107 @@ pipeline:
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
 
-    # Zip up the zarr outputs. This doesn't actually need the sstream input
-    # it's just to guarantee this task doesn't start too early
-    - type: draco.core.io.ZipZarrContainers
-      requires: sstream_dfilter
+    # Make an intercylinder ringmap from the delay-filtered visibilities,
+    - type: draco.analysis.ringmapmaker.RingMapMaker
+      requires: manager
+      in: sstream_dfilter
+      out: ringmap_int_hpf
       params:
-        containers:
-          - "sstream_lsd_{tag}.zarr"
-          - "ringmap_lsd_{tag}.zarr"
-          - "ringmap_intercyl_lsd_{tag}.zarr"
+        single_beam: true
+        weight: natural
+        exclude_intracyl: true
+        include_auto: false
+
+    # Select 10 frequencies from the delay-filtered map that are useful for validation
+    - type: draco.analysis.transform.SelectFreq
+      in: ringmap_int_hpf
+      out: ringmap_int_hpf_sel
+      params:
+        channel_index: {val_freq}
+
+    # Precision truncate and write out the chunked filtered ringmap.
+    # Don't truncate the map itself, to preserve low-amplitude pixels.
+    - type: draco.core.io.Truncate
+      in: ringmap_int_hpf_sel
+      out: ringmap_int_hpf_sel_trunc
+      params:
+        dataset:
+          map: No
+          weight: 1.0e-5
+
+    # Save the truncated filtered intercylinder ringmap to a .zarr file and
+    # start a background task to zip it
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_int_hpf_sel_trunc
+      out: ringmap_int_hpf_sel_trunc_handle
+      params:
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
         remove: true
+
+    # Downselect the ringmap to keep only the XX and YY pols
+    - type: draco.analysis.transform.Downselect
+      in: ringmap_int_hpf
+      out: ringmap_int_hpf_xx_yy
+      params:
+        selections:
+          pol_index: [0, 3]
+
+    # Take the variance of the map across elevation. Apply weights
+    # as a mask only
+    - type: draco.analysis.transform.ReduceVar
+      in: ringmap_int_hpf_xx_yy
+      params:
+        axes:
+          - el
+        dataset: map
+        weighting: weighted
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
+
+    # Take the variance of the map across frequency. Apply weights
+    # as a mask only
+    - type: draco.analysis.transform.ReduceVar
+      in: ringmap_int_hpf_xx_yy
+      params:
+        axes:
+          - freq
+        dataset: map
+        weighting: weighted
+        compression:
+          map:
+            chunks: [1, 1, 32, 512, 512]
+          weight:
+            chunks: [1, 32, 512, 512]
+        save: true
+        output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
+
+    # Wait for all the zarr zipping tasks to complete
+    # Wait for the sstream last since it will likely take the
+    # longest to complete
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_int_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_int_hpf_sel_trunc_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: sstream_trunc_handle
 """
 
 
@@ -574,20 +740,24 @@ class DailyProcessing(base.ProcessingType):
             {"start": "CSD2059", "end": "CSD2060"},
             {"start": "CSD2072", "end": "CSD2143"},
             # Intervals for which we process only one day every 7 days, this
-            # will slowly build up coverage over the whole timespan up to
-            # October 2022
-            {"start": "CSD1878", "end": "CSD3250", "step": 7},
-            {"start": "CSD1879", "end": "CSD3250", "step": 7},
-            {"start": "CSD1880", "end": "CSD3250", "step": 7},
-            {"start": "CSD1881", "end": "CSD3250", "step": 7},
-            {"start": "CSD1882", "end": "CSD3250", "step": 7},
-            {"start": "CSD1883", "end": "CSD3250", "step": 7},
-            {"start": "CSD1884", "end": "CSD3250", "step": 7},
+            # will slowly build up coverage over the whole timespan, extending
+            # as new days become available
+            {"start": "CSD1878", "step": 7},
+            {"start": "CSD1879", "step": 7},
+            {"start": "CSD1880", "step": 7},
+            {"start": "CSD1881", "step": 7},
+            {"start": "CSD1882", "step": 7},
+            {"start": "CSD1883", "step": 7},
+            {"start": "CSD1884", "step": 7},
         ],
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
+        # Number of recent days to prioritize in queue
+        "num_recent_days_first": 0,
         # Frequencies to process
         "freq": [0, 1024],
+        # Frequencies to save for validation ringmaps
+        "val_freq": [65, 250, 325, 399, 470, 605, 730, 830, 950, 990],
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # Calibration times for thermal correction
@@ -618,7 +788,7 @@ class DailyProcessing(base.ProcessingType):
         ),
         "nfreq_delay": 1025,
         # Job params
-        "time": 150,  # How long in minutes?
+        "time": 100,  # How long in minutes?
         "nodes": 12,  # Number of nodes to use.
         "ompnum": 4,  # Number of OpenMP threads
         "pernode": 12,  # Jobs per node
@@ -632,6 +802,7 @@ class DailyProcessing(base.ProcessingType):
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
         self._padding = self._revparams["padding"]
+        self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
 
     def _available_files(self, start_csd, end_csd):
         """
@@ -703,7 +874,7 @@ class DailyProcessing(base.ProcessingType):
         # files_that_exist might contain the same file multiple files
         # if it exists in multiple locations (nearline, online, gossec, etc)
         # we only want to include it once
-        filenames_that_exist = sorted(list(set(t for t in files_that_exist.tuples())))
+        filenames_that_exist = sorted({t for t in files_that_exist.tuples()})
 
         return filenames_online, filenames_that_exist
 
@@ -712,41 +883,38 @@ class DailyProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-
-        csds = []
-
-        # For each interval find and add all CSDs that have not already been added
-        for interval in self._intervals:
-            csd_i = csds_in_range(*interval)
-            csd_set = set(csds)
-            csds += [csd for csd in csd_i if csd not in csd_set]
-
-        # grab the list of files that are online, and that exist anywhere, from the earliest csd to the latest
+        # Lets us get only unique csds in the order we want them
+        # with a single pass.
+        csds = unique_ordered(
+            # This is a generator
+            (csd for i in self._intervals for csd in csds_in_range(*i))
+        )
         csds_sorted = sorted(csds)
+
+        # grab the list of files that are online, and that exist anywhere,
+        # from the earliest csd to the latest
         filenames_online, filenames_that_exist = self._available_files(
             csds_sorted[0], csds_sorted[-1] + 1
         )
-
         # only queue jobs for which all data is available online in chime_online
         csds_available = self._csds_available_data(
             csds_sorted, filenames_online, filenames_that_exist
         )
-        csds = [csd for csd in csds if csd in csds_available]
 
-        tags = ["%i" % csd for csd in csds]
+        tags = [f"{csd:.0f}" for csd in csds if csd in csds_available]
 
         return tags
 
-    def _csds_available_data(self, csds, filenames_online, filenames_that_exist):
+    def _csds_available_data(self, csds, filenames_online, filenames_that_exist) -> set:
         """
         Return the subset of csds in `csds` for whom all files are online.
 
         `filenames_online` and `filenames_that_exist` are a list of tuples
         (start_time, finish_time)
 
-        All 3 lists should be sorted.
+        All 3 input lists should be sorted.
         """
-        csds_available = []
+        csds_available = set()
 
         for csd in csds:
             start_time = ephemeris.csd_to_unix(csd)
@@ -762,7 +930,7 @@ class DailyProcessing(base.ProcessingType):
             )
 
             if (len(online) == len(exists)) and (len(online) != 0):
-                csds_available.append(csd)
+                csds_available.add(csd)
 
             # The final file in the span may contain more than one sidereal day
             index_online = max(index_online - 1, 0)
@@ -812,6 +980,22 @@ class DailyProcessing(base.ProcessingType):
 
         return jobparams
 
+    def _generate_hook(self, user=None):
+        to_run = self.status(user=user)["not_yet_submitted"]
+
+        if self._num_recent_days:
+            buffer = 2
+            today = math.floor(ephemeris.chime.get_current_lsd()) - buffer
+
+            priority = [
+                csd
+                for csd in to_run
+                if today - int(csd) <= self._num_recent_days and today - int(csd) >= 0
+            ]
+            to_run = priority + [csd for csd in to_run if csd not in priority]
+
+        return to_run
+
 
 class TestDailyProcessing(DailyProcessing):
     """A test version of the daily processing.
@@ -832,6 +1016,7 @@ class TestDailyProcessing(DailyProcessing):
                 {"start": "20181224T000000Z", "end": "20181228T000000Z"},
             ],
             "freq": [400, 416],
+            "val_freq": [2, 3, 7],
             "nfreq_delay": 17,
             "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
@@ -862,16 +1047,15 @@ def csds_in_range(start, end, step=1):
     csds : list of ints
     """
 
-    if end is None:
-        end = datetime.datetime.utcnow()
-
     if start.startswith("CSD"):
         start_csd = int(start[3:])
     else:
         start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
         start_csd = math.floor(start_csd)
 
-    if end.startswith("CSD"):
+    if end is None:
+        end_csd = int(ephemeris.chime.get_current_lsd())
+    elif end.startswith("CSD"):
         end_csd = int(end[3:])
     else:
         end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))

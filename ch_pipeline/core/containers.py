@@ -27,6 +27,7 @@ Tasks
 """
 import posixpath
 from typing import List, Optional, Union
+from functools import cached_property
 from draco.core.task import MPILoggedTask
 
 import numpy as np
@@ -154,6 +155,70 @@ class MultiTimeStream(TimeStream):
         super(MultiTimeStream, self).__init__(*args, **kwargs)
 
 
+class FrequencyMapSingle(FreqContainer):
+    """Map between frequency bin and FPGA [crate, slot, link].
+
+    This container holds a map between the frequency bins and stream ids.
+    A stream id is encoded based on the shuffle, crate, slot, and link values
+    as follows:
+
+    stream_id = shuffle*2**12 + crate*2**8 + slot*2**4 + link
+
+    The value of shuffle is always 3.
+    """
+
+    _axes = ("level",)
+
+    _dataset_spec = {
+        "stream": {
+            "axes": ["freq", "level"],
+            "dtype": np.int32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "stream_id": {
+            "axes": ["freq"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    def __init__(self, *args, **kwargs):
+        if "level" not in kwargs:
+            kwargs["level"] = np.array(["shuffle", "crate", "slot", "link"], dtype=str)
+
+        super().__init__(*args, **kwargs)
+
+    @property
+    def shuffle(self):
+        return self.stream[:, 0]
+
+    @property
+    def crate(self):
+        return self.stream[:, 1]
+
+    @property
+    def slot(self):
+        return self.stream[:, 2]
+
+    @property
+    def link(self):
+        return self.stream[:, 3]
+
+    @property
+    def stream(self):
+        return self.datasets["stream"]
+
+    @property
+    def stream_id(self):
+        return self.datasets["stream_id"]
+
+    @property
+    def level(self):
+        return self.index_map["level"]
+
+
 class FrequencyMap(FreqContainer, TODContainer):
     """Map between frequency bin and FPGA stream (GPU node) as a function of time."""
 
@@ -197,7 +262,7 @@ class RFIMask(ContainerBase):
     _dataset_spec = {
         "mask": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -239,7 +304,7 @@ class CorrInputMask(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -262,13 +327,13 @@ class CorrInputTest(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "passed_test": {
             "axes": ["freq", "input", "test"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": False,
         },
@@ -311,37 +376,37 @@ class CorrInputMonitor(ContainerBase):
     _dataset_spec = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "input_powered": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_mask": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_powered": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
         "expected_position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
@@ -400,7 +465,7 @@ class SiderealDayFlag(ContainerBase):
     _dataset_spec = {
         "csd_flag": {
             "axes": ["csd"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -477,7 +542,7 @@ class TransitFitParams(FreqContainer):
         },
         "ndof": {
             "axes": ["freq", "input", "component"],
-            "dtype": np.int,
+            "dtype": int,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -577,7 +642,7 @@ class PointSourceTransit(StaticGainData):
         },
         "flag": {
             "axes": ["freq", "input", "ra"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -796,7 +861,7 @@ class SunTransit(ContainerBase):
         },
         "flag": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -1145,7 +1210,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     _dataset_spec = {
         "flags/dataset_id": {
             "axes": ["freq", "time"],
-            "dtype": "U32",
+            "dtype": "S32",
             "initialise": False,
             "distributed": True,
         },
@@ -1190,6 +1255,19 @@ class CHIMETimeStream(TimeStream, RawContainer):
             storage["input_flags"] = storage["flags"].pop("inputs")
             storage["input_flags"]._name = "/input_flags"
 
+        # Remove any datasets/flags which shouldn't be present in this container.
+        # If any other dataset is needed, then a CorrData container should be used
+        # or a new dataset_spec entry should be added to this container. At present,
+        # this should only affect the "frac_rfi" flag.
+        contains = set(newdata.datasets) | {
+            "flags/" + name for name in newdata["flags"]
+        }
+
+        for name in contains:
+            if name not in newdata.dataset_spec:
+                del newdata[name]
+                continue
+
         return newdata
 
     @property
@@ -1198,14 +1276,25 @@ class CHIMETimeStream(TimeStream, RawContainer):
         return self["flags/frac_lost"]
 
     @property
+    def dataset_id(self):
+        """Get the dataset_id dataset in Unicode."""
+        dsid = memh5.ensure_unicode(self["flags/dataset_id"][:])
+        dsid.flags.writeable = False
+
+        return dsid
+
+    @property
     def flags(self):
         """Get the flags group."""
         flags_group = dict(self["flags"])
 
         # Alias the groups back in for maximum compatibility with CHIME Andata
         # based code
-        flags_group["vis_weight"] = self["vis_weight"]
-        flags_group["input_flags"] = self["input_flags"]
+        if "vis_weight" in self:
+            flags_group["vis_weight"] = self["vis_weight"]
+
+        if "input_flags" in self:
+            flags_group["input_flags"] = self["input_flags"]
 
         return flags_group
 

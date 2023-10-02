@@ -272,6 +272,7 @@ def solve_single_time(vis, weight, source_model):
     flag = np.any(np.abs(source_model) > 0.0, axis=0)
 
     for tt in range(ntime):
+
         valid = np.flatnonzero(flag[tt])
 
         if valid.size == 0:
@@ -466,6 +467,7 @@ class SolveSources(task.SingleTask):
 
         # Calculate time
         if "ra" in data.index_map:
+
             if self.flag_lsd is None:
                 lsd = np.atleast_1d(
                     data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
@@ -1027,6 +1029,7 @@ class SolveSourcesWithBeam(SolveSources):
         # Calculate time
         bmatch = {}
         if "ra" in data.index_map:
+
             for key, val in beams.items():
                 imatch = np.searchsorted(data.ra, val.ra)
                 if np.array_equal(data.ra[imatch], val.ra):
@@ -1199,11 +1202,13 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Loop over polarisations
         for pp, this_pol in enumerate(pol_index):
+
             dist_pol = distance[:, this_pol]
             bweight_pol = baseline_weight[this_pol, np.newaxis]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
+
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :].copy()
                 weight = all_weight[ff, this_pol, :] * bweight_pol
@@ -1455,10 +1460,12 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # Subtract source model
         for pp, this_pol in enumerate(pol_index):
+
             dist_pol = distance[:, this_pol]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
+
                 # Only process times where we have a beam
                 flag_beam = np.zeros((nsources, ntime), dtype=bool)
                 for ss, src in enumerate(sources):

@@ -138,11 +138,20 @@ def create(type_):
 
 @item.command("list")
 @click.argument("revision", type=PREV)
-@click.option("-l", "--long", is_flag=True)
-@click.option("-h", "--human", is_flag=True)
-def item_list(revision, long, human):
+@click.option(
+    "-l", "--long", is_flag=True, help="Display directory size and number of files."
+)
+@click.option(
+    "-h",
+    "--human",
+    is_flag=True,
+    help="Display directory size in human-readable format.",
+)
+@click.option("-t", "--time", is_flag=True, help="Sort item be time, newest first.")
+def item_list(revision, long, human, time):
     """List existing items within the REVISION (given as type:revision)."""
-    for tag in revision.ls():
+
+    for tag in revision.ls(time):
         if long:
             n, size = dirstats(revision.base_path / tag)
             size = humansize(size, width=10) if human else str(size)
@@ -156,7 +165,7 @@ def item_list(revision, long, human):
 def pending(revision):
     """List items that do not exist within REVISION
     (given as type:revision) but can be generated."""
-    pending = revision.pending()
+    pending = revision.status()["not_yet_submitted"]
     for tag in pending:
         click.echo(tag)
 
@@ -236,16 +245,57 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     default="chime",
     help="User to check jobs for.",
 )
-def status(revision, user):
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Show all tags in each category instead of just a count.",
+)
+@click.option("-t", "--time", is_flag=True)
+def status(revision, user, verbose, time):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
-    tag_status = revision.status(user)
+    tag_status = revision.status(user, time)
 
     click.echo(f"fairshare: {fs[0]}")
-    for key, value in tag_status.items():
-        click.echo(f"{key}: {len(value)}")
+    for key, tags in tag_status.items():
+        click.echo(f"{key}: {len(tags)}")
+        if verbose:
+            for tag in tags:
+                click.echo(tag)
+
+
+@item.command("failed")
+@click.argument("revision", type=PREV)
+@click.option(
+    "-u",
+    "--user",
+    type=str,
+    default="chime",
+    help="User to check jobs for.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+)
+@click.option("-t", "--time", is_flag=True)
+def crashed(revision, user, verbose, time):
+    """List all crashed tags for REVISION, associated with available
+    category matches."""
+    failed = revision.failed(user, time)
+
+    for k, tags in failed.items():
+        if not tags:
+            continue
+
+        click.echo(f"{len(tags)} job(s) failed for reason: {k.upper()}")
+
+        if verbose:
+            for tag in tags:
+                click.echo(tag)
 
 
 def dirstats(path):

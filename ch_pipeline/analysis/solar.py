@@ -280,7 +280,7 @@ class SolarCalibrationN2(task.SingleTask):
             time = ephemeris.csd_to_unix(csd + ra / 360.0)
 
         # Only examine data between sunrise and sunset
-        time_flag = np.zeros(len(time), dtype=np.bool)
+        time_flag = np.zeros(len(time), dtype=bool)
         rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
         for rr in rise:
             ss = ephemeris.solar_setting(rr)[0]
@@ -444,7 +444,7 @@ class SolarCalibrationN2(task.SingleTask):
             )
             uniq_polid = np.unique(polid)
 
-            icross = np.ones(iprod.size, dtype=np.bool)
+            icross = np.ones(iprod.size, dtype=bool)
             # icross[iadj] = False
             icross[iauto] = False
             icross = np.flatnonzero(icross)
@@ -712,14 +712,14 @@ class SolarCleanN2(task.SingleTask):
         feed_list = [(inputmap[ii], inputmap[jj]) for ii, jj in prodmap]
 
         # Determine polarisation for each visibility
-        pol_ind = np.full(len(feed_list), -1, dtype=np.int)
+        pol_ind = np.full(len(feed_list), -1, dtype=np.int64)
         for bb, (fi, fj) in enumerate(feed_list):
             if tools.is_chime(fi) and tools.is_chime(fj):
                 pol_ind[bb] = 2 * tools.is_chime_y(fi) + tools.is_chime_y(fj)
 
         npol = suntrans.index_map["pol"].size
         if npol == 1:
-            pol_ind = (pol_ind < 0).astype(np.int)
+            pol_ind = (pol_ind < 0).astype(np.int64)
             pol_sub = np.array([0])
         elif npol == 2:
             pol_sub = np.array([0, 3])

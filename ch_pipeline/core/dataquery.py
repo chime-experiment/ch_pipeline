@@ -37,13 +37,18 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                 -   start:  2014-07-28 11:00:00
                     end:    2014-07-31 00:00:00
 """
+from __future__ import annotations
 
 import os
 
+import numpy as np
+
 from caput import mpiutil, config, pipeline
 from draco.core import task
-from chimedb import data_index as di
-from ch_util import tools, ephemeris, finder, layout
+from chimedb import data_index as di, dataset as ds
+from chimedb.core import exceptions
+from ch_util import tools, ephemeris, finder, layout, andata
+from ch_pipeline.core import containers
 
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
@@ -70,6 +75,8 @@ class QueryDatabase(task.MPILoggedTask):
     node_spoof : dictionary
         (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
         host and directory in which to find data.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
         can be in any format ensure_unix will support, including e.g.
@@ -121,6 +128,7 @@ class QueryDatabase(task.MPILoggedTask):
     return_intervals = config.Property(proptype=bool, default=False)
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     acqtype = config.Property(proptype=str, default="corr")
     instrument = config.Property(proptype=str, default=None)
@@ -170,7 +178,7 @@ class QueryDatabase(task.MPILoggedTask):
             if self.run_name:
                 return self.QueryRun()
 
-            layout.connect_database()
+            layout.connect_database(ntries=self.connection_attempts)
 
             f = finder.Finder(node_spoof=self.node_spoof)
 
@@ -288,10 +296,13 @@ class QueryRun(task.MPILoggedTask):
         Name of the `run` defined in the database.
     node_spoof : str, optional
         Node spoof argument. See documentation of :class:`ch_util.finder.Finder`.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     run_name = config.Property(proptype=str)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the specified run.
@@ -308,7 +319,8 @@ class QueryRun(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-            layout.connect_database()
+
+            layout.connect_database(ntries=self.connection_attempts)
 
             cat_run = (
                 layout.global_flag_category.select()
@@ -390,11 +402,14 @@ class QueryDataspecFile(task.MPILoggedTask):
         Name of dataset to use.
     archive_root : str
         Root of archive to add to file paths.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     dataset_file = config.Property(proptype=str, default="")
     dataset_name = config.Property(proptype=str, default="")
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the given dataspec.
@@ -443,7 +458,9 @@ class QueryDataspecFile(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
+        files = files_from_spec(
+            dspec, node_spoof=self.node_spoof, ntries=self.connection_attempts
+        )
 
         return files
 
@@ -459,11 +476,14 @@ class QueryDataspec(task.MPILoggedTask):
         List of time ranges as documented above.
     node_spoof : dict, optional
         Optional node spoof argument.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection before exiting
     """
 
     instrument = config.Property(proptype=str)
     timerange = config.Property(proptype=list)
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
 
     def setup(self):
         """Fetch the files in the given dataspec.
@@ -480,7 +500,9 @@ class QueryDataspec(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
+        files = files_from_spec(
+            dspec, node_spoof=self.node_spoof, ntries=self.connection_attempts
+        )
 
         return files
 
@@ -496,6 +518,9 @@ class QueryAcquisitions(task.MPILoggedTask):
     ----------
     node_spoof : dict
         Host and directory in which to find data.
+    connection_attempts : int (default: 1)
+        number of times to try to establish a database connection
+        before exiting
     start_time, end_time : str
         Find all acquisitions between this start and end time.
     instrument : str
@@ -512,6 +537,7 @@ class QueryAcquisitions(task.MPILoggedTask):
     """
 
     node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+    connection_attempts = config.Property(proptype=int, default=1)
     instrument = config.Property(proptype=str, default="chimestack")
     start_time = config.Property(default=None)
     end_time = config.Property(default=None)
@@ -539,7 +565,8 @@ class QueryAcquisitions(task.MPILoggedTask):
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
         if self.comm.rank == 0:
-            layout.connect_database()
+
+            layout.connect_database(ntries=self.connection_attempts)
 
             fi = finder.Finder(node_spoof=self.node_spoof)
             fi.only_corr()
@@ -655,13 +682,134 @@ class QueryInputs(task.MPILoggedTask):
         return inputs
 
 
-def finder_from_spec(spec, node_spoof=None):
+class QueryFrequencyMap(task.MPILoggedTask):
+    """Get the CHIME frequency map that was active when this data was collected.
+
+    Attributes
+    ----------
+    cache : bool
+        Only query for the inputs for the first container received. For all
+        subsequent files just return the initial set of inputs. This can help
+        minimise the number of potentially fragile database operations.
+    """
+
+    cache = config.Property(proptype=bool, default=False)
+
+    _cached_inputs = None
+
+    def next(
+        self, ts: andata.CorrData | containers.CHIMETimeStream
+    ) -> containers.FrequencyMapSingle:
+        """Generate an input description from the timestream passed in.
+
+        Parameters
+        ----------
+        ts
+            Timestream container.
+
+        Returns
+        -------
+        freq_map
+            Frequency slot map container
+        """
+        from peewee import DoesNotExist
+
+        # Fetch from the cache if we can
+        if self.cache and self._cached_inputs:
+            self.log.debug("Using cached inputs.")
+            return self._cached_inputs
+
+        stream_id = None
+        stream = None
+
+        try:
+            dsid_flag = ts.dataset_id[:].gather(rank=0)
+        except KeyError:
+            dsid_flag = None
+
+        if self.comm.rank == 0 and dsid_flag is not None:
+            layout.connect_database()
+            # Get only unique dataset ids to reduce number of lookups. Ignore
+            # the null dataset at the 0th index
+            unique_dataset_ids = np.unique(dsid_flag[:])[1:]
+
+            if len(unique_dataset_ids) != 0:
+                fmaps = {}
+                # Get the frequency map for each unique dataset id. They should all
+                # have the same frequency map - otherwise, raise an error
+                for dsid in unique_dataset_ids:
+                    _missing_ds_flag = False
+                    try:
+                        dataset = ds.Dataset.from_id(str(dsid))
+                    except DoesNotExist:
+                        # This dataset id does not exist in the database. If none of the
+                        # dataset ids are found, throw an exception
+                        _missing_ds_flag = True
+                        continue
+
+                    try:
+                        state = dataset.closest_ancestor_of_type(
+                            "f_engine_frequency_map"
+                        ).state
+                        fmaps[state.id] = state.data
+                    except exceptions.NotFoundError:
+                        # No frequency map found for this dataset id, so the default
+                        # is used. Provide an entry so we can still check how many
+                        # frequency maps were found
+                        fmaps["default"] = 1
+
+                if _missing_ds_flag and not fmaps:
+                    raise exceptions.NotFoundError(
+                        "None of the available dataset_ids exist in the chime database."
+                    )
+
+                if len(fmaps.keys()) > 1:
+                    raise ValueError("Multiple frequency maps found for this dataset.")
+
+                if "default" not in fmaps:
+                    # Extract the stream_id and frequency map
+                    fmap_dict = list(fmaps.values())[0]["fmap"]
+
+                    stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
+                    fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
+                    stream = tools.order_frequency_map_stream(fmap, stream_id)
+
+        # Broadcast to all ranks
+        stream_id = self.comm.bcast(stream_id, root=0)
+        stream = self.comm.bcast(stream, root=0)
+
+        # Check to see if we found a frequency map. If not, get the default mapping
+        if stream is None or stream_id is None:
+            stream, stream_id = tools.get_default_frequency_map_stream()
+            self.log.info("No frequency map found. Using default.")
+
+        # Set the frequency array for all 1024 frequencies, starting at 800 MHz
+        # The frequency map is only properly defined when all frequencies are used
+        freq = np.linspace(800, 400, 1024, endpoint=False)
+        cont = containers.FrequencyMapSingle(copy_from=ts, freq=freq)
+
+        cont.stream[:] = stream
+        cont.stream_id[:] = stream_id
+
+        # Save into the cache for the next iteration
+        if self.cache:
+            self.log.debug("Caching input.")
+            self._cached_inputs = cont
+
+        return cont
+
+
+def finder_from_spec(spec, node_spoof=None, ntries=1):
     """Get a `Finder` object from the dataspec.
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
+    node_spoof : dict or None
+        Host and directory in which to find data.
+    ntries : int (default: 1)
+        number of times to try to establish a database connection before exiting
 
     Returns
     -------
@@ -691,7 +839,7 @@ def finder_from_spec(spec, node_spoof=None):
             node_spoof = spec["node_spoof"]
 
         # Create a finder object limited to the relevant time
-        fi = finder.Finder(node_spoof=node_spoof)
+        fi = finder.Finder(node_spoof=node_spoof, ntries=ntries)
 
         # Set the time range that encapsulates all the intervals
         fi.set_time_range(earliest, latest)
@@ -706,14 +854,17 @@ def finder_from_spec(spec, node_spoof=None):
     return fi
 
 
-def files_from_spec(spec, node_spoof=None):
+def files_from_spec(spec, node_spoof=None, ntries=1):
     """Get the names of files in a dataset.
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
-
+    node_spoof : dict or None
+        Host and directory in which to find data.
+    ntries : int (default: 1)
+        number of times to try to establish a database connection before exiting
     Returns
     -------
     files : list
@@ -724,7 +875,7 @@ def files_from_spec(spec, node_spoof=None):
 
     if mpiutil.rank0:
         # Get the finder object
-        fi = finder_from_spec(spec, node_spoof)
+        fi = finder_from_spec(spec, node_spoof, ntries=ntries)
 
         # Pull out the results and extract all the files
         results = fi.get_results()

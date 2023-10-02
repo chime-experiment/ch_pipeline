@@ -500,7 +500,7 @@ class EdgeFlagger(task.SingleTask):
             flag = np.flatnonzero(weight[ind] > 0.0)
 
             if flag.size > 0:
-                imin, imax = np.percentile(flag, [0, 100]).astype(np.int)
+                imin, imax = np.percentile(flag, [0, 100]).astype(np.int64)
                 imax = imax + 1
 
                 if self.num_begin:
@@ -912,6 +912,7 @@ class ConstructStackedBeam(task.SingleTask):
 
         # Construct stack
         for pp, (ss, conj) in enumerate(reverse_stack):
+
             if (ss < 0) or (ss > (nstack - 1)):
                 continue
 
@@ -1593,7 +1594,7 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs["cirs_ra"] = transit.attrs["cirs_ra"]
 
             # Copy data for first transit
-            flag = (transit.weight[:] > 0.0).astype(np.int)
+            flag = (transit.weight[:] > 0.0).astype(np.int64)
             if self.weight == "inverse_variance":
                 coeff = transit.weight[:]
             else:
@@ -1601,7 +1602,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] = coeff * transit.beam[:]
             self.stack.weight[:] = (coeff**2) * invert_no_zero(transit.weight[:])
-            self.stack.nsample[:] = flag.astype(np.int)
+            self.stack.nsample[:] = flag.astype(np.int64)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1625,7 +1626,7 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs["archivefiles"] += list(transit.attrs["archivefiles"])
 
             # Accumulate transit data
-            flag = (transit.weight[:] > 0.0).astype(np.int)
+            flag = (transit.weight[:] > 0.0).astype(np.int64)
             if self.weight == "inverse_variance":
                 coeff = transit.weight[:]
             else:
