@@ -2,8 +2,11 @@
 import json
 import yaml
 from os import path, listdir
+from itertools import groupby
+from operator import itemgetter
 
 import numpy as np
+import scipy.signal
 from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
@@ -22,9 +25,9 @@ from draco.analysis.transform import Regridder
 from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
 from draco.util.tools import invert_no_zero
 
-from ..core.containers import TransitFitParams
+from ..core.containers import TransitFitParams, MultiSiderealStream, MultiTimeStream
 from .calibration import TransitFit, GainFromTransitFit
-
+from .flagging import taper_mask
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
@@ -247,6 +250,93 @@ class TransitGrouper(task.SingleTask):
             self.obs_id = this_run[0][0]
 
 
+class TaperBeam(task.SingleTask):
+    ntaper = config.Property(proptype=int, default=10)
+
+    def process(self, data):
+        data.redistribute("freq")
+
+        nfreq, npol, ninput, nha = data.beam.local_shape
+
+        window = np.hanning(2 * self.ntaper - 1)[1:-1]
+        nkeep = self.ntaper - 1
+
+        # Dereference the datasets
+        beam = data.beam[:].view(np.ndarray)
+        weight = data.weight[:].view(np.ndarray)
+
+        # Loop over frequencies to reduce memory usage
+        for ff in range(nfreq):
+            for pp in range(npol):
+                for ii in range(ninput):
+                    ind = (ff, pp, ii)
+
+                    valid = np.flatnonzero(weight[ind] > 0.0)
+
+                    if valid.size == 0:
+                        continue
+
+                    aa = valid[0]
+                    bb = aa + nkeep
+
+                    dd = valid[-1] + 1
+                    cc = dd - nkeep
+
+                    if bb > cc:
+                        weight[ind] = 0.0
+                        continue
+
+                    beam[ind + (slice(aa, bb),)] *= window[:nkeep]
+                    beam[ind + (slice(cc, dd),)] *= window[-nkeep:]
+
+        return data
+
+
+class FilterBeam(task.SingleTask):
+    ncut = config.Property(proptype=float, default=2.0)
+    ntransition = config.Property(proptype=float, default=1.0)
+
+    def process(self, data):
+        data.redistribute("freq")
+
+        ifs = data.beam.local_offset[0]
+        ife = ifs + data.beam.local_shape[0]
+
+        local_freq = data.freq[ifs:ife]
+
+        # Extract coordinates
+        phi = np.radians(data.pix["phi"])
+        theta = np.radians(np.median(data.pix["theta"]))
+
+        # Determine the m-modes probed by the holography measurement
+        dphi = np.median(np.abs(np.diff(phi)))
+        nphi = phi.size
+
+        m = np.fft.fftfreq(nphi, d=dphi / (2.0 * np.pi))
+        dm = m[1] - m[0]
+
+        # Dereference the datasets
+        beam = data.beam[:].view(np.ndarray)
+        weight = data.weight[:].view(np.ndarray)
+
+        # Loop over frequencies to reduce memory usage
+        for ff, nu in enumerate(local_freq):
+            mwidth = np.pi * nu * CHIME_CYL_W * np.cos(theta) / SPEED_LIGHT
+            mcut = self.ncut * mwidth
+            ntransition = int(self.ntransition * mwidth // dm)
+
+            h = 1.0 - taper_mask((np.abs(m) > mcut).astype(np.float32), ntransition)
+            flag = (weight[ff] > 0.0).astype(np.float32)
+
+            beam[ff] = np.fft.ifft(np.fft.fft(beam[ff] * flag, axis=-1) * h, axis=-1)
+
+            c = np.sum(h**2) / nphi**2
+            varf = c * np.sum(tools.invert_no_zero(weight[ff]), axis=-1, keepdims=True)
+            weight[ff] = tools.invert_no_zero(varf)
+
+        return data
+
+
 class TransitRegridder(Regridder):
     """Interpolate TimeStream transits onto a regular grid in hour angle.
 
@@ -422,6 +512,20 @@ class EdgeFlagger(task.SingleTask):
         return track
 
 
+class FlagBeam(task.SingleTask):
+    threshold = config.Property(proptype=float, default=2.0)
+
+    def process(self, data):
+        b = data.beam[:].local_array
+        w = data.weight[:].local_array
+
+        data.weight[:].local_array[:] *= (
+            (w > self.threshold) & (np.abs(b) > 0.0)
+        ).astype(np.float32)
+
+        return data
+
+
 class TransitResampler(task.SingleTask):
     """Resample the beam at specific RAs.
 
@@ -459,6 +563,8 @@ class TransitResampler(task.SingleTask):
         new_beam : draco.core.containers.TrackBeam
              The input `beam` re-sampled at the RAs contained in `data`.
         """
+        from mpi4py import MPI
+
         # Distribute over frequencies
         data.redistribute("freq")
         beam.redistribute("freq")
@@ -467,13 +573,19 @@ class TransitResampler(task.SingleTask):
         bv = beam.beam[:].view(np.ndarray)
         bw = beam.weight[:].view(np.ndarray)
 
-        flag = np.any(bw > 0.0, axis=(0, 1, 2))
+        flag_local = np.any(bw > 0.0, axis=(0, 1, 2))
+        flag = np.zeros_like(flag_local)
+        beam.comm.Allreduce(flag_local, flag, op=MPI.LOR)
 
         # Compute the hour angle of the source
         if "ra" in data.index_map:
-            ra = data.index_map["ra"][:]
+            phi = data.index_map["ra"][:]
+            ra = phi
+            coords = "cirs_ra-dec"
         elif "time" in data.index_map:
-            ra = self.observer.unix_to_lsa(data.time)
+            phi = data.time
+            ra = self.observer.unix_to_lsa(phi)
+            coords = "time-dec"
         else:
             raise RuntimeError("Unable to extract RA from input container.")
 
@@ -497,13 +609,20 @@ class TransitResampler(task.SingleTask):
             np.max(within_range) - self.lanczos_width + 1,
         )
 
+        new_hour_angle_sorted = new_hour_angle_sorted[slc]
+
         # Perform regridding
-        new_bv, new_bw = self._resample(hour_angle, bv, bw, new_hour_angle_sorted[slc])
+        new_bv, new_bw = self._resample(hour_angle, bv, bw, new_hour_angle_sorted)
+
+        # Figure out mapping back to the axis (time or RA) in the data container
+        new_phi = phi[isort[slc]]
+        resort = np.argsort(new_phi)
+        new_phi = new_phi[resort]
 
         # Create output container
         new_beam = TrackBeam(
-            phi=new_hour_angle,
-            theta=np.repeat(np.median(beam.pix["theta"][:]), new_hour_angle.size),
+            phi=new_phi,
+            theta=np.repeat(np.median(beam.pix["theta"][:]), new_phi.size),
             axes_from=beam,
             attrs_from=beam,
             distributed=beam.distributed,
@@ -512,12 +631,11 @@ class TransitResampler(task.SingleTask):
 
         new_beam.redistribute("freq")
 
-        # Save to container
-        new_beam.beam[:] = 0.0
-        new_beam.weight[:] = 0.0
+        new_beam.attrs["coords"] = coords
 
-        new_beam.beam[:, :, :, isort[slc]] = new_bv
-        new_beam.weight[:, :, :, isort[slc]] = new_bw
+        # Save to container
+        new_beam.beam[:] = new_bv[..., resort]
+        new_beam.weight[:] = new_bw[..., resort]
 
         return new_beam
 
@@ -757,7 +875,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0
@@ -783,6 +901,8 @@ class ConstructStackedBeam(task.SingleTask):
         pol = [pol_filter.get(pp, None) for pp in self.telescope.polarisation]
         beam_pol = [pol_filter.get(pp, None) for pp in beam.index_map["pol"][:]]
 
+        nstack = ov.shape[1]
+
         # Compute the fractional variance of the beam measurement
         frac_var = invert_no_zero(bw * np.abs(bv) ** 2)
 
@@ -792,6 +912,10 @@ class ConstructStackedBeam(task.SingleTask):
 
         # Construct stack
         for pp, (ss, conj) in enumerate(reverse_stack):
+
+            if (ss < 0) or (ss > (nstack - 1)):
+                continue
+
             aa, bb = prod[pp]
             if conj:
                 aa, bb = bb, aa
@@ -851,14 +975,253 @@ class ConstructStackedBeam(task.SingleTask):
             return ipol1, ipol2
 
 
+def find_contiguous_groups(index):
+    ranges = []
+    for key, group in groupby(enumerate(index), lambda i: i[0] - i[1]):
+        group = list(map(itemgetter(1), group))
+        ranges.append(slice(group[0], group[-1] + 1))
+    return ranges
+
+
+class ConstructMultiStackedBeam(task.SingleTask):
+    """Construct the effective beam for stacked baselines.
+
+    Parameters
+    ----------
+    weight : string ('uniform' or 'inverse_variance')
+        How to weight the baselines when stacking:
+            'uniform' - each baseline given equal weight
+            'inverse_variance' - each baseline weighted by the weight attribute
+    """
+
+    nstream = config.enum([1, 2, 4], default=2)
+
+    def setup(self, tel):
+        """Set the Telescope instance to use.
+
+        Parameters
+        ----------
+        tel : TransitTelescope
+        """
+        self.telescope = io.get_telescope(tel)
+
+    def process(self, beam, data):
+        """Stack
+
+        Parameters
+        ----------
+        beam : TrackBeam
+            The beam that will be stacked.
+        data : VisContainer
+            Must contain `prod` index map and `stack` reverse map
+            that will be used to stack the beam.
+
+        Returns
+        -------
+        stacked_beam: VisContainer
+            The input `beam` stacked in the same manner as
+
+        """
+        # Distribute over frequencies
+        data.redistribute("freq")
+        beam.redistribute("freq")
+
+        # Grab the stack specifications from the input sidereal stream
+        prod = data.index_map["prod"]
+        reverse_stack = data.reverse_map["stack"][:]
+
+        # Create output container
+        output_kwargs = {"stream": np.arange(self.nstream, dtype=int)}
+        if isinstance(data, SiderealStream):
+            OutputContainer = MultiSiderealStream
+            imatch = np.searchsorted(data.ra, beam.pix["phi"])
+            output_kwargs.update(ra=data.ra[imatch])
+        else:
+            OutputContainer = MultiTimeStream
+            imatch = np.searchsorted(data.time, beam.pix["phi"])
+            output_kwargs.update(time=data.time[imatch])
+
+        stacked_beam = OutputContainer(
+            axes_from=data,
+            attrs_from=beam,
+            distributed=True,
+            comm=data.comm,
+            **output_kwargs,
+        )
+
+        stacked_beam.redistribute("freq")
+
+        stacked_beam.vis[:] = 0.0
+        stacked_beam.weight[:] = 0.0
+
+        stacked_beam.attrs["tag"] = "_".join([beam.attrs["tag"], data.attrs["tag"]])
+
+        # Dereference datasets
+        bbe = beam.beam[:].view(np.ndarray)
+        bwe = beam.weight[:].view(np.ndarray)
+
+        ovis = stacked_beam.vis[:]
+        oweight = stacked_beam.weight[:]
+
+        # Compute the fractional variance of the beam measurement
+        bflag = bwe > 0.0
+        var = tools.invert_no_zero(bwe * np.abs(bbe) ** 2)
+
+        input_flags = data.input_flags[:, imatch].astype(bool)
+        if not np.any(input_flags):
+            input_flags = np.ones_like(input_flags)
+
+        # Determine polarisation map
+        pol_filter = {
+            "X": "X",
+            "Y": "Y",
+            "E": "X",
+            "S": "Y",
+            "co": "co",
+            "cross": "cross",
+        }
+        pol = [pol_filter.get(pp, None) for pp in self.telescope.polarisation]
+        beam_pol = [pol_filter.get(pp, None) for pp in beam.index_map["pol"][:]]
+
+        self.log.info(f"Calculating {self.nstream} stream.")
+        pol_lookup = self._resolve_pol(beam_pol, self.nstream)
+
+        nfreq, nstack, _, _ = ovis.shape
+
+        # Find boundaries into the sorted products that separate stacks.
+        stack_index = reverse_stack["stack"][:]
+        stack_conj = reverse_stack["conjugate"][:].astype(bool)
+
+        valid_stack = np.flatnonzero((stack_index >= 0) & (stack_index < nstack))
+        stack_index = stack_index[valid_stack]
+
+        isort = np.argsort(stack_index)
+        sorted_stack_index = stack_index[isort]
+
+        ivsort = valid_stack[isort]
+        sorted_stack_conj = stack_conj[ivsort]
+        sorted_prod = prod[ivsort]
+
+        temp = sorted_prod.copy()
+        sorted_prod["input_a"] = np.where(
+            sorted_stack_conj, temp["input_b"], temp["input_a"]
+        )
+        sorted_prod["input_b"] = np.where(
+            sorted_stack_conj, temp["input_a"], temp["input_b"]
+        )
+
+        boundary = np.concatenate(
+            (
+                np.atleast_1d(0),
+                np.flatnonzero(np.diff(sorted_stack_index) > 0) + 1,
+                np.atleast_1d(prod.size),
+            )
+        )
+
+        # Create counter to increment during the stacking.
+        # This will be used to normalize at the end.
+        counter = np.zeros_like(oweight)
+
+        # Loop over frequencies
+        for ff in range(nfreq):
+            flag = input_flags[np.newaxis, :, :] & bflag[ff]
+
+            valid_ra = np.flatnonzero(np.any(flag, axis=(0, 1)))
+
+            if valid_ra.size == 0:
+                # Do not bother processing if all RAs are flagged
+                continue
+
+            slcs = find_contiguous_groups(valid_ra)
+
+            for slc in slcs:
+                fs = flag[:, :, slc]
+                bs = bbe[ff, :, :, slc]
+                vs = var[ff, :, :, slc]
+
+                for ss, ssi in enumerate(np.unique(sorted_stack_index)):
+                    prodo = sorted_prod[boundary[ss] : boundary[ss + 1]]
+                    aa = prodo["input_a"]
+                    bb = prodo["input_b"]
+
+                    try:
+                        pstr = pol[aa[0]] + pol[bb[0]]
+                        aa_pol, bb_pol = pol_lookup[pstr]
+                    except KeyError:
+                        self.log.warning(
+                            f"Not familiar with {pstr} polarisation.  " "Skipping."
+                        )
+                        continue
+
+                    f = fs[:, aa][aa_pol] & fs[:, bb][bb_pol]
+
+                    c = bs[:, aa][aa_pol] * bs[:, bb][bb_pol].conj()
+
+                    v = np.abs(c) ** 2 * (vs[:, aa][aa_pol] + vs[:, bb][bb_pol])
+
+                    ovis[ff, ssi, :, slc] = np.sum(f * c, axis=1)
+                    oweight[ff, ssi, :, slc] = np.sum(f * v, axis=1)
+                    counter[ff, ssi, :, slc] = np.sum(f, axis=1)
+
+        # Divide through by counter to get properly weighted visibility average
+        ovis[:] *= tools.invert_no_zero(counter)
+        oweight[:] = counter**2 * tools.invert_no_zero(oweight[:])
+
+        return stacked_beam
+
+    @staticmethod
+    def _resolve_pol(pol_axis, nstream):
+        # We first define the lookup table for the nstream == 4 case.
+        # We need different indices depending on whether we are using the
+        # new convention (co, cross) or old convention (X, Y) for labeling
+        # the polarisation axis of the holographic measurements.
+        if "co" in pol_axis:
+            ico = pol_axis.index("co")
+            icr = pol_axis.index("cross")
+
+            lookup = {
+                "XX": [(ico, ico), (ico, icr), (icr, ico), (icr, icr)],
+                "XY": [(ico, icr), (ico, ico), (icr, icr), (icr, ico)],
+                "YX": [(icr, ico), (icr, icr), (ico, ico), (ico, icr)],
+                "YY": [(icr, icr), (icr, ico), (ico, icr), (ico, ico)],
+            }
+
+        else:
+            ix = pol_axis.index("X")
+            iy = pol_axis.index("Y")
+
+            lookup = {
+                key: [(ix, ix), (ix, iy), (iy, ix), (iy, iy)]
+                for key in ["XX", "XY", "YX", "YY"]
+            }
+
+        # Now restrict the lookup table if nstream == 2 or nstream == 1
+        if nstream == 2:
+            lookup = {key: [val[0], val[3]] for key, val in lookup.items()}
+
+        elif nstream == 1:
+            keys = sorted(lookup.keys())
+            lookup = {key: [lookup[key][kk]] for kk, key in enumerate(keys)}
+
+        # Reformat lookup table in numpy index arrays
+        lookup = {
+            key: tuple([np.array([v[0] for v in val]), np.array([v[1] for v in val])])
+            for key, val in lookup.items()
+        }
+
+        return lookup
+
+
 class HolographyTransitFit(TransitFit):
     """Fit a model to the transit.
 
     Attributes
     ----------
+    pol : str
+        The polarization product to fit.  One of either "co" or "cross".
     model : str
-        Name of the model to fit.  One of 'gauss_amp_poly_phase' or
-        'poly_log_amp_poly_phase'.
+        Name of the model to fit.  One of "gauss_amp_poly_phase" or
+        "poly_log_amp_poly_phase" or "poly_real_poly_imag"
     nsigma : float
         Number of standard deviations away from transit to fit.
     absolute_sigma : bool
@@ -867,20 +1230,32 @@ class HolographyTransitFit(TransitFit):
         will be scaled by the chi-squared per degree-of-freedom.
     poly_type : str
         Type of polynomial.  Either 'standard', 'hermite', or 'chebychev'.
+        Relevant if `model = "poly_log_amp_poly_phase"` or `model = "poly_real_poly_imag"`.
     poly_deg_amp : int
         Degree of the polynomial to fit to amplitude.
-        Relevant if `poly = True`.
+        Relevant if `model = "poly_log_amp_poly_phase"`.
     poly_deg_phi : int
         Degree of the polynomial to fit to phase.
-        Relevant if `poly = True`.
+        Relevant if `model = "poly_log_amp_poly_phase"`.
     niter : int
         Number of times to update the errors using model amplitude.
-        Relevant if `poly = True`.
+        Relevant if `model = "poly_log_amp_poly_phase"`.
     moving_window : int
         Number of standard deviations away from peak to fit.
         The peak location is updated with each iteration.
-        Must be less than `nsigma`.  Relevant if `poly = True`.
+        Must be less than `nsigma`.  Relevant if `model = "poly_log_amp_poly_phase"`.
+    poly_deg : int
+        Degree of the polynomial to fit to real and imaginary component.
+        Relevant if `model = "poly_real_poly_imag"`.
+    even : bool
+        Force the polynomial to be even.  Keeps all even coefficients up to `poly_deg + 1`.
+        Relevant if `model = "poly_real_poly_imag"`.
+    odd : bool
+        Force the polynomial to be odd.  Keeps all odd coefficients up to `poly_deg + 1`.
+        Relevant if `model = "poly_real_poly_imag"`.
     """
+
+    pol = config.enum(["co", "cross"], default="co")
 
     # Disable NaN checks by default since they can be valid outputs of the fit
     nan_check = config.Property(default=False, proptype=bool)
@@ -912,29 +1287,29 @@ class HolographyTransitFit(TransitFit):
         sigma = (0.7 * SPEED_LIGHT / (CHIME_CYL_W * freq)) * (360.0 / np.pi)
         sigma = sigma[:, np.newaxis] * np.ones((1, ninput), dtype=sigma.dtype)
 
-        # Find index into pol axis that yields copolar products
+        # Find index into pol axis that yields desired polarization products
         pol_axis = list(transit.index_map["pol"])
-        if "co" in pol_axis:
-            copolar_slice = (slice(None), pol_axis.index("co"))
+        if self.pol in pol_axis:
+            pol_slice = (slice(None), pol_axis.index(self.pol))
         else:
-            this_pol = np.array(
-                [
-                    pol_axis.index("S")
-                    if not ((ii // 256) % 2)
-                    else pol_axis.index("E")
-                    for ii in range(ninput)
-                ]
+            ns, ew = (
+                (pol_axis.index("S"), pol_axis.index("E"))
+                if self.pol == "co"
+                else (pol_axis.index("E"), pol_axis.index("S"))
             )
-            copolar_slice = (slice(None), this_pol, np.arange(ninput))
+            this_pol = np.array(
+                [ns if not ((ii // 256) % 2) else ew for ii in range(ninput)]
+            )
+            pol_slice = (slice(None), this_pol, np.arange(ninput))
 
         # Dereference datasets
         ha = transit.pix["phi"][:]
 
         vis = transit.beam[:].view(np.ndarray)
-        vis = vis[copolar_slice]
+        vis = vis[pol_slice]
 
         err = transit.weight[:].view(np.ndarray)
-        err = np.sqrt(invert_no_zero(err[copolar_slice]))
+        err = np.sqrt(tools.invert_no_zero(err[pol_slice]))
 
         # Flag data that is outside the fit window set by nsigma config parameter
         if self.nsigma is not None:
@@ -979,16 +1354,21 @@ class HolographyTransitFit(TransitFit):
         return fit
 
 
+DetermineHolographyGainsFromFits = GainFromTransitFit
+
+
 class ApplyHolographyGains(task.SingleTask):
     """Apply gains to a holography transit
 
-    Attributes
+    Parameters
     ----------
     overwrite: bool (default: False)
         If True, overwrite the input TrackBeam.
     """
 
     overwrite = config.Property(proptype=bool, default=False)
+    pol = config.enum(["co", "cross", "both"], default="both")
+    common_mode = config.Property(proptype=bool, default=False)
 
     def process(self, track_in, gain):
         """Apply gain
@@ -1000,13 +1380,9 @@ class ApplyHolographyGains(task.SingleTask):
             track['beam'], expecting axes to be freq, pol, input, ha
         gain: np.array
             Gain to apply. Expected axes are freq, pol, and input
-
-        Returns
-        -------
-        track: draco.core.containers.TrackBeam
-            Holography track with gains applied.
         """
 
+        # Create output container
         if self.overwrite:
             track = track_in
         else:
@@ -1019,17 +1395,144 @@ class ApplyHolographyGains(task.SingleTask):
             track["beam"] = track_in["beam"][:]
             track["weight"] = track_in["weight"][:]
 
-        track["beam"][:] *= gain.gain[:][:, np.newaxis, :, np.newaxis]
-        track["weight"][:] *= invert_no_zero(np.abs(gain.gain[:]) ** 2)[
-            :, np.newaxis, :, np.newaxis
-        ]
+        # Find index into pol axis that yields desired polarization products
+        pol_axis = list(track_in.index_map["pol"])
+        ninput = track_in["beam"].shape[2]
+        if self.pol == "both":
+            in_slice = (slice(None), None, slice(None), None)
+            out_slice = slice(None)
 
-        track["beam"][:] = np.where(np.isfinite(track["beam"][:]), track["beam"][:], 0)
-        track["weight"][:] = np.where(
-            np.isfinite(track["weight"][:]), track["weight"][:], 0
-        )
+        elif self.pol in pol_axis:
+            in_slice = (slice(None), slice(None), None)
+            out_slice = (slice(None), pol_axis.index(self.pol))
+
+        else:
+            in_slice = (slice(None), slice(None), None)
+            ns, ew = (
+                (pol_axis.index("S"), pol_axis.index("E"))
+                if self.pol == "co"
+                else (pol_axis.index("E"), pol_axis.index("S"))
+            )
+            this_pol = np.array(
+                [ns if not ((ii // 256) % 2) else ew for ii in range(ninput)]
+            )
+            out_slice = (slice(None), this_pol, np.arange(ninput))
+
+        if self.common_mode:
+            rawg = gain.gain[:]
+            flag = (np.abs(rawg) > 0.0) & (gain.weight[:] > 0.0)
+
+            g = np.zeros_like(rawg)
+            for pol in [0, 1]:
+                this_pol = np.array([((ii // 256) % 2) == pol for ii in range(ninput)])
+
+                this_g = np.nanmedian(
+                    np.where(flag & this_pol[np.newaxis, :], np.real(rawg), np.nan),
+                    axis=1,
+                ) + 1.0j * np.nanmedian(
+                    np.where(flag & this_pol[np.newaxis, :], np.imag(rawg), np.nan),
+                    axis=1,
+                )
+
+                g[:, this_pol] = np.where(np.isfinite(this_g), this_g, 0.0 + 0.0j)[
+                    :, np.newaxis
+                ]
+
+        else:
+            g = gain.gain[:]
+
+        g = g[in_slice]
+
+        # Apply gains
+        track["beam"][:][out_slice] *= g
+        track["weight"][:][out_slice] *= tools.invert_no_zero(np.abs(g) ** 2)
 
         return track
+
+
+class MedianBeam(io.LoadFilesFromParams):
+    _attrs = ["filename", "observation_id", "transit_time", "archivefiles"]
+
+    def setup(self):
+        super().setup()
+
+        self._nobs = len(self.files)
+        self._counter = 0
+
+    def process(self):
+        """Load the next file and save observation to one large array."""
+
+        data = super().process()
+        data.redistribute("freq")
+
+        # If this is the first file, then generate the output container
+        # and the arrays to hold the data products.
+        if self._counter == 0:
+            self._out = TrackBeam(
+                axes_from=data,
+                attrs_from=data,
+                distributed=data.distributed,
+                comm=data.comm,
+            )
+
+            self._out.add_dataset("nsample")
+
+            self._out.redistribute("freq")
+
+            for name in self._attrs:
+                self._out.attrs[name] = []
+
+            bshp = (self._nobs,) + data.beam.local_shape
+
+            self._beam = np.zeros(bshp, dtype=data.beam.dtype)
+            self._flag = np.zeros(bshp, dtype=bool)
+
+        # Save the attributes
+        for name in self._attrs:
+            self._out.attrs[name] += list(np.atleast_1d(data.attrs[name]))
+
+        self._beam[self._counter] = data.beam[:].view(np.ndarray).copy()
+        self._flag[self._counter] = data.weight[:].view(np.ndarray) > 0.0
+
+        self._counter += 1
+
+    def process_finish(self):
+        """Take the median over observations."""
+
+        # Dereference datasets
+        obeam = self._out.beam[:].view(np.ndarray)
+        oweight = self._out.weight[:].view(np.ndarray)
+        onum = self._out["nsample"][:].view(np.ndarray)
+
+        nfreq, npol, ninput, nha = obeam.shape
+
+        # Loop over local frequencies, pol, input to reduce memory
+        for ff in range(nfreq):
+            for pp in range(npol):
+                for ii in range(ninput):
+                    iin = (slice(None), ff, pp, ii)
+                    iout = (ff, pp, ii)
+
+                    onum[iout] = np.sum(self._flag[iin], axis=0)
+
+                    nan_beam = np.where(
+                        self._flag[iin], self._beam[iin], np.nan + 1.0j * np.nan
+                    )
+
+                    med_beam = np.nanmedian(
+                        nan_beam.real, axis=0
+                    ) + 1.0j * np.nanmedian(nan_beam.imag, axis=0)
+
+                    mad_beam = 1.48625 * np.nanmedian(
+                        np.abs(nan_beam - med_beam[np.newaxis, ...]), axis=0
+                    )
+                    mad_weight = onum[iout] * tools.invert_no_zero(mad_beam**2)
+
+                    med_flag = np.isfinite(med_beam) & np.isfinite(mad_weight)
+                    obeam[iout] = np.where(med_flag, med_beam, 0.0 + 00j)
+                    oweight[iout] = np.where(med_flag, mad_weight, 0.0)
+
+        return self._out
 
 
 class TransitStacker(task.SingleTask):

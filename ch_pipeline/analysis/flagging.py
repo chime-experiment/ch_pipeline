@@ -520,6 +520,7 @@ class MonitorCorrInput(task.SingleTask):
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if np.sum(good_day_flag_all) >= max(2, self.n_day_min):
+
             n_uniq_bad = np.zeros(self.ndays, dtype=np.int64)
             dindex = np.arange(self.ndays)[good_day_flag_all]
 
@@ -803,6 +804,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         # Find days where the number of correlator inputs that are bad
         # ONLY for this day is greater than some user specified threshold
         if ncsd >= max(2, self.n_day_min):
+
             n_uniq_bad = np.zeros(ncsd, dtype=np.int64)
             dindex = np.arange(ncsd)[good_day_flag]
 
@@ -1000,6 +1002,8 @@ class ApplySiderealDayFlag(task.SingleTask):
 class NanToNum(task.SingleTask):
     """Finds NaN and replaces with 0."""
 
+    dataset = config.Property(proptype=str, default="vis")
+
     def process(self, timestream):
         """Converts any NaN in the vis dataset and weight dataset
         to the value 0.0.
@@ -1017,11 +1021,12 @@ class NanToNum(task.SingleTask):
         timestream.redistribute("freq")
 
         # Loop over frequencies to reduce memory usage
-        for lfi, fi in timestream.vis[:].enumerate(0):
+        for lfi, fi in timestream.datasets[self.dataset][:].enumerate(0):
+
             # Set non-finite values of the visibility equal to zero
-            flag = ~np.isfinite(timestream.vis[fi])
+            flag = ~np.isfinite(timestream.datasets[self.dataset][fi])
             if np.any(flag):
-                timestream.vis[fi][flag] = 0.0
+                timestream.datasets[self.dataset][fi][flag] = 0.0
                 timestream.weight[fi][
                     flag
                 ] = 0.0  # Also set weights to zero so we don't trust values
@@ -1457,6 +1462,7 @@ class MaskSource(MaskDay):
         self.body = [ephemeris.source_dictionary[src] for src in source]
 
     def _flag(self, time):
+
         flag = np.zeros(time.size, dtype=bool)
         for body in self.body:
             flag |= transit_flag(body, time, nsigma=self.nsigma)
@@ -1560,7 +1566,7 @@ class MaskRA(task.SingleTask):
             sstream.vis[:] *= mask
 
         # Modify the noise weights
-        sstream.weight[:] *= mask**2
+        sstream.weight[:] *= tools.invert_no_zero(mask**2)
 
         return sstream
 

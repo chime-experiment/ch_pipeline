@@ -150,6 +150,7 @@ def create(type_):
 @click.option("-t", "--time", is_flag=True, help="Sort item be time, newest first.")
 def item_list(revision, long, human, time):
     """List existing items within the REVISION (given as type:revision)."""
+
     for tag in revision.ls(time):
         if long:
             n, size = dirstats(revision.base_path / tag)

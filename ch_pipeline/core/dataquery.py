@@ -319,6 +319,7 @@ class QueryRun(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
+
             layout.connect_database(ntries=self.connection_attempts)
 
             cat_run = (
@@ -564,6 +565,7 @@ class QueryAcquisitions(task.MPILoggedTask):
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
         if self.comm.rank == 0:
+
             layout.connect_database(ntries=self.connection_attempts)
 
             fi = finder.Finder(node_spoof=self.node_spoof)

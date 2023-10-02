@@ -6,6 +6,8 @@ containers which are imported into this module.
 
 Containers
 ==========
+- :py:class:`MultiSiderealStream`
+- :py:class:`MultiTimeStream`
 - :py:class:`FrequencyMap`
 - :py:class:`RFIMask`
 - :py:class:`CorrInputMask`
@@ -38,9 +40,119 @@ from draco.core.containers import (
     StaticGainData,
     TODContainer,
     FreqContainer,
+    SiderealContainer,
     TimeStream,
+    SiderealStream,
     FormedBeam,
 )
+
+
+class MultiSiderealStream(SiderealStream):
+    """A container for holding a visibility dataset in sidereal time.
+
+    Parameters
+    ----------
+    ra : int
+        The number of points to divide the RA axis up into.
+    """
+
+    _axes = ("stream",)
+
+    _dataset_spec = {
+        "vis": {
+            "axes": ["freq", "stack", "stream", "ra"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "vis_weight": {
+            "axes": ["freq", "stack", "stream", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "input_flags": {
+            "axes": ["input", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "gain": {
+            "axes": ["freq", "input", "ra"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    def __init__(self, stream=None, *args, **kwargs):
+        # Set up stream
+        if stream is not None:
+            if isinstance(stream, int):
+                stream = np.arange(stream, dtype=np.int)
+        else:
+            stream = np.arange(2, dtype=np.int)
+
+        kwargs["stream"] = stream
+
+        super(MultiSiderealStream, self).__init__(*args, **kwargs)
+
+
+class MultiTimeStream(TimeStream):
+    """A container for holding a visibility dataset in sidereal time.
+
+    Parameters
+    ----------
+    ra : int
+        The number of points to divide the RA axis up into.
+    """
+
+    _axes = ("stream",)
+
+    _dataset_spec = {
+        "vis": {
+            "axes": ["freq", "stack", "stream", "time"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "vis_weight": {
+            "axes": ["freq", "stack", "stream", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "input_flags": {
+            "axes": ["input", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "gain": {
+            "axes": ["freq", "input", "time"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    def __init__(self, stream=None, *args, **kwargs):
+        # Set up stream
+        if stream is not None:
+            if isinstance(stream, int):
+                stream = np.arange(stream, dtype=np.int)
+        else:
+            stream = np.arange(2, dtype=np.int)
+
+        kwargs["stream"] = stream
+
+        super(MultiTimeStream, self).__init__(*args, **kwargs)
 
 
 class FrequencyMapSingle(FreqContainer):
@@ -368,10 +480,43 @@ class SiderealDayFlag(ContainerBase):
         return self.index_map["csd"]
 
 
-class TransitFitParams(ContainerBase):
+class StackMask(SiderealContainer):
+    """Flag indicating the times that were used to construct a sidereal stack."""
+
+    _axes = ("lsd",)
+
+    _dataset_spec = {
+        "timestamp": {
+            "axes": ["lsd", "ra"],
+            "dtype": float,
+            "initialise": True,
+            "distributed": False,
+        },
+        "flag": {
+            "axes": ["lsd", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def timestamp(self):
+        return self.datasets["timestamp"]
+
+    @property
+    def flag(self):
+        return self.datasets["flag"]
+
+    @property
+    def lsd(self):
+        return self.index_map["lsd"]
+
+
+class TransitFitParams(FreqContainer):
     """Parallel container for holding the results of fitting a model to a point source transit."""
 
-    _axes = ("freq", "input", "param", "component")
+    _axes = ("input", "param", "component")
 
     _dataset_spec = {
         "parameter": {
@@ -419,10 +564,6 @@ class TransitFitParams(ContainerBase):
     @property
     def ndof(self):
         return self.datasets["ndof"]
-
-    @property
-    def freq(self):
-        return self.index_map["freq"]["centre"]
 
     @property
     def input(self):
@@ -599,11 +740,11 @@ class SourceModel(FreqContainer):
     multiple (possibly extended) sources.
     """
 
-    _axes = ("pol", "time", "param", "source")
+    _axes = ("pol", "lsd", "time", "param", "source")
 
     _dataset_spec = {
         "amplitude": {
-            "axes": ["freq", "pol", "time", "source"],
+            "axes": ["freq", "pol", "time", "param"],
             "dtype": np.complex64,
             "initialise": False,
             "distributed": True,
@@ -615,6 +756,18 @@ class SourceModel(FreqContainer):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
+        },
+        "timestamp": {
+            "axes": ["lsd", "time"],
+            "dtype": float,
+            "initialise": False,
+            "distributed": False,
+        },
+        "flag_lsd": {
+            "axes": ["lsd", "time"],
+            "dtype": bool,
+            "initialise": False,
+            "distributed": False,
         },
     }
 
