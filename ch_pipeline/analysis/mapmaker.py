@@ -106,7 +106,6 @@ class RingMapMaker(task.SingleTask):
         ysep = np.zeros(nprod, dtype=np.float)
 
         for pp, (ii, jj) in enumerate(sstream.prodstack):
-
             if self.telescope.feedconj[ii, jj]:
                 ii, jj = jj, ii
 
@@ -161,7 +160,6 @@ class RingMapMaker(task.SingleTask):
 
         # Unpack visibilities into new array
         for vis_ind, (p_ind, x_ind, y_ind) in enumerate(grid_index):
-
             # Handle different options for weighting baselines
             if self.weight == "inverse_variance":
                 w = ssw[:, vis_ind]
@@ -221,7 +219,6 @@ class RingMapMaker(task.SingleTask):
 
         # Loop over local frequencies and fill ring map
         for lfi, fi in sstream.vis[:].enumerate(0):
-
             # Get the current frequency and wavelength
             fr = sstream.freq[fi]
 

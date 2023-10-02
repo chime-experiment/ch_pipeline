@@ -88,7 +88,6 @@ class MultiSiderealStream(SiderealStream):
     }
 
     def __init__(self, stream=None, *args, **kwargs):
-
         # Set up stream
         if stream is not None:
             if isinstance(stream, int):
@@ -143,7 +142,6 @@ class MultiTimeStream(TimeStream):
     }
 
     def __init__(self, stream=None, *args, **kwargs):
-
         # Set up stream
         if stream is not None:
             if isinstance(stream, int):
@@ -277,7 +275,6 @@ class CorrInputTest(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
         if "test" not in kwargs:
             kwargs["test"] = np.array(
                 ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
@@ -351,7 +348,6 @@ class CorrInputMonitor(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
         if "coord" not in kwargs:
             kwargs["coord"] = np.array(["east_west", "north_south"])
 
@@ -603,7 +599,6 @@ class PointSourceTransit(StaticGainData):
     }
 
     def __init__(self, *args, **kwargs):
-
         kwargs["param"] = np.array(
             ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
         )
@@ -823,7 +818,6 @@ class SunTransit(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
         kwargs["param"] = np.array(
             [
                 "peak_amplitude",
@@ -927,7 +921,6 @@ class SunTransit(ContainerBase):
 
 
 class FormedBeamTime(FormedBeam, TODContainer):
-
     _dataset_spec = {
         "beam": {
             "axes": ["object_id", "pol", "freq", "time"],
@@ -988,7 +981,6 @@ class RingMap(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
         super(RingMap, self).__init__(*args, **kwargs)
 
     @property
@@ -1385,7 +1377,6 @@ class MonkeyPatchContainers(MPILoggedTask):
     """
 
     def __init__(self):
-
         super().__init__()
 
         self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")

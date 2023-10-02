@@ -251,11 +251,9 @@ class TransitGrouper(task.SingleTask):
 
 
 class TaperBeam(task.SingleTask):
-
     ntaper = config.Property(proptype=int, default=10)
 
     def process(self, data):
-
         data.redistribute("freq")
 
         nfreq, npol, ninput, nha = data.beam.local_shape
@@ -269,11 +267,8 @@ class TaperBeam(task.SingleTask):
 
         # Loop over frequencies to reduce memory usage
         for ff in range(nfreq):
-
             for pp in range(npol):
-
                 for ii in range(ninput):
-
                     ind = (ff, pp, ii)
 
                     valid = np.flatnonzero(weight[ind] > 0.0)
@@ -298,12 +293,10 @@ class TaperBeam(task.SingleTask):
 
 
 class FilterBeam(task.SingleTask):
-
     ncut = config.Property(proptype=float, default=2.0)
     ntransition = config.Property(proptype=float, default=1.0)
 
     def process(self, data):
-
         data.redistribute("freq")
 
         ifs = data.beam.local_offset[0]
@@ -328,7 +321,6 @@ class FilterBeam(task.SingleTask):
 
         # Loop over frequencies to reduce memory usage
         for ff, nu in enumerate(local_freq):
-
             mwidth = np.pi * nu * CHIME_CYL_W * np.cos(theta) / SPEED_LIGHT
             mcut = self.ncut * mwidth
             ntransition = int(self.ntransition * mwidth // dm)
@@ -505,11 +497,9 @@ class EdgeFlagger(task.SingleTask):
         weight = track["weight"][:].view(np.ndarray)
 
         for ind in np.ndindex(*weight.shape[:-1]):
-
             flag = np.flatnonzero(weight[ind] > 0.0)
 
             if flag.size > 0:
-
                 imin, imax = np.percentile(flag, [0, 100]).astype(np.int)
                 imax = imax + 1
 
@@ -523,15 +513,15 @@ class EdgeFlagger(task.SingleTask):
 
 
 class FlagBeam(task.SingleTask):
-
     threshold = config.Property(proptype=float, default=2.0)
 
     def process(self, data):
-
         b = data.beam[:].local_array
         w = data.weight[:].local_array
 
-        data.weight[:].local_array[:] *= ((w > self.threshold) & (np.abs(b) > 0.0)).astype(np.float32)
+        data.weight[:].local_array[:] *= (
+            (w > self.threshold) & (np.abs(b) > 0.0)
+        ).astype(np.float32)
 
         return data
 
@@ -650,7 +640,6 @@ class TransitResampler(task.SingleTask):
         return new_beam
 
     def _resample(self, xgrid, ygrid, wgrid, x):
-
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
@@ -923,7 +912,6 @@ class ConstructStackedBeam(task.SingleTask):
 
         # Construct stack
         for pp, (ss, conj) in enumerate(reverse_stack):
-
             if (ss < 0) or (ss > (nstack - 1)):
                 continue
 
@@ -967,9 +955,7 @@ class ConstructStackedBeam(task.SingleTask):
 
     @staticmethod
     def _resolve_pol(pol1, pol2, pol_axis):
-
         if "co" in pol_axis:
-
             if pol1 == pol2:
                 ipol = pol_axis.index("co")
             else:
@@ -978,7 +964,6 @@ class ConstructStackedBeam(task.SingleTask):
             return ipol, ipol
 
         else:
-
             if pol1 == pol2:
                 ipol1 = pol_axis.index(pol1)
                 ipol2 = pol_axis.index(pol2)
@@ -1138,7 +1123,6 @@ class ConstructMultiStackedBeam(task.SingleTask):
 
         # Loop over frequencies
         for ff in range(nfreq):
-
             flag = input_flags[np.newaxis, :, :] & bflag[ff]
 
             valid_ra = np.flatnonzero(np.any(flag, axis=(0, 1)))
@@ -1150,13 +1134,11 @@ class ConstructMultiStackedBeam(task.SingleTask):
             slcs = find_contiguous_groups(valid_ra)
 
             for slc in slcs:
-
                 fs = flag[:, :, slc]
                 bs = bbe[ff, :, :, slc]
                 vs = var[ff, :, :, slc]
 
                 for ss, ssi in enumerate(np.unique(sorted_stack_index)):
-
                     prodo = sorted_prod[boundary[ss] : boundary[ss + 1]]
                     aa = prodo["input_a"]
                     bb = prodo["input_b"]
@@ -1188,7 +1170,6 @@ class ConstructMultiStackedBeam(task.SingleTask):
 
     @staticmethod
     def _resolve_pol(pol_axis, nstream):
-
         # We first define the lookup table for the nstream == 4 case.
         # We need different indices depending on whether we are using the
         # new convention (co, cross) or old convention (X, Y) for labeling
@@ -1215,11 +1196,9 @@ class ConstructMultiStackedBeam(task.SingleTask):
 
         # Now restrict the lookup table if nstream == 2 or nstream == 1
         if nstream == 2:
-
             lookup = {key: [val[0], val[3]] for key, val in lookup.items()}
 
         elif nstream == 1:
-
             keys = sorted(lookup.keys())
             lookup = {key: [lookup[key][kk]] for kk, key in enumerate(keys)}
 
@@ -1471,11 +1450,9 @@ class ApplyHolographyGains(task.SingleTask):
 
 
 class MedianBeam(io.LoadFilesFromParams):
-
     _attrs = ["filename", "observation_id", "transit_time", "archivefiles"]
 
     def setup(self):
-
         super().setup()
 
         self._nobs = len(self.files)
@@ -1530,11 +1507,8 @@ class MedianBeam(io.LoadFilesFromParams):
 
         # Loop over local frequencies, pol, input to reduce memory
         for ff in range(nfreq):
-
             for pp in range(npol):
-
                 for ii in range(ninput):
-
                     iin = (slice(None), ff, pp, ii)
                     iout = (ff, pp, ii)
 

@@ -134,7 +134,6 @@ def solve_gain(data, feeds=None, norm=None):
     # Iterate over frequency/time and solve gains
     for fi in range(data.shape[0]):
         for ti in range(data.shape[-1]):
-
             # Skip if all zeros
             if not np.any(data[fi, :, ti]):
                 continue
@@ -244,7 +243,6 @@ def _contiguous_flag(flag, centre=None):
         centre = nelem / 2
 
     for index in np.ndindex(*shp):
-
         for ii in range(centre, nelem, 1):
             if not flag[index][ii]:
                 flag[index][ii:] = False
@@ -829,14 +827,12 @@ class EigenCalibration(task.SingleTask):
 
         # Loop over polarizations
         for pp, feeds in enumerate(pol):
-
             # Create the polarization masking vector
             P = np.zeros((1, ninput, 1), dtype=np.float64)
             P[:, feeds, :] = 1.0
 
             # Loop over frequencies
             for ff in range(nfreq):
-
                 ww = weight[ff, feeds, :]
 
                 # Normalize by eigenvalue and correct for pi phase flips in process.
@@ -1186,7 +1182,6 @@ class GainFromTransitFit(task.SingleTask):
 
         # Suppress numpy floating errors
         with np.errstate(all="ignore"):
-
             # Determine hour angle of evaluation
             if self.evaluate == "peak":
                 ha = model.peak()
@@ -1318,16 +1313,13 @@ class FlagAmplitude(task.SingleTask):
 
         # Flag outliers in amplitude for each frequency
         for pp, feeds in enumerate(pol):
-
             med_amp_by_pol = np.zeros(nfreq, dtype=np.float32)
             sig_amp_by_pol = np.zeros(nfreq, dtype=np.float32)
 
             for ff in range(nfreq):
-
                 this_flag = flag[ff, feeds]
 
                 if np.any(this_flag):
-
                     med, slow, shigh = cal_utils.estimate_directional_scale(
                         amp[ff, feeds[this_flag]]
                     )
@@ -1347,7 +1339,6 @@ class FlagAmplitude(task.SingleTask):
 
             # Flag frequencies that are outliers with respect to local median
             if self.nsigma_med_outlier:
-
                 # Collect med_amp_by_pol for all frequencies on rank 0
                 if gain.comm.rank == 0:
                     full_med_amp_by_pol = np.zeros(gain.freq.size, dtype=np.float32)
@@ -1365,7 +1356,6 @@ class FlagAmplitude(task.SingleTask):
                 # Flag outlier frequencies on rank 0
                 not_outlier = None
                 if gain.comm.rank == 0:
-
                     med_flag = full_med_amp_by_pol > 0.0
 
                     not_outlier = cal_utils.flag_outliers(
@@ -1656,7 +1646,6 @@ class SiderealCalibration(task.SingleTask):
 
         # If requested, fit a model to the point source transit
         if self.model_fit:
-
             # Only fit ra values above the specified dynamic range threshold
             # that are contiguous about the expected peak position.
             fit_flag = np.zeros([nfreq, nfeed, nra], dtype=np.bool)
@@ -1705,7 +1694,6 @@ class SiderealCalibration(task.SingleTask):
             gain_data.response_error.attrs["units"] = unit_in + " / " + unit_out
 
         else:
-
             # Create container to hold gains
             gain_data = containers.StaticGainData(axes_from=sstream)
 
@@ -1763,9 +1751,7 @@ def find_contiguous_time_ranges(timestamp, dt=3600.0):
     stop = []
 
     for tt in range(timestamp.size - 1):
-
         if (timestamp[tt + 1] - timestamp[tt]) > (2 * dt):
-
             stop.append(timestamp[tt] + dt)
             start.append(timestamp[tt + 1] - dt)
 
@@ -1983,7 +1969,6 @@ class ThermalCalibration(task.SingleTask):
 
         # Can only query the database from one rank.
         if self.comm.rank == 0:
-
             f = finder.Finder(node_spoof=self.node_spoof)
             f.only_chime_weather()  # Excludes MingunWeather
             for start_time, end_time in time_ranges:
@@ -2269,7 +2254,6 @@ class ComputeCommonMode(BaseCommonMode):
 
         # Calculate the mean (or percentile) for each group of inputs
         for gg, glbl in enumerate(self.groups):
-
             gind = self.gindex[glbl]
 
             gsi = tuple([slice(None)] * inp_axis + [gind])
@@ -2278,7 +2262,6 @@ class ComputeCommonMode(BaseCommonMode):
             norm = tools.invert_no_zero(np.sum(flag[gsi], axis=inp_axis))
 
             if self.use_percentile:
-
                 temp_re = np.nanpercentile(
                     np.where(flag[gsi], vis[gsi].real, np.nan),
                     self.percentile,
@@ -2286,7 +2269,6 @@ class ComputeCommonMode(BaseCommonMode):
                 )
 
                 if iscomplex:
-
                     temp_im = np.nanpercentile(
                         np.where(flag[gsi], vis[gsi].imag, np.nan),
                         self.percentile,
@@ -2296,7 +2278,6 @@ class ComputeCommonMode(BaseCommonMode):
                     temp = temp_re + 1.0j * temp_im
 
                 else:
-
                     temp = temp_re
 
                 grp_vis[gso] = np.where(np.isfinite(temp), temp, 0.0)
@@ -2304,7 +2285,6 @@ class ComputeCommonMode(BaseCommonMode):
                 grp_weight[gso] = (norm > 0).astype(np.float32)
 
             else:
-
                 grp_vis[gso] = np.sum(flag[gsi] * vis[gsi], axis=inp_axis) * norm
 
                 grp_weight[gso] = tools.invert_no_zero(
@@ -2368,7 +2348,6 @@ class ExpandCommonMode(BaseCommonMode):
 
         # Loop over local inputs
         for ii in range(ninput):
-
             gso = tuple([slice(None)] * inp_axis + [ii])
 
             try:
@@ -2454,7 +2433,6 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
 
         # Loop over local inputs
         for ii in range(ninput):
-
             self.log.debug(f"Processing input {ii} of {ninput}.")
 
             if not np.any(flag[:, ii]):
@@ -2596,7 +2574,6 @@ class ConcatenateGains(task.SingleTask):
         out.redistribute("freq")
 
         for tt, ss in enumerate(isort):
-
             g = gains[ss]
             g.redistribute("freq")
 
@@ -2736,7 +2713,6 @@ class FlagNarrowbandGainError(task.SingleTask):
 
         # Different calculation whether or not we have input flags
         if self.ignore_input_flags or no_input_flags:
-
             # We do not have an input flag.  Perform a straight average over all good inputs.
             err = np.sum(self.weight * self.frac_error, axis=1) * tools.invert_no_zero(
                 np.sum(self.weight, axis=1)
@@ -2760,9 +2736,7 @@ class FlagNarrowbandGainError(task.SingleTask):
 
             # Loop over the two possible gain updates
             for ii, ind in enumerate(index):
-
                 for tt, uu in enumerate(ind):
-
                     # The modulus with the number of times is for the
                     # sidereal stacks where we have gain errors on
                     # many days, but a single set of input flags.
@@ -2911,10 +2885,8 @@ class CalibrationCorrection(task.SingleTask):
 
         # Loop over flags again
         for flag in self.flags:
-
             in_range = (timestamp >= flag.start_time) & (timestamp <= flag.finish_time)
             if np.any(in_range):
-
                 msg = (
                     "%d (of %d) samples require phase correction according to "
                     "%s DataFlag covering %s to %s."
@@ -2971,7 +2943,6 @@ class CorrectTimeOffset(CalibrationCorrection):
         return kwargs["time_offset"] != 0.0
 
     def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
-
         time_offset = kwargs["time_offset"]
         calibrator = kwargs["calibrator"]
         self.log.info(
@@ -3024,7 +2995,6 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         return kwargs["rotation"] != self.rotation
 
     def _get_correction(self, freq, prod, timestamp, inputmap, **kwargs):
-
         rotation = kwargs["rotation"]
         calibrator = kwargs["calibrator"]
 

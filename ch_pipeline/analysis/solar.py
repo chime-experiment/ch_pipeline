@@ -138,7 +138,6 @@ class SolarGrouper(task.SingleTask):
         # If this file ends during a later day then we need to process the
         # current list and restart the system
         if self._current_day < day_end:
-
             self.log.info("Concatenating files for date: %i", day_start)
 
             # Combine timestreams into a single container for the whole day this
@@ -169,7 +168,6 @@ class SolarGrouper(task.SingleTask):
         return tstream_all
 
     def _process_current_day(self):
-
         # Combine the current set of files into a timestream
 
         day = str(self._current_day)
@@ -353,7 +351,6 @@ class SolarCalibrationN2(task.SingleTask):
 
         # Deal with different options for fitting dual polarisation data
         if self.dualpol:
-
             feeds = np.sort(np.concatenate((xfeeds, yfeeds)))
 
             prods = np.array(
@@ -380,7 +377,6 @@ class SolarCalibrationN2(task.SingleTask):
             )
 
         else:
-
             xprods = np.array(
                 [
                     idx
@@ -430,7 +426,6 @@ class SolarCalibrationN2(task.SingleTask):
 
         # Loop over polarizations
         for ipol, (ifeed, iprod) in enumerate(polmap):
-
             p_nfeed, p_nprod = ifeed.size, iprod.size
             iauto = np.array(
                 [idx for idx, (fi, fj) in enumerate(prodmap[iprod]) if (fi == fj)]
@@ -456,7 +451,6 @@ class SolarCalibrationN2(task.SingleTask):
 
             # Loop over frequency
             for ff_local, ff_global in enumerate(range(sfreq, efreq)):
-
                 # Create baseline vectors
                 u = vis_pos[iprod, 0] / wv[ff_local]
                 v = vis_pos[iprod, 1] / wv[ff_local]
@@ -489,10 +483,8 @@ class SolarCalibrationN2(task.SingleTask):
 
                 # Loop over time slices
                 for slc_in, slc_out in time_slice:
-
                     # Loop over times within a slice
                     for tt_in, tt_out in zip(slc_in, slc_out):
-
                         # Extract visibility and weight at this frequency and time
                         vis = (
                             sstream.vis[ff_global, iprod, tt_in].view(np.ndarray).copy()
@@ -513,11 +505,9 @@ class SolarCalibrationN2(task.SingleTask):
 
                         # Project out bright point sources so that they do not confuse the sun calibration
                         for src, center, span in source_window:
-
                             sha = _correct_phase_wrap(ra[tt_out] - center, deg=True)
 
                             if np.abs(sha) < span:
-
                                 src_phase = tools.fringestop_phase(
                                     np.radians(sha),
                                     np.radians(ephemeris.CHIMELATITUDE),
@@ -527,7 +517,6 @@ class SolarCalibrationN2(task.SingleTask):
                                 )
 
                                 for upid in uniq_polid:
-
                                     pp = np.flatnonzero(polid == upid)
 
                                     asrc = np.sum(
@@ -561,12 +550,10 @@ class SolarCalibrationN2(task.SingleTask):
 
                         # Analysis of extended source
                         if self.extended:
-
                             A = G[:, np.newaxis] * H
 
                             iters = 0
                             while iters < self.max_iter:
-
                                 vism = vis.copy()
 
                                 # Calculate covariance of model coefficients
@@ -755,10 +742,8 @@ class SolarCleanN2(task.SingleTask):
 
         # Loop over frequencies
         for ff_local, ff_global in enumerate(range(sfreq, efreq)):
-
             # Loop over polarisations
             for pp, psub in enumerate(pol_sub):
-
                 # Apply threshold to the is_sun metric defined in SolarCalibration
                 # to determine what time samples to subtract.
                 subtract_sun = (
@@ -770,12 +755,10 @@ class SolarCleanN2(task.SingleTask):
 
                 # Loop over baselines
                 for bb in this_pol:
-
                     ii, jj = prodmap[bb]
 
                     # Do not subtract from autocorrelations
                     if ii != jj:
-
                         # Create baseline vectors
                         u = vis_pos[bb, 0] / wv[ff_local]
                         v = vis_pos[bb, 1] / wv[ff_local]
@@ -998,14 +981,12 @@ class SolarBeamform(task.SingleTask):
 
         # Iterate over frequencies
         for fi in range(nfreq):
-
             # Get the baselines in wavelengths
             u = bdist[:, 0] / wv[fi]
             v = bdist[:, 1] / wv[fi]
 
             # Iterate over times
             for tt, ti in enumerate(valid_time):
-
                 # Initialize the visiblities matrix
                 vis = vis_local[fi, ikeep, ti]
                 weight = weight_local[fi, ikeep, ti]
@@ -1152,14 +1133,12 @@ class SolarClean(task.SingleTask):
 
         # Iterate over frequencies and polarisations to null out the sun
         for fi in range(nfreq):
-
             # Get the baselines in wavelengths
             u = bdist[:, 0] / wv[fi]
             v = bdist[:, 1] / wv[fi]
 
             # Loop over time to reduce memory usage
             for ti in valid_time:
-
                 # Extract the valid visibilities and weights for this freq and time.
                 # Multiply weights by flag so autocorrelations are not used in fit.
                 vis = vis_local[fi, valid_stack, ti]
@@ -1176,7 +1155,6 @@ class SolarClean(task.SingleTask):
 
                 # Loop over polarisation pairs
                 for pp in range(npol):
-
                     ipol = np.flatnonzero(pol_map == pp)
 
                     # Calculate weighted average of the fringestopped visibilities
@@ -1205,7 +1183,6 @@ def _correct_phase_wrap(phi, deg=False):
 
 
 def _upper_triangle_gain_vector(gain):
-
     nfeed = gain.shape[0]
     nprod = nfeed * (nfeed + 1) / 2
 

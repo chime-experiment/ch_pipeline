@@ -151,7 +151,6 @@ def model_extended_sources(
     S = np.zeros((nfreq, nbaseline, ntime, nparam), dtype=np.complex64)
 
     for ss, body in enumerate(bodies):
-
         # Calculate the source coordinates
         obs = observer.observe(body).apparent()
         src_radec = obs.cirs_radec(date)
@@ -160,7 +159,9 @@ def model_extended_sources(
         src_ra, src_dec = src_radec[0], src_radec[1]
         src_alt, src_az = src_altaz[0], src_altaz[1]
 
-        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians.reshape(nlsd, ntime))
+        ha = _correct_phase_wrap(
+            np.radians(ephemeris.lsa(timestamp)) - src_ra.radians.reshape(nlsd, ntime)
+        )
         dec = src_dec.radians.reshape(nlsd, ntime)
 
         weight = src_alt.radians.reshape(nlsd, ntime) > np.radians(min_altitude)
@@ -203,7 +204,8 @@ def model_extended_sources(
 
         if expand_y:
             eta = np.pi * (
-                np.cos(lat) * np.sin(avg_dec) - np.sin(lat) * np.cos(avg_dec) * np.cos(avg_ha)
+                np.cos(lat) * np.sin(avg_dec)
+                - np.sin(lat) * np.cos(avg_dec) * np.cos(avg_ha)
             )
             coords[1] = eta[np.newaxis, np.newaxis, :] * coords[1]
 
@@ -211,18 +213,26 @@ def model_extended_sources(
 
         # Calculate the fringestop phase
         if avg_phi:
-
             phi = np.zeros((nfreq, nbaseline, nvalid), dtype=complex)
             for tt in range(nlsd):
-
-                phi += w[tt, np.newaxis, np.newaxis, :] * tools.fringestop_phase(
-                    ha[tt, np.newaxis, np.newaxis, :], lat, dec[tt, np.newaxis, np.newaxis, :], u, v
-                ).conj()
+                phi += (
+                    w[tt, np.newaxis, np.newaxis, :]
+                    * tools.fringestop_phase(
+                        ha[tt, np.newaxis, np.newaxis, :],
+                        lat,
+                        dec[tt, np.newaxis, np.newaxis, :],
+                        u,
+                        v,
+                    ).conj()
+                )
 
         else:
-
             phi = tools.fringestop_phase(
-                avg_ha[np.newaxis, np.newaxis, :], lat, avg_dec[np.newaxis, np.newaxis, :], u, v
+                avg_ha[np.newaxis, np.newaxis, :],
+                lat,
+                avg_dec[np.newaxis, np.newaxis, :],
+                u,
+                v,
             ).conj()
 
         model = H * phi[..., np.newaxis]
@@ -262,7 +272,6 @@ def solve_single_time(vis, weight, source_model):
     flag = np.any(np.abs(source_model) > 0.0, axis=0)
 
     for tt in range(ntime):
-
         valid = np.flatnonzero(flag[tt])
 
         if valid.size == 0:
@@ -271,10 +280,12 @@ def solve_single_time(vis, weight, source_model):
         isigma = np.sqrt(weight[:, tt])
         S = source_model[:, tt, valid]
 
-        coeff[tt, valid] = scipy.linalg.lstsq(isigma[:, np.newaxis] * S,
-                                              isigma * vis[:, tt],
-                                              lapack_driver='gelsy',
-                                              check_finite=False)[0]
+        coeff[tt, valid] = scipy.linalg.lstsq(
+            isigma[:, np.newaxis] * S,
+            isigma * vis[:, tt],
+            lapack_driver="gelsy",
+            check_finite=False,
+        )[0]
 
     return coeff
 
@@ -302,10 +313,12 @@ def solve_multiple_times(vis, weight, source_model):
     isigma = np.sqrt(weight.reshape(-1))
     S = source_model.reshape(-1, nparam)
 
-    coeff = scipy.linalg.lstsq(isigma[:, np.newaxis] * S,
-                               isigma * vis.reshape(-1),
-                               lapack_driver='gelsy',
-                               check_finite=False)[0]
+    coeff = scipy.linalg.lstsq(
+        isigma[:, np.newaxis] * S,
+        isigma * vis.reshape(-1),
+        lapack_driver="gelsy",
+        check_finite=False,
+    )[0]
 
     return coeff
 
@@ -453,25 +466,29 @@ class SolveSources(task.SingleTask):
 
         # Calculate time
         if "ra" in data.index_map:
-
             if self.flag_lsd is None:
-
-                lsd = np.atleast_1d(data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"])
-                timestamp = ephemeris.csd_to_unix(lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0)
+                lsd = np.atleast_1d(
+                    data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+                )
+                timestamp = ephemeris.csd_to_unix(
+                    lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0
+                )
                 flag_lsd = None
 
             else:
-
-                self.log.info(f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days.")
+                self.log.info(
+                    f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days."
+                )
                 lsd = self.flag_lsd.lsd[:]
                 timestamp = self.flag_lsd.timestamp[:]
                 flag_lsd = self.flag_lsd.flag[:]
 
                 if not np.array_equal(self.flag_lsd.ra, data.ra):
-                    raise RuntimeError("The sidereal day flag is not sampled at the correct RAs.")
+                    raise RuntimeError(
+                        "The sidereal day flag is not sampled at the correct RAs."
+                    )
 
         elif "time" in data.index_map:
-
             timestamp = data.time.reshape(1, ntime)
             lsd = np.atleast_1d(np.fix(np.mean(ephemeris.unix_to_csd(timestamp))))
             flag_lsd = None
@@ -584,7 +601,6 @@ class SolveSources(task.SingleTask):
 
         # Loop over polarisations
         for pp, upp in enumerate(upol):
-
             this_pol = np.flatnonzero(pol == upp)
 
             dist_pol = distance[:, this_pol]
@@ -592,14 +608,18 @@ class SolveSources(task.SingleTask):
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :]
                 weight = all_weight[ff, this_pol, :] * bweight_pol
 
                 # Determine the initial source model, assuming all sources are point sources
                 psrc_model, _ = model_extended_sources(
-                    nu, dist_pol, timestamp, self.bodies, flag_lsd=flag_lsd, **self.point_source_kwargs
+                    nu,
+                    dist_pol,
+                    timestamp,
+                    self.bodies,
+                    flag_lsd=flag_lsd,
+                    **self.point_source_kwargs,
                 )
                 psrc_model = psrc_model[0]
 
@@ -610,7 +630,6 @@ class SolveSources(task.SingleTask):
                 # and baseline dependent response.  Assumes the description of the extended
                 # emission is constant in time.
                 if self.extended_source_kwargs:
-
                     ext_model, sedge = model_extended_sources(
                         nu,
                         dist_pol,
@@ -623,7 +642,6 @@ class SolveSources(task.SingleTask):
 
                     iters = 0
                     while iters < self.max_iter:
-
                         model = ext_model.copy()
                         for ss in range(self.nsources):
                             model[:, :, sedge[ss] : sedge[ss + 1]] *= amplitude[
@@ -660,9 +678,7 @@ class SolveSources(task.SingleTask):
 
 
 class SolveSourcesStack(SolveSources):
-
     def process(self, data, flag_lsd):
-
         self.flag_lsd = flag_lsd
 
         return super().process(data)
@@ -726,12 +742,10 @@ class LPFSourceAmplitude(task.SingleTask):
         amp = model.amplitude[:].view(np.ndarray)
 
         for ss, src in enumerate(model.source):
-
             flux = FluxCatalog[src].predict_flux(model.freq)
             inv_flux = tools.invert_no_zero(flux)[:, np.newaxis]
 
             for pp in range(npol):
-
                 a = amp[:, pp, :, ss]
                 flag = np.abs(a) > 0
 
@@ -807,7 +821,6 @@ class SubtractSources(task.SingleTask):
 
         # Calculate time
         if "ra" in data.index_map:
-
             if "timestamp" in model.datasets:
                 timestamp = model.datasets["timestamp"][:]
                 flag_lsd = model.datasets["flag_lsd"][:]
@@ -861,15 +874,18 @@ class SubtractSources(task.SingleTask):
 
         # Subtract source model
         for pp, upp in enumerate(model.index_map["pol"]):
-
             this_pol = np.flatnonzero(pol == upp)
             dist_pol = distance[:, this_pol]
 
             for ff, nu in enumerate(freq):
-
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp, bodies, flag_lsd=flag_lsd, **source_model_kwargs
+                    nu,
+                    dist_pol,
+                    timestamp,
+                    bodies,
+                    flag_lsd=flag_lsd,
+                    **source_model_kwargs,
                 )
                 source_model = source_model[0]
 
@@ -1011,7 +1027,6 @@ class SolveSourcesWithBeam(SolveSources):
         # Calculate time
         bmatch = {}
         if "ra" in data.index_map:
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.ra, val.ra)
                 if np.array_equal(data.ra[imatch], val.ra):
@@ -1022,23 +1037,28 @@ class SolveSourcesWithBeam(SolveSources):
                     )
 
             if self.flag_lsd is None:
-
-                lsd = np.atleast_1d(data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"])
-                timestamp = ephemeris.csd_to_unix(lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0)
+                lsd = np.atleast_1d(
+                    data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+                )
+                timestamp = ephemeris.csd_to_unix(
+                    lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0
+                )
                 flag_lsd = None
 
             else:
-
-                self.log.info(f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days.")
+                self.log.info(
+                    f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days."
+                )
                 lsd = self.flag_lsd.lsd[:]
                 timestamp = self.flag_lsd.timestamp[:]
                 flag_lsd = self.flag_lsd.flag[:]
 
                 if not np.array_equal(self.flag_lsd.ra, data.ra):
-                    raise RuntimeError("The sidereal day flag is not sampled at the correct RAs.")
+                    raise RuntimeError(
+                        "The sidereal day flag is not sampled at the correct RAs."
+                    )
 
         elif "time" in data.index_map:
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.time, val.time)
                 if np.array_equal(data.time[imatch], val.time):
@@ -1179,13 +1199,11 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Loop over polarisations
         for pp, this_pol in enumerate(pol_index):
-
             dist_pol = distance[:, this_pol]
             bweight_pol = baseline_weight[this_pol, np.newaxis]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Extract datasets for this polarisation and frequency
                 vis = all_vis[ff, this_pol, :].copy()
                 weight = all_weight[ff, this_pol, :] * bweight_pol
@@ -1222,12 +1240,10 @@ class SolveSourcesWithBeam(SolveSources):
 
                 # Multipy source model by the effective beam
                 for ss, src in enumerate(self.sources):
-
                     valid_in = np.flatnonzero(flag_beam[ss, bmatch[src]])
                     valid_out = np.flatnonzero(flag_beam[ss, valid_time])
 
                     for st in range(nstream):
-
                         aa, bb = sedge[ss * nstream + st], sedge[ss * nstream + st + 1]
 
                         this_flag = (
@@ -1257,9 +1273,7 @@ class SolveSourcesWithBeam(SolveSources):
 
 
 class SolveSourcesWithBeamStack(SolveSourcesWithBeam):
-
     def process(self, data, beams, flag_lsd):
-
         self.flag_lsd = flag_lsd
 
         return super().process(data, beams)
@@ -1340,7 +1354,6 @@ class SubtractSourcesWithBeam(task.SingleTask):
         # Calculate time
         bmatch = {}
         if "ra" in data.index_map:
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.ra, val.ra)
                 if np.array_equal(data.ra[imatch], val.ra):
@@ -1358,7 +1371,6 @@ class SubtractSourcesWithBeam(task.SingleTask):
                 flag_lsd = None
 
         elif "time" in data.index_map:
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.time, val.time)
                 if np.array_equal(data.time[imatch], val.time):
@@ -1443,12 +1455,10 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # Subtract source model
         for pp, this_pol in enumerate(pol_index):
-
             dist_pol = distance[:, this_pol]
 
             # Loop over frequencies
             for ff, nu in enumerate(freq):
-
                 # Only process times where we have a beam
                 flag_beam = np.zeros((nsources, ntime), dtype=bool)
                 for ss, src in enumerate(sources):
@@ -1467,18 +1477,21 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp[:, valid_time], bodies, flag_lsd=flg, **source_model_kwargs
+                    nu,
+                    dist_pol,
+                    timestamp[:, valid_time],
+                    bodies,
+                    flag_lsd=flg,
+                    **source_model_kwargs,
                 )
                 source_model = source_model[0]
 
                 # Multipy source model by the effective beam
                 for ss, src in enumerate(sources):
-
                     valid_in = np.flatnonzero(flag_beam[ss, bmatch[src]])
                     valid_out = np.flatnonzero(flag_beam[ss, valid_time])
 
                     for st in range(nstream):
-
                         aa, bb = sedge[ss * nstream + st], sedge[ss * nstream + st + 1]
 
                         this_flag = (
@@ -1534,7 +1547,6 @@ def kz_coeffs(m, k):
 
     # Iterate k-1 times over coefficients
     for i in range(1, k):
-
         t = np.zeros((m, m + i * (m - 1)))
         for km in range(m):
             t[km, km : km + coef.size] = coef
@@ -1611,7 +1623,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
     y = np.where(flag, y, 0.0)
 
     if np.isscalar(mode):
-
         y_extended = np.pad(y, pad_width, mode=mode)
         flag_extended = np.pad(flag.astype(np.float64), pad_width, mode=mode)
 
@@ -1620,7 +1631,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
         flag_extended = flag.astype(np.float64)
 
         for dd, (pw, md) in enumerate(zip(pad_width, mode)):
-
             pws = tuple([pw if ii == dd else (0, 0) for ii in range(2)])
 
             y_extended = np.pad(y_extended, pws, mode=md)
