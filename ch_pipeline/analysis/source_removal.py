@@ -8,11 +8,13 @@ import numpy as np
 
 from scipy.constants import c as speed_of_light
 import scipy.signal
+import scipy.linalg
 
 from caput import config
 from ch_util import andata, ephemeris, tools
 from ch_util.fluxcat import FluxCatalog
 from draco.core import task, io
+from draco.core import containers as dcontainers
 
 from ..core import containers
 
@@ -30,6 +32,8 @@ def model_extended_sources(
     min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
+    flag_lsd=None,
+    avg_phi=False,
     **kwargs,
 ):
     """Generate a model for the visibilities.
@@ -44,7 +48,7 @@ def model_extended_sources(
         Frequencies in MHz.
     distance : np.ndarray[2, nbaseline]
         The S-N and W-E distance for each baseline.
-    timestamp : np.ndarray[ntime,]
+    timestamp : np.ndarray[nlsd, ntime]
         Unix timestamp.
     bodies : nsource element list
         List of `skyfield.api.Star` (or equivalent) for the sources being modelled.
@@ -113,13 +117,14 @@ def model_extended_sources(
     poly_deg = np.vstack((degree_x, degree_y, degree_t)).T
 
     freq = np.atleast_1d(freq)
-    timestamp = np.atleast_1d(timestamp)
-
     nfreq = freq.size
-    ntime = timestamp.size
-    nbaseline = distance.shape[-1]
 
-    ones = np.ones((nfreq, nbaseline, ntime), dtype=np.float64)
+    timestamp = np.atleast_1d(timestamp)
+    if timestamp.ndim == 1:
+        timestamp = timestamp.reshape(1, -1)
+    nlsd, ntime = timestamp.shape
+
+    nbaseline = distance.shape[-1]
 
     # Calculate baseline distances in wavelengths
     lmbda = speed_of_light * 1e-6 / freq
@@ -130,7 +135,7 @@ def model_extended_sources(
 
     # Setup for calculating source coordinates
     lat = np.radians(ephemeris.CHIMELATITUDE)
-    date = ephemeris.unix_to_skyfield_time(timestamp)
+    date = ephemeris.unix_to_skyfield_time(timestamp.reshape(-1))
 
     observer = ephemeris.chime.skyfield_obs().at(date)
 
@@ -155,10 +160,10 @@ def model_extended_sources(
         src_ra, src_dec = src_radec[0], src_radec[1]
         src_alt, src_az = src_altaz[0], src_altaz[1]
 
-        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians)
-        dec = src_dec.radians
+        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians.reshape(nlsd, ntime))
+        dec = src_dec.radians.reshape(nlsd, ntime)
 
-        weight = src_alt.radians > np.radians(min_altitude)
+        weight = src_alt.radians.reshape(nlsd, ntime) > np.radians(min_altitude)
 
         if max_ha > 0.0:
             weight &= np.abs(ha) <= (np.radians(max_ha) / np.cos(dec))
@@ -166,34 +171,68 @@ def model_extended_sources(
         if min_ha > 0.0:
             weight &= np.abs(ha) >= (np.radians(min_ha) / np.cos(dec))
 
+        # Construct a weight array to average over sidereal days
+        if flag_lsd is None:
+            w = weight.astype(float)
+        else:
+            w = (weight & flag_lsd).astype(float)
+
+        wnorm = np.sum(w, axis=0)
+        valid = np.flatnonzero(wnorm > 0.0)
+        nvalid = valid.size
+
+        if nvalid == 0:
+            continue
+
+        ha = ha[:, valid]
+        dec = dec[:, valid]
+
+        w = w[:, valid] * tools.invert_no_zero(wnorm[np.newaxis, valid])
+
+        # Calculate the average over sidereal days
+        avg_ha = np.sum(w * ha, axis=0)
+        avg_dec = np.sum(w * dec, axis=0)
+
         # Evaluate polynomial
-        coords = [ax * scale[ss, ii] * ones for ii, ax in enumerate([u, v, ha])]
+        ones = np.ones((nfreq, nbaseline, nvalid), dtype=np.float64)
+        coords = [ax * scale[ss, ii] * ones for ii, ax in enumerate([u, v, avg_ha])]
 
         if expand_x:
-            eta = -np.pi * np.cos(dec) * np.sin(ha)
+            eta = -np.pi * np.cos(avg_dec) * np.sin(avg_ha)
             coords[0] = eta[np.newaxis, np.newaxis, :] * coords[0]
 
         if expand_y:
             eta = np.pi * (
-                np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(ha)
+                np.cos(lat) * np.sin(avg_dec) - np.sin(lat) * np.cos(avg_dec) * np.cos(avg_ha)
             )
             coords[1] = eta[np.newaxis, np.newaxis, :] * coords[1]
 
         H = np.polynomial.hermite.hermvander3d(*coords, poly_deg[ss])
 
         # Calculate the fringestop phase
-        phi = tools.fringestop_phase(
-            ha[np.newaxis, np.newaxis, :], lat, dec[np.newaxis, np.newaxis, :], u, v
-        ).conj()
+        if avg_phi:
 
-        model = H * phi[..., np.newaxis] * weight[np.newaxis, np.newaxis, :, np.newaxis]
+            phi = np.zeros((nfreq, nbaseline, nvalid), dtype=complex)
+            for tt in range(nlsd):
+
+                phi += w[tt, np.newaxis, np.newaxis, :] * tools.fringestop_phase(
+                    ha[tt, np.newaxis, np.newaxis, :], lat, dec[tt, np.newaxis, np.newaxis, :], u, v
+                ).conj()
+
+        else:
+
+            phi = tools.fringestop_phase(
+                avg_ha[np.newaxis, np.newaxis, :], lat, avg_dec[np.newaxis, np.newaxis, :], u, v
+            ).conj()
+
+        model = H * phi[..., np.newaxis]
 
         for st in range(nstream):
             aa, bb = (
                 source_bound[ss * nstream + st],
                 source_bound[ss * nstream + st + 1],
             )
-            S[..., aa:bb] = model
+            S[..., valid, aa:bb] = model
 
     return S, source_bound
 
@@ -220,17 +259,22 @@ def solve_single_time(vis, weight, source_model):
 
     coeff = np.zeros((ntime, nparam), dtype=np.complex64)
 
+    flag = np.any(np.abs(source_model) > 0.0, axis=0)
+
     for tt in range(ntime):
 
-        S = source_model[:, tt, :]
+        valid = np.flatnonzero(flag[tt])
 
-        # Calculate covariance of model coefficients
-        C = np.dot(S.T.conj(), weight[:, tt, np.newaxis] * S)
+        if valid.size == 0:
+            continue
 
-        # Solve for model coefficients
-        coeff[tt, :] = np.linalg.lstsq(
-            C, np.dot(S.T.conj(), weight[:, tt] * vis[:, tt]), rcond=None
-        )[0]
+        isigma = np.sqrt(weight[:, tt])
+        S = source_model[:, tt, valid]
+
+        coeff[tt, valid] = scipy.linalg.lstsq(isigma[:, np.newaxis] * S,
+                                              isigma * vis[:, tt],
+                                              lapack_driver='gelsy',
+                                              check_finite=False)[0]
 
     return coeff
 
@@ -255,16 +299,13 @@ def solve_multiple_times(vis, weight, source_model):
     """
     nbaseline, ntime, nparam = source_model.shape
 
-    weight = weight.flatten()
-    vis = vis.flatten()
-
+    isigma = np.sqrt(weight.reshape(-1))
     S = source_model.reshape(-1, nparam)
 
-    # Calculate covariance of model coefficients
-    C = np.dot(S.T.conj(), weight[:, np.newaxis] * S)
-
-    # Solve for model coefficients
-    coeff = np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
+    coeff = scipy.linalg.lstsq(isigma[:, np.newaxis] * S,
+                               isigma * vis.reshape(-1),
+                               lapack_driver='gelsy',
+                               check_finite=False)[0]
 
     return coeff
 
@@ -329,6 +370,9 @@ class SolveSources(task.SingleTask):
     min_distance = config.Property(proptype=list, default=[10.0, 0.0])
     telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
     max_iter = config.Property(proptype=int, default=4)
+    avg_phi = config.Property(proptype=bool, default=False)
+
+    flag_lsd = None
 
     def setup(self, tel):
         """Set up the source model.
@@ -362,6 +406,7 @@ class SolveSources(task.SingleTask):
             "min_altitude": self.min_altitude,
             "max_ha": self.max_ha,
             "min_ha": self.min_ha,
+            "avg_phi": self.avg_phi,
         }
 
         if any(self.degree_x) or any(self.degree_y):
@@ -377,6 +422,7 @@ class SolveSources(task.SingleTask):
                 "min_altitude": self.min_altitude,
                 "max_ha": self.max_ha,
                 "min_ha": self.min_ha,
+                "avg_phi": self.avg_phi,
             }
         else:
             self.extended_source_kwargs = {}
@@ -407,13 +453,33 @@ class SolveSources(task.SingleTask):
 
         # Calculate time
         if "ra" in data.index_map:
-            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
-            csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+
+            if self.flag_lsd is None:
+
+                lsd = np.atleast_1d(data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"])
+                timestamp = ephemeris.csd_to_unix(lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0)
+                flag_lsd = None
+
+            else:
+
+                self.log.info(f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days.")
+                lsd = self.flag_lsd.lsd[:]
+                timestamp = self.flag_lsd.timestamp[:]
+                flag_lsd = self.flag_lsd.flag[:]
+
+                if not np.array_equal(self.flag_lsd.ra, data.ra):
+                    raise RuntimeError("The sidereal day flag is not sampled at the correct RAs.")
+
         elif "time" in data.index_map:
-            timestamp = data.time
+
+            timestamp = data.time.reshape(1, ntime)
+            lsd = np.atleast_1d(np.fix(np.mean(ephemeris.unix_to_csd(timestamp))))
+            flag_lsd = None
+
         else:
             raise RuntimeError("Unable to extract time from input container.")
+
+        nlsd = timestamp.shape[0]
 
         # Redefine stack axis so that it only contains chime antennas
         stack_new, stack_flag = tools.redefine_stack_index_map(
@@ -475,12 +541,15 @@ class SolveSources(task.SingleTask):
 
         # Create output container
         out = containers.SourceModel(
+            lsd=lsd,
             pol=upol,
-            time=timestamp,
+            time=timestamp[0],
             source=np.array(self.sources),
             param=param_name,
             axes_from=data,
             attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
         )
 
         # Determine extended source model
@@ -500,8 +569,18 @@ class SolveSources(task.SingleTask):
 
         out.redistribute("freq")
         out_amplitude = out.amplitude[:].view(np.ndarray)
+        out_amplitude[:] = 0.0
         if self.extended_source_kwargs:
             out_coeff = out.coeff[:].view(np.ndarray)
+            out_coeff[:] = 0.0
+
+        if nlsd > 1:
+            out.add_dataset("timestamp")
+            out.datasets["timestamp"][:] = timestamp
+
+            if flag_lsd is not None:
+                out.add_dataset("flag_lsd")
+                out.datasets["flag_lsd"][:] = flag_lsd
 
         # Loop over polarisations
         for pp, upp in enumerate(upol):
@@ -520,7 +599,7 @@ class SolveSources(task.SingleTask):
 
                 # Determine the initial source model, assuming all sources are point sources
                 psrc_model, _ = model_extended_sources(
-                    nu, dist_pol, timestamp, self.bodies, **self.point_source_kwargs
+                    nu, dist_pol, timestamp, self.bodies, flag_lsd=flag_lsd, **self.point_source_kwargs
                 )
                 psrc_model = psrc_model[0]
 
@@ -537,6 +616,7 @@ class SolveSources(task.SingleTask):
                         dist_pol,
                         timestamp,
                         self.bodies,
+                        flag_lsd=flag_lsd,
                         **self.extended_source_kwargs,
                     )
                     ext_model = ext_model[0]
@@ -577,6 +657,15 @@ class SolveSources(task.SingleTask):
         out.attrs["telescope_rotation"] = self.telescope_rotation
 
         return out
+
+
+class SolveSourcesStack(SolveSources):
+
+    def process(self, data, flag_lsd):
+
+        self.flag_lsd = flag_lsd
+
+        return super().process(data)
 
 
 class LPFSourceAmplitude(task.SingleTask):
@@ -718,11 +807,18 @@ class SubtractSources(task.SingleTask):
 
         # Calculate time
         if "ra" in data.index_map:
-            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
-            csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+
+            if "timestamp" in model.datasets:
+                timestamp = model.datasets["timestamp"][:]
+                flag_lsd = model.datasets["flag_lsd"][:]
+            else:
+                timestamp = model.index_map["time"][:].reshape(1, -1)
+                flag_lsd = None
+
         elif "time" in data.index_map:
-            timestamp = data.time
+            timestamp = data.time.reshape(1, -1)
+            flag_lsd = None
+
         else:
             raise RuntimeError("Unable to extract time from input container.")
 
@@ -773,7 +869,7 @@ class SubtractSources(task.SingleTask):
 
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp, bodies, **source_model_kwargs
+                    nu, dist_pol, timestamp, bodies, flag_lsd=flag_lsd, **source_model_kwargs
                 )
                 source_model = source_model[0]
 
@@ -829,6 +925,8 @@ class SolveSourcesWithBeam(SolveSources):
     time_variable = config.Property(proptype=bool, default=False)
     joint_pol = config.Property(proptype=bool, default=False)
 
+    flag_lsd = None
+
     def setup(self, tel):
         """Set up the source model.
 
@@ -861,6 +959,7 @@ class SolveSourcesWithBeam(SolveSources):
             "min_altitude": self.min_altitude,
             "max_ha": self.max_ha,
             "min_ha": self.min_ha,
+            "avg_phi": self.avg_phi,
         }
 
         # Check if we are allowing the amplitude to vary as a function of time
@@ -913,10 +1012,6 @@ class SolveSourcesWithBeam(SolveSources):
         bmatch = {}
         if "ra" in data.index_map:
 
-            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
-            csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.ra, val.ra)
                 if np.array_equal(data.ra[imatch], val.ra):
@@ -926,9 +1021,23 @@ class SolveSourcesWithBeam(SolveSources):
                         f"The beam for {key} is not sampled at the correct RAs."
                     )
 
-        elif "time" in data.index_map:
+            if self.flag_lsd is None:
 
-            timestamp = data.time
+                lsd = np.atleast_1d(data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"])
+                timestamp = ephemeris.csd_to_unix(lsd[:, np.newaxis] + data.ra[np.newaxis, :] / 360.0)
+                flag_lsd = None
+
+            else:
+
+                self.log.info(f"Using timestamps and flags for {self.flag_lsd.lsd.size} sidereal days.")
+                lsd = self.flag_lsd.lsd[:]
+                timestamp = self.flag_lsd.timestamp[:]
+                flag_lsd = self.flag_lsd.flag[:]
+
+                if not np.array_equal(self.flag_lsd.ra, data.ra):
+                    raise RuntimeError("The sidereal day flag is not sampled at the correct RAs.")
+
+        elif "time" in data.index_map:
 
             for key, val in beams.items():
                 imatch = np.searchsorted(data.time, val.time)
@@ -939,8 +1048,14 @@ class SolveSourcesWithBeam(SolveSources):
                         f"The beam for {key} is not sampled at the correct RAs."
                     )
 
+            timestamp = data.time.reshape(1, ntime)
+            lsd = np.atleast_1d(np.fix(np.mean(ephemeris.unix_to_csd(timestamp))))
+            flag_lsd = None
+
         else:
             raise RuntimeError("Unable to extract time from input container.")
+
+        nlsd = timestamp.shape[0]
 
         # Redefine stack axis so that it only contains chime antennas
         stack_new, stack_flag = tools.redefine_stack_index_map(
@@ -1018,12 +1133,15 @@ class SolveSourcesWithBeam(SolveSources):
 
         # Create output container
         out = containers.SourceModel(
+            lsd=lsd,
             pol=upol,
-            time=timestamp,
+            time=timestamp[0],
             source=np.array(self.sources),
             param=param_name,
             axes_from=data,
             attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
         )
 
         source_kwargs = self.source_kwargs.copy()
@@ -1038,6 +1156,14 @@ class SolveSourcesWithBeam(SolveSources):
             out.add_dataset("coeff")
             out.redistribute("freq")
             out_dset = out.coeff[:].view(np.ndarray)
+
+        if nlsd > 1:
+            out.add_dataset("timestamp")
+            out.datasets["timestamp"][:] = timestamp
+
+            if flag_lsd is not None:
+                out.add_dataset("flag_lsd")
+                out.datasets["flag_lsd"][:] = flag_lsd
 
         out_dset[:] = 0.0
 
@@ -1080,14 +1206,16 @@ class SolveSourcesWithBeam(SolveSources):
 
                 vis = vis[:, valid_time]
                 weight = weight[:, valid_time]
+                flg = flag_lsd[:, valid_time] if flag_lsd is not None else None
 
                 # Determine extended source model
                 source_model, sedge = model_extended_sources(
                     nu,
                     dist_pol,
-                    timestamp[valid_time],
+                    timestamp[:, valid_time],
                     self.bodies,
                     nstream=nstream,
+                    flag_lsd=flg,
                     **self.source_kwargs,
                 )
                 source_model = source_model[0]
@@ -1126,6 +1254,15 @@ class SolveSourcesWithBeam(SolveSources):
         out.attrs["telescope_rotation"] = self.telescope_rotation
 
         return out
+
+
+class SolveSourcesWithBeamStack(SolveSourcesWithBeam):
+
+    def process(self, data, beams, flag_lsd):
+
+        self.flag_lsd = flag_lsd
+
+        return super().process(data, beams)
 
 
 class SubtractSourcesWithBeam(task.SingleTask):
@@ -1204,10 +1341,6 @@ class SubtractSourcesWithBeam(task.SingleTask):
         bmatch = {}
         if "ra" in data.index_map:
 
-            csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
-            csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
-
             for key, val in beams.items():
                 imatch = np.searchsorted(data.ra, val.ra)
                 if np.array_equal(data.ra[imatch], val.ra):
@@ -1217,9 +1350,14 @@ class SubtractSourcesWithBeam(task.SingleTask):
                         f"The beam for {key} is not sampled at the correct RAs."
                     )
 
-        elif "time" in data.index_map:
+            if "timestamp" in model.datasets:
+                timestamp = model.datasets["timestamp"][:]
+                flag_lsd = model.datasets["flag_lsd"][:]
+            else:
+                timestamp = model.index_map["time"][:].reshape(1, -1)
+                flag_lsd = None
 
-            timestamp = data.time
+        elif "time" in data.index_map:
 
             for key, val in beams.items():
                 imatch = np.searchsorted(data.time, val.time)
@@ -1229,6 +1367,9 @@ class SubtractSourcesWithBeam(task.SingleTask):
                     raise RuntimeError(
                         f"The beam for {key} is not sampled at the correct RAs."
                     )
+
+            timestamp = data.time.reshape(1, -1)
+            flag_lsd = None
 
         else:
             raise RuntimeError("Unable to extract time from input container.")
@@ -1277,7 +1418,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         # If requested, create output container.
         if self.save_model:
-            out = containers.empty_like(data)
+            out = dcontainers.empty_like(data)
             out.redistribute("freq")
             out.vis[:] = 0.0
             out.weight[:] = data.weight[:].copy()
@@ -1322,9 +1463,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
                 if valid_time.size == 0:
                     continue
 
+                flg = flag_lsd[:, valid_time] if flag_lsd is not None else None
+
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
-                    nu, dist_pol, timestamp[valid_time], bodies, **source_model_kwargs
+                    nu, dist_pol, timestamp[:, valid_time], bodies, flag_lsd=flg, **source_model_kwargs
                 )
                 source_model = source_model[0]
 

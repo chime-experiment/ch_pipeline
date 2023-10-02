@@ -1176,8 +1176,8 @@ class GainFromTransitFit(task.SingleTask):
 
         chisq_per_dof = chisq * tools.invert_no_zero(ndof.astype(np.float32))
 
-        gain = out.gain[:]
-        weight = out.weight[:]
+        gain = out.gain[:].local_array
+        weight = out.weight[:].local_array
 
         # Instantiate the model object
         model = ModelClass(

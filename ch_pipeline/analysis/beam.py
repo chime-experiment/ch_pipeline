@@ -27,7 +27,7 @@ from draco.util.tools import invert_no_zero
 
 from ..core.containers import TransitFitParams, MultiSiderealStream, MultiTimeStream
 from .calibration import TransitFit, GainFromTransitFit
-
+from .flagging import taper_mask
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
@@ -300,6 +300,7 @@ class TaperBeam(task.SingleTask):
 class FilterBeam(task.SingleTask):
 
     ncut = config.Property(proptype=float, default=2.0)
+    ntransition = config.Property(proptype=float, default=1.0)
 
     def process(self, data):
 
@@ -319,6 +320,7 @@ class FilterBeam(task.SingleTask):
         nphi = phi.size
 
         m = np.fft.fftfreq(nphi, d=dphi / (2.0 * np.pi))
+        dm = m[1] - m[0]
 
         # Dereference the datasets
         beam = data.beam[:].view(np.ndarray)
@@ -327,9 +329,11 @@ class FilterBeam(task.SingleTask):
         # Loop over frequencies to reduce memory usage
         for ff, nu in enumerate(local_freq):
 
-            mcut = self.ncut * np.pi * nu * CHIME_CYL_W * np.cos(theta) / SPEED_LIGHT
+            mwidth = np.pi * nu * CHIME_CYL_W * np.cos(theta) / SPEED_LIGHT
+            mcut = self.ncut * mwidth
+            ntransition = int(self.ntransition * mwidth // dm)
 
-            h = (np.abs(m) < mcut).astype(np.float32)
+            h = 1.0 - taper_mask((np.abs(m) > mcut).astype(np.float32), ntransition)
             flag = (weight[ff] > 0.0).astype(np.float32)
 
             beam[ff] = np.fft.ifft(np.fft.fft(beam[ff] * flag, axis=-1) * h, axis=-1)
@@ -524,10 +528,10 @@ class FlagBeam(task.SingleTask):
 
     def process(self, data):
 
-        b = data.beam[:].view(np.ndarray)
-        w = data.weight[:].view(np.ndarray)
+        b = data.beam[:].local_array
+        w = data.weight[:].local_array
 
-        data.weight[:] *= ((w > self.threshold) & (np.abs(b) > 0.0)).astype(np.float32)
+        data.weight[:].local_array[:] *= ((w > self.threshold) & (np.abs(b) > 0.0)).astype(np.float32)
 
         return data
 
@@ -1493,7 +1497,7 @@ class MedianBeam(io.LoadFilesFromParams):
                 comm=data.comm,
             )
 
-            self._out.add_dataset("number_of_observations")
+            self._out.add_dataset("nsample")
 
             self._out.redistribute("freq")
 
@@ -1520,7 +1524,7 @@ class MedianBeam(io.LoadFilesFromParams):
         # Dereference datasets
         obeam = self._out.beam[:].view(np.ndarray)
         oweight = self._out.weight[:].view(np.ndarray)
-        onum = self._out["number_of_observations"][:].view(np.ndarray)
+        onum = self._out["nsample"][:].view(np.ndarray)
 
         nfreq, npol, ninput, nha = obeam.shape
 
