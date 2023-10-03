@@ -9,6 +9,7 @@ from skyfield.starlib import Star
 
 from caput import config
 from caput import mpiarray
+from caput import weighted_median
 
 from ch_util.hfbcat import HFBCatalog
 from ch_util.ephemeris import chime, get_doppler_shifted_freq
@@ -964,14 +965,10 @@ class HFBMedianSubtraction(task.SingleTask):
         if isinstance(data, mpiarray.MPIArray):
             data = data.local_array
 
-        
-        # Reshape beam axis to separate NS and EW beams
-        freq, subfreq, _, time = data.shape
-        new_shape = (freq, subfreq, 256, 4, time)
-        data_reshaped = data.reshape(new_shape)    
+          
 
         # Subtract median along NS-beams from the data
-        diff = data_reshaped - np.median(data_reshaped, axis=2)[:, :, None, :, :]
+        diff = data - np.median(data, axis=2)[:, :, None, :]
         #diff = data_reshaped - np.median(data_reshaped, axis=2)[:, :, None, :, :]
 
 
@@ -984,5 +981,110 @@ class HFBMedianSubtraction(task.SingleTask):
         # Place diff in output container
         out.hfb[:] = diff
         out.weight[:] = weight
+
+        return out
+
+class HFBMedianSubtractionFlagging(task.SingleTask):
+    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
+    fluctuations in East and West receiver huts."""
+
+    def process(self, stream):
+        """Subtract weighted median along beam axis from the data.
+
+        Parameters
+        ----------
+        stream : containers.HFBTimeAverage
+            Container with time-averaged HFB data.
+
+        Returns
+        -------
+        out : containers.HFBTimeAverage
+            Container with flattened time-averaged HFB data.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        #Replace non-zero weights with 1, and zeros with NANs:
+        weight[weight != 0] = 1
+        weight[weight == 0] = np.nan
+
+        #Calculate weighted median (to exclude flagged data) along beam axis:
+        median = np.nanmedian(data*weight,axis=2)
+
+
+        # Subtract uniform median along all beams from the data
+        diff = data - median[:,:,None,:]
+
+        #Load the original weights
+        weight = stream.weight[:]
+
+        # Create container to hold output
+        out = containers.HFBData(stream)
+
+        # Place diff in output container
+        out.hfb[:] = diff[:]
+        out.weight[:] = weight[:]
+
+        return out
+
+class HFBWeightedMedianSubtraction(task.SingleTask):
+    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
+    fluctuations in East and West receiver huts. 
+    """
+
+    def process(self, stream):
+        """Subtract weighted median along beam axis from the data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        #Replace non-zero weights with 1:
+        #weight[weight != 0] = 1
+
+        #Change the order of axes in data and weight arrays, as weighted median is calculated along the last axis
+        data_s = np.swapaxes(data, 2, 3)
+        weight_s = np.swapaxes(weight, 2, 3)
+
+        #Calculate weighted median (to exclude flagged data) along beam axis:
+        median = weighted_median.weighted_median(data_s, weight_s)
+
+
+        #Load the original weights
+        #weight = stream.weight[:]
+
+        # Subtract weighted median along all beams from the data
+        diff = data - median[:,:,None,:]
+
+
+        # Create container to hold output
+        out = containers.HFBData(stream)
+
+        # Place diff in output container
+        out.hfb[:] = diff[:]
+        out.weight[:] = weight[:]
 
         return out
