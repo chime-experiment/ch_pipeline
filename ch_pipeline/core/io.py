@@ -43,7 +43,7 @@ from draco.core import task, io
 from . import containers
 
 
-class LoadCorrDataFiles(task.SingleTask):
+class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
     """Load CHIME correlator data from a file list passed into the setup routine.
 
     File must be a serialised subclass of :class:`ch_util.andata.CorrData`.
@@ -66,7 +66,7 @@ class LoadCorrDataFiles(task.SingleTask):
         to True.
     """
 
-    files = None
+    files: list[str] = None
 
     _file_ptr = 0
 
@@ -80,7 +80,7 @@ class LoadCorrDataFiles(task.SingleTask):
 
     use_draco_container = config.Property(proptype=bool, default=True)
 
-    def setup(self, files):
+    def setup(self, files: list[str]):
         """Set the list of files to load.
 
         Parameters
@@ -92,21 +92,25 @@ class LoadCorrDataFiles(task.SingleTask):
 
         self.files = files
 
+        self._sel = self._resolve_sel()
+
         # Set up frequency selection.
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self.freq_sel = sorted(
+            freq_sel = sorted(
                 set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = slice(*self.channel_range)
+            freq_sel = slice(*self.channel_range)
 
         elif self.channel_index:
-            self.freq_sel = self.channel_index
+            freq_sel = self.channel_index
 
         else:
-            self.freq_sel = slice(None)
+            freq_sel = slice(None)
+
+        self._sel["freq_sel"] = freq_sel
 
     def process(self):
         """Load in each sidereal day.
@@ -130,19 +134,19 @@ class LoadCorrDataFiles(task.SingleTask):
 
         # Set up product selection
         # NOTE: this probably doesn't work with stacked data
-        prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
-            prod_sel = np.array(
+            self._sel["prod_sel"] = np.array(
                 [ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1]]
             )
 
         # Load file
-        if (
-            isinstance(self.freq_sel, slice)
-            and (prod_sel is None)
-            and (self.datasets is None)
-        ):
+        fast_sel = all(
+            (sel is None or (axis == "freq_sel" and isinstance(sel, slice)))
+            for axis, sel in self._sel.items()
+        )
+
+        if fast_sel and (self.datasets is None):
             self.log.info(
                 "Reading file %i of %i. (%s) [fast io]",
                 self._file_ptr,
@@ -150,7 +154,9 @@ class LoadCorrDataFiles(task.SingleTask):
                 file_,
             )
             ts = andata.CorrData.from_acq_h5_fast(
-                file_, freq_sel=self.freq_sel, comm=self.comm
+                file_,
+                comm=self.comm,
+                **self._sel,
             )
         else:
             self.log.info(
@@ -164,8 +170,7 @@ class LoadCorrDataFiles(task.SingleTask):
                 datasets=self.datasets,
                 distributed=True,
                 comm=self.comm,
-                freq_sel=self.freq_sel,
-                prod_sel=prod_sel,
+                **self._sel,
             )
 
         # Store file name
