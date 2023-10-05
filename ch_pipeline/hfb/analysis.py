@@ -1011,7 +1011,7 @@ class HFBMedianSubtractionFlagging(task.SingleTask):
             data = data.local_array
             weight = weight.local_array
 
-        #Replace non-zero weights with 1, and zeros with NANs:
+        #Replace non-zero weights with 1, and zeros with NANs (it changes the actual weights which is problematic):
         weight[weight != 0] = 1
         weight[weight == 0] = np.nan
 
@@ -1062,7 +1062,7 @@ class HFBWeightedMedianSubtraction(task.SingleTask):
             data = data.local_array
             weight = weight.local_array
 
-        #Replace non-zero weights with 1:
+        #make a mask of non-zero weights
         #weight[weight != 0] = 1
 
         #Change the order of axes in data and weight arrays, as weighted median is calculated along the last axis
@@ -1088,3 +1088,62 @@ class HFBWeightedMedianSubtraction(task.SingleTask):
         out.weight[:] = weight[:]
 
         return out
+
+
+
+class HFBMaskMedianSubtraction(task.SingleTask):
+    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
+    fluctuations in East and West receiver huts. 
+    """
+
+    def process(self, stream):
+        """Subtract weighted median along beam axis from the data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        #make a mask of non-zero weights, and apply weighted median to the data masked by this mask
+        mask = weight != 0
+        #mask.astype(float) generates array of zeros and ones
+        binary_weight = mask.astype(float)
+    
+
+        #Change the order of axes in data and mask arrays, as weighted median is calculated along the last axis
+        data_s = np.swapaxes(data, 2, 3)
+        binary_weight = np.swapaxes(binary_weight, 2, 3)
+
+        #Calculate weighted median (to exclude flagged data) along beam axis:
+        median = weighted_median.weighted_median(data_s, binary_weight)
+
+
+        # Subtract weighted median along all beams from the data
+        diff = data - median[:,:,None,:]
+
+
+        # Create container to hold output
+        out = containers.HFBData(stream)
+
+        # Place diff in output container
+        out.hfb[:] = diff[:]
+        out.weight[:] = weight[:]
+
+        return out
+
+        
