@@ -13,13 +13,14 @@ import h5py
 import healpy
 from scipy.interpolate import RectBivariateSpline
 
-from caput import config, mpiutil
+from caput import config, misc, mpiutil
 
 from cora.util import coord, hputil
 
 from drift.core import telescope
 from drift.telescope import cylbeam
 
+from draco.core import task
 from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
 
 from ch_util import ephemeris, tools
@@ -1040,3 +1041,40 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
     freq_ind = np.nonzero(match_mask)[0]
 
     return freq_ind
+
+
+class MakeTelescope(task.MPILoggedTask):
+    """A simple task to construct a telescope object.
+
+    This removes the need to use driftscan to create a saved beam transfer manager
+    solely for running pipelines that only need the telescope object.
+
+    Attributes
+    ----------
+    telescope_type : str
+        The type of telescope object to create. Generally this must be a fully qualified
+        Python class name, however, \"chime\" (default) can be used to create a
+        `ch_pipeline.core.telescope.CHIME` instance.
+    telescope_config : dict
+        Configuration passed straight to the telescope class via it's `from_config`
+        method.
+    """
+
+    telescope_type = config.Property(proptype=str, default="chime")
+    telescope_config = config.Property(proptype=dict)
+
+    def setup(self) -> telescope.TransitTelescope:
+        """Create and return the telescope object."""
+
+        _type_map = {
+            "chime": CHIME,
+        }
+
+        if self.telescope_type in _type_map:
+            tel_class = _type_map[self.telescope_type]
+        else:
+            tel_class = misc.import_class(self.telescope_type)
+
+        tel = tel_class.from_config(self.telescope_config)
+
+        return tel
