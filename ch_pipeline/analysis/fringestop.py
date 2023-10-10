@@ -124,6 +124,8 @@ class ApplyBTermCorrection(task.SingleTask):
         self.log.warning(f"The shape of the product map is {prod_map.shape}")
 
         nfreq = track.beam.local_shape[0]
+        npol = track.beam.local_shape[1]
+        ninput = track.beam.local_shape[2]
         local_slice = slice(track.beam.local_offset[0], track.beam.local_offset[0] + nfreq)
 
         freq = track.freq[local_slice]
@@ -133,7 +135,7 @@ class ApplyBTermCorrection(task.SingleTask):
         bterm_phase = np.exp(2.j * np.pi * bterm_delay * freq * 1e6)
         self.log.warning(f"The shape of the delay phase is {bterm_delay.shape}")
 
-        track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, 2, 2048)))[..., np.newaxis]
+        track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, npol, ninput)))[..., np.newaxis]
 
         return track
 
