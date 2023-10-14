@@ -2,6 +2,7 @@
 import json
 import yaml
 from os import path, listdir
+import re
 
 import numpy as np
 from scipy import constants
@@ -12,8 +13,9 @@ from caput.time import STELLAR_S
 
 from ch_util import ephemeris as ephem
 from ch_util import tools, layout, holography
-from chimedb import data_index as di
+from chimedb import data_index as di, dataset
 from chimedb.core import connect as connect_database
+from chimedb.core.exceptions import NotFoundError
 
 
 from draco.core import task, io
@@ -30,6 +32,9 @@ SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
 CHIME_CYL_W = 22.0  # m
 
+NULL_ID = "00000000000000000000000000000000"  # null dataset ID
+ACQ_RE = re.compile("(\d{8}T\d{6}Z)_")
+
 
 class TransitGrouper(task.SingleTask):
     """Group transits from a sequence of TimeStream objects.
@@ -45,12 +50,19 @@ class TransitGrouper(task.SingleTask):
     db_source: str
         Name of the transiting source as listed in holography database.
         This is a hack until a better solution is implemented.
+    fail_if_missing: bool
+        Raise an exception if no transits are found in the provided data.
+    check_dataset_id: bool
+        Check that the gating state associated with the dataset ID for the data matches
+        the holography source. Only for gated holography.
     """
 
     ha_span = config.Property(proptype=float, default=180.0)
     min_span = config.Property(proptype=float, default=0.0)
     source = config.Property(proptype=str)
     db_source = config.Property(proptype=str)
+    fail_if_missing = config.Property(proptype=bool, default=True)
+    check_dataset_id = config.Property(proptype=bool, default=False)
 
     def setup(self, observer=None):
         """Set the local observers position if not using CHIME.
@@ -78,6 +90,10 @@ class TransitGrouper(task.SingleTask):
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
+        self.n_processed = 0
+        self.acq = None
+        self._uncertain_gating = False
+        self._known_datasets = []
 
         # Get list of holography observations
         # Only allowed to query database from rank0
@@ -108,14 +124,19 @@ class TransitGrouper(task.SingleTask):
         # placeholder for finalized transit when it is ready
         final_ts = None
 
+        # for gated holography, check gating state matches source
+        if not self._match_dataset_id(tstream):
+            self.log.info("Dataset ID check failed. Skipping.")
+            return None
+
         # check if we jumped to another acquisition
-        if (tstream.time[0] - self.last_time) > 5 * (tstream.time[1] - tstream.time[0]):
-            if self.cur_transit is None:
-                # will be true when we start a new transit
-                pass
-            else:
-                # start on a new transit and return current one
-                final_ts = self._finalize_transit()
+        this_acq = ACQ_RE.search(tstream.attrs["filename"]).group(1)
+        if self.acq is None:
+            # this is the first file
+            self.acq = this_acq
+        elif this_acq != self.acq:
+            # start on a new transit and return current one
+            final_ts = self._finalize_transit()
 
         # if this is the start of a new grouping, setup transit bounds
         if self.cur_transit is None:
@@ -166,15 +187,21 @@ class TransitGrouper(task.SingleTask):
     def _finalize_transit(self):
         """Concatenate grouped time streams for the currrent transit."""
 
-        # Find where transit starts and ends
+        # Check if we successfully processed a transit
         if len(self.tstreams) == 0 or self.cur_transit is None:
-            self.log.info("Did not find any transits.")
+            if self.n_processed == 0:
+                self.log.info("Did not find any transits.")
+                if self.fail_if_missing:
+                    raise PipelineRuntimeError("Did not find any transits.")
             return None
+
         self.log.debug(
             "Finalising transit for {}...".format(
                 ephem.unix_to_datetime(self.cur_transit)
             )
         )
+
+        # Find where transit starts and ends
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
         stop_ind = int(np.argmin(np.abs(all_t - self.end_t)))
@@ -208,12 +235,18 @@ class TransitGrouper(task.SingleTask):
                 ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
             )
             ts.attrs["archivefiles"] = filenames
+            if self._uncertain_gating:
+                ts.attrs["uncertain_gating"] = True
+                ts.attrs["tag"] = ts.attrs["tag"] + f"_{self.n_processed}"
         else:
             self.log.info("Transit too short. Skipping.")
             ts = None
 
         self.tstreams = []
         self.cur_transit = None
+        self.acq = None
+        self._uncertain_gating = False
+        self.n_processed += 1
 
         return ts
 
@@ -245,6 +278,65 @@ class TransitGrouper(task.SingleTask):
             self.start_t = max(self.start_t, this_run[0][1][0])
             self.end_t = min(self.end_t, this_run[0][1][1])
             self.obs_id = this_run[0][0]
+
+    def _match_dataset_id(self, tstream):
+        if not self.check_dataset_id:
+            # skip this check
+            return True
+
+        if "dataset_id" not in tstream.flags.keys():
+            self.log.warning(
+                "Data was acquired before dataset IDs were saved. Aborting check."
+            )
+            self._uncertain_gating = (
+                True  # set a flag to indicate we couldn't confirm source
+            )
+            return True
+
+        # get dataset IDs from file
+        dset_ids = np.unique(tstream.flags["dataset_id"][:].flatten())
+        dset_ids = [d for d in dset_ids if d != NULL_ID]  # exclude null state
+
+        # communicate all dataset IDs to rank 0
+        dset_ids = self.comm.gather(dset_ids, root=0)
+
+        result = True
+        if self.comm.rank == 0:
+            dset_ids = list(set([i for ds in dset_ids for i in ds]))
+
+            # check whether we valided these already
+            known = True
+            for dsi in dset_ids:
+                if dsi not in self._known_datasets:
+                    known = False
+                    break
+
+            if not known:
+                connect_database()
+                for dsi in dset_ids:
+                    dset = dataset.Dataset.get_by_id(dsi)
+                    try:
+                        state = dset.closest_ancestor_of_type("gating")
+                    except NotFoundError:
+                        result = False
+                        self.log.warning(
+                            f"Dataset {dsi} has no associated gating state."
+                        )
+                        break
+                    name = state.dataset_state.data["data"]["data"]["pulsar_name"]
+                    if name not in self.src.names:
+                        result = False
+                        self.log.warning(
+                            f"Gating state associated with {dsi} is for {name}, not {self.source}."
+                        )
+                        break
+                    else:
+                        self._known_datasets.append(dsi)
+
+        # communicate result to all ranks
+        result = self.comm.bcast(result, root=0)
+
+        return result
 
 
 class TransitRegridder(Regridder):
@@ -757,7 +849,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0

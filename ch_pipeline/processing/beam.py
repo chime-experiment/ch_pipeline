@@ -29,25 +29,43 @@ param_anchors:
 
 # Pipeline task configuration
 pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - draco
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
   tasks:
 
     - type: draco.core.task.SetMPILogging
       params:
-          level_all: INFO
-          level_rank0: DEBUG
+          level_all: WARNING
+          level_rank0: INFO
 
     - type: ch_pipeline.core.dataquery.QueryDatabase
       out: files_wait
       params:
         node_spoof:
-          cedar_online: /project/rpp-krs/chime/chime_online
-        instrument: chime26m
+          cedar_online: /project/rpp-chime/chime/chime_online
+        instrument: {inst}
         source_26m: *db_source_name
         start_time: {start_time}
         end_time: {end_time}
         accept_all_global_flags: True
         exclude_data_flag_types: ["misc"]
-        return_intervals: True
 
     - type: draco.core.io.LoadFilesFromParams
       out: tcorr
@@ -64,15 +82,8 @@ pipeline:
       in: files_wait
       out: files
 
-    - type: ch_pipeline.analysis.beam.FilterHolographyProcessed
-      in: files
-      out: files_filt
-      params:
-        source: *db_source_name
-        processed_dir: [{dir}, {tempdir}]
-
     - type: ch_pipeline.core.io.LoadCorrDataFiles
-      requires: files_filt
+      requires: files
       out: tstreams
 
     - type: ch_pipeline.analysis.timing.ApplyTimingCorrection
@@ -89,6 +100,8 @@ pipeline:
         source: *source_name
         db_source: *db_source_name
         ha_span: *hour_angle
+        fail_if_missing: True
+        check_dataset_id: {check_dset}
 
     - type: ch_pipeline.core.dataquery.QueryInputs
       in: transits
@@ -133,60 +146,65 @@ class HolographyFringestop(base.ProcessingType):
 
     type_name = "holo_fstop"
     # tag by name of source and processing run
-    tag_pattern = r"(.+)_run(\d{3})"
+    tag_pattern = r"(.+)_(\d{4})"
 
     # Parameters of the job processing
     default_params = {
-        "src": ["CYG_A", "CAS_A"],
-        "src_db": ["CygA", "CasA"],
+        "sources": {"CygA": "CYG_A", "CasA": "CAS_A"},
+        "gated_sources": {"B0329+54": "B0329+54"},
         "start_time": "20180101T000000",
-        "end_time": "20200101T000000",
-        "transits_per_run": 10,
         "ha_span": 60.0,
         "num_samples": 720,
         "nodes": 4,
         "pernode": 4,
-        "ompnum": 8,
-        "time": "0-4:00:00",
-        "timing_corr": "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
+        "ompnum": 12,
+        "time": "0-0:15:00",
+        "timing_corr": "/project/rpp-chime/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
+        "check_dset": False,
     }
     default_script = DEFAULT_SCRIPT
 
     def _available_tags(self):
         self._tags = {}
-        # Divide observations by source and in groups
+
+        # Query database for holography observations of given sources
         start_t = ephem.ensure_unix(self._revparams["start_time"])
-        end_t = ephem.ensure_unix(self._revparams["end_time"])
         connect_db()
-        for src in self._revparams["src_db"]:
-            # query database for observations within time range and sort by time
+
+        def get_obs(src):
             db_src = holo.HolographySource.get(holo.HolographySource.name == src)
-            db_obs = (
+            return (
                 holo.HolographyObservation.select()
-                .where(holo.HolographyObservation.source == db_src)
                 .where(
-                    (holo.HolographyObservation.start_time > start_t)
-                    & (holo.HolographyObservation.finish_time < end_t)
-                )
-                .where(
+                    (holo.HolographyObservation.source == db_src),
+                    (holo.HolographyObservation.start_time > start_t),
                     (holo.HolographyObservation.quality_flag == 0)
-                    | (holo.HolographyObservation.quality_flag == None)
+                    | (holo.HolographyObservation.quality_flag == None),
                 )
                 .order_by(holo.HolographyObservation.start_time)
             )
 
-            # divide into groups to process together
-            n_per = self._revparams["transits_per_run"]
-            n_groups = len(db_obs) // n_per + (len(db_obs) % n_per != 0)
-            for i in range(n_groups):
-                tag = "{}_run{:0>3d}".format(src, i)
-                # set up time range for these transits, with 1h padding
-                i *= n_per
-                j = i + n_per - 1
-                if j >= len(db_obs):
-                    j = len(db_obs) - 1
-                bnds = (db_obs[i].start_time - 3600, db_obs[j].finish_time + 3600)
-                self._tags[tag] = {"start": bnds[0], "end": bnds[1], "src_db": src}
+        for src in self._revparams["sources"]:
+            db_obs = get_obs(src)
+            for obs in db_obs:
+                tag = f"{src}_{obs.id:0>4d}"
+                self._tags[tag] = {
+                    "start": obs.start_time,
+                    "end": obs.finish_time,
+                    "src_db": src,
+                    "gated": False,
+                }
+
+        for src in self._revparams["gated_sources"]:
+            db_obs = get_obs(src)
+            for obs in db_obs:
+                tag = f"{src}_gated_{obs.id:0>4d}"
+                self._tags[tag] = {
+                    "start": obs.start_time,
+                    "end": obs.finish_time,
+                    "src_db": src,
+                    "gated": True,
+                }
 
         return self._tags.keys()
 
@@ -195,10 +213,18 @@ class HolographyFringestop(base.ProcessingType):
         jobparams["start_time"] = self._tags[tag]["start"]
         jobparams["end_time"] = self._tags[tag]["end"]
 
-        # set source
-        jobparams["src_db"] = self._tags[tag]["src_db"]
-        jobparams["src"] = self._revparams["src"][
-            self._revparams["src_db"].index(self._tags[tag]["src_db"])
-        ]
+        # set source name
+        # some sources are named differently in the database and the ephemeris
+        # catalog so we need to map from one to the other
+        src_db = self._tags[tag]["src_db"]
+        jobparams["src_db"] = src_db
+        if self._tags[tag]["gated"]:
+            # instrument is different for gated observations
+            jobparams["src"] = self._revparams["gated_sources"][src_db]
+            jobparams["inst"] = "chime26mgated"
+            jobparams["check_dset"] = True
+        else:
+            jobparams["src"] = self._revparams["sources"][src_db]
+            jobparams["inst"] = "chime26m"
 
         return jobparams

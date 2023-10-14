@@ -98,7 +98,7 @@ class CorrectDecorrelation(task.SingleTask):
         )
 
         # weights are inverse variance
-        weight = np.sqrt(invert_no_zero(tstream.weight[:]))
+        weight = np.sqrt(invert_no_zero(tstream.weight[:].local_array))
         weight = tools.decorrelation(
             weight,
             times=tstream.time,
