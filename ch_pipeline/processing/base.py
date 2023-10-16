@@ -379,7 +379,12 @@ class ProcessingType(object):
         to_run = self._generate_hook(user=user)[:max]
 
         for tag in to_run:
-            queue_job(self.job_script(tag), submit=submit)
+            try:
+                queue_job(self.job_script(tag), submit=submit)
+            except Exception as exc:
+                warnings.warn(
+                    f"Exception occured while queuing tag [{tag}].\n" f"{exc}"
+                )
 
     def _generate_hook(self, user: str = None) -> list:
         """Override to add custom behaviour when jobs are queued."""
