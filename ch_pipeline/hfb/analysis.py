@@ -940,164 +940,12 @@ def _ensure_list(x):
 
 
 class HFBMedianSubtraction(task.SingleTask):
-    """Subtract median along beam axis to remove fluctuations in the data induced by temperature
-    fluctuations in East receiver hut."""
-
-    def process(self, stream):
-        """Flatten HFB data.
-
-        Parameters
-        ----------
-        stream : containers.HFBTimeAverage
-            Container with time-averaged HFB data.
-
-        Returns
-        -------
-        out : containers.HFBTimeAverage
-            Container with flattened time-averaged HFB data.
-        """
-
-        # Extract data from container
-        data = stream.hfb[:]
-        weight = stream.weight[:]
-
-        # Change data to numpy array, so that it can be reshaped
-        if isinstance(data, mpiarray.MPIArray):
-            data = data.local_array
-
-          
-
-        # Subtract median along NS-beams from the data
-        diff = data - np.median(data, axis=2)[:, :, None, :]
-        #diff = data_reshaped - np.median(data_reshaped, axis=2)[:, :, None, :, :]
-
-
-        #Reshape to the original
-        diff = diff.reshape(data.shape)
-
-        # Create container to hold output
-        out = containers.HFBData(stream)
-
-        # Place diff in output container
-        out.hfb[:] = diff
-        out.weight[:] = weight
-
-        return out
-
-class HFBMedianSubtractionFlagging(task.SingleTask):
-    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
-    fluctuations in East and West receiver huts."""
-
-    def process(self, stream):
-        """Subtract weighted median along beam axis from the data.
-
-        Parameters
-        ----------
-        stream : containers.HFBTimeAverage
-            Container with time-averaged HFB data.
-
-        Returns
-        -------
-        out : containers.HFBTimeAverage
-            Container with flattened time-averaged HFB data.
-        """
-
-        # Extract data from container
-        data = stream.hfb[:]
-        weight = stream.weight[:]
-
-        # Change data to numpy array, so that it can be reshaped
-        if isinstance(data, mpiarray.MPIArray):
-            data = data.local_array
-            weight = weight.local_array
-
-        #Replace non-zero weights with 1, and zeros with NANs (it changes the actual weights which is problematic):
-        weight[weight != 0] = 1
-        weight[weight == 0] = np.nan
-
-        #Calculate weighted median (to exclude flagged data) along beam axis:
-        median = np.nanmedian(data*weight,axis=2)
-
-
-        # Subtract uniform median along all beams from the data
-        diff = data - median[:,:,None,:]
-
-        #Load the original weights
-        weight = stream.weight[:]
-
-        # Create container to hold output
-        out = containers.HFBData(stream)
-
-        # Place diff in output container
-        out.hfb[:] = diff[:]
-        out.weight[:] = weight[:]
-
-        return out
-
-class HFBWeightedMedianSubtraction(task.SingleTask):
-    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
+    """Subtracting weighted median along beam axis from data to remove fluctuations in the data induced by temperature
     fluctuations in East and West receiver huts. 
     """
 
     def process(self, stream):
-        """Subtract weighted median along beam axis from the data.
-
-        Parameters
-        ----------
-        stream : containers.HFBData
-            Container with HFB data and weights.
-
-        Returns
-        -------
-        out : containers.HFBData
-            Container with HFB data and weights.
-        """
-
-        # Extract data from container
-        data = stream.hfb[:]
-        weight = stream.weight[:]
-
-        # Change data to numpy array, so that it can be reshaped
-        if isinstance(data, mpiarray.MPIArray):
-            data = data.local_array
-            weight = weight.local_array
-
-        #make a mask of non-zero weights
-        #weight[weight != 0] = 1
-
-        #Change the order of axes in data and weight arrays, as weighted median is calculated along the last axis
-        data_s = np.swapaxes(data, 2, 3)
-        weight_s = np.swapaxes(weight, 2, 3)
-
-        #Calculate weighted median (to exclude flagged data) along beam axis:
-        median = weighted_median.weighted_median(data_s, weight_s)
-
-
-        #Load the original weights
-        #weight = stream.weight[:]
-
-        # Subtract weighted median along all beams from the data
-        diff = data - median[:,:,None,:]
-
-
-        # Create container to hold output
-        out = containers.HFBData(stream)
-
-        # Place diff in output container
-        out.hfb[:] = diff[:]
-        out.weight[:] = weight[:]
-
-        return out
-
-
-
-class HFBMaskMedianSubtraction(task.SingleTask):
-    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature
-    fluctuations in East and West receiver huts. 
-    """
-
-    def process(self, stream):
-        """Subtract weighted median along beam axis from the data.
+        """Subtract weighted median along beam axis from the data, excluding flagged data.
 
         Parameters
         ----------
@@ -1121,15 +969,16 @@ class HFBMaskMedianSubtraction(task.SingleTask):
 
         #make a mask of non-zero weights, and apply weighted median to the data masked by this mask
         mask = weight != 0
+        
         #mask.astype(float) generates array of zeros and ones
         binary_weight = mask.astype(float)
     
 
-        #Change the order of axes in data and mask arrays, as weighted median is calculated along the last axis
+        #Change the order of axes in data and mask arrays, as weighted median is calculated only along the last axis
         data_s = np.swapaxes(data, 2, 3)
         binary_weight = np.swapaxes(binary_weight, 2, 3)
 
-        #Calculate weighted median (to exclude flagged data) along beam axis:
+        #Calculate weighted median along beam axis:
         median = weighted_median.weighted_median(data_s, binary_weight)
 
 
