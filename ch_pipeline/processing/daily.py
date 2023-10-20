@@ -24,6 +24,8 @@ cluster:
   mem: 192000M
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 
 # Pipeline task configuration
 pipeline:
@@ -790,6 +792,9 @@ class DailyProcessing(base.ProcessingType):
         "blend_stack_file": (
             "/project/rpp-chime/chime/chime_processed/stacks/rev_03/all/sstack.h5"
         ),
+        # System modules to use/load
+        "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
+        "modlist": "chime/python/2022.06",
         "nfreq_delay": 1025,
         # Job params
         "time": 100,  # How long in minutes?
