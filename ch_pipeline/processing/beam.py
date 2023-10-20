@@ -20,6 +20,8 @@ cluster:
   pernode: {pernode}
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 
 # source, hour angle span will be used by multiple tasks
 param_anchors:
@@ -149,6 +151,9 @@ class HolographyFringestop(base.ProcessingType):
         "ompnum": 8,
         "time": "0-4:00:00",
         "timing_corr": "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
+        # System modules to use/load
+        "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
+        "modlist": "chime/python/2022.06",
     }
     default_script = DEFAULT_SCRIPT
 

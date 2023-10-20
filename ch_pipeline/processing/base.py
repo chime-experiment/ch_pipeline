@@ -16,6 +16,8 @@ cluster:
   temp_directory: {tempdir}
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 """
 
 
