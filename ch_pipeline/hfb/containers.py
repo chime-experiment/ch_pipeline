@@ -371,6 +371,13 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
         the sample's frequency using the synthetic beam model."""
         return self.index_map["el"]
 
+    @property
+    def ra(self):
+        """The RA in degrees associated with each sample of the RA axis. This is
+        valid for EW beam index 1. For other EW beams, there is an offset in RA
+        that depends on the EW and NS beam index."""
+        return self.index_map["ra"]
+
 
 class HFBRingMap(FreqContainer, HFBRingMapBase):
     """Container for holding HFB ringmap data."""
