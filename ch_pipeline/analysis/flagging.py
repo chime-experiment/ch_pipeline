@@ -6,6 +6,7 @@ pre-map making flagging on m-modes.
 """
 
 from typing import Union
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
@@ -139,6 +140,64 @@ class RFIFilter(task.SingleTask):
 
         # Return output container
         return out
+
+
+class RFIStokesIMask(dflagging.RFIStokesIMask):
+    """CHIME version of RFIFourierMask.
+
+    This has a static mask for the local environment and will use the MAD
+    algorithm (over SumThreshold) when bright sources are visible.
+    """
+
+    transit_width = config.Property(proptype=float, default=2.0)
+
+    def _static_rfi_mask_hook(self, freq, timestamp=None):
+        """Use the static CHIME RFI mask.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq]
+            1D array of frequencies in the data (in MHz).
+
+        timestamp : np.array[float]
+            Start observing time (in unix time)
+
+        Returns
+        -------
+        mask : np.ndarray[nfreq]
+            Mask array. True will mask a frequency channel.
+        """
+        return rfi.frequency_mask(freq, timestamp=timestamp)
+
+    def _source_flag_hook(self, times):
+        """Flag times where bright sources are transiting or sun is up.
+
+        Parameters
+        ----------
+        times : np.ndarray[float]
+            Array of timestamps associated with the full dataset.
+
+        Returns
+        -------
+        mask : np.ndarray[float]
+            Mask array. True will flag a time sample.
+        """
+        moon = ephemeris.skyfield_wrapper.ephemeris["moon"]
+        sun = ephemeris.skyfield_wrapper.ephemeris["sun"]
+        body = [
+            ephemeris.source_dictionary[src]
+            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
+        ]
+        body += [sun, moon]
+
+        mask = np.zeros_like(times, dtype=bool)
+
+        for b_ in body:
+            mask |= transit_flag(b_, times, nsigma=self.transit_width)
+
+        mask |= daytime_flag(times)
+
+        return mask
 
 
 class RFISensitivityMask(dflagging.RFISensitivityMask):
