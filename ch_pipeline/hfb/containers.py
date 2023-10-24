@@ -51,7 +51,50 @@ class HFBContainer(ContainerBase):
             raise KeyError("Dataset 'nsample' not initialised.")
 
 
-class HFBData(RawContainer, FreqContainer, HFBContainer):
+class HFBBeamContainer(HFBContainer):
+    """A pipeline container for HFB data with a beam axis.
+
+    This works like a normal :class:`HFBContainer` container, but already has a beam
+    axis defined, and specific properties for dealing with beams.
+    """
+
+    _axes = ("beam",)
+
+    @property
+    def beam(self):
+        """The beam indices associated with each entry of the beam axis."""
+        return self.index_map["beam"]
+
+    @property
+    def beam_ew(self):
+        """The unique EW-beam indices (i.e., from 0 to 3) in the beam axis."""
+        return self.get_beam_ew()
+
+    @property
+    def beam_ns(self):
+        """The unique NS-beam indices (i.e., from 0 to 256) in the beam axis."""
+        return self.get_beam_ns()
+
+    def get_beam_ew(self, return_inverse=False):
+        """Find the unique EW-beam indices (i.e., from 0 to 3) in the beam axis.
+
+        If called with `return_inverse=True`, return a tuple of (a) unique EW-beam
+        indices and (b) an array mapping each sample in the beam axis to an index
+        in the output array of unique EW-beam indices.
+        """
+        return np.unique(self.beam // 256, return_inverse=return_inverse)
+
+    def get_beam_ns(self, return_inverse=False):
+        """Find the unique NS-beam indices (i.e., from 0 to 256) in the beam axis.
+
+        If called with `return_inverse=True`, return a tuple of (a) unique NS-beam
+        indices and (b) an array mapping each sample in the beam axis to an index
+        in the output array of unique NS-beam indices.
+        """
+        return np.unique(self.beam % 256, return_inverse=return_inverse)
+
+
+class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
     """A container for HFB data.
 
     This attempts to wrap the HFB archive format.
@@ -60,7 +103,7 @@ class HFBData(RawContainer, FreqContainer, HFBContainer):
        files.
     """
 
-    _axes = ("subfreq", "beam")
+    _axes = ("subfreq",)
 
     _dataset_spec = {
         "hfb": {
@@ -224,10 +267,10 @@ class HFBRFIMask(TODContainer, FreqContainer):
         return self.datasets["sens"]
 
 
-class HFBTimeAverage(FreqContainer, HFBContainer):
+class HFBTimeAverage(FreqContainer, HFBBeamContainer):
     """Container for holding average data for flattening sub-frequency band shape."""
 
-    _axes = ("subfreq", "beam")
+    _axes = ("subfreq",)
 
     _dataset_spec = {
         "hfb": {
@@ -257,10 +300,8 @@ class HFBHighResContainer(FreqContainer, HFBContainer):
     """Base class for HFB containers with high-resolution frequency data."""
 
 
-class HFBHighResData(TODContainer, HFBHighResContainer):
+class HFBHighResData(TODContainer, HFBHighResContainer, HFBBeamContainer):
     """Container for holding high-resolution frequency data."""
-
-    _axes = ("beam",)
 
     _dataset_spec = {
         "hfb": {
@@ -286,10 +327,8 @@ class HFBHighResData(TODContainer, HFBHighResContainer):
     }
 
 
-class HFBHighResTimeAverage(HFBHighResContainer):
+class HFBHighResTimeAverage(HFBHighResContainer, HFBBeamContainer):
     """Container for holding time-averaged high-resolution frequency data."""
-
-    _axes = ("beam",)
 
     _dataset_spec = {
         "hfb": {
