@@ -308,6 +308,80 @@ class HFBDivideByTemplate(task.SingleTask):
         return out
 
 
+class HFBAlignEWBeams(task.SingleTask):
+    """Shift HFB ringmap data to true RA values in order to align EW beams."""
+
+    def setup(self):
+        """Load offsets and reference angles from CHIME/FRB beam model."""
+
+        from beam_model.formed import FFTFormedActualBeamModel
+
+        # Get the offsets in CHIME/FRB x coord (in deg) of the EW beams and the
+        # reference zenith angles (CHIME/FRB y coord; in deg) of the NS beams
+        # from the CHIME/FRB beam model
+        beam_mdl = FFTFormedActualBeamModel()
+        self.ew_beam_offset_deg = beam_mdl.config["ew_spacing"]
+        self.ns_reference_angles_deg = beam_mdl.reference_angles
+
+    def process(self, stream):
+        """Align EW beams.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMap
+            HFB ringmap container to align.
+
+        Returns
+        -------
+        out : containers.HFBHighResRingMap
+            HFB ringmap container with EW beams aligned in RA.
+        """
+
+        from ch_util.ephemeris import bmxy_to_hadec
+
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Find CHIME/FRB XY coordinates of beams
+        x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
+        y_beam_list = self.ns_reference_angles_deg[stream.beam_ns]
+
+        # Compute hour angles of beams
+        x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
+        ha_beam, _ = bmxy_to_hadec(x_beam_grid, y_beam_grid)
+
+        # Initialize arrays to hold data and weights
+        data_aligned = np.zeros_like(data)
+        weight_aligned = np.zeros_like(weight)
+
+        for insb, nsb in enumerate(stream.beam_ns):
+            for iewb, ewb in enumerate(stream.beam_ew):
+                # Compute actual RA of samples per beam
+                ra_true = stream.ra - ha_beam[insb, ewb]
+
+                # Do alignment by evaluating the data and weight at the RAs
+                # given by the `ra` axis of the container. Do this using linear
+                # interpolation with cyclic wrapping in RA, taking into account
+                # uncertainties and flagged data.
+                (
+                    data_aligned[iewb, insb, :, :],
+                    weight_aligned[iewb, insb, :, :],
+                ) = _interpolation_linear(
+                    x=ra_true,
+                    y=data[iewb, insb, :, :],
+                    w=weight[iewb, insb, :, :],
+                    xeval=stream.ra,
+                    zero_outside=True,
+                )
+
+        # Create output container; add data and weights
+        out = containers.HFBHighResRingMap(copy_from=stream)
+        out.data[:] = data_aligned
+        out.weight[:] = weight_aligned
+
+        return out
+
+
 class HFBDifference(task.SingleTask):
     """Take the difference of two sets of HFB data.
 
