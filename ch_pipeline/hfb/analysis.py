@@ -307,6 +307,74 @@ class HFBDivideByTemplate(task.SingleTask):
         return out
 
 
+class HFBAlignEWBeams(task.SingleTask):
+    """Shift RA axis of high-resolution frequency ringmaps to align EW beams."""
+
+    def setup(self):
+        """Setup the HFBAlignEWBeams task; load ."""
+
+        from beam_model.formed import FFTFormedActualBeamModel
+
+        # Get the offsets in CHIME/FRB x coord (in deg) of the EW beams and the
+        # reference zenith angles (CHIME/FRB y coord; in deg) of the NS beams
+        # from the CHIME/FRB beam model
+        beam_mdl = FFTFormedActualBeamModel()
+        self.ew_beam_offset_deg = beam_mdl.config["ew_spacing"]
+        self.ns_reference_angles_deg = beam_mdl.reference_angles
+
+    def process(self, stream):
+        """Align EW beams.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMap
+            High-resolution frequency ringmap to align.
+
+        Returns
+        -------
+        out : containers.HFBHighResRingMap
+            High-resolution frequency ringmap with EW beams aligned in RA.
+        """
+
+        from ch_util.ephemeris import bmxy_to_hadec
+
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Find CHIME/FRB XY coordinates of beams
+        xs = self.ew_beam_offset_deg[stream.beam_ew]
+        ys = self.ns_reference_angles_deg[stream.beam_ns]
+
+        # Compute offsets in hour angle
+        xg, yg = np.meshgrid(xs, ys)
+        ha_offsets, _ = bmxy_to_hadec(xg, yg)
+
+        data_shifted = np.zeros_like(data)
+        weight_shifted = np.zeros_like(weight)
+
+        for insb, nsb in enumerate(stream.beam_ns):
+            for iewb, ewb in enumerate(stream.beam_ew):
+                ra_shifted = stream.ra - ha_offsets[insb, ewb]
+
+                (
+                    data_shifted[iewb, insb, :, :],
+                    weight_shifted[iewb, insb, :, :],
+                ) = _interpolation_linear(
+                    x=ra_shifted,
+                    y=data[iewb, insb, :, :],
+                    w=weight[iewb, insb, :, :],
+                    xeval=stream.ra,
+                    zero_outside=True,
+                )
+
+        # Create output container; add data and weights
+        out = containers.HFBHighResRingMap(copy_from=stream)
+        out.data[:] = data_shifted
+        out.weight[:] = weight_shifted
+
+        return out
+
+
 class HFBDifference(task.SingleTask):
     """Take the difference of two sets of HFB data.
 
