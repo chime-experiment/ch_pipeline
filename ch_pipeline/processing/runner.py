@@ -17,7 +17,7 @@ from ch_pipeline.processing import base
 from ch_pipeline.processing import client
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 _default_config = {
@@ -28,14 +28,13 @@ _default_config = {
 }
 GLOBAL_CONFIG = {"user": None}
 
-PROCESSING_REVISIONS = {}
-SCHEDULER = None
-SOCKET = None
-routes = {}
+# True if this is the main process running the server
+_is_main_process = False
 
-_main_process = False
-_is_running = False
-_startup_tasks = []
+# Store existing processing revisions in the global space
+PROCESSING_REVISIONS = {}
+# Global scheduler to run tasks in their own threads
+SCHEDULER = None
 
 
 @lru_cache(maxsize=10)
@@ -49,9 +48,7 @@ def setup(revision: base.ProcessingType, config: dict = {}):
     # Check the socket. If it already exists, assume that the
     # pipeline service is running and we just have to submit
     # another job to it. Otherwise, set up the server
-    global SOCKET
-    SOCKET = Path(revision.root_path) / ".socket"
-    server_is_running = _check_or_make_server()
+    server_is_running = SERVER.check_or_make_server(revision)
     revision_name = _format_revision(revision)
 
     data = {
@@ -62,25 +59,25 @@ def setup(revision: base.ProcessingType, config: dict = {}):
     if server_is_running:
         # The server is already running. Submit the job and return
         logger.info("A server is already running.")
-        response = _send_request({"route": "/add", "data": data}, SOCKET)
+        response = send({"route": "/add", "data": data})
         if response.get("result"):
             logger.info(f"Revision {revision_name} was submitted.")
         else:
             logger.warning(
                 f"An error occured trying to submit revision "
-                f"{revision_name}.\n{response.get('opt')}"
+                f"{revision_name}.\n{response.get('msg')}"
             )
     else:
         # We've just made the server, so register this job to be
         # submitted once the server starts
-        global _main_process
-        _main_process = True
-        _startup_tasks.append(partial(add_job, data))
+        global _is_main_process
+        _is_main_process = True
+        SERVER.queue(partial(add_job, data))
 
 
 def run():
     """Run the pipeline."""
-    if not _main_process:
+    if not _is_main_process:
         # This is not the main pipeline runner, so we don't
         # want to run the server here
         return
@@ -89,13 +86,29 @@ def run():
     # Start the background pipeline runner
     SCHEDULER.start()
     # Run the server
-    try:
-        asyncio.run(_run_all())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    asyncio.run(SERVER.run())
 
     logger.info("\n\nKilled pipeline service...")
     logger.info("Running cleanup...")
+
+
+def send(request):
+    """Send a request to the server."""
+    if SERVER._socket is None:
+        # Try to extract the revision from the request
+        package = json.loads(request).get("data")
+        if isinstance(package, dict):
+            revision_name = package.get("revision")
+            if revision_name is not None:
+                # Load this revision and set the socket
+                revision = client.PRev().convert(revision_name, None, None)
+                SERVER._socket = Path(revision.root_path) / ".socket"
+
+    if SERVER._socket is None:
+        logger.warning("Can't send request - no socket was set.")
+        return None
+
+    return asyncio.run(SERVER._send_request(request))
 
 
 # ------------------------------
@@ -103,130 +116,210 @@ def run():
 # ------------------------------
 
 
-_default_response = {"result": True, "opt": None}
+class _AsyncServer:
+    def __init__(self):
+        self._socket = None
+        self._routes = {}
+        self._startup_tasks = []
+        self._server = None
+        self._timeout = 10
 
+    @property
+    def is_running(self):
+        """Is the server running?"""
+        return self._server is not None and self._server.is_serving()
 
-def _send_request(data: dict, socket: Path):
-    """Send a datapacket while blocking.
+    def route(self, route_):
+        """Decorator to route functions."""
 
-    This should not be called from the main loop.
-    """
-    return asyncio.run(_async_send_request(data, socket))
+        def _route(func):
+            self._routes[route_] = func
+            return func
 
+        return _route
 
-async def _async_send_request(data: dict, socket: Path):
-    """Send a request to the server."""
-    if socket is None:
-        return "ERROR: No socket exists."
-    if "route" not in data:
-        return "ERROR: Invalid request. No route"
+    def queue(self, func):
+        """Add a task to run after the server starts.
 
-    if "data" not in data:
-        # This is just a request for something
-        data["data"] = None
+        Parameters
+        ----------
+        func : function
+            The function to call
+        """
+        self._startup_tasks.append(func)
+        logger.debug(f"Added function {func} to startup queue.")
 
-    # Send the data
-    data = json.dumps(data) + "\n"
+    def check_or_make_server(self, revision):
+        """Set up a server on the given socket.
 
-    reader, writer = await asyncio.open_unix_connection(path=str(socket))
-    writer.write(data.encode("utf-8"))
-    writer.write_eof()
-    await writer.drain()
-    response = await reader.read(-1)
+        If a server is already running, return.
 
-    return json.loads(response.decode("utf-8"))
+        Parameters
+        ----------
+        socket
+            path to the unix socket as a `pathlib.Path` object
 
+        Returns
+        -------
+        server_is_running
+            True if the server is already running
+            False if a new server has been started
+        """
+        socket = Path(revision.root_path) / ".socket"
+        # Check the socket. If it already exists, assume that the
+        # pipeline service is running. Otherwise, set up the server
+        if socket.exists():
+            if not socket.is_socket():
+                # Something is broken
+                raise FileExistsError(
+                    "Socket path already exists, but it isn't a socket."
+                )
+            # The server is already running elsewhere
+            return True
 
-async def _handler(reader, writer):
-    request = await reader.read(-1)
-    request = json.loads(request.decode("utf-8"))
-    response = _default_response.copy()
+        self._socket = socket
 
-    # Get the route that's being requested and handle
-    # accordingly if the request was bad
-    if "route" not in request or "data" not in request:
-        response["result"] = False
-        response["opt"] = "Bad request"
-    else:
-        func = routes.get(request["route"])
-        if func is None:
+        # Try to figure out the current user if it isn't set
+        # This will only run the first time the runner is started
+        if GLOBAL_CONFIG["user"] is None:
+            user = getpass.getuser()
+            logger.info(f"Running as user {user}")
+            GLOBAL_CONFIG["user"] = user
+
+        # Unlink the socket on close
+        atexit.register(self._socket.unlink)
+
+        # Set up the scheduler
+        global SCHEDULER
+        SCHEDULER = BackgroundScheduler(daemon=True)
+        atexit.register(partial(SCHEDULER.shutdown, wait=True))
+
+        return False
+
+    async def _handler(self, reader, writer):
+        """Server request handler."""
+        try:
+            request = await asyncio.wait_for(reader.readline(), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            return
+        request = json.loads(request.decode("utf-8"))
+        response = {"result": True}
+
+        # Get the route that's being requested and handle
+        # accordingly if the request was bad
+        if "route" not in request or "data" not in request:
             response["result"] = False
-            response["opt"] = "Bad route"
+            response["msg"] = "Bad request"
         else:
-            # Get whatever is set at this route
-            try:
-                ret = await func(request["data"])
-            except Exception:
+            func = self._routes.get(request["route"])
+            if func is None:
                 response["result"] = False
-                response["opt"] = traceback.format_exc()
+                response["msg"] = "Bad route"
             else:
-                # If there was a response, use it. Otherwise we'll
-                # fall back to the default and assume that things
-                # went fine
-                if ret is not None:
-                    response = ret
+                # Get whatever is set at this route
+                try:
+                    ret = await func(request["data"])
+                except:
+                    response["result"] = False
+                    response["msg"] = traceback.format_exc()
+                else:
+                    # If there was a response, use it. Otherwise we'll
+                    # fall back to the default and assume that things
+                    # went fine
+                    if ret is not None:
+                        response = ret
 
-    if isinstance(response, dict):
-        response = json.dumps(response)
+        if isinstance(response, dict):
+            response = json.dumps(response)
 
-    writer.write((response + "\n").encode("utf-8"))
-    writer.write_eof()
-    try:
-        await writer.drain()
-    except ConnectionResetError:
-        logger.debug("Connection closed by peer. No response was sent.")
-    writer.close()
+        writer.write((response + "\n").encode("utf-8"))
+        writer.write_eof()
+        try:
+            await asyncio.wait_for(writer.drain(), timeout=self._timeout)
+        except ConnectionResetError:
+            logger.debug("Connection closed by peer. No response was sent.")
+        except asyncio.TimeoutError:
+            logger.warning("Connection timed out sending reply.")
 
+        writer.close()
 
-async def _run_server():
-    """Make an async server on a unix socket."""
-    server = await asyncio.start_unix_server(_handler, path=str(SOCKET))
-    async with server:
-        global _is_running
-        _is_running = True
-        await server.serve_forever()
+    async def run(self):
+        """Run the server and any other startup tasks."""
 
-
-async def _run_all():
-    """Run the server and any other startup tasks."""
-
-    async def _wait_for_server(func):
-        # Wait until the server is started to execute
-        while not _is_running:
+        async def _wait_for_server(func):
+            # Wait until the server is started to execute
+            while not self.is_running:
+                await asyncio.sleep(0.5)
+            # Wait a bit longer for good measure
             await asyncio.sleep(1)
-        await func()
+            await func()
+            logger.debug(f"Completed startup task {func}")
 
-    tasks_ = [_wait_for_server(t) for t in _startup_tasks] + [_run_server()]
-    return await asyncio.gather(*tasks_)
+        async def _run_server():
+            """Make an async server on a unix socket."""
+            self._server = await asyncio.start_unix_server(
+                self._handler, path=str(self._socket)
+            )
+            async with self._server:
+                await self._server.serve_forever()
+
+        self.tasks = [
+            *(_wait_for_server(t) for t in self._startup_tasks),
+            _run_server(),
+        ]
+
+        return await asyncio.gather(*self.tasks, return_exceptions=True)
+
+    async def close(self):
+        if self.is_running:
+            self._server.close()
+            await self._server.wait_closed()
+
+    async def _send_request(self, data: dict):
+        """Send a request to the server."""
+        if self._socket is None:
+            return "ERROR: No socket exists."
+        if "route" not in data:
+            return "ERROR: Invalid request. No route"
+
+        if "data" not in data:
+            # This is just a request to do something
+            data["data"] = {}
+
+        # Send the data
+        data = json.dumps(data) + "\n"
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_unix_connection(path=str(self._socket)),
+                timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            return None
+        # Send the request
+        writer.write(data.encode("utf-8"))
+        writer.write_eof()
+        try:
+            await asyncio.wait_for(writer.drain(), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            writer.close()
+            return "ERROR: timed out when writing to server."
+        # Wait for a reply
+        try:
+            response = await asyncio.wait_for(reader.readline(), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            return "ERROR: timed out waiting for server response."
+        response = response.decode("utf-8")
+        try:
+            response = json.loads(response)
+        except Exception:
+            response = None
+
+        return response
 
 
-def _check_or_make_server():
-    """Set up the server."""
-    # Check the socket. If it already exists, assume that the
-    # pipeline service is running. Otherwise, set up the server
-    if SOCKET.exists():
-        if not SOCKET.is_socket():
-            # Something is broken
-            raise FileExistsError("Socket path already exists, but it isn't a socket.")
-        # The server is already running elsewhere
-        return True
-
-    # Try to figure out the current user if it isn't set
-    # This will only run the first time the runner is started
-    if GLOBAL_CONFIG["user"] is None:
-        user = getpass.getuser()
-        logger.info(f"Running as user {user}")
-        GLOBAL_CONFIG["user"] = user
-
-    # Unlink the socket on close
-    atexit.register(SOCKET.unlink)
-
-    # Set up the scheduler
-    global SCHEDULER
-    SCHEDULER = BackgroundScheduler(daemon=True)
-    atexit.register(partial(SCHEDULER.shutdown, wait=True))
-
-    return False
+# Create a server instance on import
+SERVER = _AsyncServer()
 
 
 # ------------------------------
@@ -234,50 +327,37 @@ def _check_or_make_server():
 # ------------------------------
 
 
-def route(route_):
-    def _route(func):
-        routes[route_] = func
-        return func
-
-    return _route
-
-
-@route("/finish")
+@SERVER.route("/finish")
 async def finish(request: dict):
     """Finish a revision and close server if nothing left."""
     revision_name = request.get("revision")
-    response = _default_response.copy()
+    # response = _default_response.copy()
     revision = PROCESSING_REVISIONS.get(revision_name)
 
     if revision is None:
-        logger.info(f"No revision {revision}")
-        return json.dumps({"result": False, "opt": None})
+        logger.info(f"No revision {revision_name}")
+        return json.dumps({"result": False, "msg": f"No revision {revision_name}"})
 
     if GLOBAL_CONFIG[revision_name]["run_indefinitely"]:
         # Just return, this revision should stick around
-        return json.dumps(response)
+        return json.dumps({"result": True})
 
-    try:
-        SCHEDULER.remove_job(f"runner_{revision_name}")
-    except Exception:
-        logger.warning(f"Error removing job: runner_{revision_name}")
-        logger.warning(traceback.format_exc())
-    else:
-        PROCESSING_REVISIONS.pop(revision_name, None)
+    SCHEDULER.remove_job(f"runner_{revision_name}")
+    PROCESSING_REVISIONS.pop(revision_name, None)
 
     logger.info(
         f"Done revision {revision_name}. {len(PROCESSING_REVISIONS)} processing "
-        f"revisions remaining: {list(PROCESSING_REVISIONS.keys())}"
+        f"revision(s) remaining: {list(PROCESSING_REVISIONS.keys())}"
     )
 
     if not PROCESSING_REVISIONS:
         logger.info("Nothing left to process. Shutting down server.")
-        raise SystemExit
+        await SERVER.close()
 
-    return json.dumps(response)
+    return json.dumps({"result": True})
 
 
-@route("/metrics")
+@SERVER.route("/metrics")
 async def metrics(request: dict):
     """Get metrics about a revision."""
     revision_name = request.get("revision")
@@ -288,27 +368,28 @@ async def metrics(request: dict):
     # The requested revision doesn't exist, so don't do anything
     if revision is None:
         logger.info(f"No revision {revision_name}")
-        return json.dumps({"result": False, "opt": None})
+        return json.dumps({"result": False, "msg": None})
 
     return json.dumps(
-        {"result": True, "opt": revision.status(user=GLOBAL_CONFIG["user"])}
+        {"result": True, "msg": revision.status(user=GLOBAL_CONFIG["user"])}
     )
 
 
-@route("/add")
+@SERVER.route("/add")
 async def add_job(request: dict):
     """Add a processing job to the pipeline runner."""
 
     revision_name = request.get("revision")
     config = request.get("config", {})
-    response = _default_response.copy()
 
     # Load this revision
     revision = client.PRev().convert(revision_name, None, None)
 
     if revision_name in PROCESSING_REVISIONS:
-        logger.info(f"Revision {revision} already exists.")
-        return json.dumps(response)
+        logger.info(f"Revision {revision_name} already exists.")
+        return json.dumps(
+            {"result": True, "msg": f"Revision {revision_name} already exists."}
+        )
 
     # Update the config with any revision-specific items
     GLOBAL_CONFIG[revision_name] = _default_config.copy()
@@ -336,7 +417,7 @@ async def add_job(request: dict):
     # Clean up any extra files when the server shuts down
     atexit.register(partial(_update_files, revision, bring_online=False))
 
-    return json.dumps(response)
+    return json.dumps({"result": True})
 
 
 # ------------------------------
@@ -428,6 +509,8 @@ def _requeue_failed(revision):
             except Exception:
                 logger.warning(f"Could not re-queue job with tag {tag}")
                 logger.warning(traceback.format_exc())
+            else:
+                logger.info(f"Re-queued job with tag {tag}.")
 
 
 def _check_finished(revision):
@@ -441,4 +524,4 @@ def _check_finished(revision):
     remaining = revision.status(user=GLOBAL_CONFIG["user"])["not_yet_submitted"]
     if len(remaining) == 0:
         # Send a message to the server that this revision is done
-        _send_request({"route": "/finish", "data": _format_revision(revision)}, SOCKET)
+        send({"route": "/finish", "data": {"revision": revision_name}})
