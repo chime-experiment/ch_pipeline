@@ -71,7 +71,7 @@ PREV = PRev()
 @click.option(
     "--root",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    default="/project/rpp-chime/chime/chime_processed/",  # TODO: put elsewhere
+    default=base.DEFAULT_ROOT,
     help="Set the root directory to save processed data.",
 )
 def cli(root):
@@ -161,16 +161,6 @@ def item_list(revision, long, human, time):
 
 @item.command()
 @click.argument("revision", type=PREV)
-def pending(revision):
-    """List items that do not exist within REVISION
-    (given as type:revision) but can be generated."""
-    pending = revision.status()["not_yet_submitted"]
-    for tag in pending:
-        click.echo(tag)
-
-
-@item.command()
-@click.argument("revision", type=PREV)
 @click.option(
     "-n",
     "--number",
@@ -209,10 +199,21 @@ def pending(revision):
     "--priority-fairshare",
     type=float,
     default=0.0,
-    help="Fairshare threshold for priority jobs. The smaller of `fairshare` or this is used.",
+    help=(
+        "Fairshare threshold for priority jobs. If `--fairshare` is also given, "
+        "and is lower than the priority fairshare given here, this option is ignored."
+    ),
 )
+@click.option("--check-failed", is_flag=True, help="Try to requeue failed jobs.")
 def generate(
-    revision, number, max_number, submit, fairshare, user_fairshare, priority_fairshare
+    revision,
+    number,
+    max_number,
+    submit,
+    fairshare,
+    user_fairshare,
+    priority_fairshare,
+    check_failed,
 ):
     """Submit pending jobs for REVISION (given as type:revision)."""
     priority_only = False
@@ -246,6 +247,30 @@ def generate(
         )
         return
 
+    if check_failed:
+
+        import shutil
+
+        failed = revision.failed()
+        requeue = {"chimedb_error", "time_limit", "mpi_error"}
+
+        for key, tags in failed.items():
+            if key not in requeue:
+                continue
+            # Delete these tags so they get resubmitted to the queue
+            for tag in tags:
+                path = revision.workdir_path / str(tag)
+                try:
+                    # TODO: any issues with removing the entire directory?
+                    shutil.rmtree(path)
+                except Exception:
+                    import traceback
+
+                    click.echo(f"Could not re-queue job with tag {tag}")
+                    click.echo(traceback.format_exc())
+                else:
+                    click.echo(f"Re-queued job with tag {tag}")
+
     number_in_queue, number_running = [len(l) for l in revision.queued()]
     number_to_submit = max(
         min(number, max_number - number_in_queue - number_running), 0
@@ -255,6 +280,27 @@ def generate(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
     revision.generate(max=number_to_submit, submit=submit, priority_only=priority_only)
+
+
+@item.command("update")
+@click.argument("revision", type=PREV)
+@click.option(
+    "--clean",
+    is_flag=True,
+    help="Remove data files which are no longer needed by this revision.",
+)
+@click.option(
+    "--retrieve",
+    is_flag=True,
+    help="Submit a request to move required files to project storage.",
+)
+def update_files(revision, clear, retrieve):
+    """Manage files between project and long-term storage spaces."""
+    nfiles = revision.update_files(retrieve=retrieve, clear=clear)
+    if retrieve:
+        click.echo(f"Retrieving {nfiles['nretrieve']} files.")
+    if clear:
+        click.echo(f"Clearing {nfiles['nclear']} files.")
 
 
 @item.command("status")
@@ -272,17 +318,37 @@ def generate(
     is_flag=True,
     help="Show all tags in each category instead of just a count.",
 )
-@click.option("-t", "--time", is_flag=True)
-def status(revision, user, verbose, time):
+@click.option("-t", "--time", is_flag=True, help="Sort tags by time.")
+@click.option(
+    "-c",
+    "--category",
+    type=str,
+    default=None,
+    help=(
+        "Only return metrics for jobs with this status. Valid categories "
+        "include: available, not_available, not_yet_submitted, pending, "
+        "running, successful, failed"
+    ),
+)
+def status(revision, user, verbose, time, category):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
     tag_status = revision.status(user, time)
 
+    if category is not None:
+        if category not in tag_status:
+            click.echo(f"Invalid category: {category}. See --help for valid options.")
+            return
+        category = [category]
+    else:
+        category = tag_status.keys()
+
     click.echo(f"fairshare: {fs[0]}")
-    for key, tags in tag_status.items():
-        click.echo(f"{key}: {len(tags)}")
+    for c in category:
+        tags = tag_status[c]
+        click.echo(f"{c}: {len(tags)}")
         if verbose:
             for tag in tags:
                 click.echo(tag)
@@ -321,7 +387,7 @@ def crashed(revision, user, verbose, time):
 
 @item.command("run")
 @click.argument("revision", type=PREV)
-@click.option("--update", type=int, default=None, help="Minute refresh time.")
+@click.option("--update", type=int, default=None, help="Refresh time in minutes.")
 @click.option(
     "-m",
     "--max-number",
@@ -342,7 +408,7 @@ def crashed(revision, user, verbose, time):
 @click.option(
     "--run-indefinitely",
     is_flag=True,
-    help="Set if the runner should continue running even if there are no jobs remaining.",
+    help="If set, the runner should continue running even if there are no jobs remaining.",
 )
 def run_pipeline(revision, update, max_number, fairshare, user, run_indefinitely):
     """Run the pipeline service for this revision."""
