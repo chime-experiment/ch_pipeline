@@ -250,16 +250,26 @@ def generate(revision, number, max_number, submit, fairshare, user_fairshare):
     help="Show all tags in each category instead of just a count.",
 )
 @click.option("-t", "--time", is_flag=True)
-def status(revision, user, verbose, time):
+@click.option("-k", "--key", type=str, default=None, help="Status key to get.")
+def status(revision, user, verbose, time, key):
     """Show metrics about currently running jobs for
     REVISION (given as (type:revision)."""
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
     tag_status = revision.status(user, time)
 
+    if key is not None:
+        if key not in tag_status:
+            click.echo(f"Invalid key: {key}. Options: {list(tag_status.keys())}")
+            return
+        key = [key]
+    else:
+        key = tag_status.keys()
+
     click.echo(f"fairshare: {fs[0]}")
-    for key, tags in tag_status.items():
-        click.echo(f"{key}: {len(tags)}")
+    for k in key:
+        tags = tag_status[k]
+        click.echo(f"{k}: {len(tags)}")
         if verbose:
             for tag in tags:
                 click.echo(tag)
