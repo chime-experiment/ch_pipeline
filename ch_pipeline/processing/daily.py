@@ -5,9 +5,8 @@ import chimedb.core as db
 import chimedb.data_index as di
 from ch_util import ephemeris, finder
 from caput.tools import unique_ordered
-
-from . import base
-from ..core.dataquery import _DEFAULT_NODE_SPOOF
+from ch_pipeline.processing import base
+from ch_pipeline.core.dataquery import _DEFAULT_NODE_SPOOF
 
 
 DEFAULT_SCRIPT = """
@@ -825,7 +824,7 @@ class DailyProcessing(base.ProcessingType):
         csds = self._all_tags
         csds_sorted = sorted(csds)
         # Get a list of CSDS whose files are entirely available online
-        csds_to_run = csds_available(
+        csds_to_run = available_csds(
             csds_sorted, pad=self._padding, required_coverage=self._min_coverage
         )
 
@@ -837,7 +836,7 @@ class DailyProcessing(base.ProcessingType):
     def _all_tags(self) -> list:
         """Return all tags desired from the config."""
         return unique_ordered(
-            (csd for i in self._intervals for csd in csds_in_range(*i))
+            (csd for i in self._intervals for csd in expand_csd_range(*i))
         )
 
     def _finalise_jobparams(self, tag, jobparams):
@@ -901,19 +900,9 @@ class DailyProcessing(base.ProcessingType):
 
     def _generate_hook(self, user=None):
         # Get the list of tags remaining to run, in order
-        job_status = self.status(user=user)
-        # Only check the number of days re
-        to_run = job_status["not_yet_submitted"]
-
+        to_run = self.status(user=user)["not_yet_submitted"]
+        # Prioritize some number of recent days
         today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
-        # For recent days, make sure that weather data exists. This is a fairly expensive
-        # check, so don't do it for all days. It's mainly here to handle hiccups in
-        # the weather data tunnel
-        _weather_check = [csd for csd in to_run if today - int(csd) <= 3]
-        for csd in _weather_check:
-            if not check_weather_data(int(csd), self._padding):
-                to_run.remove(csd)
-
         priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
 
         return priority + [csd for csd in to_run if csd not in priority]
@@ -949,7 +938,7 @@ class TestDailyProcessing(DailyProcessing):
     )
 
 
-def csds_in_range(start, end, step=1):
+def expand_csd_range(start, end, step=1):
     """Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
@@ -1023,7 +1012,7 @@ def files_in_timespan(start, end, file_times):
     return available, len(file_times) - 1
 
 
-def csds_available(csds: list, pad: float = 0, required_coverage: float = 0) -> set:
+def available_csds(csds: list, pad: float = 0, required_coverage: float = 0) -> set:
     """Return the subset of csds in `csds` for whom all files are online.
 
     Parameters
@@ -1040,48 +1029,64 @@ def csds_available(csds: list, pad: float = 0, required_coverage: float = 0) -> 
 
     Returns
     -------
-    csds_available
+    available
         set of all available csds
     """
 
     # Figure out which files exist online and which ones exist entirely
-    filenames_online, filenames_that_exist = all_files_in_range(
+    # Repeat the process for corr data and weather data
+    corr_online, corr_that_exist = db_get_corr_filenames_in_range(
+        csds[0] - pad, csds[-1] + pad
+    )
+    weather_online, weather_that_exist = db_get_weather_times_in_range(
         csds[0] - pad, csds[-1] + pad
     )
 
-    csds_available = set()
+    def _available(filenames_online, filenames_that_exist):
+        available = set()
+        coverage_ = required_coverage * 86400 * (1 + 2 * pad)
 
-    for csd in csds:
-        start_time = ephemeris.csd_to_unix(csd - pad)
-        end_time = ephemeris.csd_to_unix(csd + 1 + pad)
+        for csd in csds:
+            start_time = ephemeris.csd_to_unix(csd - pad)
+            end_time = ephemeris.csd_to_unix(csd + 1 + pad)
 
-        # online - list of file start and end times that are online
-        # between start_time and end_time
-        # index_online - the final index in which data was located
-        online, index_online = files_in_timespan(start_time, end_time, filenames_online)
-        exists, index_exists = files_in_timespan(
-            start_time, end_time, filenames_that_exist
-        )
+            # online - list of file start and end times that are online
+            # between start_time and end_time
+            # index_online - the final index in which data was located
+            online, index_online = files_in_timespan(
+                start_time, end_time, filenames_online
+            )
+            exists, index_exists = files_in_timespan(
+                start_time, end_time, filenames_that_exist
+            )
 
-        if (len(online) == len(exists)) and (len(online) != 0):
-            # All files for this CSD are online
-            # Check that we have the required data coverage
-            time_range = online[-1][2] - online[0][1]
-            if time_range > required_coverage * 86400 * (1 + 2 * pad):
-                csds_available.add(csd)
+            if (len(online) == len(exists)) and (len(online) != 0):
+                # All files for this CSD are online
+                # Check that we have the required data coverage
+                time_range = 0
+                for tr in online:
+                    time_range += tr[2] - tr[1]
 
-        # The final file in the span may contain more than one sidereal day
-        index_online = max(index_online - 1, 0)
-        index_exists = max(index_exists - 1, 0)
+                if time_range > coverage_:
+                    available.add(csd)
 
-        filenames_online = filenames_online[index_online:]
-        filenames_that_exist = filenames_that_exist[index_exists:]
+            # The final file in the span may contain more than one sidereal day
+            index_online = max(index_online - 1, 0)
+            index_exists = max(index_exists - 1, 0)
 
-    return csds_available
+            filenames_online = filenames_online[index_online:]
+            filenames_that_exist = filenames_that_exist[index_exists:]
+
+        return available
+
+    corr_available = _available(corr_online, corr_that_exist)
+    weather_available = _available(weather_online, weather_that_exist)
+
+    return corr_available & weather_available
 
 
-def all_files_in_range(start_csd: int, end_csd: int, has_file: str = "Y"):
-    """Get the name and start and end times of files in the CSD range.
+def db_get_corr_filenames_in_range(start_csd: int, end_csd: int, has_file: str = "Y"):
+    """Get the name and start and end times of corrdata files in the CSD range.
 
     Return both a list of files which were found on the online node and those
     which were found anywhere. If `has_file` is `N`, these lists should be
@@ -1136,7 +1141,6 @@ def all_files_in_range(start_csd: int, end_csd: int, has_file: str = "Y"):
         di.CorrFileInfo.finish_time >= start_time,
         di.ArchiveFileCopy.has_file == has_file,
     )
-    # archive_files = query_files_in_range(start_time, end_time, has_file)
     # Figure out which files are online
     online_node = di.StorageNode.get(name="cedar_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
@@ -1150,10 +1154,73 @@ def all_files_in_range(start_csd: int, end_csd: int, has_file: str = "Y"):
     return files_online, files_that_exist
 
 
-def csd_files_in_range(csds: list, files: list, pad: float = 0):
+def db_get_weather_times_in_range(start_csd: int, end_csd: int, has_file: str = "Y"):
+    """Get the name and start and end times of weather files in the CSD range.
+
+    Return both a list of files which were found on the online node and those
+    which were found anywhere. If `has_file` is `N`, these lists should be
+    the same.
+
+    Return an empty list if files between start_csd and end_csd are only
+    partially available online.
+
+    Total file count is verified by checking files that exist everywhere.
+
+    Parameters
+    ----------
+    start_csd
+        Start date in sidereal day format
+    end_csd
+        End date in sidereal day format
+    has_file
+        If `Y`, require that the online node actually has the file
+
+    Returns
+    -------
+    filenames_online
+        chimestack files available in the timespan, if
+        all of them are available online
+    filenames_that_exist
+        all chimestack files available in the timespan
+    """
+    start_time = ephemeris.csd_to_unix(start_csd)
+    end_time = ephemeris.csd_to_unix(end_csd + 1)
+    db.connect()
+
+    archive_files = (
+        di.ArchiveFileCopy.select(
+            di.ArchiveFileCopy.file,
+            di.WeatherFileInfo.start_time,
+            di.WeatherFileInfo.finish_time,
+        )
+        .join(di.ArchiveFile)
+        .join(di.ArchiveAcq)
+        .join(di.ArchiveInst)
+        .switch(di.ArchiveFile)
+        .join(di.WeatherFileInfo)
+    ).where(
+        di.ArchiveInst.name == "chime",
+        di.WeatherFileInfo.start_time < end_time,
+        di.WeatherFileInfo.finish_time >= start_time,
+        di.ArchiveFileCopy.has_file == has_file,
+    )
+    # Figure out which files are online
+    online_node = di.StorageNode.get(name="cedar_online", active=True)
+    files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
+
+    files_online = sorted([t for t in files_online.tuples()], key=lambda x: x[1])
+    # files_that_exist might contain the same file multiple files
+    # if it exists in multiple locations (nearline, online, gossec, etc)
+    # we only want to include it once, so we initially create a set
+    files_that_exist = sorted({t for t in archive_files.tuples()}, key=lambda x: x[1])
+
+    return files_online, files_that_exist
+
+
+def get_filenames_used_by_csds(csds: list, files: list, pad: float = 0):
     """For a list of CSDS, return all files from `files` which are used by the CSDS.
 
-    Note that this just returns the file names, and discards file times.
+    This only returns the file names.
 
     Parameters
     ----------
@@ -1198,8 +1265,8 @@ def request_offline_csds(csds: list, pad: float = 0):
     pad
         fraction of data from adjacent days that should also be copied online
     """
-    files, _ = all_files_in_range(csds[0], csds[-1], has_file="N")
-    request_files = csd_files_in_range(csds, files, pad)
+    files, _ = db_get_corr_filenames_in_range(csds[0], csds[-1], has_file="N")
+    request_files = get_filenames_used_by_csds(csds, files, pad)
 
     online_node = di.StorageNode.get(name="cedar_online")
     # Request these files be brought back online
@@ -1229,14 +1296,14 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
         a csd in `csds_remove` from clearing all its data if that fraction
         of data is needed by an adjacent csd in `csds_keep`
     """
-    files, _ = all_files_in_range(
+    files, _ = db_get_corr_filenames_in_range(
         min(csds_remove[0], csds_keep[0]),
         max(csds_remove[-1], csds_keep[-1]),
     )
     # Get all the files we want to keep and remove. Choosing to
     # keep a file supercedes choosing to remove one
-    keep_files = csd_files_in_range(csds_remove, files, pad)
-    remove_files = csd_files_in_range(csds_keep, files, pad)
+    keep_files = get_filenames_used_by_csds(csds_remove, files, pad)
+    remove_files = get_filenames_used_by_csds(csds_keep, files, pad)
     remove_files = [file for file in remove_files if file not in keep_files]
 
     # Before removing files, we should make sure that there's a backup
@@ -1258,33 +1325,3 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
         di.ArchiveFileCopy.file << remove_files,
         di.ArchiveFileCopy.node == online_node,
     ).execute()
-
-
-def check_weather_data(csd, pad):
-    """Make sure that weather data is available for this CSD."""
-    f = finder.Finder(node_spoof=_DEFAULT_NODE_SPOOF)
-    # Only get weather for chime
-    f.only_chime_weather()
-    # Query for this day plus padding
-    start_time = ephemeris.csd_to_unix(csd - pad)
-    end_time = ephemeris.csd_to_unix(csd + 1 + pad)
-    f.include_time_interval(start_time, end_time)
-    f.accept_all_global_flags()
-    results = f.get_results()
-    # Load up this data and check the time coverage
-    times = []
-    for r in results:
-        wdata = r.as_loaded_data()
-        times.append(wdata.time[:])
-
-    if not times:
-        # No data was found
-        return False
-
-    times = np.concatenate(times)
-    times = np.sort(times)
-    # make sure we have nearly complete coverage and that the coverage reaches
-    # to the end of the requested time period
-    coverage = (times[-1] - times[0]) / (end_time - start_time)
-
-    return (coverage >= 0.95) and (times[-1] >= end_time)
