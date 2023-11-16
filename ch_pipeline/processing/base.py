@@ -381,9 +381,12 @@ class ProcessingType(object):
         for tag in to_run:
             try:
                 queue_job(self.job_script(tag), submit=submit)
-            except Exception as exc:
+            except Exception:
+                import traceback
+
                 warnings.warn(
-                    f"Exception occured while queuing tag [{tag}].\n" f"{exc}"
+                    f"Exception occured while queuing tag [{tag}].\n"
+                    f"{traceback.format_exc()}"
                 )
 
     def _generate_hook(self, user: str = None) -> list:
@@ -541,17 +544,17 @@ class ProcessingType(object):
             crashed_tags = sorted(crashed_tags)
 
         # Return a dict of all status values
-        tags = {
-            "all": self._all_tags,
+        return {
             "available": available_tags,
+            "not_available": [
+                tag for tag in self._all_tags if tag not in available_tags
+            ],
             "not_yet_submitted": not_submitted_tags,
             "pending": pending_tags,
             "running": running_tags,
             "successful": finished_tags,
             "failed": crashed_tags,
         }
-
-        return tags
 
 
 def find_venv():
