@@ -3,11 +3,14 @@ import numpy as np
 
 import chimedb.core as db
 import chimedb.data_index as di
-from ch_util import ephemeris, finder
+import chimedb.dataflag as df
+from ch_util import ephemeris
 from caput.tools import unique_ordered
 from ch_pipeline.processing import base
-from ch_pipeline.core.dataquery import _DEFAULT_NODE_SPOOF
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -751,6 +754,48 @@ class DailyProcessing(base.ProcessingType):
             {"start": "CSD1883", "step": 7},
             {"start": "CSD1884", "step": 7},
         ],
+        # These flags (and corresponding days) are already known
+        # and cannot be recovered. These flags do not exist
+        # in the database
+        "flags": {
+            # Missing timing correction file
+            "no_timing_correction": [
+                "CSD1940",
+                "CSD2000",
+                "CSD2007",
+                "CSD2008",
+                "CSD2017",
+                "CSD2052",
+                "CSD2053",
+                "CSD2054",
+                "CSD2055",
+                "CSD2056",
+                "CSD2057",
+                "CSD2061",
+                "CSD2088",
+                "CSD2092",
+                "CSD2151",
+                "CSD2176",
+                "CSD2187",
+                "CSD2205",
+            ],
+            # Timing correction flag edge
+            "timing_correction_edge": ["CSD2307"],
+            # Missing weather data
+            "no_weather_data": ["CSD2815"],
+            # Corrupted corrdata file
+            "corrupted_file": ["CSD2173"],
+        },
+        # Any days flagged by these flags are excluded from
+        # the days to run
+        "exclude_flags": [
+            "no_timing_correction",
+            "timing_correction_edge",
+            "no_weather_data",
+            "corrupted_file",
+        ],
+        # Maximum fraction of day flagged to exclude
+        "frac_flagged": 0.8,
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Minimum data coverage in order to process a day
@@ -802,6 +847,20 @@ class DailyProcessing(base.ProcessingType):
     # Make sure not to remove chimestack files before this CSD
     runner_config = {"keep_online": {"start": "CSD1800", "end": "CSD2650"}}
 
+    def _create_hook(self):
+        """Produce a list of bad days based on the following criteria."""
+        intervals = []
+        for t in self.default_params["intervals"]:
+            intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
+        # Save out a list of heavily flagged days
+        self.default_params["flags"].update(
+            get_flagged_csds(
+                [csd for i in intervals for csd in expand_csd_range(*i)],
+                self.default_params["exclude_flags"],
+                self.default_params["frac_flagged"],
+            )
+        )
+
     def _load_hook(self):
         # Process the intervals
         self._intervals = []
@@ -814,6 +873,10 @@ class DailyProcessing(base.ProcessingType):
         self._include_offline_files = self._revparams.get(
             "include_offline_files", False
         )
+        self._exclude = set()
+        for flag in self._revparams.get("exclude_flags", []):
+            for csd in self._revparams["flags"].get(flag, []):
+                self._exclude.add(int(csd[3:]))
 
     def _available_tags(self) -> list:
         """Return all the tags that are available to run.
@@ -822,6 +885,8 @@ class DailyProcessing(base.ProcessingType):
         """
         # Get all desired csds from the config file
         csds = self._all_tags
+        # Automatically exclude bad days
+        csds = [csd for csd in csds if csd not in self._exclude]
         csds_sorted = sorted(csds)
         # Get a list of CSDS whose files are entirely available online
         csds_to_run = available_csds(
@@ -1302,8 +1367,8 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     )
     # Get all the files we want to keep and remove. Choosing to
     # keep a file supercedes choosing to remove one
-    keep_files = get_filenames_used_by_csds(csds_remove, files, pad)
-    remove_files = get_filenames_used_by_csds(csds_keep, files, pad)
+    keep_files = get_filenames_used_by_csds(csds_keep, files, pad)
+    remove_files = get_filenames_used_by_csds(csds_remove, files, pad)
     remove_files = [file for file in remove_files if file not in keep_files]
 
     # Before removing files, we should make sure that there's a backup
@@ -1325,3 +1390,81 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
         di.ArchiveFileCopy.file << remove_files,
         di.ArchiveFileCopy.node == online_node,
     ).execute()
+
+
+def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
+    """Return a subset of csds which are heavily flagged.
+
+    Return a set of csds from the input list for which more than
+    `frac_flagged` of the data is flagged.
+
+    Parameters
+    ----------
+    csds
+      List of integer csds to check
+
+    frac_flagged
+      Fraction between 0 and 1 of flagged data for which to
+      return a csd
+
+    Returns
+    -------
+    flagged
+      Subset of days in `csds` for which more than the threshold of
+      data is flagged
+    """
+    # No point in doing database queries if there's nothing
+    # to looks for
+    if not csds or not flags:
+        return {}
+
+    out_flags = {}
+    flagged_days = {}
+
+    # Open a database connection
+    db.connect()
+    # Get flags from the database
+    flag_types = df.DataFlagType.select()
+    for ft in flag_types:
+        if ft.name in flags:
+            out_flags[ft.name] = list(
+                df.DataFlag.select().where(df.DataFlag.type == ft)
+            )
+            flagged_days[ft.name] = []
+
+    for name in flags:
+        if name not in out_flags:
+            logger.debug(f"Ignoring invalid flag {name}.")
+
+    # Iterate over csds and flags to find which ones need to be excluded
+    for csd in csds:
+        start = ephemeris.csd_to_unix(csd)
+        end = ephemeris.csd_to_unix(csd + 1)
+        flagged_intervals = []
+
+        for flag_name, flag_list in out_flags.items():
+            # Iterate over the individual flags
+            for flag in flag_list:
+                # Iterate over flagged intervals for this flag
+                if (start < flag.finish_time) & (end >= flag.start_time):
+                    # some part of this day is flagged
+                    overlap = False
+                    for interval in flagged_intervals:
+                        # Check if this flag overlaps with an already-flagged region
+                        if (interval[0] < flag.finish_time) & (
+                            interval[1] >= flag.start_time
+                        ):
+                            overlap = True
+                            interval[0] = min(interval[0], flag.start_time)
+                            interval[1] = max(interval[1], flag.finish_time)
+
+                    if not overlap:
+                        # This is part of a new interval
+                        flagged_intervals.append([flag.start_time, flag.finish_time])
+
+        # Figure out what fraction of this day is flagged
+        flagged_time = np.sum([t[1] - t[0] for t in flagged_intervals])
+        if flagged_time > frac_flagged * (end - start):
+            flagged_days[flag_name].append(f"CSD{csd}")
+
+    return flagged_days
