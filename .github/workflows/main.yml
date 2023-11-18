@@ -51,7 +51,7 @@ jobs:
         pip install --use-deprecated=legacy-resolver -r doc/requirements.txt
 
     - name: Install ch_pipeline
-      run: python setup.py develop
+      run: pip install -e .
 
     - name: Build sphinx docs
       run: sphinx-build -W -b html doc/ doc/_build/html
