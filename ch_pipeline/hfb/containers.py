@@ -341,13 +341,34 @@ class HFBHighResSpectrum(HFBHighResContainer):
 
 
 class HFBRingMapBase(SiderealContainer, HFBContainer):
-    """Base class for HFB ringmaps."""
+    """Base class for HFB ringmaps.
 
-    _axes = ("beam_ew", "el")
+    These containers include axes to mark the EW and NS beam indices, as well as
+    RA (inherited from :class:`SiderealContainer`) and el = sin(zenith angle) axes.
+
+    The el axis corresponds to the sin(za) of the reference angles for the NS beams.
+    The true el for a given bit of data also depends on the frequency and can be
+    computed from the NS beam index and frequency using the synthetic beam model.
+    """
+
+    _axes = ("beam_ew", "beam_ns", "el")
+
+    @property
+    def beam_ew(self):
+        """The (unique) EW beam indices (i.e., from 0 to 3) of the beam_ew axis."""
+        return self.index_map["beam_ew"]
+
+    @property
+    def beam_ns(self):
+        """The (unique) NS beam indices (i.e., from 0 to 256) of the beam_ns axis."""
+        return self.index_map["beam_ns"]
 
     @property
     def el(self):
-        """The elevation in degrees associated with each sample of the elevation axis."""
+        """The el = sin(zenith angle) associated with each sample of the el axis.
+        The zenith angle used is the reference angle for the NS beam in question.
+        The true el of a data sample can be computed from the NS beam index and
+        the sample's frequency using the synthetic beam model."""
         return self.index_map["el"]
 
 
@@ -385,7 +406,7 @@ class HFBHighResRingMap(HFBRingMapBase, HFBHighResContainer):
     """Container for holding high-resolution frequency ringmap data.
 
     With respect to :class:`HFBRingMap`, the (combined) frequency axis is moved
-    to the back, and the distributed axis is changed to the elevation axis.
+    to the back, and the distributed axis is changed to the el = sin(za) axis.
     This is because further downstream in the pipeline, we will look for features
     along the frequency axis.
     """
