@@ -391,7 +391,7 @@ class HFBStackDays(task.SingleTask):
 
             # For uniform weighting, simply normalize accumulated data by number
             # of days to finalize stack.hfb.
-            self.stack.hfb[:] /= norm
+            self.stack.hfb[:] *= tools.invert_no_zero(norm)
 
         else:
             # For inverse variance weighting, the weight dataset doesn't have to
