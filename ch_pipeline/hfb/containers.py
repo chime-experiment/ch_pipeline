@@ -343,7 +343,7 @@ class HFBHighResSpectrum(HFBHighResContainer):
 class HFBRingMapBase(SiderealContainer, HFBContainer):
     """Base class for HFB ringmaps."""
 
-    _axes = ("beam", "el")
+    _axes = ("beam_ew", "el")
 
     @property
     def el(self):
@@ -358,21 +358,21 @@ class HFBRingMap(FreqContainer, HFBRingMapBase):
 
     _dataset_spec = {
         "hfb": {
-            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "axes": ["freq", "subfreq", "beam_ew", "el", "ra"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "weight": {
-            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "axes": ["freq", "subfreq", "beam_ew", "el", "ra"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "nsample": {
-            "axes": ["freq", "subfreq", "beam", "el", "ra"],
+            "axes": ["freq", "subfreq", "beam_ew", "el", "ra"],
             "dtype": np.uint16,
             "initialise": False,
             "distributed": True,
@@ -392,21 +392,21 @@ class HFBHighResRingMap(HFBRingMapBase, HFBHighResContainer):
 
     _dataset_spec = {
         "hfb": {
-            "axes": ["beam", "el", "ra", "freq"],
+            "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
         },
         "weight": {
-            "axes": ["beam", "el", "ra", "freq"],
+            "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
         },
         "nsample": {
-            "axes": ["beam", "el", "ra", "freq"],
+            "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.uint16,
             "initialise": False,
             "distributed": True,
@@ -420,14 +420,14 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
 
     _dataset_spec = {
         "max_snr": {
-            "axes": ["beam", "el", "ra", "freq"],
+            "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
         },
         "best_width": {
-            "axes": ["beam", "el", "ra", "freq"],
+            "axes": ["beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
