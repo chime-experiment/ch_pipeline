@@ -842,7 +842,7 @@ class HFBDividePFB(task.SingleTask):
         weight = stream.weight
 
         # Mask out DC bin (subfrequency bin 64) by setting weight to zero
-        weight[:, 64, :] = 0
+        weight[:, 64, ...] = 0
 
         # Get PFB shape, instantiating PFB-deconvolution class with default parameters
         pfb_shape = DeconvolvePFB().Wt2.sum(axis=1)
@@ -852,11 +852,11 @@ class HFBDividePFB(task.SingleTask):
         out = dcontainers.empty_like(stream)
 
         # Divide data by PFB shape and place in output container
-        out.hfb[:] = data / pfb_shape[:, np.newaxis]
+        out.hfb[:] = data / pfb_shape[:, np.newaxis, np.newaxis, np.newaxis]
 
         # Divide uncertainties by PFB shape, hence multiply weights by square
         # of PFB shape, and place in output container.
-        out.weight[:] = weight * pfb_shape[:, np.newaxis] ** 2
+        out.weight[:] = weight * pfb_shape[:, np.newaxis, np.newaxis, np.newaxis] ** 2
 
         return out
 
