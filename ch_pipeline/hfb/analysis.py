@@ -940,11 +940,13 @@ def _ensure_list(x):
 
 
 class HFBMedianSubtraction(task.SingleTask):
-    """Subtracting weighted median along beam axis to remove fluctuations in the data induced by temperature fluctuations in East and West receiver huts.
-    """
+    """Subtracting weighted median along beam axis to remove fluctuations in the
+    data induced by temperature fluctuations in East and West receiver huts."""
 
     def process(self, stream):
-        """Subtract weighted median of the data along beam axis from the data. A binary mask (0 when the weight is zero, and 1 for non-zero weights) is used in weighted median
+        """Subtract weighted median of the data along beam axis from the data.
+        A binary mask (0 when the weight is zero, and 1 for non-zero weights)
+        is used in weighted median
 
         Parameters
         ----------
@@ -966,24 +968,22 @@ class HFBMedianSubtraction(task.SingleTask):
             data = data.local_array
             weight = weight.local_array
 
-        #make a mask of non-zero weights
+        # make a mask of non-zero weights
         mask = weight != 0
 
-        #Generate binary weight
+        # Generate binary weight
         binary_weight = mask.astype(float)
 
-
-        #Change the order of axes in data and mask arrays, as weighted median is calculated along the last axis
+        # Change the order of axes in data and mask arrays, as weighted median
+        # is calculated along the last axis
         data_s = np.swapaxes(data, 2, 3)
         binary_weight = np.swapaxes(binary_weight, 2, 3)
 
-        #Calculate weighted median (to exclude flagged data) along beam axis:
+        # Calculate weighted median (to exclude flagged data) along beam axis:
         median = weighted_median.weighted_median(data_s, binary_weight)
 
-
         # Subtract weighted median along all beams from the data
-        diff = data - median[:,:,None,:]
-
+        diff = data - median[:, :, None, :]
 
         # Create container to hold output
         out = containers.HFBData(stream)
@@ -993,5 +993,3 @@ class HFBMedianSubtraction(task.SingleTask):
         out.weight[:] = weight[:]
 
         return out
-
-        
