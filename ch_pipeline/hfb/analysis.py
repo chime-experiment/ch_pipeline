@@ -212,6 +212,9 @@ class MakeHighFreqResRingMap(task.SingleTask):
             Ringmap with single high-resolution frequency axis
         """
 
+        # Change distributed axis from freq to el
+        stream.redistribute("el")
+
         # Retrieve data and weights
         data = stream.hfb[:]
         weight = stream.weight[:]
@@ -230,9 +233,6 @@ class MakeHighFreqResRingMap(task.SingleTask):
         axes = (2, 3, 4, 0, 1)
         data = data.transpose(axes)
         weight = weight.transpose(axes)
-
-        # Change distributed axis from freq to el
-        stream.redistribute("el")
 
         # Determine new shape of data with combined frequency axis,
         # giving a length of None to the (distributed) el axis
