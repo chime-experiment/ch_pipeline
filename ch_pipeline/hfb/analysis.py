@@ -224,9 +224,8 @@ class MakeHighFreqResRingMap(task.SingleTask):
         subfreq = stream.index_map["subfreq"]
         freq = (cfreq[:, np.newaxis] + subfreq).flatten()
 
-        # Retrieve beam, elevation, and RA axes
+        # Retrieve beam and RA axes
         beam = stream.index_map["beam"]
-        el = stream.el
         ra = stream.ra
 
         # Move frequency and subfrequency axes to the back
@@ -248,7 +247,7 @@ class MakeHighFreqResRingMap(task.SingleTask):
 
         # Create container to hold output
         out = containers.HFBHighResRingMap(
-            beam=beam, el=el, ra=ra, freq=freq, attrs_from=stream
+            axes_from=stream, attrs_from=stream, freq=freq
         )
 
         # Save data to output container
