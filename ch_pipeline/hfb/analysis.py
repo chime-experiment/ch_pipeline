@@ -342,25 +342,30 @@ class HFBAlignEWBeams(task.SingleTask):
         weight = stream.weight[:]
 
         # Find CHIME/FRB XY coordinates of beams
-        xs = self.ew_beam_offset_deg[stream.beam_ew]
-        ys = self.ns_reference_angles_deg[stream.beam_ns]
+        x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
+        y_beam_list = self.ns_reference_angles_deg[stream.beam_ns]
 
-        # Compute offsets in hour angle
-        xg, yg = np.meshgrid(xs, ys)
-        ha_offsets, _ = bmxy_to_hadec(xg, yg)
+        # Compute hour angles of beams
+        x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
+        ha_beam, _ = bmxy_to_hadec(x_beam_grid, y_beam_grid)
 
-        data_shifted = np.zeros_like(data)
-        weight_shifted = np.zeros_like(weight)
+        # Initialize arrays to hold data and weights
+        data_aligned = np.zeros_like(data)
+        weight_aligned = np.zeros_like(weight)
 
         for insb, nsb in enumerate(stream.beam_ns):
             for iewb, ewb in enumerate(stream.beam_ew):
-                ra_shifted = stream.ra - ha_offsets[insb, ewb]
+                # Compute actual RA of samples per beam
+                ra_true = stream.ra - ha_beam[insb, ewb]
 
+                # Do alignment by evaluating the data at the RAs given by the ra axis
+                # using linear interpolation. TODO: Cyclic interpolation. For now,
+                # zero out data points that need to be extrapolated.
                 (
-                    data_shifted[iewb, insb, :, :],
-                    weight_shifted[iewb, insb, :, :],
+                    data_aligned[iewb, insb, :, :],
+                    weight_aligned[iewb, insb, :, :],
                 ) = _interpolation_linear(
-                    x=ra_shifted,
+                    x=ra_true,
                     y=data[iewb, insb, :, :],
                     w=weight[iewb, insb, :, :],
                     xeval=stream.ra,
@@ -369,8 +374,8 @@ class HFBAlignEWBeams(task.SingleTask):
 
         # Create output container; add data and weights
         out = containers.HFBHighResRingMap(copy_from=stream)
-        out.data[:] = data_shifted
-        out.weight[:] = weight_shifted
+        out.data[:] = data_aligned
+        out.weight[:] = weight_aligned
 
         return out
 
