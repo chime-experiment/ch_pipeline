@@ -1899,6 +1899,11 @@ class ThermalCalibration(task.SingleTask):
         )
         wtime, wtemp = self._load_weather(trng)
 
+        # Exclude NaNs and Infs in weather data from the interpolation
+        weather_sel = np.isfinite(wtemp)
+        wtime = wtime[weather_sel]
+        wtemp = wtemp[weather_sel]
+
         # Gain corrections for direct gains (no interpolation).
         #######################################################
         # Reference temperatures
