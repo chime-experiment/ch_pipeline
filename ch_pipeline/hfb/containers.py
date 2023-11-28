@@ -1,6 +1,7 @@
 """HFB containers
 """
 
+from caput.cache import cached_property
 from typing import Union
 
 import numpy as np
@@ -65,12 +66,12 @@ class HFBBeamContainer(HFBContainer):
         """The beam indices associated with each entry of the beam axis."""
         return self.index_map["beam"]
 
-    @property
+    @cached_property
     def beam_ew(self):
         """The unique EW-beam indices (i.e., from 0 to 3) in the beam axis."""
         return np.unique(self.beam // 256)
 
-    @property
+    @cached_property
     def beam_ns(self):
         """The unique NS-beam indices (i.e., from 0 to 256) in the beam axis."""
         return np.unique(self.beam % 256)
