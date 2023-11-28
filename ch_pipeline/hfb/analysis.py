@@ -364,12 +364,12 @@ class HFBAlignEWBeams(task.SingleTask):
                 (
                     data_aligned[iewb, insb, :, :],
                     weight_aligned[iewb, insb, :, :],
-                ) = _interpolation_linear(
+                ) = _interpolation_circular(
                     x=ra_true,
                     y=data[iewb, insb, :, :],
                     w=weight[iewb, insb, :, :],
                     xeval=stream.ra,
-                    zero_outside=True,
+                    xperiod=360.0,
                 )
 
         # Create output container; add data and weights
@@ -1124,6 +1124,65 @@ def _interpolation_linear(x, y, w, xeval, zero_outside=True):
         outside = np.concatenate((below, above))
         yeval[outside] = 0.0
         weval[outside] = 0.0
+
+    return yeval, weval
+
+
+def _interpolation_circular(x, y, w, xeval, xperiod):
+    """Linear interpolation with handling of uncertainties and flagged data."""
+
+    # Invert weights to obtain variances
+    var = tools.invert_no_zero(w)
+
+    # Wrap xeval points over period
+    xeval %= xperiod
+
+    # Find indices of x points left and right of xeval points
+    index = np.searchsorted(x, xeval, side="left")
+    ind1 = index - 1
+    ind2 = index
+
+    # Find points below the range of x and overwrite left index with the index
+    # at the end of x
+    below = np.flatnonzero(ind1 == -1)
+    if below.size > 0:
+        ind1[below] = x.size - 1
+
+    # Find points above the range of x and overwrite right index with the index
+    # at the strart of x
+    above = np.flatnonzero(ind2 == x.size)
+    if above.size > 0:
+        ind2[above] = 0
+
+    # Compute intervals
+    adx1 = xeval - x[ind1]
+    adx2 = x[ind2] - xeval
+
+    # For points below and above the range of x, overwrite the interval,
+    # adjusting for the period
+    if below.size > 0:
+        adx1[below] = xeval - x[ind1] - xperiod
+    if above.size > 0:
+        adx2[above] = x[ind2] + xperiod - xeval
+
+    # Compute relative weights of left and right points
+    norm = tools.invert_no_zero(adx1 + adx2)
+    a1 = adx2 * norm
+    a2 = adx1 * norm
+
+    # Adjust shape of a1 and a2 to allow broadcasting with y and var
+    new_axes_pos = tuple(range(1, len(y.shape)))
+    a1 = np.expand_dims(a1, axis=new_axes_pos)
+    a2 = np.expand_dims(a2, axis=new_axes_pos)
+
+    # Do interpolation and extrapolation
+    yeval = a1 * y[ind1, ...] + a2 * y[ind2, ...]
+    weval = tools.invert_no_zero(a1**2 * var[ind1, ...] + a2**2 * var[ind2, ...])
+
+    # Set interpolated weight to zero if either of the two weights going into
+    # the interpolation is zero, indicated data flagged as bad
+    flags = (w[ind1, ...] == 0.0) | (w[ind2, ...] == 0.0)
+    weval[flags] = 0.0
 
     return yeval, weval
 
