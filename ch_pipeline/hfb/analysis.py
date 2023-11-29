@@ -195,6 +195,69 @@ class MakeHighFreqRes(task.SingleTask):
         return out
 
 
+class MakeHighFreqResRingMap(task.SingleTask):
+    """Combine frequency and sub-frequency axes and reorder axes for HFB ringmaps"""
+
+    def process(self, stream):
+        """Convert HFBRingMap to HFBHighResRingMap container
+
+        Parameters
+        ----------
+        stream : HFBRingMap
+            Ringmap with frequency and subfrequency axis
+
+        Returns
+        -------
+        out : HFBHighResRingMap
+            Ringmap with single high-resolution frequency axis
+        """
+
+        # Change distributed axis from freq to el
+        stream.redistribute("el")
+
+        # Retrieve data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Make combined frequency axis
+        cfreq = stream.index_map["freq"]["centre"]
+        subfreq = stream.index_map["subfreq"]
+        freq = (cfreq[:, np.newaxis] + subfreq).flatten()
+
+        # Retrieve beam and RA axes
+        beam = stream.index_map["beam"]
+        ra = stream.ra
+
+        # Move frequency and subfrequency axes to the back
+        axes = (2, 3, 4, 0, 1)
+        data = data.transpose(axes)
+        weight = weight.transpose(axes)
+
+        # Determine new shape of data with combined frequency axis,
+        # giving a length of None to the (distributed) el axis
+        nbeam = len(beam)
+        nra = len(ra)
+        nfreq = len(cfreq)
+        nsubfreq = len(subfreq)
+        new_shape = (nbeam, None, nra, nfreq * nsubfreq)
+
+        # Combine frequency and sub-frequency axes
+        data = data.reshape(new_shape)
+        weight = weight.reshape(new_shape)
+
+        # Create container to hold output
+        out = containers.HFBHighResRingMap(
+            axes_from=stream, attrs_from=stream, freq=freq
+        )
+
+        # Save data to output container
+        out.hfb[:] = data
+        out.weight[:] = weight
+
+        # Return output container
+        return out
+
+
 class HFBDivideByTemplate(task.SingleTask):
     """Divide HFB data by template of time-averaged HFB data.
 
