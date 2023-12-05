@@ -828,12 +828,12 @@ class HFBDividePFB(task.SingleTask):
 
         Parameters
         ----------
-        stream : containers.HFBTimeAverage
+        stream : containers.HFBTimeAverage or containers.HFBRingMap
             Container with time-averaged HFB data.
 
         Returns
         -------
-        out : containers.HFBTimeAverage
+        out : same as stream
             Container with flattened time-averaged HFB data.
         """
 
@@ -848,15 +848,26 @@ class HFBDividePFB(task.SingleTask):
         pfb_shape = DeconvolvePFB().Wt2.sum(axis=1)
         pfb_shape = np.roll(pfb_shape, 64)
 
+        # Prepare pfb_shape for broadcasting
+        if type(stream == containers.HFBTimeAverage):
+            pfb_shape = pfb_shape[:, np.newaxis]
+        elif type(stream == containers.HFBRingMap):
+            pfb_shape = pfb_shape[:, np.newaxis, np.newaxis, np.newaxis]
+        else:
+            raise TypeError(
+                "Task HFBDividePFB expects HFBTimeAverage or HFBRingMap. "
+                f"Got container of type {type(stream)}"
+            )
+
         # Create container to hold output
         out = dcontainers.empty_like(stream)
 
         # Divide data by PFB shape and place in output container
-        out.hfb[:] = data / pfb_shape[:, np.newaxis, np.newaxis, np.newaxis]
+        out.hfb[:] = data / pfb_shape
 
         # Divide uncertainties by PFB shape, hence multiply weights by square
         # of PFB shape, and place in output container.
-        out.weight[:] = weight * pfb_shape[:, np.newaxis, np.newaxis, np.newaxis] ** 2
+        out.weight[:] = weight * pfb_shape**2
 
         return out
 
