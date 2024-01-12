@@ -26,6 +26,8 @@ cluster:
   mem: 192000M
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 
 days: &days
 {days}
@@ -178,6 +180,9 @@ class QuarterStackProcessing(base.ProcessingType):
         "freq": [0, 1024],
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        # System modules to use/load
+        "modpath": "/project/rpp-chime/chime_env/modules/modulefiles",
+        "modlist": "chime/python/2022.06",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
