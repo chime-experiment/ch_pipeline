@@ -62,17 +62,17 @@ class HFBBeamContainer(HFBContainer):
     _axes = ("beam",)
 
     @property
-    def beam(self):
+    def beam(self) -> np.ndarray:
         """The beam indices associated with each entry of the beam axis."""
         return self.index_map["beam"]
 
     @cached_property
-    def beam_ew(self):
+    def beam_ew(self) -> np.ndarray:
         """The unique EW-beam indices (i.e., from 0 to 3) in the beam axis."""
         return np.unique(self.beam // 256)
 
     @cached_property
-    def beam_ns(self):
+    def beam_ns(self) -> np.ndarray:
         """The unique NS-beam indices (i.e., from 0 to 256) in the beam axis."""
         return np.unique(self.beam % 256)
 
@@ -376,28 +376,32 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
     _axes = ("beam_ew", "beam_ns", "el")
 
     @property
-    def beam_ew(self):
+    def beam_ew(self) -> np.ndarray:
         """The (unique) EW beam indices (i.e., from 0 to 3) of the beam_ew axis."""
         return self.index_map["beam_ew"]
 
     @property
-    def beam_ns(self):
+    def beam_ns(self) -> np.ndarray:
         """The (unique) NS beam indices (i.e., from 0 to 256) of the beam_ns axis."""
         return self.index_map["beam_ns"]
 
     @property
-    def el(self):
+    def el(self) -> np.ndarray:
         """The el = sin(zenith angle) associated with each sample of the el axis.
+
         The zenith angle used is the reference angle for the NS beam in question.
         The true el of a data sample can be computed from the NS beam index and
-        the sample's frequency using the synthetic beam model."""
+        the sample's frequency using the synthetic beam model.
+        """
         return self.index_map["el"]
 
     @property
-    def ra(self):
-        """The RA in degrees associated with each sample of the RA axis. This is
-        valid for EW beam index 1. For other EW beams, there is an offset in RA
-        that depends on the EW and NS beam index."""
+    def ra(self) -> np.ndarray:
+        """The RA in degrees associated with each sample of the RA axis.
+
+        This is valid for EW beam index 1. For other EW beams, there is an
+        offset in RA that depends on the EW and NS beam index.
+        """
         return self.index_map["ra"]
 
 
