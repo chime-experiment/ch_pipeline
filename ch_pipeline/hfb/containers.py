@@ -73,7 +73,7 @@ class HFBBeamContainer(HFBContainer):
 
     @cached_property
     def beam_ns(self) -> np.ndarray:
-        """The unique NS-beam indices (i.e., from 0 to 256) in the beam axis."""
+        """The unique NS-beam indices (i.e., from 0 to 255) in the beam axis."""
         return np.unique(self.beam % 256)
 
 
