@@ -29,6 +29,10 @@ class BaseLoadFiles(io.BaseLoadFiles):
         Name of source, which should be in `ch_util.hfbcat.HFBCatalog`.
     source_dec : float
         Declination of source in degrees.
+    beam_ns_range : list
+        Selection of North-South beam indices (i.e., in the range 0-255) to
+        include, given as a slice with `[start, stop]` or `[start, stop, step]`
+        as the value. Does not work in combination with `freq_phys_list`.
     beam_ew_include : list
         List of East-West beam indices (i.e., in the range 0-3) to include.
         By default all four EW beams are included. Does not work in combination
@@ -41,7 +45,7 @@ class BaseLoadFiles(io.BaseLoadFiles):
         List of physical frequencies (in MHz) to read. The first frequency
         in this list is also used in evaluating beam positions (for selecting
         the beams closest to a transiting source). Does not work in combination
-        with `beam_ew_include`.
+        with `beam_ns_range` or `beam_ew_include`.
     freq_phys_delta : float
         Half-width of frequency chuck (in MHz) that is selected around the
         frequency listed in the HFB target list in case a source is provided
@@ -62,14 +66,16 @@ class BaseLoadFiles(io.BaseLoadFiles):
        The `source_dec`, `freq_phys_range`, and `freq_phys_list` attributes
        cancel the look-up of declination and frequency from the HFB target list
        triggered by the `source_name` attribute.
-    3. By manually passing indices in the `selections` attribute
-       (see documentation in :class:`draco.core.io.BaseLoadFiles`).
+    3. By passing `beam_ns_range` and/or `beam_ew_include` attributes.
+    4. By manually passing indices in the `selections` attribute
+       (see documentation in :class:`draco.core.io.SelectionsMixin`).
     Method 1 takes precedence over method 2. If no relevant attributes are
     passed, all frequencies/beams are read.
     """
 
     source_name = config.Property(proptype=str, default=None)
     source_dec = config.Property(proptype=float, default=None)
+    beam_ns_range = config.Property(proptype=list, default=None)
     beam_ew_include = config.Property(proptype=list, default=None)
     freq_phys_range = config.Property(proptype=list, default=[])
     freq_phys_list = config.Property(proptype=list, default=[])
@@ -143,6 +149,11 @@ class BaseLoadFiles(io.BaseLoadFiles):
                 self.beam_sel = list(
                     np.arange(1024)[self.beam_sel][self.beam_ew_include]
                 )
+        elif self.beam_ns_range or self.beam_ew_include:
+            beam_index_grid = np.arange(1024).reshape(4, 256)
+            beam_ew_sel = self.beam_ew_include or slice(None)
+            beam_ns_sel = slice(*self.beam_ns_range) if self.beam_ns_range else None
+            self.beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
         elif "beam_sel" in self._sel:
             self.beam_sel = self._sel["beam_sel"]
         else:
