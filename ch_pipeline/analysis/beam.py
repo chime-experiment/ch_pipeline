@@ -1,4 +1,5 @@
 """Tasks for beam measurement processing"""
+
 import json
 import yaml
 from os import path, listdir
@@ -620,9 +621,11 @@ class MakeHolographyBeam(task.SingleTask):
         conj_cox = [pg.copy() for pg in conj]
         input_pol = np.array(
             [
-                ipt.pol
-                if (tools.is_array(ipt) or tools.is_holographic(ipt))
-                else inputmap[input_26m[0]].pol
+                (
+                    ipt.pol
+                    if (tools.is_array(ipt) or tools.is_holographic(ipt))
+                    else inputmap[input_26m[0]].pol
+                )
                 for ipt in inputmap
             ]
         )
@@ -919,9 +922,11 @@ class HolographyTransitFit(TransitFit):
         else:
             this_pol = np.array(
                 [
-                    pol_axis.index("S")
-                    if not ((ii // 256) % 2)
-                    else pol_axis.index("E")
+                    (
+                        pol_axis.index("S")
+                        if not ((ii // 256) % 2)
+                        else pol_axis.index("E")
+                    )
                     for ii in range(ninput)
                 ]
             )

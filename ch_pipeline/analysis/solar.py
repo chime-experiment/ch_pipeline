@@ -590,9 +590,9 @@ class SolarCalibrationN2(task.SingleTask):
                                 iters += 1
 
                             # Save model coefficients to output container
-                            suntrans.coeff[
-                                ff_global, ipol, tt_out, :, :
-                            ] = coeff.reshape(*poly_ncoeff)
+                            suntrans.coeff[ff_global, ipol, tt_out, :, :] = (
+                                coeff.reshape(*poly_ncoeff)
+                            )
 
                             # Calculate residual
                             residual = vis - np.dot(A, coeff)

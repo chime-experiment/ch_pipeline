@@ -1,5 +1,6 @@
 """HFB Tasks for flagging data
 """
+
 import numpy as np
 
 from caput import config

@@ -4,6 +4,7 @@ Tasks for calculating flagging out unwanted data. This includes RFI removal, and
 data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
+
 from typing import Union
 import numpy as np
 

@@ -4,6 +4,7 @@ Pathfinder Telescope
 .. deprecated:: pass1
     Use :mod:`ch_pipeline.core.telescope` instead.
 """
+
 import warnings
 from .telescope import *
 

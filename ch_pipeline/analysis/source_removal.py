@@ -304,9 +304,11 @@ class SolveSources(task.SingleTask):
         self.inputmap = telescope.feeds
 
         self.bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in self.sources
         ]
 
@@ -650,9 +652,11 @@ class SubtractSources(task.SingleTask):
         source_model_kwargs = json.loads(model.attrs["source_model_kwargs"])
 
         bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in sources
         ]
 
@@ -788,9 +792,11 @@ class SolveSourcesWithBeam(SolveSources):
         self.inputmap = telescope.feeds
 
         self.bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in self.sources
         ]
 
@@ -1006,9 +1012,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
         source_model_kwargs = json.loads(model.attrs["source_model_kwargs"])
 
         bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in sources
         ]
 
