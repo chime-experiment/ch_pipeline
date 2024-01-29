@@ -1,12 +1,22 @@
+"""Chime Daily Pipeline processing type.
+
+This processing type is used to run the Chime daily pipeline.
+
+Classes
+=======
+- :py:class:`DailyProcessing`
+- :py:class:`TestDailyProcessing`
+"""
+
 import math
+from typing import ClassVar
 
 import chimedb.core as db
 import chimedb.data_index as di
-from ch_util import ephemeris
 from caput.tools import unique_ordered
+from ch_util import ephemeris
 
 from . import base
-
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -700,13 +710,17 @@ pipeline:
 
 
 class DailyProcessing(base.ProcessingType):
-    """ """
+    """Chime daily processing pipeline processing type.
+
+    Processes individual chimestack files into one CSD in RA, along with
+    ringmaps and other data products.
+    """
 
     type_name = "daily"
     tag_pattern = r"\d+"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         # Time range(s) to process
         "intervals": [
             # Two short two-day intervals either side of the caltime change
@@ -805,9 +819,9 @@ class DailyProcessing(base.ProcessingType):
         self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
 
     def _available_files(self, start_csd, end_csd):
-        """
-        Return chimestack files available in cedar_online between start_csd and
-        end_csd, if all of the files for that period are available online.
+        """Return chimestack files available in cedar_online between start_csd and end_csd.
+
+        Return list of files if all of the files for that period are available online.
 
         Return an empty list if files between start_csd and end_csd are only
         partially available online.
@@ -827,7 +841,6 @@ class DailyProcessing(base.ProcessingType):
             List contains the chimestack files available in the timespan, if
             all of them are available online
         """
-
         # Connect to databases
         db.connect()
 
@@ -840,7 +853,7 @@ class DailyProcessing(base.ProcessingType):
         online_node = di.StorageNode.get(name="cedar_online", active=True)
         chimestack_inst = di.ArchiveInst.get(name="chimestack")
 
-        # TODO: if the time range is so small that it’s completely contained
+        # TODO: if the time range is so small that it`s completely contained
         # within a single file, nothing will be returned have to special-case
         # it by looking for files which start before the start time and end
         # after the end time).
@@ -869,12 +882,12 @@ class DailyProcessing(base.ProcessingType):
             di.ArchiveFileCopy.node == online_node,  # that are online
         )
 
-        filenames_online = sorted([t for t in files_online.tuples()])
+        filenames_online = sorted(files_online.tuples())
 
         # files_that_exist might contain the same file multiple files
         # if it exists in multiple locations (nearline, online, gossec, etc)
         # we only want to include it once
-        filenames_that_exist = sorted({t for t in files_that_exist.tuples()})
+        filenames_that_exist = sorted(set(files_that_exist.tuples()))
 
         return filenames_online, filenames_that_exist
 
@@ -887,7 +900,9 @@ class DailyProcessing(base.ProcessingType):
         # with a single pass.
         csds = unique_ordered(
             # This is a generator
-            (csd for i in self._intervals for csd in csds_in_range(*i))
+            csd
+            for i in self._intervals
+            for csd in csds_in_range(*i)
         )
         csds_sorted = sorted(csds)
 
@@ -901,13 +916,10 @@ class DailyProcessing(base.ProcessingType):
             csds_sorted, filenames_online, filenames_that_exist
         )
 
-        tags = [f"{csd:.0f}" for csd in csds if csd in csds_available]
-
-        return tags
+        return [f"{csd:.0f}" for csd in csds if csd in csds_available]
 
     def _csds_available_data(self, csds, filenames_online, filenames_that_exist) -> set:
-        """
-        Return the subset of csds in `csds` for whom all files are online.
+        """Return the subset of csds in `csds` for whom all files are online.
 
         `filenames_online` and `filenames_that_exist` are a list of tuples
         (start_time, finish_time)
@@ -942,7 +954,8 @@ class DailyProcessing(base.ProcessingType):
         return csds_available
 
     def _files_in_timespan(self, start, end, files):
-        """
+        """Get a list of files whose start and end time fall between `start` and `end`.
+
         Parameters
         ----------
         start : float
@@ -974,7 +987,6 @@ class DailyProcessing(base.ProcessingType):
 
     def _finalise_jobparams(self, tag, jobparams):
         """Set bounds for this CSD."""
-
         csd = float(tag)
         jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
 
@@ -990,9 +1002,7 @@ class DailyProcessing(base.ProcessingType):
         to_run = [csd for csd in to_run if today - int(csd) > 0]
         # Get any recent tags to run first
         priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
-        to_run = priority + [csd for csd in to_run if csd not in priority]
-
-        return to_run
+        return priority + [csd for csd in to_run if csd not in priority]
 
 
 class TestDailyProcessing(DailyProcessing):
@@ -1026,7 +1036,7 @@ class TestDailyProcessing(DailyProcessing):
 
 
 def csds_in_range(start, end, step=1):
-    """Get the CSDs within a time range.
+    r"""Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
@@ -1039,12 +1049,13 @@ def csds_in_range(start, end, step=1):
     end : str or parseable to datetime
         End of interval. If `None` use now. Note that for CSD intervals the
         end is *inclusive* (unlike a `range`).
+    step : int
+        step size to use when traversing interval
 
     Returns
     -------
     csds : list of ints
     """
-
     if start.startswith("CSD"):
         start_csd = int(start[3:])
     else:
@@ -1059,5 +1070,4 @@ def csds_in_range(start, end, step=1):
         end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
         end_csd = math.ceil(end_csd)
 
-    csds = [day for day in range(start_csd, end_csd + 1, step)]
-    return csds
+    return list(range(start_csd, end_csd + 1, step))

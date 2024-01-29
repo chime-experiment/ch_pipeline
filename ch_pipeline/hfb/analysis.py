@@ -1,24 +1,15 @@
-"""Tasks for HFB analysis
-"""
+"""Tasks for HFB analysis."""
 
 import numpy as np
-
-from scipy.interpolate import interp1d
-
-from skyfield.positionlib import Angle
-from skyfield.starlib import Star
-
-from caput import config
-from caput import mpiarray
-
-from ch_util.hfbcat import HFBCatalog
+from beam_model.composite import FutureMostAccurateCompositeBeamModel
+from caput import config, mpiarray
 from ch_util.ephemeris import chime, get_doppler_shifted_freq
-
+from ch_util.hfbcat import HFBCatalog
+from draco.core import containers as dcontainers
 from draco.core import task
 from draco.util import tools
-from draco.core import containers as dcontainers
-
-from beam_model.composite import FutureMostAccurateCompositeBeamModel
+from skyfield.positionlib import Angle
+from skyfield.starlib import Star
 
 from . import containers
 from .pfb import DeconvolvePFB
@@ -56,7 +47,6 @@ class HFBAverage(task.SingleTask):
         out : HFBTimeAverage, HFBHighResTimeAverage
             Average of stream over time axis.
         """
-
         contmap = {
             "freq": {},
             "subfreq": {},
@@ -133,10 +123,10 @@ class HFBAverage(task.SingleTask):
 
 
 class MakeHighFreqRes(task.SingleTask):
-    """Combine frequency and sub-frequency axes"""
+    """Combine frequency and sub-frequency axes."""
 
     def process(self, stream):
-        """Convert HFBData to HFBHighResData container
+        """Convert HFBData to HFBHighResData container.
 
         Parameters
         ----------
@@ -148,7 +138,6 @@ class MakeHighFreqRes(task.SingleTask):
         out : HFBHighResData, HFBHighResTimeAverage
             Data with single high-resolution frequency axis
         """
-
         contmap = {
             containers.HFBData: containers.HFBHighResData,
             containers.HFBTimeAverage: containers.HFBHighResTimeAverage,
@@ -197,10 +186,10 @@ class MakeHighFreqRes(task.SingleTask):
 
 
 class MakeHighFreqResRingMap(task.SingleTask):
-    """Combine frequency and sub-frequency axes and reorder axes for HFB ringmaps"""
+    """Combine frequency and sub-frequency axes and reorder axes for HFB ringmaps."""
 
     def process(self, stream):
-        """Convert HFBRingMap to HFBHighResRingMap container
+        """Convert HFBRingMap to HFBHighResRingMap container.
 
         Parameters
         ----------
@@ -212,7 +201,6 @@ class MakeHighFreqResRingMap(task.SingleTask):
         out : HFBHighResRingMap
             Ringmap with single high-resolution frequency axis
         """
-
         # Change distributed axis from freq to el
         stream.redistribute("el")
 
@@ -283,7 +271,6 @@ class HFBDivideByTemplate(task.SingleTask):
         out : containers.HFBData
             Container with HFB data and weights; the result of the division.
         """
-
         template_array = template.hfb[:]
 
         # Divide data by template
@@ -326,7 +313,6 @@ class HFBDifference(task.SingleTask):
         out : HFBData or HFBTimeAverage
             Container with HFB data and weights; the result of the subtraction.
         """
-
         # Difference data
         data = minuend.hfb[:] - subtrahend.hfb[:]
 
@@ -371,7 +357,6 @@ class HFBStackDays(task.SingleTask):
         sdata : any HFB data container
             Individual (time-averaged) day to add to stack.
         """
-
         # Get the LSD (or CSD) label out of the input's attributes.
         # If there is no label, use a placeholder.
         if "lsd" in sdata.attrs:
@@ -550,7 +535,6 @@ class HFBSelectTransit(task.SingleTask):
 
     def setup(self):
         """Check criteria attribute."""
-
         if not self.criteria:
             raise ValueError("No selection criteria set.")
 
@@ -575,7 +559,6 @@ class HFBSelectTransit(task.SingleTask):
         out : containers.HFBData
             Container with same HFB data, but weights adjusted to make selection.
         """
-
         # On the first pass, obtain the source's coordinates from the HFB catalog,
         # unless they are provided manually via the task's source_ra / source_dec
         # attributes. To do this, get the source name from the container attributes,
@@ -739,7 +722,6 @@ class HFBFlattenPFB(task.SingleTask):
         out : containers.HFBData
             Container with flattened HFB data.
         """
-
         # Extract data and weight from container
         data = stream.hfb
         weight = stream.weight
@@ -787,7 +769,6 @@ class HFBFlattenRingMapPFB(task.SingleTask):
         out : containers.HFBRingMap
             Container with flattened HFB ringmap.
         """
-
         # Extract data and weight from container
         data = stream.hfb[:].local_array
         weight = stream.weight[:].local_array
@@ -836,7 +817,6 @@ class HFBDividePFB(task.SingleTask):
         out : containers.HFBTimeAverage
             Container with flattened time-averaged HFB data.
         """
-
         # Extract data and weight from container
         data = stream.hfb
         weight = stream.weight
@@ -877,7 +857,8 @@ class HFBDopplerShift(task.SingleTask):
         `ch_util.hfbcat.HFBCatalog`.
     time_override : float
         Unix time used to calculate Doppler shift, to override the time calculated
-        from the LSD and the RA of the source found in the container attributes."""
+    from the LSD and the RA of the source found in the container attributes.
+    """
 
     source_name = config.Property(proptype=str, default=None)
     source_ra = config.Property(proptype=float, default=None)
@@ -894,7 +875,6 @@ class HFBDopplerShift(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Set up the default Observer
         self.observer = chime if observer is None else observer
 
@@ -911,7 +891,6 @@ class HFBDopplerShift(task.SingleTask):
         out : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
             Doppler shifted data.
         """
-
         # On the first pass, obtain a skyfield Star object of the source. This can
         # either be retrieved from the HFB catalog (using the source name from the
         # container attributes, unless manually overridden via the task's source_name
@@ -985,7 +964,6 @@ class HFBDopplerShift(task.SingleTask):
 
 def _interpolation_linear(x, y, w, xeval, zero_outside=True):
     """Linear interpolation with handling of uncertainties and flagged data."""
-
     # Invert weights to obtain variances
     var = tools.invert_no_zero(w)
 
@@ -1042,7 +1020,7 @@ def _interpolation_linear(x, y, w, xeval, zero_outside=True):
 
 def _ensure_list(x):
     if hasattr(x, "__iter__"):
-        y = [xx for xx in x]
+        y = [xx for xx in x]  # noqa: C416
     else:
         y = [x]
 

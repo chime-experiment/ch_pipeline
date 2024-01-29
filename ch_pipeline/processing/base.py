@@ -1,12 +1,22 @@
-import re
-import warnings
-import yaml
+"""Base class for a pipeline processing type.
+
+The base class is inherited by specific pipeline processing types and handles
+most steps in setting up and running the processing type.
+
+Classes
+=======
+- :py:class:`ProcessingType`
+"""
+
 import os
+import re
 import subprocess as sp
 import tempfile
-from typing import Dict, Union, Tuple
+import warnings
 from pathlib import Path
+from typing import ClassVar, Dict, Optional, Tuple, Union
 
+import yaml
 
 DEFAULT_SCRIPT = """
 cluster:
@@ -24,7 +34,7 @@ Please describe the purpose/changes of this revision here.
 """
 
 
-class ProcessingType(object):
+class ProcessingType:
     """Baseclass for a pipeline processing type.
 
     Parameters
@@ -41,7 +51,7 @@ class ProcessingType(object):
     root_path = None
 
     # Defined in sub-classses
-    default_params = {}
+    default_params: ClassVar = {}
     default_script = DEFAULT_SCRIPT
 
     def __init__(self, revision, create=False, root_path=None):
@@ -59,7 +69,6 @@ class ProcessingType(object):
 
     def _create(self):
         """Save default parameters and pipeline config for this revision."""
-
         # Subclass hook
         self._create_hook()
 
@@ -94,7 +103,6 @@ class ProcessingType(object):
 
     def _load(self):
         """Load default parameters and pipeline config for this revision."""
-
         # Load config from file
         with (self.revconfig_path).open() as fc:
             self._revparams = yaml.safe_load(fc)
@@ -115,7 +123,6 @@ class ProcessingType(object):
 
     def job_script(self, tag):
         """The slurm job script to queue up."""
-
         jobparams = dict(self._revparams)
         jobparams.update(
             {
@@ -129,9 +136,7 @@ class ProcessingType(object):
         jobparams = self._finalise_jobparams(tag, jobparams)
 
         if not (self.venv_path / "bin/activate").exists():
-            raise ValueError(
-                "Couldn't find a virtualenv script in {}.".format(self.venv_path)
-            )
+            raise ValueError(f"Couldn't find a virtualenv script in {self.venv_path}.")
         jobparams.update({"venv": self.venv_path})
 
         return self._jobconfig.format(**jobparams)
@@ -153,7 +158,6 @@ class ProcessingType(object):
         tags
             Return the tags of all outputs found.
         """
-
         base = self.base_path
 
         if not base.exists():
@@ -172,8 +176,8 @@ class ProcessingType(object):
                 ]
             )
             return [x for _, x in sorted(zip(times, tags), reverse=True)]
-        else:
-            return sorted([path.name for path in entries])
+
+        return sorted([path.name for path in entries])
 
     @classmethod
     def ls_type(cls, existing: bool = True) -> list:
@@ -189,14 +193,13 @@ class ProcessingType(object):
         type_names
             list of processing types found
         """
-
         type_names = [t.type_name for t in all_subclasses(cls)]
 
         if existing:
             base = Path(cls.root_path)
             return sorted([t.name for t in base.glob("*") if t.name in type_names])
-        else:
-            return type_names
+
+        return type_names
 
     @classmethod
     def ls_rev(cls) -> list:
@@ -207,7 +210,6 @@ class ProcessingType(object):
         rev
             List of revision names
         """
-
         base = Path(cls.root_path) / cls.type_name
 
         # Revisions are labelled by a two digit code
@@ -219,7 +221,6 @@ class ProcessingType(object):
     @classmethod
     def create_rev(cls):
         """Create a new revision of this type."""
-
         revisions = cls.ls_rev()
 
         if revisions:
@@ -232,7 +233,7 @@ class ProcessingType(object):
 
         return cls(new_rev, create=True)
 
-    def queued(self, user: str = None) -> Tuple[list, list]:
+    def queued(self, user: Optional[str] = None) -> Tuple[list, list]:
         """Get the queued and running jobs of this type.
 
         Parameters
@@ -248,7 +249,6 @@ class ProcessingType(object):
         running
             List of running jobs.
         """
-
         job_regex = re.compile(f"^{self.job_name(self.tag_pattern)}$")
 
         # Find matching jobs
@@ -271,15 +271,12 @@ class ProcessingType(object):
         -------
         jobname
         """
-        return "chp/%s/%s/%s" % (self.type_name, self.revision, tag)
+        return f"chp/{self.type_name}/{self.revision}/{tag}"
 
     @property
     def base_path(self):
         """Base path for this processed data type."""
-
-        base_path = Path(self.root_path) / self.type_name / self.revision
-
-        return base_path
+        return Path(self.root_path) / self.type_name / self.revision
 
     @property
     def workdir_path(self):
@@ -329,9 +326,7 @@ class ProcessingType(object):
 
         # Filter out entries that already exist in the working directory
         working_tags = [path.name for path in self.workdir_path.glob("*")]
-        tags = [tag for tag in tags if tag not in working_tags]
-
-        return tags
+        return [tag for tag in tags if tag not in working_tags]
 
     def _available_tags(self) -> list:
         """Return the list of tags available for processing."""
@@ -346,7 +341,6 @@ class ProcessingType(object):
         pt : cls
             An instance of the processing type for the latest revision.
         """
-
         rev = cls.ls_rev()
 
         if not rev:
@@ -355,7 +349,7 @@ class ProcessingType(object):
         # Create instance and set the revision
         return cls(rev[-1])
 
-    def generate(self, max: int = 10, submit: bool = True, user: str = None):
+    def generate(self, max: int = 10, submit: bool = True, user: Optional[str] = None):
         """Queue up jobs that are available to run.
 
         Parameters
@@ -368,24 +362,25 @@ class ProcessingType(object):
             user to find running jobs for. If not provided, this
             will default to the current user
         """
-
         to_run = self._generate_hook(user=user)[:max]
 
         for tag in to_run:
             queue_job(self.job_script(tag), submit=submit)
 
-    def _generate_hook(self, user: str = None) -> list:
+    def _generate_hook(self, user: Optional[str] = None) -> list:
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
 
-    def pending(self, user: str = None):
+    def pending(self, user: Optional[str] = None):
         """Jobs available to run."""
         warnings.warn(
             "'pending' method is deprecated. Call 'status()['not_yet_submitted']'."
         )
         return self.status(user)["not_yet_submitted"]
 
-    def failed(self, user: str = None, time_sort: bool = False) -> Dict[str, list]:
+    def failed(
+        self, user: Optional[str] = None, time_sort: bool = False
+    ) -> Dict[str, list]:
         """Categorize failed jobs.
 
         Parameters
@@ -434,9 +429,12 @@ class ProcessingType(object):
         # Return all tags which match the listed patterns
         return classify_failed(self.workdir_path, failed_tags, patterns)
 
-    def status(self, user: str = None, time_sort: bool = False) -> Dict[str, list]:
-        """Find the status of existing jobs. This duplicates
-        some other methods for individual status values, but
+    def status(
+        self, user: Optional[str] = None, time_sort: bool = False
+    ) -> Dict[str, list]:
+        """Find the status of existing jobs.
+
+        This duplicates some other methods for individual status values, but
         reduces repeated method (and slurm) calls.
 
         Parameters
@@ -532,7 +530,7 @@ class ProcessingType(object):
             crashed_tags = sorted(crashed_tags)
 
         # Return a dict of all status values
-        tags = {
+        return {
             "available": available_tags,
             "not_yet_submitted": not_submitted_tags,
             "pending": pending_tags,
@@ -541,11 +539,9 @@ class ProcessingType(object):
             "failed": crashed_tags,
         }
 
-        return tags
-
 
 def find_venv():
-    """Get the path of the current virtual environment
+    """Get the path of the current virtual environment.
 
     Returns
     -------
@@ -559,7 +555,6 @@ def find_venv():
 
 def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
-
     import os
 
     with tempfile.NamedTemporaryFile("w+") as fh:
@@ -617,14 +612,14 @@ def classify_failed(
         # See if any of the patterns that we are looking for
         # exist in the stdout
         for key, regex_patterns in patterns.items():
-            if any([bool(re.search(p, tail)) for p in regex_patterns]):
+            if any([bool(re.search(p, tail)) for p in regex_patterns]):  # noqa: C419
                 failed[key].append(tag)
                 break
 
     return failed
 
 
-def slurm_jobs(user: str = None) -> list:
+def slurm_jobs(user: Optional[str] = None) -> list:
     """Get the jobs of the given user.
 
     Parameters
@@ -700,7 +695,7 @@ def slurm_jobs(user: str = None) -> list:
     return entries
 
 
-def slurm_fairshare(account: str, user: str = None) -> Tuple[str, str]:
+def slurm_fairshare(account: str, user: Optional[str] = None) -> Tuple[str, str]:
     """Get the LevelFS for the current user and account.
 
     Parameters
@@ -749,7 +744,6 @@ def slurm_fairshare(account: str, user: str = None) -> Tuple[str, str]:
 
 def all_subclasses(cls):
     """Recursively find all subclasses of cls."""
-
     subclasses = []
 
     stack = [cls]
