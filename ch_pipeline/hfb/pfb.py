@@ -1,4 +1,5 @@
 """PFB related tools."""
+
 from typing import Callable
 
 import numpy as np
@@ -187,28 +188,18 @@ class DeconvolvePFB:
         # Construct the inverse covariance term via Sherman-Morrison using the products
         # above
         Ci = np.empty((x.shape[0], 2, 2), dtype=np.float64)
-        Ci[:, 0, 0] = np.sum(
-            wNw - sig_d**2 / (1 + sig_d**2 * wNw) * wNw**2, axis=-1
-        )
-        Ci[:, 0, 1] = np.sum(
-            zNw - sig_d**2 / (1 + sig_d**2 * wNw) * zNw * wNw, axis=-1
-        )
+        Ci[:, 0, 0] = np.sum(wNw - sig_d**2 / (1 + sig_d**2 * wNw) * wNw**2, axis=-1)
+        Ci[:, 0, 1] = np.sum(zNw - sig_d**2 / (1 + sig_d**2 * wNw) * zNw * wNw, axis=-1)
         Ci[:, 1, 0] = Ci[:, 0, 1]
-        Ci[:, 1, 1] = np.sum(
-            zNz - sig_d**2 / (1 + sig_d**2 * wNw) * zNw**2, axis=-1
-        )
+        Ci[:, 1, 1] = np.sum(zNz - sig_d**2 / (1 + sig_d**2 * wNw) * zNw**2, axis=-1)
         # Add in the signal term
         Ci[:, 0, 0] += sig_a**-2
         Ci[:, 1, 1] += sig_b**-2
 
         # Construct the "dirty" estimator
         dirty = np.empty((x.shape[0], 2), dtype=np.float64)
-        dirty[:, 0] = np.sum(
-            wNd - sig_d**2 / (1 + sig_d**2 * wNw) * wNw * wNd, axis=-1
-        )
-        dirty[:, 1] = np.sum(
-            zNd - sig_d**2 / (1 + sig_d**2 * wNw) * zNw * wNd, axis=-1
-        )
+        dirty[:, 0] = np.sum(wNd - sig_d**2 / (1 + sig_d**2 * wNw) * wNw * wNd, axis=-1)
+        dirty[:, 1] = np.sum(zNd - sig_d**2 / (1 + sig_d**2 * wNw) * zNw * wNd, axis=-1)
 
         # Solve for a and b, and then apply to the data
         fx = np.empty_like(x)

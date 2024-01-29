@@ -1,6 +1,5 @@
 """Tasks for constructing timing corrections and applying them to data."""
 
-
 import os
 
 import numpy as np

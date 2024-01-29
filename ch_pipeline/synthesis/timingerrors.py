@@ -1,6 +1,5 @@
 """Tasks for simulating timing distribution errors."""
 
-
 import numpy as np
 
 from caput import config, mpiarray, mpiutil
@@ -44,6 +43,7 @@ class TimingErrors(gain.BaseGains):
         Specify the periods of the sinusoids for each cylinder. Needs to be specified
         when simulating `sinusoidal` `common_mode_cyl` timing errors.
     """
+
     ndays = config.Property(proptype=float, default=733)
     corr_length_delay = config.Property(proptype=float, default=3600)
     sigma_delay = config.Property(proptype=float, default=1e-12)
