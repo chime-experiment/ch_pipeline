@@ -10,6 +10,7 @@ from skyfield.starlib import Star
 
 from caput import config
 from caput import mpiarray
+from caput import weighted_median
 
 from ch_util.hfbcat import HFBCatalog
 from ch_util.ephemeris import chime, get_doppler_shifted_freq
@@ -1061,3 +1062,62 @@ def _ensure_list(x):
         y = [x]
 
     return y
+
+
+class HFBMedianSubtraction(task.SingleTask):
+    """Subtract weighted median along beam axis.
+
+    This is to remove fluctuations in the data induced by temperature
+    fluctuations in East and West receiver huts."""
+
+    def process(self, stream):
+        """Subtract weighted median of the data along beam axis from the data.
+
+        A binary mask (0 when the weight is zero, and 1 for non-zero weights)
+        is used in weighted median.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        # make a mask of non-zero weights
+        mask = weight != 0
+
+        # Generate binary weight
+        binary_weight = mask.astype(np.float32)
+
+        # Change the order of axes in data and mask arrays, as weighted median
+        # is calculated along the last axis
+        data_s = np.swapaxes(data, 2, 3)
+        binary_weight = np.swapaxes(binary_weight, 2, 3)
+
+        # Calculate weighted median (to exclude flagged data) along beam axis:
+        median = weighted_median.weighted_median(data_s, binary_weight)
+
+        # Subtract weighted median along all beams from the data
+        diff = data - median[:, :, np.newaxis, :]
+
+        # Create container to hold output
+        out = containers.HFBData(stream)
+
+        # Place diff in output container
+        out.hfb[:] = diff
+        out.weight[:] = weight
+
+        return out
