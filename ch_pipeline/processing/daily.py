@@ -446,9 +446,16 @@ pipeline:
         files:
         - "{catalogs[0]}"
 
+    # Wait until the catalog is loaded, otherwise this task will
+    # run its setup method and significantly increase memory used
+    - type: draco.core.misc.WaitUntil
+      requires: source_catalog_nocollapse
+      in: sstream_inter
+      out: sstream_inter2
+
     # Measure the beamformed visibility as a function of hour angle
     - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_inter]
+      requires: [manager, sstream_inter2]
       in: source_catalog_nocollapse
       out: sourceflux_nocollapse
       params:
@@ -456,13 +463,15 @@ pipeline:
         collapse_ha: false
         save: true
         output_name: "sourceflux_vs_ha_{{tag}}.h5"
+        base_priority: -2
+        limit_outputs: 1
 
     # Wait until the additional catalog is loaded, otherwise this task will
     # run its setup method and significantly increase memory used
     - type: draco.core.misc.WaitUntil
       requires: sourceflux_nocollapse
       in: sstream_inter
-      out: sstream_inter2
+      out: sstream_inter3
 
     # Load the source catalogs to measure fluxes of
     - type: draco.core.io.LoadBasicCont
@@ -476,12 +485,14 @@ pipeline:
 
     # Measure the observed fluxes of the point sources in the catalogs
     - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_inter2]
+      requires: [manager, sstream_inter3]
       in: source_catalog
       params:
         timetrack: 300.0
         save: true
         output_name: "sourceflux_{{tag}}.h5"
+        base_priority: -2
+        limit_outputs: 4
 
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
