@@ -86,7 +86,7 @@ class HFBAverage(task.SingleTask):
         data = stream.hfb[:]
         weight = stream.weight[:]
 
-        # Average the data and weights
+        # Average the data and compute the weight of the averaged data
         if self.weighting == "uniform":
             # Binary weights for uniform weighting
             binary_weight = np.zeros(weight.shape)
@@ -95,11 +95,11 @@ class HFBAverage(task.SingleTask):
             # Number of samples with non-zero weight in each time bin
             nsamples = np.sum(binary_weight, axis=axis_index)
 
-            # For uniform weighting, the average of the variances is
-            # sum( 1 / weight ) / nsamples,
-            # and the averaged weight is the inverse of that
+            # For uniform weighting, the variance of averaged data is
+            # sum( variance ) / nsamples**2,
+            # and the weight is the inverse of that
             variance = tools.invert_no_zero(weight)
-            avg_weight = nsamples * tools.invert_no_zero(
+            avg_weight = nsamples**2 * tools.invert_no_zero(
                 np.sum(variance, axis=axis_index)
             )
 
@@ -454,8 +454,8 @@ class HFBStackDays(task.SingleTask):
             norm = self.stack.nsample[:].astype(np.float32)
 
             # For uniform weighting, invert the accumulated variances and
-            # multiply by number of days to finalize stack.weight.
-            self.stack.weight[:] = norm * tools.invert_no_zero(self.stack.weight[:])
+            # multiply by number of days squared to finalize stack.weight.
+            self.stack.weight[:] = norm**2 * tools.invert_no_zero(self.stack.weight[:])
 
             # For uniform weighting, simply normalize accumulated data by number
             # of days to finalize stack.hfb.
