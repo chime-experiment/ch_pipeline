@@ -40,7 +40,7 @@ class HFBAverage(task.SingleTask):
         Either `uniform` or `inverse_variance`.
     """
 
-    axis = config.enum(["freq", "subfreq", "beam", "time"], default="time")
+    axis = config.enum(["freq", "subfreq", "beam", "beam_ew", "time"], default="time")
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
@@ -62,6 +62,9 @@ class HFBAverage(task.SingleTask):
             "subfreq": {},
             "beam": {
                 containers.HFBHighResTimeAverage: containers.HFBHighResSpectrum,
+            },
+            "beam_ew": {
+                containers.HFBHighResRingMap: containers.HFBHighResBeamAvgRingMap,
             },
             "time": {
                 containers.HFBData: containers.HFBTimeAverage,

@@ -365,7 +365,7 @@ class HFBHighResSpectrum(HFBHighResContainer):
 class HFBRingMapBase(SiderealContainer, HFBContainer):
     """Base class for HFB ringmaps.
 
-    These containers include axes to mark the EW and NS beam indices, as well as
+    This container includes an axis to mark the indices of the NS beams, as well as
     RA (inherited from :class:`SiderealContainer`) and el = sin(zenith angle) axes.
 
     The el axis corresponds to the sin(za) of the reference angles for the NS beams.
@@ -373,12 +373,7 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
     computed from the NS beam index and frequency using the synthetic beam model.
     """
 
-    _axes = ("beam_ew", "beam_ns", "el")
-
-    @property
-    def beam_ew(self) -> np.ndarray:
-        """The (unique) EW beam indices (i.e., from 0 to 3) of the beam_ew axis."""
-        return self.index_map["beam_ew"]
+    _axes = ("beam_ns", "el")
 
     @property
     def beam_ns(self) -> np.ndarray:
@@ -405,7 +400,21 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
         return self.index_map["ra"]
 
 
-class HFBRingMap(FreqContainer, HFBRingMapBase):
+class HFBBeamRingMap(HFBRingMapBase):
+    """Base class for HFB ringmaps that have separate EW beams.
+
+    This container includes an axis to mark the indices of the EW beams.
+    """
+
+    _axes = ("beam_ew",)
+
+    @property
+    def beam_ew(self):
+        """The (unique) EW beam indices (i.e., from 0 to 3) of the beam_ew axis."""
+        return self.index_map["beam_ew"]
+
+
+class HFBRingMap(FreqContainer, HFBBeamRingMap):
     """Container for holding HFB ringmap data."""
 
     _axes = ("subfreq",)
@@ -435,7 +444,7 @@ class HFBRingMap(FreqContainer, HFBRingMapBase):
     }
 
 
-class HFBHighResRingMap(HFBRingMapBase, HFBHighResContainer):
+class HFBHighResRingMap(HFBBeamRingMap, HFBHighResContainer):
     """Container for holding high-resolution frequency ringmap data.
 
     With respect to :class:`HFBRingMap`, the (combined) frequency axis is moved
@@ -461,6 +470,34 @@ class HFBHighResRingMap(HFBRingMapBase, HFBHighResContainer):
         },
         "nsample": {
             "axes": ["beam_ew", "el", "ra", "freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+    }
+
+
+class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
+    """Container for holding EW-beam-averaged high-resolution frequency ringmap data."""
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "weight": {
+            "axes": ["el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "nsample": {
+            "axes": ["el", "ra", "freq"],
             "dtype": np.uint16,
             "initialise": False,
             "distributed": True,
