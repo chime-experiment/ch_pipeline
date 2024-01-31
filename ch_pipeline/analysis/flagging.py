@@ -210,6 +210,47 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         return ~rfi.frequency_mask(freq, timestamp=timestamp)
 
 
+class RFIStaticMask(task.SingleTask):
+    """Get the static mask for the time period covered by the data.
+
+    This is the same static mask used in :class:`RFIFilter` and
+    :class:`RFISensitivityMask`.
+    """
+
+    def process(self, data):
+        """Create a mask with all static frequency bands for a given day.
+
+        Parameters
+        ----------
+        data
+            container with data to mask. Should have either a time-like axis
+            or a `lsd` attribute which can be converted to a UNIX timestamp.
+
+        Returns
+        -------
+        mask
+            boolean mask that can be applied to the input container
+        """
+        # Redistribute across frequency
+        data.redistribute("freq")
+
+        # Create mask container. draco RFIMask is not distributed.
+        if "ra" in data.index_map:
+            csd = data.attrs.get("lsd", data.attrs.get("csd"))
+            timestamp = ephemeris.csd_to_unix(csd)
+            out = dcontainers.SiderealRFIMask(attrs_from=data, axes_from=data)
+        elif "time" in data.index_map:
+            timestamp = data.time[0]
+            out = dcontainers.RFIMask(attrs_from=data, axes_from=data)
+        else:
+            raise ValueError("No definition for `time` or `ra` axes.")
+
+        # Expand 1D mask to proper shape
+        out.mask[:] = rfi.frequency_mask(data.freq, timestamp=timestamp)[:, np.newaxis]
+
+        return out
+
+
 class ChannelFlagger(task.SingleTask):
     """Mask out channels that appear weird in some way.
 
