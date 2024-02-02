@@ -1066,8 +1066,8 @@ class HFBDividePFB(task.SingleTask):
         """
 
         # Extract data and weight from container
-        data = stream.hfb
-        weight = stream.weight
+        data = stream.hfb[:].local_array
+        weight = stream.weight[:].local_array
 
         # Mask out DC bin (subfrequency bin 64) by setting weight to zero
         weight[:, 64, ...] = 0
