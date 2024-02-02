@@ -231,7 +231,7 @@ class MakeHighFreqResRingMap(task.SingleTask):
         freq = (cfreq[:, np.newaxis] + subfreq).flatten()
 
         # Retrieve beam and RA axes
-        beam = stream.index_map["beam"]
+        beam = stream.beam_ew
         ra = stream.ra
 
         # Move frequency and subfrequency axes to the back
@@ -955,8 +955,8 @@ class HFBFlattenRingMapPFB(task.SingleTask):
         out = containers.HFBRingMap(axes_from=stream, attrs_from=stream)
 
         # Flatten one EW beam and one elevation at a time
-        for ibeam, _ in enumerate(stream.index_map["beam"]):
-            for iel, _ in enumerate(stream.index_map["el"]):
+        for ibeam, _ in enumerate(stream.beam_ew):
+            for iel, _ in enumerate(stream.el):
                 # Select data and weights for beam
                 data_beam = data[:, :, ibeam, iel, :]
                 weight_beam = weight[:, :, ibeam, iel, :]
