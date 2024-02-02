@@ -853,9 +853,9 @@ class HFBDividePFB(task.SingleTask):
         pfb_shape = np.roll(pfb_shape, 64)
 
         # Prepare pfb_shape for broadcasting
-        if type(stream == containers.HFBTimeAverage):
+        if isinstance(stream, containers.HFBTimeAverage):
             pfb_shape = pfb_shape[:, np.newaxis]
-        elif type(stream == containers.HFBRingMap):
+        elif isinstance(stream, containers.HFBRingMap):
             pfb_shape = pfb_shape[:, np.newaxis, np.newaxis, np.newaxis]
         else:
             raise TypeError(
