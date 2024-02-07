@@ -307,6 +307,80 @@ class HFBDivideByTemplate(task.SingleTask):
         return out
 
 
+class HFBAlignEWBeams(task.SingleTask):
+    """Shift RA axis of high-resolution frequency ringmaps to align EW beams."""
+
+    def setup(self):
+        """Setup the HFBAlignEWBeams task; load ."""
+
+        from beam_model.formed import FFTFormedActualBeamModel
+
+        # Get the offsets in CHIME/FRB x coord (in deg) of the EW beams and the
+        # reference zenith angles (CHIME/FRB y coord; in deg) of the NS beams
+        # from the CHIME/FRB beam model
+        beam_mdl = FFTFormedActualBeamModel()
+        self.ew_beam_offset_deg = beam_mdl.config["ew_spacing"]
+        self.ns_reference_angles_deg = beam_mdl.reference_angles
+
+    def process(self, stream):
+        """Align EW beams.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMap
+            High-resolution frequency ringmap to align.
+
+        Returns
+        -------
+        out : containers.HFBHighResRingMap
+            High-resolution frequency ringmap with EW beams aligned in RA.
+        """
+
+        from ch_util.ephemeris import bmxy_to_hadec
+
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Find CHIME/FRB XY coordinates of beams
+        x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
+        y_beam_list = self.ns_reference_angles_deg[stream.beam_ns]
+
+        # Compute hour angles of beams
+        x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
+        ha_beam, _ = bmxy_to_hadec(x_beam_grid, y_beam_grid)
+
+        # Initialize arrays to hold data and weights
+        data_aligned = np.zeros_like(data)
+        weight_aligned = np.zeros_like(weight)
+
+        for insb, nsb in enumerate(stream.beam_ns):
+            for iewb, ewb in enumerate(stream.beam_ew):
+                # Compute actual RA of samples per beam
+                ra_true = stream.ra - ha_beam[insb, ewb]
+
+                # Do alignment by evaluating the data at the RAs given by the ra axis
+                # using linear interpolation. TODO: Cyclic interpolation. For now,
+                # zero out data points that need to be extrapolated.
+                (
+                    data_aligned[iewb, insb, :, :],
+                    weight_aligned[iewb, insb, :, :],
+                ) = _interpolation_linear(
+                    x=ra_true,
+                    y=data[iewb, insb, :, :],
+                    w=weight[iewb, insb, :, :],
+                    xeval=stream.ra,
+                    mode="wrap",
+                    xperiod=360.0,
+                )
+
+        # Create output container; add data and weights
+        out = containers.HFBHighResRingMap(copy_from=stream)
+        out.data[:] = data_aligned
+        out.weight[:] = weight_aligned
+
+        return out
+
+
 class HFBDifference(task.SingleTask):
     """Take the difference of two sets of HFB data.
 
@@ -982,7 +1056,7 @@ class HFBDopplerShift(task.SingleTask):
             y=data_obs[::-1, ...],
             w=weight_obs[::-1, ...],
             xeval=freq_shifted[::-1],
-            zero_outside=True,
+            mode="zero",
         )
 
         # Reverse back frequency dimension.
@@ -998,34 +1072,94 @@ class HFBDopplerShift(task.SingleTask):
         return out
 
 
-def _interpolation_linear(x, y, w, xeval, zero_outside=True):
-    """Linear interpolation with handling of uncertainties and flagged data."""
+def _interpolation_linear(x, y, w, xeval, mode="zero", xperiod=None):
+    """Linear interpolation with handling of uncertainties and flagged data.
+
+    Approximates a 1-D function `y = f(x)` using linear interpolation, while
+    taking into account the uncertainties on the known points of `y`.
+
+    Parameters
+    ----------
+    x : array_like
+        A 1-D array of real values.
+    y : array_like
+        An N-D array of real values. The first axis is the interpolation axis
+        and must be the same length as `x`.
+    w : array_like
+        An N-D array of weights, the same shape as `y`, giving the inverse
+        variance of each point in `y`.
+    xeval : array_like
+        The points at which to evaluate the interpolation.
+    mode : {"zero", "extrapolate", "wrap"}, optional
+        The `mode` parameter determines the behaviour for values of `xeval` that
+        fall outside the range of `x`. Default is "zero". The behaviour for each
+        valid value is as follows:
+        "zero"
+            Returns zeros outside the range of `x`.
+        "extrapolate"
+            Extrapolates (linearly) using the first two or last two input values.
+        "wrap"
+            Treats the input as circular, wrapping around to the opposite edge.
+            This requires the `xperiod` parameter to be set.
+    xperiod : float, optional
+        The period of `x`, in case the "wrap" mode is used (otherwise ignored).
+    """
 
     # Invert weights to obtain variances
     var = tools.invert_no_zero(w)
+
+    if mode == "wrap":
+        # Check if xperiod, needed in the "wrap" mode, was passed
+        if not xperiod:
+            raise ValueError("xperiod needed if mode is 'wrap'")
+
+        # Wrap xeval points over period
+        xeval %= xperiod
 
     # Find indices of x points left and right of xeval points
     index = np.searchsorted(x, xeval, side="left")
     ind1 = index - 1
     ind2 = index
 
-    # Find points below the range of x and overwrite left and right indices
-    # with the two indices at the start of x for extrapolation
-    below = np.flatnonzero(ind1 == -1)
-    if below.size > 0:
-        ind1[below] = 0
-        ind2[below] = 1
+    if mode == "wrap":
+        # Find points below the range of x and overwrite left index with the index
+        # at the end of x
+        below = np.flatnonzero(ind1 == -1)
+        if below.size > 0:
+            ind1[below] = x.size - 1
 
-    # Find points above the range of x and overwrite left and right indices
-    # with the two indices at the end of x for extrapolation
-    above = np.flatnonzero(ind2 == x.size)
-    if above.size > 0:
-        ind1[above] = x.size - 2
-        ind2[above] = x.size - 1
+        # Find points above the range of x and overwrite right index with the index
+        # at the strart of x
+        above = np.flatnonzero(ind2 == x.size)
+        if above.size > 0:
+            ind2[above] = 0
+
+    else:
+        # Find points below the range of x and overwrite left and right indices
+        # with the two indices at the start of x for extrapolation
+        below = np.flatnonzero(ind1 == -1)
+        if below.size > 0:
+            ind1[below] = 0
+            ind2[below] = 1
+
+        # Find points above the range of x and overwrite left and right indices
+        # with the two indices at the end of x for extrapolation
+        above = np.flatnonzero(ind2 == x.size)
+        if above.size > 0:
+            ind1[above] = x.size - 2
+            ind2[above] = x.size - 1
 
     # Compute intervals
     adx1 = xeval - x[ind1]
     adx2 = x[ind2] - xeval
+
+    if mode == "wrap":
+        # For points below and above the range of x, overwrite the interval,
+        # adjusting for the period
+        if below.size > 0:
+            adx1[below] = xeval - x[ind1] - xperiod
+        if above.size > 0:
+            adx2[above] = x[ind2] + xperiod - xeval
 
     # Compute relative weights of left and right points
     norm = tools.invert_no_zero(adx1 + adx2)
@@ -1046,7 +1180,7 @@ def _interpolation_linear(x, y, w, xeval, zero_outside=True):
     flags = (w[ind1, ...] == 0.0) | (w[ind2, ...] == 0.0)
     weval[flags] = 0.0
 
-    if zero_outside:
+    if mode == "zero":
         # Overwrite extrapolated points with zeros
         outside = np.concatenate((below, above))
         yeval[outside] = 0.0
