@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.daily &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+        <script src="../../../_static/doctools.js?v=888ff710"></script>
+        <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.daily</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.processing.daily</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">math</span>
+
+<span class="kn">import</span> <span class="nn">chimedb.core</span> <span class="k">as</span> <span class="nn">db</span>
+<span class="kn">import</span> <span class="nn">chimedb.data_index</span> <span class="k">as</span> <span class="nn">di</span>
+<span class="kn">from</span> <span class="nn">ch_util</span> <span class="kn">import</span> <span class="n">ephemeris</span>
+<span class="kn">from</span> <span class="nn">caput.tools</span> <span class="kn">import</span> <span class="n">unique_ordered</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">base</span>
+
+
+<span class="n">DEFAULT_SCRIPT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Cluster configuration</span>
+<span class="s2">cluster:</span>
+<span class="s2">  name: </span><span class="si">{jobname}</span>
+
+<span class="s2">  directory: </span><span class="si">{dir}</span>
+<span class="s2">  temp_directory: </span><span class="si">{tempdir}</span>
+
+<span class="s2">  time: </span><span class="si">{time}</span>
+<span class="s2">  system: cedar</span>
+<span class="s2">  nodes: </span><span class="si">{nodes}</span>
+<span class="s2">  ompnum: </span><span class="si">{ompnum}</span>
+<span class="s2">  pernode: </span><span class="si">{pernode}</span>
+<span class="s2">  mem: 192000M</span>
+
+<span class="s2">  venv: </span><span class="si">{venv}</span>
+
+<span class="s2"># Pipeline task configuration</span>
+<span class="s2">pipeline:</span>
+
+<span class="s2">  logging:</span>
+<span class="s2">    root: DEBUG</span>
+<span class="s2">    peewee: INFO</span>
+<span class="s2">    matplotlib: INFO</span>
+
+<span class="s2">  save_versions:</span>
+<span class="s2">    - caput</span>
+<span class="s2">    - ch_util</span>
+<span class="s2">    - ch_pipeline</span>
+<span class="s2">    - chimedb.core</span>
+<span class="s2">    - chimedb.data_index</span>
+<span class="s2">    - chimedb.dataflag</span>
+<span class="s2">    - cora</span>
+<span class="s2">    - draco</span>
+<span class="s2">    - drift</span>
+<span class="s2">    - numpy</span>
+<span class="s2">    - scipy</span>
+<span class="s2">    - h5py</span>
+<span class="s2">    - mpi4py</span>
+
+<span class="s2">  tasks:</span>
+
+<span class="s2">    - type: draco.core.task.SetMPILogging</span>
+<span class="s2">      params:</span>
+<span class="s2">        level_rank0: DEBUG</span>
+<span class="s2">        level_all: WARNING</span>
+
+<span class="s2">    - type: draco.core.misc.CheckMPIEnvironment</span>
+<span class="s2">      params:</span>
+<span class="s2">        timeout: 420</span>
+
+<span class="s2">    # Query for all the data for the sidereal day we are processing</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryDatabase</span>
+<span class="s2">      out: filelist</span>
+<span class="s2">      params:</span>
+<span class="s2">        start_csd: </span><span class="si">{csd[0]:.2f}</span>
+<span class="s2">        end_csd: </span><span class="si">{csd[1]:.2f}</span>
+<span class="s2">        accept_all_global_flags: true</span>
+<span class="s2">        node_spoof:</span>
+<span class="s2">          cedar_online: &quot;/project/rpp-chime/chime/chime_online/&quot;</span>
+<span class="s2">        connection_attempts: 5</span>
+<span class="s2">        instrument: chimestack</span>
+
+<span class="s2">    # Load the telescope model that we need for several steps</span>
+<span class="s2">    - type: draco.core.io.LoadProductManager</span>
+<span class="s2">      out: manager</span>
+<span class="s2">      params:</span>
+<span class="s2">        product_directory: &quot;</span><span class="si">{product_path}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Load and accumulate the available timing correction files.</span>
+<span class="s2">    - type: draco.core.io.LoadFilesFromParams</span>
+<span class="s2">      out: tcorr</span>
+<span class="s2">      params:</span>
+<span class="s2">        files: &quot;</span><span class="si">{timing_file}</span><span class="s2">&quot;</span>
+<span class="s2">        distributed: false</span>
+
+<span class="s2">    - type: draco.core.misc.AccumulateList</span>
+<span class="s2">      in: tcorr</span>
+<span class="s2">      out: tcorrlist</span>
+
+<span class="s2">    # We need to block the loading of the files until all the timing correction files are available</span>
+<span class="s2">    - type: draco.core.misc.WaitUntil</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: filelist</span>
+<span class="s2">      out: filelist2</span>
+
+<span class="s2">    # Load the individual data files</span>
+<span class="s2">    - type: ch_pipeline.core.io.LoadCorrDataFiles</span>
+<span class="s2">      requires: filelist2</span>
+<span class="s2">      out: tstream_orig</span>
+<span class="s2">      params:</span>
+<span class="s2">        channel_range: [</span><span class="si">{freq[0]:d}</span><span class="s2">, </span><span class="si">{freq[1]:d}</span><span class="s2">]</span>
+
+<span class="s2">    # Correct the timing distribution errors</span>
+<span class="s2">    - type: ch_pipeline.analysis.timing.ApplyTimingCorrection</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: tstream_orig</span>
+<span class="s2">      out: tstream_corr</span>
+<span class="s2">      params:</span>
+<span class="s2">        use_input_flags: true</span>
+
+<span class="s2">    # Get the telescope layout that was active when this data file was recorded</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryInputs</span>
+<span class="s2">      in: tstream_corr</span>
+<span class="s2">      out: inputmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        cache: true</span>
+
+<span class="s2">    # Correct the miscalibration of the data due to the varying estimates of telescope</span>
+<span class="s2">    # rotation</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTelescopeRotation</span>
+<span class="s2">      in: [tstream_corr, inputmap]</span>
+<span class="s2">      out: tstream_rot</span>
+<span class="s2">      params:</span>
+<span class="s2">        rotation: -0.071</span>
+
+<span class="s2">    # Correct an early bug in the interpretation of the timestamps that effected the</span>
+<span class="s2">    # calibration</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTimeOffset</span>
+<span class="s2">      in: [tstream_rot, inputmap]</span>
+<span class="s2">      out: tstream</span>
+
+<span class="s2">    # Calculate the system sensitivity for this file</span>
+<span class="s2">    - type: draco.analysis.sensitivity.ComputeSystemSensitivity</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream</span>
+<span class="s2">      out: sensitivity</span>
+<span class="s2">      params:</span>
+<span class="s2">        exclude_intracyl: true</span>
+
+<span class="s2">    # Mask out any weights that are abnormally large or small, since these are likely</span>
+<span class="s2">    # numerical issues and represent bad data</span>
+<span class="s2">    - type: draco.analysis.flagging.SanitizeWeights</span>
+<span class="s2">      in: tstream</span>
+<span class="s2">      out: tstream_sanitized</span>
+<span class="s2">      params:</span>
+<span class="s2">        max_thresh: 1e30</span>
+<span class="s2">        min_thresh: 1e-30</span>
+
+<span class="s2">    # Identify individual baselines with much lower weights than expected</span>
+<span class="s2">    - type: draco.analysis.flagging.ThresholdVisWeightBaseline</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_sanitized</span>
+<span class="s2">      out: full_bad_baseline_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        average_type: &quot;median&quot;</span>
+<span class="s2">        absolute_threshold: 1e-7</span>
+<span class="s2">        relative_threshold: 1e-5</span>
+<span class="s2">        pols_to_flag: &quot;copol&quot;</span>
+
+<span class="s2">    # Collapse bad-baseline mask over baseline, so that any time-freq sample</span>
+<span class="s2">    # with a low weight at any baseline is masked</span>
+<span class="s2">    - type: draco.analysis.flagging.CollapseBaselineMask</span>
+<span class="s2">      in: full_bad_baseline_mask</span>
+<span class="s2">      out: bad_baseline_mask</span>
+
+<span class="s2">    # Load the frequency map that was active when this data was collected</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryFrequencyMap</span>
+<span class="s2">      in: tstream_sanitized</span>
+<span class="s2">      out: freqmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        cache: false</span>
+
+<span class="s2">    # Identify decorrelated cylinders</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder</span>
+<span class="s2">      in: [tstream_sanitized, inputmap, freqmap]</span>
+<span class="s2">      out: decorr_cyl_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        threshold: 5.0</span>
+<span class="s2">        max_frac_freq: 0.1</span>
+
+<span class="s2">    # Average over redundant baselines across all cylinder pairs</span>
+<span class="s2">    - type: draco.analysis.transform.CollateProducts</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_sanitized</span>
+<span class="s2">      out: tstream_col</span>
+<span class="s2">      params:</span>
+<span class="s2">        weight: &quot;natural&quot;</span>
+
+<span class="s2">    # Concatenate together all the days timestream information</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_col</span>
+<span class="s2">      out: tstream_day</span>
+
+<span class="s2">    # Concatenate together all the days sensitivity information and output it</span>
+<span class="s2">    # for validation</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sensitivity</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sensitivity_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Concatenate together all the masks for bad baselines</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: bad_baseline_mask</span>
+<span class="s2">      out: bad_baseline_mask_day</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;bad_baseline_mask_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Concatenate together all the decorrelated cylinder masks</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: decorr_cyl_mask</span>
+<span class="s2">      out: decorr_cyl_mask_day</span>
+
+<span class="s2">    # Expand the decorrelated cylinder mask along the time axis</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.ExpandMask</span>
+<span class="s2">      in: decorr_cyl_mask_day</span>
+<span class="s2">      out: decorr_cyl_mask_day_exp</span>
+<span class="s2">      params:</span>
+<span class="s2">        nexpand: 6</span>
+<span class="s2">        in_place: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;decorrelated_cylinder_mask_expanded_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the mask from the bad baselines. This will modify the data in</span>
+<span class="s2">    # place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_day, bad_baseline_mask_day]</span>
+<span class="s2">      out: tstream_bbm</span>
+
+<span class="s2">    # Apply the mask from the decorrelated cylinders. This will modify the data</span>
+<span class="s2">    # in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_bbm, decorr_cyl_mask_day_exp]</span>
+<span class="s2">      out: tstream_dcm</span>
+
+<span class="s2">    # Calculate the RFI mask from the autocorrelation data</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.RFIFilter</span>
+<span class="s2">      in: tstream_dcm</span>
+<span class="s2">      out: rfimask</span>
+<span class="s2">      params:</span>
+<span class="s2">        stack: true</span>
+<span class="s2">        flag1d: false</span>
+<span class="s2">        rolling: true</span>
+<span class="s2">        apply_static_mask: true</span>
+<span class="s2">        keep_auto: true</span>
+<span class="s2">        keep_ndev: true</span>
+<span class="s2">        freq_width: 10.0</span>
+<span class="s2">        time_width: 420.0</span>
+<span class="s2">        threshold_mad: 6.0</span>
+<span class="s2">        use_draco_container: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_{{tag}}.h5&quot;</span>
+<span class="s2">        nan_check: false</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_dcm, rfimask]</span>
+<span class="s2">      out: tstream_day_rfi</span>
+
+<span class="s2">    # Calculate the thermal gain correction</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.ThermalCalibration</span>
+<span class="s2">      in: tstream_day_rfi</span>
+<span class="s2">      out: thermal_gain</span>
+<span class="s2">      params:</span>
+<span class="s2">        caltime_path: &quot;</span><span class="si">{caltimes_file}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Apply the thermal correction</span>
+<span class="s2">    - type: draco.core.misc.ApplyGain</span>
+<span class="s2">      in: [tstream_day_rfi, thermal_gain]</span>
+<span class="s2">      out: tstream_thermal_corrected</span>
+<span class="s2">      params:</span>
+<span class="s2">        inverse: false</span>
+
+<span class="s2">    # Smooth the noise estimates which suffer from sample variance</span>
+<span class="s2">    - type: draco.analysis.flagging.SmoothVisWeight</span>
+<span class="s2">      in: tstream_thermal_corrected</span>
+<span class="s2">      out: tstream_day_smoothweight</span>
+
+<span class="s2">    # Regrid the data onto a regular grid in sidereal time</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealRegridder</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_day_smoothweight</span>
+<span class="s2">      out: sstream</span>
+<span class="s2">      params:</span>
+<span class="s2">        samples: 4096</span>
+
+<span class="s2">    # Precision truncate the sidereal stream data</span>
+<span class="s2">    - type: draco.core.io.Truncate</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: sstream_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          vis:</span>
+<span class="s2">            weight_dataset: vis_weight</span>
+<span class="s2">            variance_increase: 1.0e-3</span>
+<span class="s2">          vis_weight: 1.0e-5</span>
+
+<span class="s2">    # Save the truncated sidereal stream to a .zarr file and start a background</span>
+<span class="s2">    # task to zip it</span>
+<span class="s2">    - type: draco.core.io.SaveZarrZip</span>
+<span class="s2">      in: sstream_trunc</span>
+<span class="s2">      out: sstream_trunc_handle</span>
+<span class="s2">      params:</span>
+<span class="s2">        compression:</span>
+<span class="s2">          vis:</span>
+<span class="s2">            chunks: [32, 512, 512]</span>
+<span class="s2">          vis_weight:</span>
+<span class="s2">            chunks: [32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sstream_{{tag}}.zarr.zip&quot;</span>
+<span class="s2">        remove: true</span>
+
+<span class="s2">    # Flag out low weight samples to remove transient RFI artifacts at the edges of</span>
+<span class="s2">    # flagged regions</span>
+<span class="s2">    - type: draco.analysis.flagging.ThresholdVisWeightBaseline</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: full_tvwb_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        relative_threshold: 0.5</span>
+<span class="s2">        ignore_absolute_threshold: -1</span>
+<span class="s2">        average_type: &quot;mean&quot;</span>
+<span class="s2">        pols_to_flag: &quot;all&quot;</span>
+
+<span class="s2">    # Apply the tvwb mask. This will modify the data inplace.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyBaselineMask</span>
+<span class="s2">      in: [sstream, full_tvwb_mask]</span>
+<span class="s2">      out: sstream_tvwb</span>
+
+<span class="s2">    # Generate the second RFI mask using targeted knowledge of the instrument</span>
+<span class="s2">    - type: draco.analysis.flagging.RFIMask</span>
+<span class="s2">      in: sstream_tvwb</span>
+<span class="s2">      out: rfimask2</span>
+<span class="s2">      params:</span>
+<span class="s2">        stack_ind: 66</span>
+<span class="s2">        output_name: &quot;rfi_mask2_{{tag}}.h5&quot;</span>
+<span class="s2">        save: true</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [sstream_tvwb, rfimask2]</span>
+<span class="s2">      out: sstream_mask</span>
+
+<span class="s2">    # Make a map of the full dataset</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: ringmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: false</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Precision truncate and write out the chunked normal ringmap</span>
+<span class="s2">    - type: draco.core.io.Truncate</span>
+<span class="s2">      in: ringmap</span>
+<span class="s2">      out: ringmap_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          map:</span>
+<span class="s2">            weight_dataset: weight</span>
+<span class="s2">            variance_increase: 1.0e-3</span>
+<span class="s2">          weight: 1.0e-5</span>
+
+<span class="s2">    # Save the truncated ringmap to a .zarr file and start a background</span>
+<span class="s2">    # task to zip it</span>
+<span class="s2">    - type: draco.core.io.SaveZarrZip</span>
+<span class="s2">      in: ringmap_trunc</span>
+<span class="s2">      out: ringmap_trunc_handle</span>
+<span class="s2">      params:</span>
+<span class="s2">        compression:</span>
+<span class="s2">          map:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">          weight:</span>
+<span class="s2">            chunks: [1, 32, 512, 512]</span>
+<span class="s2">          dirty_beam:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_{{tag}}.zarr.zip&quot;</span>
+<span class="s2">        remove: true</span>
+
+<span class="s2">    # Make a map from the inter cylinder baselines. This is less sensitive to</span>
+<span class="s2">    # cross talk and emphasis point sources</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: ringmap_int</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: true</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Precision truncate and write out the chunked intercylinder ringmap</span>
+<span class="s2">    # NOTE: this cannot be combined with the above Truncate task as it would</span>
+<span class="s2">    # result in both ringmaps existing in memory at the same time.</span>
+<span class="s2">    - type: draco.core.io.Truncate</span>
+<span class="s2">      in: ringmap_int</span>
+<span class="s2">      out: ringmap_int_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          map:</span>
+<span class="s2">            weight_dataset: weight</span>
+<span class="s2">            variance_increase: 1.0e-3</span>
+<span class="s2">          weight: 1.0e-5</span>
+
+<span class="s2">    # Save the truncated intercylinder ringmap to a .zarr file and start a background</span>
+<span class="s2">    # task to zip it</span>
+<span class="s2">    - type: draco.core.io.SaveZarrZip</span>
+<span class="s2">      in: ringmap_int_trunc</span>
+<span class="s2">      out: ringmap_int_trunc_handle</span>
+<span class="s2">      params:</span>
+<span class="s2">        compression:</span>
+<span class="s2">          map:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">          weight:</span>
+<span class="s2">            chunks: [1, 32, 512, 512]</span>
+<span class="s2">          dirty_beam:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_{{tag}}.zarr.zip&quot;</span>
+<span class="s2">        remove: true</span>
+
+<span class="s2">    # Mask out intercylinder baselines before beam forming to minimise cross</span>
+<span class="s2">    # talk. This creates a copy of the input that shares the vis dataset (but</span>
+<span class="s2">    # with a distinct weight dataset) to save memory</span>
+<span class="s2">    - type: draco.analysis.flagging.MaskBaselines</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: sstream_inter</span>
+<span class="s2">      params:</span>
+<span class="s2">        share: vis</span>
+<span class="s2">        mask_short_ew: 1.0</span>
+
+<span class="s2">    # Load the source catalogs to measure flux as a function of hour angle</span>
+<span class="s2">    - type: draco.core.io.LoadBasicCont</span>
+<span class="s2">      out: source_catalog_nocollapse</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[0]}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Measure the beamformed visibility as a function of hour angle</span>
+<span class="s2">    - type: draco.analysis.beamform.BeamFormCat</span>
+<span class="s2">      requires: [manager, sstream_inter]</span>
+<span class="s2">      in: source_catalog_nocollapse</span>
+<span class="s2">      out: sourceflux_nocollapse</span>
+<span class="s2">      params:</span>
+<span class="s2">        timetrack: 300.0</span>
+<span class="s2">        collapse_ha: false</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sourceflux_vs_ha_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Wait until the additional catalog is loaded, otherwise this task will</span>
+<span class="s2">    # run its setup method and significantly increase memory used</span>
+<span class="s2">    - type: draco.core.misc.WaitUntil</span>
+<span class="s2">      requires: sourceflux_nocollapse</span>
+<span class="s2">      in: sstream_inter</span>
+<span class="s2">      out: sstream_inter2</span>
+
+<span class="s2">    # Load the source catalogs to measure fluxes of</span>
+<span class="s2">    - type: draco.core.io.LoadBasicCont</span>
+<span class="s2">      out: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[0]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[1]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[2]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[3]}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Measure the observed fluxes of the point sources in the catalogs</span>
+<span class="s2">    - type: draco.analysis.beamform.BeamFormCat</span>
+<span class="s2">      requires: [manager, sstream_inter2]</span>
+<span class="s2">      in: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        timetrack: 300.0</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sourceflux_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Mask out day time data</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DayMask</span>
+<span class="s2">      in: sstream_mask</span>
+<span class="s2">      out: sstream_mask1</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskMoon</span>
+<span class="s2">      in: sstream_mask1</span>
+<span class="s2">      out: sstream_mask2</span>
+
+<span class="s2">    # Remove ranges of time known to be bad that may effect the delay power</span>
+<span class="s2">    # spectrum estimate</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DataFlagger</span>
+<span class="s2">      in: sstream_mask2</span>
+<span class="s2">      out: sstream_mask3</span>
+<span class="s2">      params:</span>
+<span class="s2">        flag_type:</span>
+<span class="s2">          - acjump</span>
+<span class="s2">          - bad_calibration_acquisition_restart</span>
+<span class="s2">          - bad_calibration_fpga_restart</span>
+<span class="s2">          - bad_calibration_gains</span>
+<span class="s2">          - decorrelated_cylinder</span>
+<span class="s2">          - globalflag</span>
+<span class="s2">          - rain1mm</span>
+
+<span class="s2">    # Load the stack that we will blend into the daily data</span>
+<span class="s2">    - type: draco.core.io.LoadBasicCont</span>
+<span class="s2">      out: sstack</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">            - &quot;</span><span class="si">{blend_stack_file}</span><span class="s2">&quot;</span>
+<span class="s2">        selections:</span>
+<span class="s2">            freq_range: [</span><span class="si">{freq[0]:d}</span><span class="s2">, </span><span class="si">{freq[1]:d}</span><span class="s2">]</span>
+
+<span class="s2">    - type: draco.analysis.flagging.BlendStack</span>
+<span class="s2">      requires: sstack</span>
+<span class="s2">      in: sstream_mask3</span>
+<span class="s2">      out: sstream_blend1</span>
+<span class="s2">      params:</span>
+<span class="s2">        frac: 1e-4</span>
+
+<span class="s2">    # Mask the daytime data again. This ensures that we only see the time range in</span>
+<span class="s2">    # the delay spectrum we would expect</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskDay</span>
+<span class="s2">      in: sstream_blend1</span>
+<span class="s2">      out: sstream_blend2</span>
+
+<span class="s2">    # Mask out the bright sources so we can see the high delay structure more easily</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskSource</span>
+<span class="s2">      in: sstream_blend2</span>
+<span class="s2">      out: sstream_blend3</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: [&quot;CAS_A&quot;, &quot;CYG_A&quot;, &quot;TAU_A&quot;, &quot;VIR_A&quot;]</span>
+
+<span class="s2">    # Try and derive an optimal time-freq factorizable mask that covers the</span>
+<span class="s2">    # existing masked entries</span>
+<span class="s2">    # Also, mask out some additional frequencies:</span>
+<span class="s2">    # 506.25 - 511.71 MHz: band which isn&#39;t that visible in the data but generates</span>
+<span class="s2">    # a lot of high delay power</span>
+<span class="s2">    # 519.14 - 525.4 MHz: unmasked band in the stack that seems to generate a lot</span>
+<span class="s2">    # of power across all delays</span>
+<span class="s2">    # 601.56 - 608.59 MHz: sporadic band which generates some power</span>
+<span class="s2">    # 459.38 - 465.23 MHz: another high-power band in the stack</span>
+<span class="s2">    # 609.77 - 610.55 MHz: narrow band in stack creating artifacts in delay-filtered</span>
+<span class="s2">    # ringmaps </span>
+<span class="s2">    - type: draco.analysis.flagging.MaskFreq</span>
+<span class="s2">      in: sstream_blend3</span>
+<span class="s2">      out: factmask</span>
+<span class="s2">      params:</span>
+<span class="s2">        factorize: true</span>
+<span class="s2">        bad_freq_ind: [[738, 753], [703, 720], [490, 509], [857, 873], [485, 488]]</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [sstream_blend3, factmask]</span>
+<span class="s2">      out: sstream_blend4</span>
+
+<span class="s2">    # Estimate the delay power spectrum of the data. This is a good diagnostic</span>
+<span class="s2">    # of instrument performance</span>
+<span class="s2">    - type: draco.analysis.delay.DelaySpectrumEstimator</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_blend4</span>
+<span class="s2">      params:</span>
+<span class="s2">        freq_zero: 800.0</span>
+<span class="s2">        nfreq: </span><span class="si">{nfreq_delay}</span>
+<span class="s2">        nsamp: 40</span>
+<span class="s2">        complex_timedomain: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;delayspectrum_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply delay filter to stream</span>
+<span class="s2">    - type: draco.analysis.delay.DelayFilter</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_blend4</span>
+<span class="s2">      out: sstream_dfilter</span>
+<span class="s2">      params:</span>
+<span class="s2">        delay_cut: 0.1</span>
+<span class="s2">        za_cut: 1.0</span>
+<span class="s2">        window: true</span>
+
+<span class="s2">    # Estimate the delay power spectrum of the data after applying</span>
+<span class="s2">    # the delay filter</span>
+<span class="s2">    - type: draco.analysis.delay.DelaySpectrumEstimator</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_dfilter</span>
+<span class="s2">      params:</span>
+<span class="s2">        freq_zero: 800.0</span>
+<span class="s2">        nfreq: </span><span class="si">{nfreq_delay}</span>
+<span class="s2">        nsamp: 40</span>
+<span class="s2">        complex_timedomain: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;delayspectrum_hpf_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Make an intercylinder ringmap from the delay-filtered visibilities,</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_dfilter</span>
+<span class="s2">      out: ringmap_int_hpf</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: true</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Select 10 frequencies from the delay-filtered map that are useful for validation</span>
+<span class="s2">    - type: draco.analysis.transform.SelectFreq</span>
+<span class="s2">      in: ringmap_int_hpf</span>
+<span class="s2">      out: ringmap_int_hpf_sel</span>
+<span class="s2">      params:</span>
+<span class="s2">        channel_index: </span><span class="si">{val_freq}</span>
+
+<span class="s2">    # Precision truncate and write out the chunked filtered ringmap.</span>
+<span class="s2">    # Don&#39;t truncate the map itself, to preserve low-amplitude pixels.</span>
+<span class="s2">    - type: draco.core.io.Truncate</span>
+<span class="s2">      in: ringmap_int_hpf_sel</span>
+<span class="s2">      out: ringmap_int_hpf_sel_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          map: No</span>
+<span class="s2">          weight: 1.0e-5</span>
+
+<span class="s2">    # Save the truncated filtered intercylinder ringmap to a .zarr file and</span>
+<span class="s2">    # start a background task to zip it</span>
+<span class="s2">    - type: draco.core.io.SaveZarrZip</span>
+<span class="s2">      in: ringmap_int_hpf_sel_trunc</span>
+<span class="s2">      out: ringmap_int_hpf_sel_trunc_handle</span>
+<span class="s2">      params:</span>
+<span class="s2">        compression:</span>
+<span class="s2">          map:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">          weight:</span>
+<span class="s2">            chunks: [1, 32, 512, 512]</span>
+<span class="s2">          dirty_beam:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_hpf_{{tag}}.zarr.zip&quot;</span>
+<span class="s2">        remove: true</span>
+
+<span class="s2">    # Downselect the ringmap to keep only the XX and YY pols</span>
+<span class="s2">    - type: draco.analysis.transform.Downselect</span>
+<span class="s2">      in: ringmap_int_hpf</span>
+<span class="s2">      out: ringmap_int_hpf_xx_yy</span>
+<span class="s2">      params:</span>
+<span class="s2">        selections:</span>
+<span class="s2">          pol_index: [0, 3]</span>
+
+<span class="s2">    # Take the variance of the map across elevation. Apply weights</span>
+<span class="s2">    # as a mask only</span>
+<span class="s2">    - type: draco.analysis.transform.ReduceVar</span>
+<span class="s2">      in: ringmap_int_hpf_xx_yy</span>
+<span class="s2">      params:</span>
+<span class="s2">        axes:</span>
+<span class="s2">          - el</span>
+<span class="s2">        dataset: map</span>
+<span class="s2">        weighting: weighted</span>
+<span class="s2">        compression:</span>
+<span class="s2">          map:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">          weight:</span>
+<span class="s2">            chunks: [1, 32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_el_var_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Take the variance of the map across frequency. Apply weights</span>
+<span class="s2">    # as a mask only</span>
+<span class="s2">    - type: draco.analysis.transform.ReduceVar</span>
+<span class="s2">      in: ringmap_int_hpf_xx_yy</span>
+<span class="s2">      params:</span>
+<span class="s2">        axes:</span>
+<span class="s2">          - freq</span>
+<span class="s2">        dataset: map</span>
+<span class="s2">        weighting: weighted</span>
+<span class="s2">        compression:</span>
+<span class="s2">          map:</span>
+<span class="s2">            chunks: [1, 1, 32, 512, 512]</span>
+<span class="s2">          weight:</span>
+<span class="s2">            chunks: [1, 32, 512, 512]</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_freq_var_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Wait for all the zarr zipping tasks to complete</span>
+<span class="s2">    # Wait for the sstream last since it will likely take the</span>
+<span class="s2">    # longest to complete</span>
+<span class="s2">    - type: draco.core.io.WaitZarrZip</span>
+<span class="s2">      in: ringmap_trunc_handle</span>
+
+<span class="s2">    - type: draco.core.io.WaitZarrZip</span>
+<span class="s2">      in: ringmap_int_trunc_handle</span>
+
+<span class="s2">    - type: draco.core.io.WaitZarrZip</span>
+<span class="s2">      in: ringmap_int_hpf_sel_trunc_handle</span>
+
+<span class="s2">    - type: draco.core.io.WaitZarrZip</span>
+<span class="s2">      in: sstream_trunc_handle</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">class</span> <span class="nc">DailyProcessing</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; &quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;daily&quot;</span>
+    <span class="n">tag_pattern</span> <span class="o">=</span> <span class="sa">r</span><span class="s2">&quot;\d+&quot;</span>
+
+    <span class="c1"># Parameters of the job processing</span>
+    <span class="n">default_params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="c1"># Time range(s) to process</span>
+        <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="c1"># Two short two-day intervals either side of the caltime change</span>
+            <span class="c1"># (1878, 3000), one with the weird 4 baseline issue (1912), one</span>
+            <span class="c1"># with no actual data (1898), one with a single baseline-freq issue</span>
+            <span class="c1"># (1960), one to test the thermal correction which otherwise shows</span>
+            <span class="c1"># a large spread (1965), one with a different set of vertical</span>
+            <span class="c1"># stripes (1983), and one with a decorrelated cylinder (2325) in</span>
+            <span class="c1"># order to have a few good test days at the very start</span>
+            <span class="c1"># NOTE: these intervals are *inclusive*</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1879&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1898&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1898&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1912&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1912&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1960&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1960&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1965&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1965&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1983&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1983&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2325&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2325&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3000&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3001&quot;</span><span class="p">},</span>
+            <span class="c1"># Good short ranges from rev_00, these are spread over the year and</span>
+            <span class="c1"># quickly cover the full sky</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1868&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1875&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1927&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1935&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1973&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1977&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2071&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2080&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2162&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2166&quot;</span><span class="p">},</span>
+            <span class="c1"># Intervals covering the days used in the stacking analysis</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1939&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1958&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1990&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2012&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2013&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2029&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2046&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2059&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2060&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2072&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2143&quot;</span><span class="p">},</span>
+            <span class="c1"># Intervals for which we process only one day every 7 days, this</span>
+            <span class="c1"># will slowly build up coverage over the whole timespan, extending</span>
+            <span class="c1"># as new days become available</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1879&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1880&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1881&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1882&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1883&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1884&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+        <span class="p">],</span>
+        <span class="c1"># Amount of padding each side of sidereal day to load</span>
+        <span class="s2">&quot;padding&quot;</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="c1"># Number of recent days to prioritize in queue</span>
+        <span class="s2">&quot;num_recent_days_first&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="c1"># Frequencies to process</span>
+        <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">],</span>
+        <span class="c1"># Frequencies to save for validation ringmaps</span>
+        <span class="s2">&quot;val_freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">65</span><span class="p">,</span> <span class="mi">250</span><span class="p">,</span> <span class="mi">325</span><span class="p">,</span> <span class="mi">399</span><span class="p">,</span> <span class="mi">470</span><span class="p">,</span> <span class="mi">605</span><span class="p">,</span> <span class="mi">730</span><span class="p">,</span> <span class="mi">830</span><span class="p">,</span> <span class="mi">950</span><span class="p">,</span> <span class="mi">990</span><span class="p">],</span>
+        <span class="c1"># The beam transfers to use (need to have the same freq range as above)</span>
+        <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/&quot;</span><span class="p">,</span>
+        <span class="c1"># Calibration times for thermal correction</span>
+        <span class="s2">&quot;caltimes_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/gain/calibration_times/&quot;</span>
+            <span class="s2">&quot;20180902_20201230_calibration_times.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># File for the timing correction</span>
+        <span class="s2">&quot;timing_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/timing/rev_00/referenced/&quot;</span>
+            <span class="s2">&quot;*_chimetiming_delay.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># File containing the freq map being used for processing the data</span>
+        <span class="s2">&quot;freqmap_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/freq_map/&quot;</span>
+            <span class="s2">&quot;20180902_20220927_freq_map.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># Catalogs to extract fluxes of</span>
+        <span class="s2">&quot;catalogs&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_cora_10Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_QSO_05Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_OVRO.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_requested.h5&quot;</span><span class="p">,</span>
+        <span class="p">],</span>
+        <span class="c1"># Delay spectrum estimation</span>
+        <span class="s2">&quot;blend_stack_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/stacks/rev_03/all/sstack.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;nfreq_delay&quot;</span><span class="p">:</span> <span class="mi">1025</span><span class="p">,</span>
+        <span class="c1"># Job params</span>
+        <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+        <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+        <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+        <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+    <span class="p">}</span>
+    <span class="n">default_script</span> <span class="o">=</span> <span class="n">DEFAULT_SCRIPT</span>
+
+    <span class="k">def</span> <span class="nf">_load_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Process the intervals</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;intervals&quot;</span><span class="p">]:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">],</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;end&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;step&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;padding&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_recent_days_first&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_available_files</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">start_csd</span><span class="p">,</span> <span class="n">end_csd</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Return chimestack files available in cedar_online between start_csd and</span>
+<span class="sd">        end_csd, if all of the files for that period are available online.</span>
+
+<span class="sd">        Return an empty list if files between start_csd and end_csd are only</span>
+<span class="sd">        partially available online.</span>
+
+<span class="sd">        Total file count is verified by checking files that exist everywhere.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        start_csd : int</span>
+<span class="sd">            Start date in sidereal day format</span>
+<span class="sd">        end_csd : int</span>
+<span class="sd">            End date in sidereal day format</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        list</span>
+<span class="sd">            List contains the chimestack files available in the timespan, if</span>
+<span class="sd">            all of them are available online</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Connect to databases</span>
+        <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+
+        <span class="c1"># Get timestamps in unix format</span>
+        <span class="c1"># Needed for queries</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">end_csd</span><span class="p">)</span>
+
+        <span class="c1"># We will want to know which files are in chime_online and nearline on cedar</span>
+        <span class="n">online_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;cedar_online&quot;</span><span class="p">,</span> <span class="n">active</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">chimestack_inst</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;chimestack&quot;</span><span class="p">)</span>
+
+        <span class="c1"># TODO: if the time range is so small that it’s completely contained</span>
+        <span class="c1"># within a single file, nothing will be returned have to special-case</span>
+        <span class="c1"># it by looking for files which start before the start time and end</span>
+        <span class="c1"># after the end time).</span>
+        <span class="n">archive_files</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">select</span><span class="p">(</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">finish_time</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">switch</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># chimestack files available online which include between start and end_time</span>
+        <span class="n">files_that_exist</span> <span class="o">=</span> <span class="n">archive_files</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="o">.</span><span class="n">inst</span>
+            <span class="o">==</span> <span class="n">chimestack_inst</span><span class="p">,</span>  <span class="c1"># specifically looking for chimestack files</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">start_time</span>
+            <span class="o">&lt;</span> <span class="n">end_time</span><span class="p">,</span>  <span class="c1"># which contain data that includes start time and end time</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">finish_time</span> <span class="o">&gt;=</span> <span class="n">start_time</span><span class="p">,</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">has_file</span> <span class="o">==</span> <span class="s2">&quot;Y&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">files_online</span> <span class="o">=</span> <span class="n">files_that_exist</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">node</span> <span class="o">==</span> <span class="n">online_node</span><span class="p">,</span>  <span class="c1"># that are online</span>
+        <span class="p">)</span>
+
+        <span class="n">filenames_online</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">([</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">files_online</span><span class="o">.</span><span class="n">tuples</span><span class="p">()])</span>
+
+        <span class="c1"># files_that_exist might contain the same file multiple files</span>
+        <span class="c1"># if it exists in multiple locations (nearline, online, gossec, etc)</span>
+        <span class="c1"># we only want to include it once</span>
+        <span class="n">filenames_that_exist</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">files_that_exist</span><span class="o">.</span><span class="n">tuples</span><span class="p">()})</span>
+
+        <span class="k">return</span> <span class="n">filenames_online</span><span class="p">,</span> <span class="n">filenames_that_exist</span>
+
+    <span class="k">def</span> <span class="nf">_available_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return all the tags that are available to run.</span>
+
+<span class="sd">        This includes any that currently exist or are in the job queue.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Lets us get only unique csds in the order we want them</span>
+        <span class="c1"># with a single pass.</span>
+        <span class="n">csds</span> <span class="o">=</span> <span class="n">unique_ordered</span><span class="p">(</span>
+            <span class="c1"># This is a generator</span>
+            <span class="p">(</span><span class="n">csd</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds_in_range</span><span class="p">(</span><span class="o">*</span><span class="n">i</span><span class="p">))</span>
+        <span class="p">)</span>
+        <span class="n">csds_sorted</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">csds</span><span class="p">)</span>
+
+        <span class="c1"># grab the list of files that are online, and that exist anywhere,</span>
+        <span class="c1"># from the earliest csd to the latest</span>
+        <span class="n">filenames_online</span><span class="p">,</span> <span class="n">filenames_that_exist</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_available_files</span><span class="p">(</span>
+            <span class="n">csds_sorted</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">csds_sorted</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="c1"># only queue jobs for which all data is available online in chime_online</span>
+        <span class="n">csds_available</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_csds_available_data</span><span class="p">(</span>
+            <span class="n">csds_sorted</span><span class="p">,</span> <span class="n">filenames_online</span><span class="p">,</span> <span class="n">filenames_that_exist</span>
+        <span class="p">)</span>
+
+        <span class="n">tags</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">csd</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds_available</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">tags</span>
+
+    <span class="k">def</span> <span class="nf">_csds_available_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">csds</span><span class="p">,</span> <span class="n">filenames_online</span><span class="p">,</span> <span class="n">filenames_that_exist</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Return the subset of csds in `csds` for whom all files are online.</span>
+
+<span class="sd">        `filenames_online` and `filenames_that_exist` are a list of tuples</span>
+<span class="sd">        (start_time, finish_time)</span>
+
+<span class="sd">        All 3 input lists should be sorted.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">csds_available</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">:</span>
+            <span class="n">start_time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+            <span class="n">end_time</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">csd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># online - list of filenames that are online between start_time and end_time</span>
+            <span class="c1"># index_online, the final index in which data was located</span>
+            <span class="n">online</span><span class="p">,</span> <span class="n">index_online</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_files_in_timespan</span><span class="p">(</span>
+                <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span><span class="p">,</span> <span class="n">filenames_online</span>
+            <span class="p">)</span>
+            <span class="n">exists</span><span class="p">,</span> <span class="n">index_exists</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_files_in_timespan</span><span class="p">(</span>
+                <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span><span class="p">,</span> <span class="n">filenames_that_exist</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">online</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">exists</span><span class="p">))</span> <span class="ow">and</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">online</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">csds_available</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+
+            <span class="c1"># The final file in the span may contain more than one sidereal day</span>
+            <span class="n">index_online</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">index_online</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">index_exists</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">index_exists</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+            <span class="n">filenames_online</span> <span class="o">=</span> <span class="n">filenames_online</span><span class="p">[</span><span class="n">index_online</span><span class="p">:]</span>
+            <span class="n">filenames_that_exist</span> <span class="o">=</span> <span class="n">filenames_that_exist</span><span class="p">[</span><span class="n">index_exists</span><span class="p">:]</span>
+
+        <span class="k">return</span> <span class="n">csds_available</span>
+
+    <span class="k">def</span> <span class="nf">_files_in_timespan</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        start : float</span>
+<span class="sd">            unix timestamp</span>
+<span class="sd">        end : float</span>
+<span class="sd">            unix timestamp</span>
+<span class="sd">        files : list of tuple</span>
+<span class="sd">            tuple: (start_time, finish_time)</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        list of elements of `files`, whose start_time and finish_time</span>
+<span class="sd">        fall between `start` and `end`</span>
+
+<span class="sd">        index of the first file whose `start_time` is after `end`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">available</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">)):</span>
+            <span class="n">f</span> <span class="o">=</span> <span class="n">files</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">end</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">start</span><span class="p">):</span>
+                <span class="n">available</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            <span class="c1"># files are in chronological order</span>
+            <span class="c1"># once we hit this conditional, there are no files</span>
+            <span class="c1"># further in the list, which will fall within</span>
+            <span class="c1"># our timewindow</span>
+            <span class="k">elif</span> <span class="n">f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">end</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">available</span><span class="p">,</span> <span class="n">i</span>
+        <span class="k">return</span> <span class="n">available</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+
+    <span class="k">def</span> <span class="nf">_finalise_jobparams</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set bounds for this CSD.&quot;&quot;&quot;</span>
+
+        <span class="n">csd</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">jobparams</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;csd&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">csd</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">,</span> <span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">]})</span>
+
+        <span class="k">return</span> <span class="n">jobparams</span>
+
+    <span class="k">def</span> <span class="nf">_generate_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)[</span><span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">]</span>
+
+        <span class="n">buffer</span> <span class="o">=</span> <span class="mi">2</span>
+        <span class="n">today</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">chime</span><span class="o">.</span><span class="n">get_current_lsd</span><span class="p">())</span> <span class="o">-</span> <span class="n">buffer</span>
+
+        <span class="c1"># Remove any days which are within the buffer window</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">to_run</span> <span class="k">if</span> <span class="n">today</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+        <span class="c1"># Get any recent tags to run first</span>
+        <span class="n">priority</span> <span class="o">=</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">to_run</span> <span class="k">if</span> <span class="n">today</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span><span class="p">]</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="n">priority</span> <span class="o">+</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">to_run</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">priority</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">to_run</span>
+
+
+<div class="viewcode-block" id="TestDailyProcessing">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.TestDailyProcessing">[docs]</a>
+<span class="k">class</span> <span class="nc">TestDailyProcessing</span><span class="p">(</span><span class="n">DailyProcessing</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A test version of the daily processing.</span>
+
+<span class="sd">    Processes only 16 frequencies on a single node.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;test_daily&quot;</span>
+
+    <span class="c1"># Override params above</span>
+    <span class="n">default_params</span> <span class="o">=</span> <span class="n">DailyProcessing</span><span class="o">.</span><span class="n">default_params</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">default_params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="c1"># 1878 and 1885 have files available online</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1889&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3000&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3014&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20181224T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20181228T000000Z&quot;</span><span class="p">},</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">400</span><span class="p">,</span> <span class="mi">416</span><span class="p">],</span>
+            <span class="s2">&quot;val_freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">7</span><span class="p">],</span>
+            <span class="s2">&quot;nfreq_delay&quot;</span><span class="p">:</span> <span class="mi">17</span><span class="p">,</span>
+            <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">60</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+            <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+            <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+            <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+        <span class="p">}</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="csds_in_range">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.csds_in_range">[docs]</a>
+<span class="k">def</span> <span class="nf">csds_in_range</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the CSDs within a time range.</span>
+
+<span class="sd">    The start and end parameters must either be strings of the form &quot;CSD\d+&quot;</span>
+<span class="sd">    (i.e. CSD followed by an int), which specifies an exact CSD start, or a</span>
+<span class="sd">    form that `ephemeris.ensure_unix` understands.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start : str or parseable to datetime</span>
+<span class="sd">        Start of interval.</span>
+<span class="sd">    end : str or parseable to datetime</span>
+<span class="sd">        End of interval. If `None` use now. Note that for CSD intervals the</span>
+<span class="sd">        end is *inclusive* (unlike a `range`).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    csds : list of ints</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">start</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_csd</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">start</span><span class="p">))</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">end</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">chime</span><span class="o">.</span><span class="n">get_current_lsd</span><span class="p">())</span>
+    <span class="k">elif</span> <span class="n">end</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">end</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">ephemeris</span><span class="o">.</span><span class="n">unix_to_csd</span><span class="p">(</span><span class="n">ephemeris</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">end</span><span class="p">))</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">end_csd</span><span class="p">)</span>
+
+    <span class="n">csds</span> <span class="o">=</span> <span class="p">[</span><span class="n">day</span> <span class="k">for</span> <span class="n">day</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">start_csd</span><span class="p">,</span> <span class="n">end_csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">step</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">csds</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
