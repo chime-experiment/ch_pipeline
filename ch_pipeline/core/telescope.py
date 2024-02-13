@@ -11,7 +11,7 @@ import logging
 import numpy as np
 import h5py
 import healpy
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import interp1d, RectBivariateSpline
 
 from caput import config, misc, mpiutil
 
@@ -125,6 +125,9 @@ class CHIME(telescope.PolarisedTelescope):
     dec_normalized = config.Property(proptype=float, default=None)
     # Skipping frequency/baseline parameters
     skip_pol_pair = config.list_type(type_=str, maxlength=4, default=[])
+    # If true, include the horizon in the primary beam
+    use_true_horizon = config.Property(proptype=bool, default=False)
+    horizon_file_path = config.Property(proptype=str, default="")
 
     # Fix base properties
     cylinder_width = 20.0
@@ -151,6 +154,7 @@ class CHIME(telescope.PolarisedTelescope):
         self.latitude = ephemeris.CHIMELATITUDE
         self.longitude = ephemeris.CHIMELONGITUDE
         self.altitude = ephemeris.CHIMEALTITUDE
+        self.horizon = None
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
@@ -206,6 +210,15 @@ class CHIME(telescope.PolarisedTelescope):
             raise Exception("Not supported.")
 
         self._feeds = feeds
+        # TODO: figure out a better way to store this file
+        if self.horizon_file_path:
+            # Load the horizon elevation model and set up variables
+            # to cache the healpix horizon mask. The horizon model is expected
+            # to be in observer coordinates (azimuth, elevation), with azimuth
+            # increasing clockwise
+            self.horizon = np.load(self.horizon_file_path)
+            self._horizon_hpx = None
+            self._horizon_nside = self._nside
 
     def _finalise_config(self):
         # Override base method to implement automatic loading of layout when
@@ -420,7 +433,7 @@ class CHIME(telescope.PolarisedTelescope):
     # === Setup the primary beams ===
     #
 
-    def beam(self, feed, freq, angpos=None):
+    def true_beam(self, feed, freq, angpos=None):
         """Primary beam implementation for the CHIME/Pathfinder.
 
         This only supports normal CHIME cylinder antennas. Asking for the beams
@@ -497,6 +510,81 @@ class CHIME(telescope.PolarisedTelescope):
             beam *= self._beam_normalization[freq, feed, np.newaxis, :]
 
         return beam
+
+    def beam(self, feed, freq, angpos=None):
+        """Primary beam implementation for the CHIME/Pathfinder.
+
+        Parameters
+        ----------
+        feed : int
+            Index for the feed.
+        freq : int
+            Index for the frequency.
+        angpos : np.ndarray[nposition, 2], optional
+            Angular position on the sky (in radians).
+            If not provided, default to the _angpos
+            class attribute.
+
+        Returns
+        -------
+        beam : np.ndarray[nposition, 2]
+            Amplitude vector of beam at each position on the sky.
+        """
+        if angpos is None:
+            angpos = self._angpos
+
+        beam = self.true_beam(feed, freq, angpos=angpos)
+
+        if not self.use_true_horizon:
+            return beam
+
+        # Get a horizon mask in beam coordinates
+        horizon = self._make_horizon(angpos)
+
+        return beam * horizon[:, np.newaxis]
+
+    def _make_horizon(self, angpos):
+        """Convert horizon elevation model into beam coordinates."""
+
+        nside = self._horizon_nside
+        horizon_nside = healpy.npix2nside(angpos.shape[0])
+
+        # Check if the healpix horizon is already cached. Return the cached horizon
+        # if the requested nside has not changed
+        if (self._horizon_hpx is not None) & (nside == horizon_nside):
+            return self._horizon_hpx
+
+        horizon = self.horizon.copy()
+        # Ensure the horizon azimuth angle is wrapped to [0, 2*pi)
+        horizon[0] += 2 * np.pi * (horizon[0] < 0)
+
+        # Convert map polar spherical coordinates to observer coordinates
+        theta = angpos[:, 0]
+        phi = angpos[:, 1]
+
+        # Convert spherical polar to observer azimuth
+        azimuth = np.arctan2(-np.sin(theta) * np.sin(phi), np.cos(theta))
+        # Shift azimuth from (-pi, pi] to [0, 2*pi)
+        azimuth += 2 * np.pi * (azimuth < 0)
+
+        elevation = np.arctan2(
+            np.sin(theta) * np.cos(phi),
+            (np.cos(theta) ** 2 + (np.sin(theta) * np.sin(phi)) ** 2) ** 0.5,
+        )
+        # Interpolate the horizon onto map azimuth and mask pixels below the horizon
+        interp_func = interp1d(horizon[:, 0], horizon[:, 1], fill_value="extrapolate")
+        horizon_elevation = interp_func(azimuth)
+        horizon_map = elevation > horizon_elevation
+
+        # Rotate the mask back to map polar spherical frame
+        rot = np.rad2deg([self.zenith[1], self.zenith[0] - np.pi / 2, 0.0])
+        horizon_map = healpy.rotator.Rotator(rot=rot).rotate_map_pixel(horizon_map) > 0
+
+        # Cache horizon
+        self._horizon_hpx = horizon_map
+        self._horizon_nside = horizon_nside
+
+        return horizon_map
 
     #
     # === Override methods determining the feed pairs we should calculate ===
@@ -679,7 +767,7 @@ class CHIMEParameterizedBeam(CHIME):
             dec - np.radians(self.latitude), *self.PARAM_NS[pol_index]
         )
 
-    def beam(self, feed, freq, angpos=None):
+    def true_beam(self, feed, freq, angpos=None):
         """Parameterized fit to driftscan cylinder beam model for CHIME telescope.
 
         Parameters
@@ -839,7 +927,7 @@ class CHIMEExternalBeam(CHIME):
 
         super()._finalise_config()
 
-    def beam(self, feed, freq_id):
+    def true_beam(self, feed, freq_id, **kwargs):
         """Get the beam pattern.
 
         Parameters
