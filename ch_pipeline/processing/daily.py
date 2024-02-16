@@ -538,21 +538,11 @@ pipeline:
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
-    # Also, mask out some additional frequencies:
-    # 506.25 - 511.71 MHz: band which isn't that visible in the data but generates
-    # a lot of high delay power
-    # 519.14 - 525.4 MHz: unmasked band in the stack that seems to generate a lot
-    # of power across all delays
-    # 601.56 - 608.59 MHz: sporadic band which generates some power
-    # 459.38 - 465.23 MHz: another high-power band in the stack
-    # 609.77 - 610.55 MHz: narrow band in stack creating artifacts in delay-filtered
-    # ringmaps 
     - type: draco.analysis.flagging.MaskFreq
       in: sstream_blend3
       out: factmask
       params:
         factorize: true
-        bad_freq_ind: [[738, 753], [703, 720], [490, 509], [857, 873], [485, 488]]
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
