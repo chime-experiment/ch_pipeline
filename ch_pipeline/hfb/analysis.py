@@ -10,6 +10,7 @@ from skyfield.starlib import Star
 
 from caput import config
 from caput import mpiarray
+from caput import mpiutil
 from caput import weighted_median
 
 from ch_util.hfbcat import HFBCatalog
@@ -259,6 +260,11 @@ class MakeHighFreqResRingMap(task.SingleTask):
         out.hfb[:] = data
         out.weight[:] = weight
 
+        # HACK: If the `el` axis is contains fewer elements than there are MPI processes,
+        # redistribute along new (longer) `freq` axis to avoid write-out bug
+        if len(out.el) < mpiutil.size:
+            out.redistribute("freq")
+
         # Return output container
         return out
 
@@ -376,6 +382,8 @@ class HFBStackDays(task.SingleTask):
             Individual (time-averaged) day to add to stack.
         """
 
+        sdata.redistribute("freq")
+
         # Get the LSD (or CSD) label out of the input's attributes.
         # If there is no label, use a placeholder.
         if "lsd" in sdata.attrs:
@@ -397,6 +405,8 @@ class HFBStackDays(task.SingleTask):
             if "nsample" not in self.stack.datasets:
                 self.stack.add_dataset("nsample")
                 self.stack.nsample[:] = 0
+
+            self.stack.redistribute("freq")
 
             self.lsd_list = []
 
