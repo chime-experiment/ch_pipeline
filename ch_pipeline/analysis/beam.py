@@ -1179,13 +1179,52 @@ class TransitStacker(task.SingleTask):
 
 
 class CombineHolographyPrePostNSStacks(TransitFit):
+    """Combine stacks of holography taken before and after the noise
+    source was installed on the 26m.
+
+    The installation of the noise source on 8 March 2019 caused a jump in
+    the phase of the cross-polarized holography. See DocLib #1677. This task
+    fits for the phase jump and applies it to the stack of data taken prior to
+    the noise source installation, then combines the two stacks.
+
+    Attributes
+    ----------
+    fit_bounds : float
+        The range of hour angle around transit within which the fit
+        should be performed.
+    weight : str
+        The type of weighting to use for combining the stacks. Note that
+        this should always be chosen to be consistent with the weighting
+        choice made for both of the individual stacks.
+
+    """
     fit_bounds = config.Property(proptype=float, default=3.0)
     weight = config.Property(proptype=str, default="uniform")
 
     def process(self, stack_pre, stack_post):
+        """Combine the two stacks.
+
+        Fit for the phase jump, then combine them with appropriate weight
+        to undo the effect of partitioning the data set.
+
+        Parameters
+        ----------
+        stack_pre : draco.core.containers.TrackBeam
+            The stack of holography data taken BEFORE 8 March 2019.
+        stack_post : draco.core.containers.TrackBeam
+            The stack of holography data taken AFTER 8 March 2019.
+
+        Returns
+        -------
+        stack_combined : draco.core.containers.TrackBeam
+            The final, combined stack after removing the phase jump.
+        """
+
+        # Redistribute the two stacks along frequency
         stack_pre.redistribute("freq")
         stack_post.redistribute("freq")
 
+        # Dereference datasets
         beam_pre = stack_pre.beam[:].view(np.ndarray)
         weight_pre = stack_pre.weight[:].view(np.ndarray)
         nobs_pre = stack_pre.nsample[:].view(np.ndarray).astype(float)
@@ -1197,36 +1236,41 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         # Get the hour angle axis
         ha = stack_pre.index_map["pix"]["phi"][:]
 
+        # Restrict the fit to within the specified bounds in HA
         fit_inds = np.flatnonzero(np.abs(ha) <= self.fit_bounds)
         fit_slice = slice(fit_inds[0], fit_inds[-1] + 1)
 
-        # Restrict the fit to within the specified bounds in HA
         ha_fit = ha[fit_slice]
 
-        # Select only the cross-polar response
-        resp_pre = beam_pre[:, 1, :, fit_slice]
-        weight_pre_x = weight_pre[:, 1, :, fit_slice]
+        # Select only the cross-polar response, and the range of data to be fit
+        cross_pol = stack_pre.index_map["pol"][:] == b'cross'
+        resp_pre = beam_pre[:, cross_pol, :, fit_slice]
+        weight_pre_x = weight_pre[:, cross_pol, :, fit_slice]
         resp_pre_err = invert_no_zero(np.sqrt(weight_pre_x))
 
-        resp_post = beam_post[:, 1, :, fit_slice]
-        weight_post_x = weight_post[:, 1, :, fit_slice]
+        resp_post = beam_post[:, cross_pol, :, fit_slice]
+        weight_post_x = weight_post[:, cross_pol, :, fit_slice]
         resp_post_err = invert_no_zero(np.sqrt(weight_post_x))
 
+        # Initialize model classes
         model_pre = self.ModelClass(**self.model_kwargs)
         model_post = self.ModelClass(**self.model_kwargs)
 
+        # Fit the pre-noise-source data
         model_pre.fit(
             ha_fit,
             resp_pre,
             resp_pre_err,
         )
 
+        # Fit the post-noise-source data
         model_post.fit(
             ha_fit,
             resp_post,
             resp_post_err,
         )
 
+        # Calculate the phases from the fits
         transit_phase_fit_pre = np.arctan2(
             model_pre.param[..., 6], model_pre.param[..., 0]
         )
@@ -1234,6 +1278,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             model_post.param[..., 6], model_post.param[..., 0]
         )
 
+        # Generate the phase correction from the difference of the computed phases
         phase_correction = np.exp(
             -1.0j * (transit_phase_fit_pre - transit_phase_fit_post)
         )
@@ -1241,10 +1286,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         # Align the cross-polar data
         stack_pre.beam[:, 1] = beam_pre[:, 1] * phase_correction[..., np.newaxis]
 
-        # In what follows we propagate this phase rotation to the pseudo-variance of the xpol data, and
-        # we combine the two stacks and compute the statistics of the overall population
-
-        # First, form the variance and sample variance from each stack using their saved statistics
+        # Form the variance and sample variance from each stack using their saved statistics
         sample_variance_pre = stack_pre.sample_variance[:].view(np.ndarray)
         sample_variance_post = stack_post.sample_variance[:].view(np.ndarray)
 
@@ -1255,7 +1297,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             sample_variance_post
         )
 
-        # Apply the effective rotation of the uncertainty distribution
+        # Propagate the phase correction by rotating the pseudo-variance
         pseudo_variance_pre[:, 1] *= phase_correction[..., np.newaxis] ** 2
 
         # Now we combine the two stacks; first, initialize an output container
@@ -1266,15 +1308,16 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             comm=stack_pre.comm,
         )
 
+        # Add the needed datasets for a stack
         stack_combined.add_dataset("nsample")
         stack_combined.add_dataset("sample_variance")
 
+        # Redistribute the output container along frequency
         stack_combined.redistribute("freq")
 
         stack_combined.nsample[:] = (nobs_pre + nobs_post).astype(np.uint8)
 
-        self.log.info(f"Weight type is {self.weight}.")
-
+        # Determine coefficients for combining the stacks based on weight choice
         if self.weight == "uniform":
             coeff_pre = nobs_pre
             coeff_post = nobs_post
@@ -1282,17 +1325,19 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             coeff_pre = weight_pre
             coeff_post = weight_post
 
+        # Combine the stacks
         stack_combined.beam[:] = invert_no_zero(coeff_pre + coeff_post) * (
             coeff_pre * beam_pre + coeff_post * beam_post
         )
 
+        # Combine the weights
         stack_combined.weight[:] = invert_no_zero(
             coeff_pre**2 * invert_no_zero(weight_pre)
             + coeff_post**2 * invert_no_zero(weight_post)
         )
         stack_combined.weight[:] *= (coeff_pre + coeff_post) ** 2
 
-        # Here we mean the sample variance we would get if we calculated from the entire population of data
+        # Determine the statistics of the full population from the two partitions
         combined_variance = coeff_pre * (
             variance_pre + np.abs(beam_pre) ** 2
         ) + coeff_post * (variance_post + np.abs(beam_post) ** 2)
@@ -1331,7 +1376,8 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             (stack_pre.attrs["observation_id"], stack_post.attrs["observation_id"])
         )
 
-        # Create a tag for the combined stack using the earliest and latest observation times in the set
+        # Create a tag for the combined stack using the earliest and latest
+        # observation times in the set
         time_range = np.percentile(stack_combined.attrs["transit_time"], [0, 100])
         stack_combined.attrs["tag"] = "{}_combined-stack_{}_to_{}".format(
             stack_combined.attrs["source_name"],
