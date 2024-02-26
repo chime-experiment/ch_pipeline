@@ -1205,7 +1205,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         """Combine the two stacks.
 
         Fit for the phase jump, then combine them with appropriate weight
-        to undo the effect of partitioning the data set.
+        to account for partitioning the data set.
 
         Parameters
         ----------
@@ -1244,13 +1244,14 @@ class CombineHolographyPrePostNSStacks(TransitFit):
 
         # Select only the cross-polar response, and the range of data to be fit
         cross_pol = stack_pre.index_map["pol"][:] == b'cross'
-        resp_pre = beam_pre[:, cross_pol, :, fit_slice]
-        weight_pre_x = weight_pre[:, cross_pol, :, fit_slice]
-        resp_pre_err = invert_no_zero(np.sqrt(weight_pre_x))
 
-        resp_post = beam_post[:, cross_pol, :, fit_slice]
+        resp_pre_x = beam_pre[:, cross_pol, :, fit_slice]
+        weight_pre_x = weight_pre[:, cross_pol, :, fit_slice]
+        resp_pre_x_err = invert_no_zero(np.sqrt(weight_pre_x))
+
+        resp_post_x = beam_post[:, cross_pol, :, fit_slice]
         weight_post_x = weight_post[:, cross_pol, :, fit_slice]
-        resp_post_err = invert_no_zero(np.sqrt(weight_post_x))
+        resp_post_x_err = invert_no_zero(np.sqrt(weight_post_x))
 
         # Initialize model classes
         model_pre = self.ModelClass(**self.model_kwargs)
@@ -1259,15 +1260,15 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         # Fit the pre-noise-source data
         model_pre.fit(
             ha_fit,
-            resp_pre,
-            resp_pre_err,
+            resp_pre_x,
+            resp_pre_x_err,
         )
 
         # Fit the post-noise-source data
         model_post.fit(
             ha_fit,
-            resp_post,
-            resp_post_err,
+            resp_post_x,
+            resp_post_x_err,
         )
 
         # Calculate the phases from the fits
