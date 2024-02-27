@@ -1285,7 +1285,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         )
 
         # Align the cross-polar data
-        beam_pre[:, 1] *= phase_correction[..., np.newaxis]
+        beam_pre[:, cross_pol] *= phase_correction[..., np.newaxis]
 
         # Form the variance and sample variance from each stack using their saved statistics
         sample_variance_pre = stack_pre.sample_variance[:].view(np.ndarray)
