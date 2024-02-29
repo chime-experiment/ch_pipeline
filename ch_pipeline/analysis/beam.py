@@ -1198,6 +1198,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         choice made for both of the individual stacks.
 
     """
+
     fit_bounds = config.Property(proptype=float, default=3.0)
     weight = config.Property(proptype=str, default="uniform")
 
@@ -1243,7 +1244,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         ha_fit = ha[fit_slice]
 
         # Select only the cross-polar response, and the range of data to be fit
-        cross_pol = stack_pre.index_map["pol"][:] == 'cross'
+        cross_pol = stack_pre.index_map["pol"][:] == "cross"
 
         resp_pre_x = beam_pre[:, cross_pol, :, fit_slice]
         weight_pre_x = weight_pre[:, cross_pol, :, fit_slice]
@@ -1271,8 +1272,12 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             resp_post_x_err,
         )
 
-        real_c0_sel = model_pre.parameter_names.astype(str) == ('%s_poly_real_coeff0' % model_pre.poly_type)
-        imag_c0_sel = model_pre.parameter_names.astype(str) == ('%s_poly_imag_coeff0' % model_pre.poly_type)
+        real_c0_sel = model_pre.parameter_names.astype(str) == (
+            "%s_poly_real_coeff0" % model_pre.poly_type
+        )
+        imag_c0_sel = model_pre.parameter_names.astype(str) == (
+            "%s_poly_imag_coeff0" % model_pre.poly_type
+        )
 
         # Calculate the phases from the fits
         real_c0_pre = model_pre.param[..., real_c0_sel]
@@ -1281,12 +1286,8 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         real_c0_post = model_post.param[..., real_c0_sel]
         imag_c0_post = model_post.param[..., imag_c0_sel]
 
-        transit_phase_fit_pre = np.arctan2(
-            imag_c0_pre, real_c0_pre
-        )
-        transit_phase_fit_post = np.arctan2(
-            imag_c0_post, real_c0_post
-        )
+        transit_phase_fit_pre = np.arctan2(imag_c0_pre, real_c0_pre)
+        transit_phase_fit_post = np.arctan2(imag_c0_post, real_c0_post)
 
         # Generate the phase correction from the difference of the computed phases
         phase_correction = np.exp(
@@ -1315,7 +1316,7 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         )
 
         # Propagate the phase correction by rotating the pseudo-variance
-        pseudo_variance_pre[:, cross_pol] *= phase_correction ** 2
+        pseudo_variance_pre[:, cross_pol] *= phase_correction**2
 
         # Now we combine the two stacks; first, initialize an output container
         stack_combined = TrackBeam(
