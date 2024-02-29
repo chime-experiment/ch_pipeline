@@ -1242,17 +1242,12 @@ class CombineHolographyPrePostNSStacks(TransitFit):
 
         ha_fit = ha[fit_slice]
 
-        self.log.info(f"The pol axis is {stack_pre.index_map['pol'][:]}.")
         # Select only the cross-polar response, and the range of data to be fit
         cross_pol = stack_pre.index_map["pol"][:] == 'cross'
-
-        self.log.info(f"Beam shape is {beam_pre.shape}.")
 
         resp_pre_x = beam_pre[:, cross_pol, :, fit_slice]
         weight_pre_x = weight_pre[:, cross_pol, :, fit_slice]
         resp_pre_x_err = invert_no_zero(np.sqrt(weight_pre_x))
-
-        self.log.info(f"Sliced data for fit has shape {resp_pre_x.shape}.")
 
         resp_post_x = beam_post[:, cross_pol, :, fit_slice]
         weight_post_x = weight_post[:, cross_pol, :, fit_slice]
@@ -1276,13 +1271,8 @@ class CombineHolographyPrePostNSStacks(TransitFit):
             resp_post_x_err,
         )
 
-        self.log.info(f"Output model params have shape {model_pre.param.shape}.")
-
-        self.log.info(f"Parameter names are {model_pre.parameter_names}")
         real_c0_sel = model_pre.parameter_names.astype(str) == ('%s_poly_real_coeff0' % model_pre.poly_type)
         imag_c0_sel = model_pre.parameter_names.astype(str) == ('%s_poly_imag_coeff0' % model_pre.poly_type)
-
-        self.log.info(f"real_c0_sel is {real_c0_sel}")
 
         # Calculate the phases from the fits
         real_c0_pre = model_pre.param[..., real_c0_sel]
@@ -1297,8 +1287,6 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         transit_phase_fit_post = np.arctan2(
             imag_c0_post, real_c0_post
         )
-
-        self.log.info(f"Phase shape is {transit_phase_fit_pre.shape}.")
 
         # Generate the phase correction from the difference of the computed phases
         phase_correction = np.exp(
@@ -1319,16 +1307,12 @@ class CombineHolographyPrePostNSStacks(TransitFit):
         sample_variance_pre = stack_pre.sample_variance[:].view(np.ndarray)
         sample_variance_post = stack_post.sample_variance[:].view(np.ndarray)
 
-        self.log.info(f"Sample variance has shape {sample_variance_pre.shape}")
-
         variance_pre, pseudo_variance_pre = _extract_variance_pseudovariance(
             sample_variance_pre
         )
         variance_post, pseudo_variance_post = _extract_variance_pseudovariance(
             sample_variance_post
         )
-
-        self.log.info(f"Pseudo-variance has shape {pseudo_variance_pre.shape}")
 
         # Propagate the phase correction by rotating the pseudo-variance
         pseudo_variance_pre[:, cross_pol] *= phase_correction ** 2
