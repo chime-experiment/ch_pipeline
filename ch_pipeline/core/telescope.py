@@ -127,6 +127,7 @@ class CHIME(telescope.PolarisedTelescope):
     skip_pol_pair = config.list_type(type_=str, maxlength=4, default=[])
     # If true, include the horizon in the primary beam
     use_true_horizon = config.Property(proptype=bool, default=False)
+    horizon_boundary_taper = config.Property(proptype=bool, default=True)
     horizon_file_path = config.Property(proptype=str, default="")
 
     # Fix base properties
@@ -574,11 +575,28 @@ class CHIME(telescope.PolarisedTelescope):
         # Interpolate the horizon onto map azimuth and mask pixels below the horizon
         interp_func = interp1d(horizon[:, 0], horizon[:, 1], fill_value="extrapolate")
         horizon_elevation = interp_func(azimuth)
-        horizon_map = elevation > horizon_elevation
+
+        if self.horizon_boundary_taper:
+            # Add a taper to the edge of the horizon to account for minor diffraction.
+            above_horizon = elevation - horizon_elevation
+            # TODO: this should be either configurable or set by some
+            # actual physical property
+            horizon_diffraction = np.deg2rad(2.0)
+
+            cos_taper = lambda x, a: 0.5 + 0.5 * np.cos((np.pi / a) * x)
+
+            horizon_map = np.where(
+                above_horizon >= -horizon_diffraction,
+                cos_taper(above_horizon, horizon_diffraction),
+                0.0,
+            )
+            horizon_map = np.where(above_horizon >= 0.0, 1.0, horizon_map)
+        else:
+            horizon_map = elevation > horizon_elevation
 
         # Rotate the mask back to map polar spherical frame
         rot = np.rad2deg([self.zenith[1], self.zenith[0] - np.pi / 2, 0.0])
-        horizon_map = healpy.rotator.Rotator(rot=rot).rotate_map_pixel(horizon_map) > 0
+        horizon_map = healpy.rotator.Rotator(rot=rot).rotate_map_pixel(horizon_map)
 
         # Cache horizon
         self._horizon_hpx = horizon_map
