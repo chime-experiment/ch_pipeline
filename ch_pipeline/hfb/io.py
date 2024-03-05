@@ -149,11 +149,8 @@ class BaseLoadFiles(io.BaseLoadFiles):
                 self.beam_sel = list(
                     np.arange(1024)[self.beam_sel][self.beam_ew_include]
                 )
-        elif self.beam_ns_range or self.beam_ew_include:
-            beam_index_grid = np.arange(1024).reshape(4, 256)
-            beam_ew_sel = self.beam_ew_include or slice(None)
-            beam_ns_sel = slice(*self.beam_ns_range) if self.beam_ns_range else None
-            self.beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
+        elif self.beam_ew_include or self.beam_ns_range:
+            self.beam_sel = get_beam_indices(self.beam_ew_include, self.beam_ns_range)
         elif "beam_sel" in self._sel:
             self.beam_sel = self._sel["beam_sel"]
         else:
@@ -398,3 +395,11 @@ class LoadFiles(LoadFilesFromParams):
 
         # Call the baseclass setup to resolve any selections
         super().setup()
+
+
+def get_beam_indices(beam_ew_include=None, beam_ns_range=None):
+    beam_index_grid = np.arange(1024).reshape(4, 256)
+    beam_ew_sel = beam_ew_include or slice(None)
+    beam_ns_sel = slice(*beam_ns_range) if beam_ns_range else None
+    beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
+    return beam_sel
