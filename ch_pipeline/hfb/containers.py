@@ -1,7 +1,7 @@
 """HFB containers
 """
 
-from caput.cache import cached_property
+from functools import cached_property
 from typing import Union
 
 import numpy as np
