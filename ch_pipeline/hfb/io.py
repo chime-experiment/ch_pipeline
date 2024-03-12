@@ -20,7 +20,83 @@ from beam_model.formed import FFTFormedActualBeamModel
 from .containers import HFBData, HFBReader
 
 
-class BaseLoadFiles(io.BaseLoadFiles):
+class BeamSelectionMixin:
+    """Mixin for parsing beam selections, typically from a yaml config.
+
+    Attributes
+    ----------
+    beam_ew_include : list
+        List of East-West beam indices (i.e., in the range 0-3) to include.
+        By default all four EW beams are included.
+    beam_ns_index : list
+        Selection of North-South beam indices (i.e., in the range 0-255) to
+        include, given as an explicit list of indices.
+    beam_ns_range : list
+        Selection of North-South beam indices (i.e., in the range 0-255) to
+        include, given as a slice with `[start, stop]` or `[start, stop, step]`
+        as the value.
+
+    Notes
+    -----
+    These attributes will result in an error if they are used together with the
+    attribute `freq_phys_list` in :class:`ch_pipeline.hfb.io.BaseLoadFiles`.
+    It seems that only one axis can be indexed using "fancy indexing" (i.e.,
+    passing an array of indices to access multiple array elements at once).
+
+    Here's an example in the YAML format that the pipeline uses:
+
+    .. code-block:: yaml
+
+        beam_ew_include: [0, 1, 2]      # Excludes EW beam 3
+        beam_ns_index: [105, 118, 127]  # A sparse selection (CygA, absorber, Zenith)
+        beam_ns_range: [100, 130]       # Will override the selection above
+    """
+
+    beam_ew_include = config.Property(proptype=list, default=None)
+    beam_ns_index = config.Property(proptype=list, default=None)
+    beam_ns_range = config.Property(proptype=list, default=None)
+
+    def resolve_beam_sel(self):
+        """Resolve the beam selection.
+
+        Returns
+        -------
+        fancy_beam_sel : np.ndarray
+            Array of beam indices to select.
+        """
+
+        if self.beam_ew_include or self.beam_ns_index or self.beam_ns_range:
+            # Grid of all beam indices, with shape (4, 256) (i.e., EW x NS)
+            beam_index_grid = np.arange(1024).reshape(4, 256)
+
+            # Resolve selection of EW beams, creating a column vector to allow
+            # correct broadcasting in case `beam_ns_index` is used for NS beams
+            if self.beam_ew_include:
+                beam_ew_sel = np.array(self.beam_ew_include)[:, np.newaxis]
+            else:
+                beam_ew_sel = slice(None)
+
+            # Resolve selection of NS beams, with `beam_ns_range` taking
+            # precedence over `beam_ns_index`
+            if self.beam_ns_range:
+                beam_ns_sel = slice(*self.beam_ns_range)
+            elif self.beam_ns_index:
+                beam_ns_sel = self.beam_ns_index
+            else:
+                beam_ns_sel = slice(None)
+
+            # Select beam indices from grid
+            fancy_beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
+
+        else:
+            # If none of the relevant attributes were passed, return None to
+            # prevent this beam-selection mechanism from operating in BaseLoadFiles
+            fancy_beam_sel = None
+
+        return fancy_beam_sel
+
+
+class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
     """Base class for loading CHIME HFB data from files on disk into containers.
 
     Attributes
@@ -29,14 +105,6 @@ class BaseLoadFiles(io.BaseLoadFiles):
         Name of source, which should be in `ch_util.hfbcat.HFBCatalog`.
     source_dec : float
         Declination of source in degrees.
-    beam_ns_range : list
-        Selection of North-South beam indices (i.e., in the range 0-255) to
-        include, given as a slice with `[start, stop]` or `[start, stop, step]`
-        as the value. Does not work in combination with `freq_phys_list`.
-    beam_ew_include : list
-        List of East-West beam indices (i.e., in the range 0-3) to include.
-        By default all four EW beams are included. Does not work in combination
-        with `freq_phys_list`.
     freq_phys_range : list
         Start and stop of physical frequencies (in MHz) to read. The mean is
         used as reference frequency in evaluating beam positions (for selecting
@@ -66,7 +134,8 @@ class BaseLoadFiles(io.BaseLoadFiles):
        The `source_dec`, `freq_phys_range`, and `freq_phys_list` attributes
        cancel the look-up of declination and frequency from the HFB target list
        triggered by the `source_name` attribute.
-    3. By passing `beam_ns_range` and/or `beam_ew_include` attributes.
+    3. By passing `beam_ew_include` and/or `beam_ns_index` or `beam_ns_range`
+       attributes (see documentation in :class:`BeamSelectionsMixin`).
     4. By manually passing indices in the `selections` attribute
        (see documentation in :class:`draco.core.io.SelectionsMixin`).
     Method 1 takes precedence over method 2. If no relevant attributes are
@@ -75,8 +144,6 @@ class BaseLoadFiles(io.BaseLoadFiles):
 
     source_name = config.Property(proptype=str, default=None)
     source_dec = config.Property(proptype=float, default=None)
-    beam_ns_range = config.Property(proptype=list, default=None)
-    beam_ew_include = config.Property(proptype=list, default=None)
     freq_phys_range = config.Property(proptype=list, default=[])
     freq_phys_list = config.Property(proptype=list, default=[])
     freq_phys_delta = config.Property(proptype=float, default=1.0)
@@ -94,7 +161,12 @@ class BaseLoadFiles(io.BaseLoadFiles):
         self.observer = ephemeris.chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
+        # (via `draco.core.io.SelectionsMixin`)
         super().setup()
+
+        # Resolve any beam selections provided through the `beam_ew_include`,
+        # `beam_ns_index`, and `beam_ns_range` attributes (via `BeamSelectionsMixin`)
+        fancy_beam_sel = self.resolve_beam_sel()
 
         # Look up source in catalog
         if self.source_name:
@@ -143,15 +215,20 @@ class BaseLoadFiles(io.BaseLoadFiles):
 
         # Set up beam selection
         if self.source_dec:
+            # NS beam selection from the source's declination, with optional
+            # EW beam selection via the `beam_ew_include` attribute
             beam_index_ns = self._find_beam()
             self.beam_sel = slice(beam_index_ns, 1024, 256)
             if self.beam_ew_include:
                 self.beam_sel = list(
                     np.arange(1024)[self.beam_sel][self.beam_ew_include]
                 )
-        elif self.beam_ew_include or self.beam_ns_range:
-            self.beam_sel = get_beam_indices(self.beam_ew_include, self.beam_ns_range)
+        elif fancy_beam_sel is not None:
+            # Beam selection via the `beam_ew_include` and/or `beam_ns_index`
+            # or `beam_ns_range` attributes
+            self.beam_sel = fancy_beam_sel
         elif "beam_sel" in self._sel:
+            # Beam selection via the `selections` attribute
             self.beam_sel = self._sel["beam_sel"]
         else:
             self.beam_sel = slice(None)
@@ -395,11 +472,3 @@ class LoadFiles(LoadFilesFromParams):
 
         # Call the baseclass setup to resolve any selections
         super().setup()
-
-
-def get_beam_indices(beam_ew_include=None, beam_ns_range=None):
-    beam_index_grid = np.arange(1024).reshape(4, 256)
-    beam_ew_sel = beam_ew_include or slice(None)
-    beam_ns_sel = slice(*beam_ns_range) if beam_ns_range else None
-    beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
-    return beam_sel
