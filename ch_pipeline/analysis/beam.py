@@ -422,6 +422,42 @@ class EdgeFlagger(task.SingleTask):
         return track
 
 
+class AnomalousBeamFlagger(task.SingleTask):
+    """Flag out unphysical values in the beam.
+
+    Attributes
+    ----------
+    flag_threshold : float
+        The maximum allowed amplitude of any pixel in the beam.
+        Any pixels with value larger than this quantity are set to 0
+        and are given zero weight. Default is 1.2, and this task
+        assumes that the data has already been normalized to
+        ~1 on meridian.
+    """
+
+    flag_threshold = config.Property(proptype=float, default=1.2)
+
+    def process(self, track):
+        """Flag pixels in the data with values > `flag_threshold`.
+
+        Parameters
+        ----------
+        track : draco.core.containers.TrackBeam
+            The track to be examined for anomalous values.
+        `"""
+
+        track.redistribute("freq")
+
+        beam = track.beam.local_data[:]
+        weight = track.weight.local_data[:]
+
+        flag = (np.abs(beam) > self.flag_threshold)
+
+        weight[flag] = 0.0
+
+        return track
+
+
 class TransitResampler(task.SingleTask):
     """Resample the beam at specific RAs.
 
