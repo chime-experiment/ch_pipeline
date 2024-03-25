@@ -2263,12 +2263,50 @@ class SetInputFlag(ApplyInputFlag):
 
 
 class ApplyRFIMaskHolography(task.SingleTask):
-    mask_type = config.enum(["static", "frequency", "frequency-time"])
+    """Mask RFI in a holography transit using the daily pipeline RFI masks.
+
+    Parameters
+    ----------
+    mask_type : str (one  of 'static', 'frequency', 'frequency-time')
+        How to construct the RFI mask for this transit:
+            'static' - use the static RFI mask from `ch_util`,
+            (`ch_util.rfi.frequency_mask`)
+            'frequency' - use the daily pipeline mask for the CSD on which the
+            input transit was taken, but take a median over the
+            time axis, effectively flagging a frequency bin if the majority of
+            time samples for that bin are flagged in the daily mask.
+            'frequency-time' - use the full time-resolved daily mask,
+            interpolated onto the holography's time axis. Note that if a
+            daily mask is not available, the code will fall-back to `static`.
+    masks_from_daily_rev : str
+        Which revision of the daily pipeline to take the masks from. Default
+        is `rev_06`.
+    """
+    mask_type = config.enum(
+        ["static", "frequency", "frequency-time"],
+        default="frequency-time",
+    )
     masks_from_daily_rev = config.Property(proptype=str, default="06")
 
     def process(self, transit):
+        """Create, and apply, an RFI mask from the daily pipeline mask,
+        if available, falling back to the `ch_util` static mask if not.
+
+        Parameters
+        ----------
+        transit : draco.core.containers.TrackBeam
+            The input holography transit to be flagged.
+
+        Returns
+        -------
+        transit : draco.core.containers.TrackBeam
+            The transit after being flagged.
+        """
+
+        # Redistribute the input in frequency
         transit.redistribute("freq")
 
+        # Save a bunch of attributes to be used by the masking code
         self.transit_attrs = transit.attrs
         self.transit_index_map = transit.index_map
 
@@ -2305,12 +2343,11 @@ class ApplyRFIMaskHolography(task.SingleTask):
             import os
 
             # Look for daily masks from rev_06
-            # TODO: let user specify which daily rev to check for masks from
             daily_dir = "/project/rpp-chime/chime/chime_processed/daily/"
             daily_rev = f"{daily_dir}rev_{self.masks_from_daily_rev}/"
             available_csds = os.listdir(daily_rev)
 
-            # If that CSD was processed in the daily pipeline...
+            # If that CSD was not processed in the daily pipeline...
             if csd_str not in available_csds:
 
                 msg = (f"Daily pipeline mask not available for CSD {csd_str}"
@@ -2328,7 +2365,8 @@ class ApplyRFIMaskHolography(task.SingleTask):
             # Negate so that 1 = clean, 0 = RFI contaminated
             ma = (~(mask.mask[:].view(np.ndarray))).astype(np.float32)
 
-            # Mask out the entire frequency if most time samples are bad
+            # If `mask_type` is `frequency`, mask out the entire frequency
+            # if most time samples are bad
             if self.mask_type == "frequency":
 
                 rfi_mask_1d = np.median(ma, axis=1)
