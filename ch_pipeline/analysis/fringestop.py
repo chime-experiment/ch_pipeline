@@ -98,12 +98,46 @@ class FringeStop(task.SingleTask):
 
 
 class ApplyBTermCorrection(task.SingleTask):
+    """Correct the phase of a holography transit for the pointing geometry of the
+    26m.
+
+    The z-component of the holographic baseline changes with the declination
+    pointed to by the 26m and is proportional to the distance labeled CD in the
+    memo by John Galt; see DocLib #703.
+
+    Parameters
+    ----------
+    overwrite : bool
+        Sets whether the phase correction is applied in-place (overwriting
+        the input transit) or if a new track is returned instead. Default
+        is True.
+    """
     overwrite = config.Property(proptype=bool, default=True)
 
     def process(self, track_in, feeds):
+        """Apply the phase correction to the input transit.
+
+        Parameters
+        ----------
+        track_in : draco.core.containers.TrackBeam
+            The input holography transit. The correction will be applied
+            in-place to this transit if `overwrite` is True.
+        feeds : list[ch_util.tools.CorrInput]
+            The list of correlator inputs used in the corresponding
+            transit. Obtained from `ch_pipeline.core.dataquery.QueryInputs`
+
+        Returns
+        -------
+        track : draco.core.containers.TrackBeam
+            The phase-corrected track.
+        """
+
+        # If we're overwriting, the output `track` is just the input
         if self.overwrite:
             track = track_in
         else:
+            # Else, create a new container for the output and copy over
+            # attributes and data from the input
             track = containers.TrackBeam(
                 axes_from=track_in,
                 attrs_from=track_in,
@@ -113,43 +147,61 @@ class ApplyBTermCorrection(task.SingleTask):
             track["beam"] = track_in["beam"][:]
             track["weight"] = track_in["weight"][:]
 
+        # Redistribute in frequency
         track.redistribute("freq")
 
+        # Fetch the declination of the track
         src_dec = np.radians(track.attrs["dec"])
 
-        self.log.warning("The number of feeds is %d" % len(feeds))
-        self.log.warning(f"The feeds are {feeds}")
+        # Construct a full product map from the list of input feeds
         prod_map = _construct_holography_prod_map(feeds)
 
-        self.log.warning(f"The shape of the product map is {prod_map.shape}")
-
+        # Get the shape of the local data
         nfreq = track.beam.local_shape[0]
         npol = track.beam.local_shape[1]
         ninput = track.beam.local_shape[2]
+
+        # Create a slice for the local portion of the frequency axis
         local_slice = slice(track.beam.local_offset[0], track.beam.local_offset[0] + nfreq)
 
         freq = track.freq[local_slice]
 
+        # Fetch the geometric delay and turn it into a phase
         bterm_delay = tools.bterm(src_dec, feeds, prod_map)
-        self.log.warning(f"The shape of the delay term is {bterm_delay.shape}")
         bterm_phase = np.exp(2.j * np.pi * bterm_delay * freq * 1e6)
-        self.log.warning(f"The shape of the delay phase is {bterm_delay.shape}")
 
+        # Apply the phase
         track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, npol, ninput)))[..., np.newaxis]
 
         return track
 
 
 def _construct_holography_prod_map(feeds):
+    """Create a product map for holography from a list of feeds.
+
+    Parameters
+    ----------
+    feeds : list[ch_util.tools.CorrInput]
+        A list of correlator inputs to be paired with the Galt inputs.
+
+    Returns
+    -------
+    prod_map : np.ndarray[2 * nfeeds]
+        An array of holographic input produts.
+    """
     nfeeds = len(feeds)
+    # Figure out where in the input list the Galt inputs are
     holo_indices = tools.get_holographic_index(feeds)
 
+    # Fetch the polarizations of the inputs
     input_pols = tools.get_feed_polarisations(feeds)
 
+    # Initialize a numpy array to contain the product map
     prod_map_dtype = np.dtype([("input_a", np.int32), ("input_b", np.int32)])
 
     prod_map = np.zeros(2 * nfeeds, dtype=prod_map_dtype)
 
+    # Loop over the product map
     for pp in range(prod_map.shape[0]):
         ii = pp % nfeeds
         copol = ~(pp // nfeeds)
