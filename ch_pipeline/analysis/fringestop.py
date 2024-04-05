@@ -168,10 +168,15 @@ class ApplyBTermCorrection(task.SingleTask):
 
         # Fetch the geometric delay and turn it into a phase
         bterm_delay = tools.bterm(src_dec, feeds, prod_map)
-        bterm_phase = np.exp(2.j * np.pi * bterm_delay * freq * 1e6)
+        bterm_phase = np.exp(
+            2.j * np.pi * np.outer(freq, bterm_delay) * 1e6
+        )
+
+        # Reshape to multiply into data
+        bterm_phase = bterm_phase.reshape(nfreq, npol, ninput, 1)
 
         # Apply the phase
-        track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, npol, ninput)))[..., np.newaxis]
+        track["beam"].local_data[:] *= bterm_phase
 
         return track
 
