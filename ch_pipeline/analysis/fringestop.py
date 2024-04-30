@@ -195,28 +195,37 @@ def _construct_holography_prod_map(feeds):
         An array of holographic input produts.
     """
     nfeeds = len(feeds)
-    # Figure out where in the input list the Galt inputs are
-    holo_indices = tools.get_holographic_index(feeds)
 
     # Fetch the polarizations of the inputs
     input_pols = tools.get_feed_polarisations(feeds)
+
+    # Figure out where in the input list the Galt inputs are
+    holo_indices = tools.get_holographic_index(feeds)
 
     # Initialize a numpy array to contain the product map
     prod_map_dtype = np.dtype([("input_a", np.int32), ("input_b", np.int32)])
 
     prod_map = np.zeros(2 * nfeeds, dtype=prod_map_dtype)
 
-    # Loop over the product map
-    for pp in range(prod_map.shape[0]):
-        ii = pp % nfeeds
-        copol = ~(pp // nfeeds)
-        if copol:
-            holo_input = holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
-        else:
-            holo_input = holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
+    # Loop over pols and feeds and fill the product map
+    pols = ["co", "cross"]
+    for pp, po in enumerate(pols):
 
-        input_pair = (ii, holo_input)
+        for ii in range(nfeeds):
 
-        prod_map[pp] = (min(input_pair), max(input_pair))
+            # TODO: the layout database queried using the `ch_util.tools`
+            # functions does not actually specify the polarisations of
+            # the Galt inputs, so for now they are hard-coded here, with
+            # the lower Galt index being Y pol and the higher being X
+            if po == "co":
+                holo_input  = holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
+            else:
+                holo_input  = holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
+
+            pr = nfeeds * pp + ii
+
+            input_pair = (ii, holo_input)
+
+            prod_map[pr] = (min(input_pair), max(input_pair))
 
     return prod_map

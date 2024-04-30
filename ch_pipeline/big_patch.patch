@@ -1,0 +1,278 @@
+From ed4f1ad4cc810c68f5ec18782bdd26cc52bd4558 Mon Sep 17 00:00:00 2001
+From: Alex Reda <alex.reda@yale.edu>
+Date: Thu, 27 Jul 2023 09:13:48 -0700
+Subject: [PATCH] feat(ch_pipeline): Compilation of dev code for running holo
+ pipeline.
+
+---
+ ch_pipeline/analysis/flagging.py   | 126 +++++++++++++++++++++++++++++
+ ch_pipeline/analysis/fringestop.py |  67 +++++++++++++++
+ ch_pipeline/core/dataquery.py      |  17 +++-
+ 3 files changed, 206 insertions(+), 4 deletions(-)
+
+diff --git a/ch_pipeline/analysis/flagging.py b/ch_pipeline/analysis/flagging.py
+index e43f2fe..69c0076 100644
+--- a/ch_pipeline/analysis/flagging.py
++++ b/ch_pipeline/analysis/flagging.py
+@@ -6,6 +6,7 @@ pre-map making flagging on m-modes.
+ """
+ from typing import Union
+ import numpy as np
++from scipy.interpolate import interp1d
+ 
+ from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
+ from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
+@@ -2259,3 +2260,128 @@ class SetInputFlag(ApplyInputFlag):
+         data.input_flags[:] = flag
+ 
+         return data
++
++
++class ApplyRFIMaskHolography(task.SingleTask):
++    mask_type = config.enum(["static", "frequency", "frequency-time"])
++    masks_from_daily_rev = config.Property(proptype=str, default="06")
++
++    def process(self, transit):
++        transit.redistribute("freq")
++
++        self.transit_attrs = transit.attrs
++        self.transit_index_map = transit.index_map
++
++        # Get the beam dataset shape
++        self.local_shape = transit.beam.local_shape
++        self.nfreq = self.local_shape[0]
++
++        # Examine only the MPI-local frequency slice
++        self.local_offset = transit.beam.local_offset[0]
++        self.local_slice = slice(
++            self.local_offset,
++            self.local_offset + self.nfreq
++        )
++
++        # Get the appropriate RFI mask
++        mask = self._rfi_mask()
++
++        # Apply the mask
++        transit.beam.local_data[:] *= mask
++        transit.weight.local_data[:] *= mask
++
++        return transit
++
++    def _rfi_mask(self):
++
++        # If asking for an external mask...
++        if self.mask_type in ["frequency", "frequency-time"]:
++
++            # Determine the `csd` of the transit
++            transit_time = self.transit_attrs["transit_time"]
++            transit_csd = ephemeris.unix_to_csd(transit_time)
++            csd_str = f"{transit_csd:.0f}"
++
++            import os
++
++            # Look for daily masks from rev_06
++            # TODO: let user specify which daily rev to check for masks from
++            daily_dir = "/project/rpp-chime/chime/chime_processed/daily/"
++            daily_rev = f"{daily_dir}rev_{self.masks_from_daily_rev}/"
++            available_csds = os.listdir(daily_rev)
++
++            # If that CSD was processed in the daily pipeline...
++            if csd_str not in available_csds:
++
++                msg = (f"Daily pipeline mask not available for CSD {csd_str}"
++                       "using `ch_util` static mask.")
++                self.log.warning(msg)
++
++                # ...fallback to static mask...
++                return self._static_mask()
++
++            # ...or load in mask if it is available
++            mask = containers.RFIMask.from_file(
++                f"{daily_rev}{csd_str}/rfi_mask2_lsd_{csd_str}.h5"
++            )
++
++            # Negate so that 1 = clean, 0 = RFI contaminated
++            ma = (~(mask.mask[:].view(np.ndarray))).astype(np.float32)
++
++            # Mask out the entire frequency if most time samples are bad
++            if self.mask_type == "frequency":
++
++                rfi_mask_1d = np.median(ma, axis=1)
++                rfi_mask_1d_local = np.expand_dims(
++                    rfi_mask_1d[self.local_slice],
++                    axis=(1, 2, 3),
++                )
++
++                return rfi_mask_1d_local
++
++            # Otherwise use the full frequency resolution
++            else:
++                # Need to interpolate onto common pixels
++                src_ra = self.transit_attrs["cirs_ra"]
++
++                ha = self.transit_index_map["pix"]["phi"][:]
++                mask_ra = mask.index_map["ra"][:]
++
++                # Locate the relevant portion of the daily mask
++                transit_range = np.where(np.abs(mask_ra - src_ra) < 30.0)
++
++                mask_interp = np.zeros((self.nfreq, ha.shape[-1]))
++
++                # Step through frequency-by-frequency and do
++                # nearest neighbors interpolation
++                for fr in range(self.nfreq):
++                    mask_interp_f = interp1d(
++                        (mask_ra - src_ra)[transit_range],
++                        ma[self.local_slice][fr, transit_range],
++                        kind="nearest",
++                        bounds_error=False,
++                        fill_value=1.0,
++                    )
++                    mask_interp[fr] = mask_interp_f(ha)
++
++                mask_interp = np.expand_dims(
++                    mask_interp,
++                    axis=(1, 2),
++                )
++
++                return mask_interp
++
++        else:
++            return self._static_mask()
++
++    def _static_mask(self):
++        transit_time = self.transit_attrs["transit_time"]
++
++        mask = rfi.frequency_mask(
++            self.transit_index_map["freq"][self.local_slice],
++            timestamp=transit_time,
++        )
++
++        mask = np.expand_dims(~mask, axis=(1, 2, 3))
++
++        return mask
+diff --git a/ch_pipeline/analysis/fringestop.py b/ch_pipeline/analysis/fringestop.py
+index 5066507..a4fe64d 100644
+--- a/ch_pipeline/analysis/fringestop.py
++++ b/ch_pipeline/analysis/fringestop.py
+@@ -15,6 +15,7 @@ Use this task together with:
+   of the timestream data
+ """
+ 
++import numpy as np
+ from datetime import datetime
+ from caput import config, mpiutil
+ from ch_util import tools, ephemeris
+@@ -94,3 +95,69 @@ class FringeStop(task.SingleTask):
+             tstream_fs.vis[:] = fs_vis
+             tstream_fs.weight[:] = tstream.weight
+             return tstream_fs
++
++
++class ApplyBTermCorrection(task.SingleTask):
++    overwrite = config.Property(proptype=bool, default=True)
++
++    def process(self, track_in, feeds):
++        if self.overwrite:
++            track = track_in
++        else:
++            track = containers.TrackBeam(
++                axes_from=track_in,
++                attrs_from=track_in,
++                distributed=track_in.distributed,
++                comm=track_in.comm,
++            )
++            track["beam"] = track_in["beam"][:]
++            track["weight"] = track_in["weight"][:]
++
++        track.redistribute("freq")
++
++        src_dec = np.radians(track.attrs["dec"])
++
++        self.log.warning("The number of feeds is %d" % len(feeds))
++        self.log.warning(f"The feeds are {feeds}")
++        prod_map = _construct_holography_prod_map(feeds)
++
++        self.log.warning(f"The shape of the product map is {prod_map.shape}")
++
++        nfreq = track.beam.local_shape[0]
++        local_slice = slice(track.beam.local_offset[0], track.beam.local_offset[0] + nfreq)
++
++        freq = track.freq[local_slice]
++
++        bterm_delay = tools.bterm(src_dec, feeds, prod_map)
++        self.log.warning(f"The shape of the delay term is {bterm_delay.shape}")
++        bterm_phase = np.exp(2.j * np.pi * bterm_delay * freq * 1e6)
++        self.log.warning(f"The shape of the delay phase is {bterm_delay.shape}")
++
++        track["beam"].local_data[:] *= (bterm_phase.T.reshape((nfreq, 2, 2048)))[..., np.newaxis]
++
++        return track
++
++
++def _construct_holography_prod_map(feeds):
++    nfeeds = len(feeds)
++    holo_indices = tools.get_holographic_index(feeds)
++
++    input_pols = tools.get_feed_polarisations(feeds)
++
++    prod_map_dtype = np.dtype([("input_a", np.int32), ("input_b", np.int32)])
++
++    prod_map = np.zeros(2 * nfeeds, dtype=prod_map_dtype)
++
++    for pp in range(prod_map.shape[0]):
++        ii = pp % nfeeds
++        copol = ~(pp // nfeeds)
++        if copol:
++            holo_input = holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
++        else:
++            holo_input = holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
++
++        input_pair = (ii, holo_input)
++
++        prod_map[pp] = (min(input_pair), max(input_pair))
++
++    return prod_map
+\ No newline at end of file
+diff --git a/ch_pipeline/core/dataquery.py b/ch_pipeline/core/dataquery.py
+index 17cb74f..394026f 100644
+--- a/ch_pipeline/core/dataquery.py
++++ b/ch_pipeline/core/dataquery.py
+@@ -45,10 +45,16 @@ import numpy as np
+ 
+ from caput import mpiutil, config, pipeline
+ from draco.core import task
++<<<<<<< Updated upstream
+ from chimedb import data_index as di, dataset as ds
+ from chimedb.core import exceptions
+ from ch_util import tools, ephemeris, finder, layout, andata
+ from ch_pipeline.core import containers
++=======
++from draco.core import containers as dcontainers
++from chimedb import data_index as di
++from ch_util import tools, ephemeris, finder, layout
++>>>>>>> Stashed changes
+ 
+ 
+ _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
+@@ -662,10 +668,13 @@ class QueryInputs(task.MPILoggedTask):
+ 
+         if mpiutil.rank0:
+             # Get the datetime of the middle of the file
+-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+-            inputs = tools.get_correlator_inputs(time)
+-
+-            inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
++            if isinstance(ts, dcontainers.TrackBeam):
++                time = ephemeris.unix_to_datetime(ts.attrs["transit_time"])
++                inputs = tools.get_correlator_inputs(time, correlator="chime")
++            else:
++                time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
++                inputs = tools.get_correlator_inputs(time)
++                inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
+ 
+         # Broadcast input description to all ranks
+         inputs = mpiutil.world.bcast(inputs, root=0)
+-- 
+2.31.6
+
