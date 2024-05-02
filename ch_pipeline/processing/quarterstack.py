@@ -312,7 +312,7 @@ class QuarterStackProcessing(base.ProcessingType):
             # Update these below when they become available
             2021: (
                 "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
-                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+                "20210101_20211231_gain_inverted_error_input_flagged.h5"
             ),
             2022: (
                 "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
