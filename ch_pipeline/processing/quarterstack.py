@@ -120,35 +120,8 @@ pipeline:
       in: [sstream_mask3, mask_gain_err]
       out: sstream_mask4
 
-    # Flag out low weight samples to remove transient RFI artifacts at the edges of
-    # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
-      requires: manager
-      in: sstream_mask4
-      out: full_tvwb_mask
-      params:
-        relative_threshold: 0.5
-        ignore_absolute_threshold: -1
-        average_type: "mean"
-        pols_to_flag: "all"
-
-    # Apply the tvwb mask. This will modify the data inplace.
-    - type: draco.analysis.flagging.ApplyBaselineMask
-      in: [sstream_mask4, full_tvwb_mask]
-      out: sstream_mask5
-
-    - type: draco.analysis.flagging.RFIMask
-      in: sstream_mask5
-      out: rfi_mask
-      params:
-          stack_ind: 66
-
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_mask5, rfi_mask]
-      out: sstream_mask6
-
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: sstream_mask6
+      in: sstream_mask4
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -157,11 +130,11 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask6, med]
-      out: sstream_mask7
+      in: [sstream_mask4, med]
+      out: sstream_mask5
 
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask7
+      in: sstream_mask5
       out: sstack_stack
       params:
         tag: {tag}
@@ -225,10 +198,30 @@ pipeline:
       params:
         output_name: "ringmap.zarr.zip"
 
+    # Mask out the bright sources so we can see the high delay structure more easily
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: sstack_stack
+      out: sstack_flag_src
+      params:
+        source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
+
+    # Try and derive an optimal time-freq factorizable mask that covers the
+    # existing masked entries
+    - type: draco.analysis.flagging.MaskFreq
+      in: sstack_flag_src
+      out: factmask
+      params:
+        factorize: true
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [sstack_flag_src, factmask]
+      out: sstack_factmask
+
     # Estimate the delay spectrum
     - type: draco.analysis.delay.DelaySpectrumEstimator
       requires: manager
-      in: sstack_stack
+      in: sstack_factmask
       params:
         freq_zero: 800.0
         complex_timedomain: true
@@ -274,7 +267,7 @@ class QuarterStackProcessing(base.ProcessingType):
     default_params = {
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
-        "daily_revisions": ["rev_07"],
+        "daily_revisions": ["rev_08"],
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
