@@ -247,30 +247,6 @@ def generate(
         )
         return
 
-    if check_failed:
-
-        import shutil
-
-        failed = revision.failed()
-        requeue = {"chimedb_error", "time_limit", "mpi_error"}
-
-        for key, tags in failed.items():
-            if key not in requeue:
-                continue
-            # Delete these tags so they get resubmitted to the queue
-            for tag in tags:
-                path = revision.workdir_path / str(tag)
-                try:
-                    # TODO: any issues with removing the entire directory?
-                    shutil.rmtree(path)
-                except Exception:
-                    import traceback
-
-                    click.echo(f"Could not re-queue job with tag {tag}")
-                    click.echo(traceback.format_exc())
-                else:
-                    click.echo(f"Re-queued job with tag {tag}")
-
     number_in_queue, number_running = [len(l) for l in revision.queued()]
     number_to_submit = max(
         min(number, max_number - number_in_queue - number_running), 0
@@ -279,7 +255,12 @@ def generate(
     click.echo(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
-    revision.generate(max=number_to_submit, submit=submit, priority_only=priority_only)
+    revision.generate(
+        max=number_to_submit,
+        submit=submit,
+        priority_only=priority_only,
+        check_failed=check_failed,
+    )
 
 
 @item.command("update")

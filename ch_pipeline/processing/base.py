@@ -370,6 +370,7 @@ class ProcessingType(object):
         submit: bool = True,
         user: str = None,
         priority_only: bool = False,
+        check_failed: bool = False,
     ):
         """Queue up jobs that are available to run.
 
@@ -382,9 +383,16 @@ class ProcessingType(object):
         user
             user to find running jobs for. If not provided, this
             will default to the current user
+        priority_only
+            If true, only submit priority jobs
+        check_failed
+            If true, check for a specific set of failures and include those
+            jobs in the queue list
         """
 
-        to_run = self._generate_hook(user=user, priority_only=priority_only)[:max]
+        to_run = self._generate_hook(
+            user=user, priority_only=priority_only, check_failed=check_failed
+        )[:max]
 
         for tag in to_run:
             try:
@@ -590,7 +598,7 @@ def queue_job(script, submit=True):
 
         # TODO: do this in a better way
         if submit:
-            cmd = "caput-pipeline queue %s"
+            cmd = "caput-pipeline queue --overwrite failed %s"
         else:
             cmd = "caput-pipeline queue --nosubmit %s"
         os.system(cmd % fh.name)
