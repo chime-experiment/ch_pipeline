@@ -4,8 +4,11 @@
 import os
 import gc
 from pathlib import Path
+from typing import Tuple
 
 import numpy as np
+
+import scipy.linalg as la
 
 from caput import pipeline
 from caput import config
@@ -13,11 +16,12 @@ from caput import config
 from ch_util import ephemeris
 from ch_util.hfbcat import HFBCatalog
 
-from draco.core import io
+from draco.core import io, task
+from draco.util import tools
 
 from beam_model.formed import FFTFormedActualBeamModel
 
-from .containers import HFBData, HFBReader
+from .containers import HFBData, HFBReader, HFBCompressed
 
 
 class BeamSelectionMixin:
@@ -461,3 +465,129 @@ class LoadFiles(LoadFilesFromParams):
 
         # Call the baseclass setup to resolve any selections
         super().setup()
+
+
+class CompressHFBWeights(task.SingleTask):
+    """Compress weight dataset of HFB data.
+
+    Attributes
+    ----------
+
+    method : str, optional
+        Method of compression. Either "svd" or "sum". Default is "sum".
+    """
+
+    method = config.enum(["svd", "sum"], default="sum")
+
+    def setup(self):
+        """Set up compression function."""
+
+        self._compress_fn = {
+            "svd": self._compress_svd,
+            "sum": self._compress_sum,
+        }.get(self.method, None)
+
+    def process(self, stream):
+        """Create compressed HFB data from raw HFB data.
+
+        Parameters
+        ----------
+        stream : HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : HFBCompressed
+            Container with HFB data and compressed weights.
+        """
+
+        nfreq, nsubf, nbeam, ntime = stream.weight.shape
+
+        weight_subf = np.zeros((nfreq, nsubf, ntime))
+        weight_beam = np.zeros((nfreq, nbeam, ntime))
+        weight_norm = np.zeros((nfreq, ntime))
+
+        for ifreq in range(nfreq):
+            for itime in range(ntime):
+                wsubf, wnorm, wbeam = self._compress_fn(
+                    stream.weight[ifreq, :, :, itime]
+                )
+
+                weight_subf[ifreq, :, itime] = wsubf
+                weight_beam[ifreq, :, itime] = wbeam
+                weight_norm[ifreq, itime] = wnorm
+
+                # u, s, vh = la.svd(stream.weight[ifreq, :, :, itime], full_matrices=False)
+
+                # weight_subf[ifreq, :, itime] = u[:, 0].copy()
+                # weight_beam[ifreq, :, itime] = vh[:, 0].copy()
+                # weight_norm[ifreq, itime] = s[0]
+
+        # Create container to hold output
+        # TODO: check if copy_from works, remove weight dataset
+        out = HFBCompressed(copy_from=stream)
+
+        # Store compressed weights
+        out.weight_subf[:] = weight_subf
+        out.weight_beam[:] = weight_beam
+        out.weight_norm[:] = weight_norm
+
+        # Return output container
+        return out
+
+    def _compress_svd(self, array: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
+
+        u, s, vh = la.svd(array, full_matrices=False)
+
+        rows = u[:, 0].copy()
+        cols = vh[0].copy()
+        norm = s[0]
+
+        return rows, norm, cols
+
+    def _compress_sum(self, array: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
+
+        rows = array.sum(axis=1)
+        cols = array.sum(axis=0)
+        norm = tools.invert_no_zero(array.sum())
+
+        return rows, norm, cols
+
+
+class UnpackHFBWeights(task.SingleTask):
+    """Unpack compressed weight dataset of HFB data."""
+
+    def process(self, stream):
+        """Create full HFB data by unpacking compressed weights.
+
+        Parameters
+        ----------
+        stream : HFBCompressed
+            Container with HFB data and compressed weights.
+
+        Returns
+        -------
+        out : HFBData
+            Container with HFB data and unpacked weights.
+        """
+
+        nfreq, nsubf, nbeam, ntime = stream.hfb.shape
+
+        weight = np.zeros(nfreq, nsubf, nbeam, ntime)
+
+        for ifreq in range(nfreq):
+            for itime in range(ntime):
+                weight[ifreq, :, :, itime] = (
+                    np.outer(stream.weight_subf, stream.weight_beam)
+                    * stream.weight_norm
+                )
+
+        # Create container to hold output
+        # TODO: check if copy_from works, add weight dataset
+        out = HFBData(copy_from=stream)
+
+        # Add unpacked weights
+        out.weight[:] = weight
+
+        # Return output container
+        return out
