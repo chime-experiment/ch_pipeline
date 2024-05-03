@@ -275,7 +275,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "opinion_overrides": {
             "rev_03": "rev_02",
         },
-        "daily_root": "/project/rpp-chime/chime/chime_processed/",
+        "daily_root": None,
         # Frequencies to process
         "freq": [0, 1024],
         "nfreq_delay": 1025,
