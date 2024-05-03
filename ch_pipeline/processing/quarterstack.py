@@ -158,7 +158,7 @@ pipeline:
     # Save the sstack out to a zarr zip file
     - type: draco.core.io.SaveZarrZip
       in: sstack_trunc
-      out: zip_handle
+      out: sstack_zip_handle
       params:
         output_name: "sstack.zarr.zip"
 
@@ -194,7 +194,7 @@ pipeline:
     # Save the ringmap out to a ZarrZip file
     - type: draco.core.io.SaveZarrZip
       in: ringmap_trunc
-      out: zip_handle
+      out: ringmap_zip_handle
       params:
         output_name: "ringmap.zarr.zip"
 
@@ -232,7 +232,10 @@ pipeline:
 
     # Wait for the Zipping to finish
     - type: draco.core.io.WaitZarrZip
-      in: zip_handle
+      in: sstack_zip_handle
+
+    - type: draco.core.io.WaitZarrZip
+      in: ringmap_zip_handle
 """
 
 
