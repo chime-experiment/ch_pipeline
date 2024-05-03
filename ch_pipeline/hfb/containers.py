@@ -81,6 +81,64 @@ class HFBBeamContainer(HFBContainer):
         return np.unique(self.beam % 256)
 
 
+class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
+    """A container for HFB data with compressed weights."""
+
+    _axes = ("subfreq",)
+
+    _dataset_spec = {
+        "hfb": {
+            "axes": ["freq", "subfreq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight_subf": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight_beam": {
+            "axes": ["freq", "beam", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight_norm": {
+            "axes": ["freq", "time"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "nsample": {
+            "axes": ["freq", "subfreq", "beam", "time"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+        },
+    }
+
+    @property
+    def weight_subf(self) -> np.ndarray:
+        """Weight vector in subfrequency axis."""
+        return self.datasets["weight_subf"]
+
+    @property
+    def weight_beam(self) -> np.ndarray:
+        """Weight vector in beam axis."""
+        return self.datasets["weight_beam"]
+
+    @property
+    def weight_norm(self) -> np.ndarray:
+        """Weight normalization."""
+        return self.datasets["weight_norm"]
+
+
 class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
     """A container for HFB data.
 
