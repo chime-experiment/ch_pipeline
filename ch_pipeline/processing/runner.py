@@ -436,7 +436,6 @@ async def add_job(request: dict):
 
 def _run_pipeline(revision):
     """Run all the pipeline jobs in a fixed order."""
-    _requeue_failed(revision)
     _generate(revision)
     _update_files(revision)
     _check_finished(revision)
@@ -486,7 +485,12 @@ def _generate(revision):
     logger.info(
         f"Generating {number_to_submit} jobs ({number_in_queue} jobs already queued)."
     )
-    revision.generate(max=number_to_submit, submit=True, priority_only=priority_only)
+    revision.generate(
+        max=number_to_submit,
+        submit=True,
+        priority_only=priority_only,
+        check_failed=True,
+    )
 
 
 @db.atomic
@@ -495,30 +499,6 @@ def _update_files(revision, *args, **kwargs):
 
     kwargs.update({"user": GLOBAL_CONFIG["user"]})
     revision.update_files(*args, **kwargs)
-
-
-def _requeue_failed(revision):
-    """Re-queue failed jobs based on certain criteria."""
-
-    failed = revision.failed(user=GLOBAL_CONFIG["user"])
-    # These causes of failure are generally a result of a one-off issue
-    # with the compute node rather that the data itself, so they should
-    # be re-run
-    requeue = {"chimedb_error", "time_limit", "mpi_error"}
-
-    for key, tags in failed.items():
-        if key not in requeue:
-            continue
-        # Delete these tags so they get requeued
-        for tag in tags:
-            path = revision.workdir_path / str(tag)
-            try:
-                shutil.rmtree(path)
-            except Exception:
-                logger.warning(f"Could not re-queue job with tag {tag}")
-                logger.warning(traceback.format_exc())
-            else:
-                logger.info(f"Re-queued job with tag {tag}.")
 
 
 def _check_finished(revision):

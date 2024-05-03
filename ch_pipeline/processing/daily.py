@@ -980,9 +980,21 @@ class DailyProcessing(base.ProcessingType):
 
         return nfiles
 
-    def _generate_hook(self, user=None, priority_only=False):
+    def _generate_hook(self, user=None, priority_only=False, check_failed=False):
         # Get the list of tags remaining to run, in order
         to_run = self.status(user=user)["not_yet_submitted"]
+
+        if check_failed:
+            requeue = {"chimedb_error", "time_limit", "mpi_error"}
+
+            # Place failed jobs at the start of the queue
+            to_run = [
+                tag
+                for key, tags in self.failed().items()
+                for tag in tags
+                if key in requeue
+            ] + to_run
+
         # Prioritize some number of recent days
         today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
         priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
