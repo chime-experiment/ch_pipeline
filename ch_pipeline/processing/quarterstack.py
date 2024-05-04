@@ -363,28 +363,29 @@ class QuarterStackProcessing(base.ProcessingType):
             # revision, but it can be overriden
             opinion_rev = opinion_overrides.get(rev, rev)
 
-            # Get all the bad days in this revision
-            revision = df.DataRevision.get(name=opinion_rev)
-            query = (
-                df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
-                .distinct()
-                .where(
-                    df.DataFlagOpinion.revision == revision,
-                    df.DataFlagOpinion.decision == "bad",
+            if opinion_rev is not None:
+                # Get all the bad days in this revision
+                revision = df.DataRevision.get(name=opinion_rev)
+                query = (
+                    df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
+                    .distinct()
+                    .where(
+                        df.DataFlagOpinion.revision == revision,
+                        df.DataFlagOpinion.decision == "bad",
+                    )
                 )
-            )
-            bad_days = [x[0] for x in query.tuples()]
+                bad_days = [x[0] for x in query.tuples()]
 
-            # Get all the good days
-            query = (
-                df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
-                .distinct()
-                .where(
-                    df.DataFlagOpinion.revision == revision,
-                    df.DataFlagOpinion.decision == "good",
+                # Get all the good days
+                query = (
+                    df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
+                    .distinct()
+                    .where(
+                        df.DataFlagOpinion.revision == revision,
+                        df.DataFlagOpinion.decision == "good",
+                    )
                 )
-            )
-            good_days = [x[0] for x in query.tuples()]
+                good_days = [x[0] for x in query.tuples()]
 
             for d in daily_rev.ls():
                 try:
@@ -394,9 +395,12 @@ class QuarterStackProcessing(base.ProcessingType):
                         f'Could not parse string tag "{d}" into a valid LSD'
                     ) from e
 
-                # Filter out known bad days here
-                if (lsd in bad_days) or (lsd not in good_days):
-                    continue
+                # Filter out known bad days here. If `opinion_rev` is None,
+                # ignore opinions and automatically include all available days.
+                # This is only true if the opinion override is explicitly set
+                if opinion_rev is not None:
+                    if (lsd in bad_days) or (lsd not in good_days):
+                        continue
 
                 # Insert the day and path into the dict, this will replace the entries
                 # from prior revisions
