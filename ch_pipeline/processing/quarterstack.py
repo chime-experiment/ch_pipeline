@@ -162,9 +162,14 @@ pipeline:
       params:
         output_name: "sstack.zarr.zip"
 
+    # Apply a gradient rebin correction
+    - type: draco.analysis.sidereal.RebinGradientFix
+      in: sstack_stack
+      out: sstack_fix
+
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstack_trunc
+      in: sstack_fix
       out: ringmap
       params:
         single_beam: true
@@ -200,7 +205,7 @@ pipeline:
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: sstack_stack
+      in: sstack_fix
       out: sstack_flag_src
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
