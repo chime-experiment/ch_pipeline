@@ -502,6 +502,11 @@ class ChangeSiderealMean(task.SingleTask):
             mustream.weight[:].local_array > 0.0
         ).astype(sstream.weight.dtype)
 
+        if "rebin_weight" in sstream.datasets:
+            sstream.rebin_weight[:].local_array[:] *= np.any(
+                mustream.weight[:].local_array > 0.0, axis=1
+            ).astype(sstream.rebin_weight[:].dtype)
+
         # Return sidereal stream with modified offset
         return sstream
 

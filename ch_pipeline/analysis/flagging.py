@@ -1412,6 +1412,9 @@ class MaskDay(task.SingleTask):
             # Apply the mask to the weights
             sstream.weight[:] *= 1.0 - flag
 
+            if "rebin_weight" in sstream.datasets:
+                sstream.rebin_weight[:] *= 1.0 - flag
+
             # If requested, apply the mask to the data
             if self.zero_data:
                 sstream.vis[:] *= 1.0 - flag
@@ -2114,6 +2117,9 @@ class DataFlagger(task.SingleTask):
         if stacked:
             # Apply same mask to all products
             weight.local_array[:] *= weight_mask
+
+            if "rebin_weight" in timestream.datasets:
+                timestream.rebin_weight[:] *= weight_mask[:, 0]
         else:
             # Use apply_gain function to apply mask based on product map
             products = timestream.index_map["prod"][
