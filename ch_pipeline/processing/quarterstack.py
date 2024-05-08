@@ -217,6 +217,8 @@ pipeline:
       out: factmask
       params:
         factorize: true
+        save: true
+        output_name: "fact_mask.h5"
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
