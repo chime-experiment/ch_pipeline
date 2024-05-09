@@ -9,7 +9,7 @@ from typing import Union
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
-from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata
+from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata, finder
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
@@ -18,6 +18,7 @@ from draco.core import task, io
 from draco.core import containers as dcontainers
 
 from ..core import containers
+from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
 
 class RFIFilter(task.SingleTask):
@@ -2260,3 +2261,193 @@ class SetInputFlag(ApplyInputFlag):
         data.input_flags[:] = flag
 
         return data
+
+
+def load_rainfall(start_time, end_time, node_spoof=_DEFAULT_NODE_SPOOF):
+    """Load rainfall measurements in a specific time range.
+
+    Parameters
+    ----------
+    start_time, end_time : float
+        Unix times denoting beginning and end of time range.
+    node_spoof : dictionary
+        Host and directory for finding weather data.
+        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}
+
+    Returns
+    -------
+    times, rainfall : np.ndarray
+        Arrays of Unix timestamps and rainfall measurements (in mm).
+    """
+
+    # Use Finder to fetch weather data files overlapping with specified time interval
+    f = finder.Finder(node_spoof=node_spoof)
+    f.only_chime_weather()
+    f.set_time_range(start_time=start_time, end_time=end_time)
+    f.accept_all_global_flags()
+    results_list = f.get_results()
+
+    # For each weather file, fetch rainfall measurements and associated timestamps
+    times = []
+    rainfall = []
+    for result in results_list:
+        result_data = result.as_loaded_data()
+        times.append(result_data.index_map["station_time_blockhouse"])
+        rainfall.append(result_data["blockhouse"]["rain"])
+
+    # Concatenate timestamp and rainfall arrays, and also sort chronologically
+    times = np.concatenate(times)
+    rainfall = np.concatenate(rainfall)
+    idx_sort = np.argsort(times)
+    times = times[idx_sort]
+    rainfall = rainfall[idx_sort]
+
+    return times, rainfall
+
+
+def compute_cumulative_rainfall(
+    times, accumulation_time=30.0, node_spoof=_DEFAULT_NODE_SPOOF
+):
+    """Compute cumulative rainfall for a given set of Unix times.
+
+    The cumulative rainfall total is computed over the previous
+    accumulation_time seconds.
+
+    Parameters
+    ----------
+    times : np.ndarray
+        Unix times to compute cumulative rainfall for. Assumed to be sorted
+        chronologically.
+    accumulation_time: float
+        Number of hours over which to compute accumulated rainfall for each time sample.
+        Default: 30.
+    node_spoof : dictionary
+        Host and directory for finding weather data.
+        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}.
+
+    Returns
+    -------
+    rainfall : np.ndarray
+        Cumulative rainfall totals, in mm.
+    """
+
+    # Extra buffer (in s) for reading rainfall measurements, to ensure that range of
+    # input times is always fully within range of rainfall timestamps
+    _TIME_BUFFER = 600
+
+    # Compute accumulation time in seconds
+    accumulation_time_s = accumulation_time * 3600
+
+    # Load rainfall measurements within relevant time range
+    rain_timestamps, rain_meas = load_rainfall(
+        times[0] - accumulation_time_s * 3600 - _TIME_BUFFER,
+        times[-1] + _TIME_BUFFER,
+        node_spoof,
+    )
+
+    # Compute number of rainfall timestamps to accumulate
+    dtimestamp = np.median(np.diff(rain_timestamps))
+    n_sum = np.rint(accumulation_time_s / dtimestamp).astype(int)
+
+    # Compute cumulative rainfall totals at each timestamp and (n_sum - 1) previous
+    # timestamps:
+    # - First, for each timestamp, compute sum of rainfall at that timestamp and all
+    #   previous timestamps
+    all_cumu_rainfall = np.cumsum(rain_meas)
+    # - Make new array to store final results
+    cumu_rainfall = np.zeros_like(rain_meas)
+    # - First n_sum sums will just be equal to cumsum result
+    cumu_rainfall[:n_sum] = all_cumu_rainfall[:n_sum]
+    # - Other sums will be difference of cumsum results separated by n_sum entries
+    cumu_rainfall[n_sum:] = (
+        all_cumu_rainfall[n_sum:] - all_cumu_rainfall[: len(rain_meas) - n_sum]
+    )
+
+    # For each input time, assign cumulative rainfall from first timestamp
+    # that occurs after this time. This errs on the side of potentially
+    # overestimating the cumulative rainfall at a given input time.
+    time_timestamp_idx = np.searchsorted(rain_timestamps, times, side="left")
+    cumu_rainfall = cumu_rainfall[time_timestamp_idx]
+
+    return cumu_rainfall
+
+
+class FlagRainfall(task.SingleTask):
+    """Flag times following periods of heavy rainfall.
+
+    This task uses rainfall measurements from the DRAO weather station to compute
+    the accumulated rainfall within a given time interval prior to each time sample.
+    If the rainfall total exceeds some threshold, the weight dataset is set to zero
+    for that time.
+
+    Parameters
+    ----------
+    accumulation_time : float
+        Number of hours over which to compute accumulated rainfall for each time sample.
+        Default: 30.
+    threshold : float
+        Rainfall threshold (in mm) for flagging. Default: 1.0.
+    node_spoof : dictionary
+        Host and directory for finding weather data.
+        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}.
+    """
+
+    accumulation_time = config.Property(proptype=float, default=30.0)
+    threshold = config.Property(proptype=float, default=1.0)
+    node_spoof = config.Property(proptype=dict, default=_DEFAULT_NODE_SPOOF)
+
+    def process(self, stream):
+        """Set weight to zero if cumulative rainfall exceeds desired threshold.
+
+        Parameters
+        ----------
+        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+            Stream to flag.
+
+        Returns
+        -------
+        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+            Returns the same stream object with a modified weight dataset.
+        """
+        # Redistribute over the frequency direction
+        stream.redistribute("freq")
+
+        # Get time axis or convert RA axis to Unix time
+        if "ra" in stream.index_map:
+            ra = stream.index_map["ra"][:]
+            if "lsd" in stream.attrs:
+                csd = stream.attrs["lsd"]
+            else:
+                csd = stream.attrs["csd"]
+            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+        else:
+            time = stream.time
+
+        # Compute cumulative rainfall within specified time interval.
+        # Only run on rank 0, because a database query is required
+        if self.comm.rank == 0:
+            rainfall = compute_cumulative_rainfall(
+                time,
+                accumulation_time=self.accumulation_time,
+                node_spoof=self.node_spoof,
+            )
+        else:
+            rainfall = np.empty_like(time)
+
+        # Broadcast cumulative rainfall to all ranks
+        self.comm.Bcast(rainfall, root=0)
+
+        # Compute mask corresponding to times when rainfall is below threshold
+        rainfall_mask = rainfall < self.threshold
+
+        # Multiply weights by mask
+        weight = stream.weight[:]
+        weight.local_array[:] *= rainfall_mask[np.newaxis, np.newaxis, :]
+
+        # Report how much data has been flagged due to rainfall
+        self.log.info(
+            f"{100.0 * (1.0 - np.sum(rainfall_mask) / len(rainfall_mask)):.2f} "
+            "percent of data was flagged due to rainfall."
+        )
+
+        return stream
