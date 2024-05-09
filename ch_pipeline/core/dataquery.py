@@ -65,6 +65,35 @@ def _force_list(val) -> list:
         return [val]
 
 
+class ConnectDatabase(task.MPILoggedTask):
+    """Establish an initial connection to the chimedb database.
+
+    This is useful when running pipelines on machines with poor
+    network I/O.
+
+    Attributes
+    ----------
+    timeout : int
+        Connection timeout in seconds
+    ntries : int
+        Number of times to retry if connection fails
+    """
+
+    timeout = config.Property(proptype=int, default=5)
+    ntries = config.Property(proptype=int, default=5)
+
+    def setup(self):
+        """Establish a database connection"""
+
+        import chimedb.core
+
+        # Set the os connection timeout variable
+        os.environ["CHIMEDB_CONNECT_TIMEOUT"] = str(self.timeout)
+
+        # Try to establish a connection
+        chimedb.core.connect(ntries=self.ntries)
+
+
 class QueryDatabase(task.MPILoggedTask):
     """Find files from specified database queries.
 
