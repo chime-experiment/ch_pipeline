@@ -62,6 +62,15 @@ pipeline:
         level_rank0: DEBUG
         level_all: WARNING
 
+    - type: draco.core.misc.CheckMPIEnvironment
+      params:
+        timeout: 420
+
+    - type: ch_pipeline.core.dataquery.ConnectDatabase
+      params:
+        timeout: 5
+        ntries: 5
+
     - type: draco.core.io.LoadProductManager
       out: manager
       params:
