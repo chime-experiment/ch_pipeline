@@ -352,6 +352,16 @@ class QuarterStackProcessing(base.ProcessingType):
         available good days into the individual stacks.
         """
 
+        # Request additional information from the user
+        daily_revs = input(
+            "Enter the daily revisions to include (<rev_ij>,<rev_ik>,...): "
+        )
+        if daily_revs:
+            daily_revs = re.compile(r"rev_[0-9]{2}").findall(daily_revs)
+            for d in daily_revs:
+                if d not in self.default_params["daily_revisions"]:
+                    self.default_params["daily_revisions"].append(d)
+
         days = {}
 
         core.connect()
@@ -368,7 +378,11 @@ class QuarterStackProcessing(base.ProcessingType):
                 if self.default_params["daily_root"] is None
                 else self.default_params["daily_root"]
             )
-            daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
+            try:
+                daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
+            except Exception:
+                # TODO: some sort of warning here
+                continue
 
             # Get the revision used to determine the opinions, by default this is the
             # revision, but it can be overriden
