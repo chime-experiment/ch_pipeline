@@ -59,6 +59,11 @@ pipeline:
       params:
         timeout: 420
 
+    - type: ch_pipeline.core.dataquery.ConnectDatabase
+      params:
+        timeout: 5
+        ntries: 5
+
     # Query for all the data for the sidereal day we are processing
     - type: ch_pipeline.core.dataquery.QueryDatabase
       out: filelist
