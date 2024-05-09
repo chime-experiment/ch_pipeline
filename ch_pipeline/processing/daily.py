@@ -68,7 +68,6 @@ pipeline:
         accept_all_global_flags: true
         node_spoof:
           cedar_online: "/project/rpp-chime/chime/chime_online/"
-        connection_attempts: 5
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
