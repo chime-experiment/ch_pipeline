@@ -62,20 +62,25 @@ pipeline:
         level_rank0: DEBUG
         level_all: WARNING
 
+    # Test the MPI environment so that the pipeline fails
+    # early if there are issues
     - type: draco.core.misc.CheckMPIEnvironment
       params:
         timeout: 420
 
+    # Aggressivly try to establish a database connection
     - type: ch_pipeline.core.dataquery.ConnectDatabase
       params:
         timeout: 5
         ntries: 5
 
+    # Load the telescope manager object
     - type: draco.core.io.LoadProductManager
       out: manager
       params:
         product_directory: "{product_path}"
 
+    # Load each Sidereal Stream which will go into this stack
     - type: draco.core.io.LoadBasicCont
       out: sstream
       params:
@@ -83,27 +88,37 @@ pipeline:
         selections:
           freq_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # Mask out daytime data
     - type: ch_pipeline.analysis.flagging.MaskDay
       in: sstream
       out: sstream_mask
 
+    # Mask out the moon when it can affect the data
     - type: ch_pipeline.analysis.flagging.MaskMoon
       in: sstream_mask
       out: sstream_mask2
 
+    # Flag data based on database flags
     - type: ch_pipeline.analysis.flagging.DataFlagger
       in: sstream_mask2
       out: sstream_mask3
       params:
         flag_type:
           - acjump_sd
-          - rain1mm_sd
           - srs/bad_ringmap_broadband
           - bad_calibration_gains
           - bad_calibration_fpga_restart
           - bad_calibration_acquisition_restart
           - snow
           - decorrelated_cylinder
+
+    # Flag periods of rainfall which could affect data
+    - type: ch_pipeline.analysis.flagging.FlagRainfall
+      in: sstream_mask3
+      out: sstream_mask4
+      params:
+        accumulation_time: 30.0
+        threshold: 1.0
 
     # Load gain errors as a function of time
     - type: ch_pipeline.core.io.LoadSetupFile
@@ -117,7 +132,7 @@ pipeline:
     # Apply a mask that removes frequencies and times that suffer from gain errors
     - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
       requires: gain_err
-      in: sstream_mask3
+      in: sstream_mask4
       out: mask_gain_err
       params:
         transition: 600.0
@@ -126,11 +141,13 @@ pipeline:
         save: false
 
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_mask3, mask_gain_err]
-      out: sstream_mask4
+      in: [sstream_mask4, mask_gain_err]
+      out: sstream_mask5
 
+    # Calculate a median in RA over a specified RA window. This acts
+    # as an estimation of the cross-talk for this stack
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: sstream_mask4
+      in: sstream_mask5
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -139,11 +156,13 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask4, med]
-      out: sstream_mask5
+      in: [sstream_mask5, med]
+      out: sstream_mask6
 
+    # Update the stack with each sidereal stream. This is effectively
+    # a weighted average
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask5
+      in: sstream_mask6
       out: sstack_stack
       params:
         tag: {tag}
