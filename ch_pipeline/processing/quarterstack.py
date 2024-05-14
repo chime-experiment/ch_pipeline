@@ -163,13 +163,13 @@ pipeline:
     # a weighted average
     - type: draco.analysis.sidereal.SiderealStacker
       in: sstream_mask6
-      out: sstack_stack
+      out: sstack
       params:
         tag: {tag}
 
     # Precision truncate the sidereal stack data
     - type: draco.core.io.Truncate
-      in: sstack_stack
+      in: sstack
       out: sstack_trunc
       params:
         dataset:
@@ -190,9 +190,15 @@ pipeline:
       params:
         output_name: "sstack.zarr.zip"
 
+    # Block until the stack file is written out
+    - type: draco.core.misc.WaitUntil
+      requires: sstack_zip_handle
+      in: sstack
+      out: sstack2
+
     # Apply a gradient rebin correction
     - type: draco.analysis.sidereal.RebinGradientFix
-      in: sstack_stack
+      in: sstack2
       out: sstack_fix
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
