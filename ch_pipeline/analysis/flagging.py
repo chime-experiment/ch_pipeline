@@ -141,6 +141,66 @@ class RFIFilter(task.SingleTask):
         return out
 
 
+class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
+    """CHIME version of RFIMaskChisqHighDelay.
+
+    Ignores times that occur during the day or when bright point sources
+    or pulsars are transiting through the primary beam.
+
+    Attributes
+    ----------
+    transit_width : float
+        Ignore any times that occur within this number of sigma from
+        the transit of a bright source.  Here sigma refers to the standard
+        deviation of a a Gaussian approximation to the primary beam.
+        Default is 1.0.
+    """
+
+    transit_width = config.Property(proptype=float, default=1.0)
+
+    def _source_flag_hook(self, times, freq):
+        """Mask times when bright sources are transiting.
+
+        Parameters
+        ----------
+        times : np.ndarray[ntime]
+            Array of timestamps.
+        freq : np.ndarray[nfreq]
+            Array of frequencies.
+
+        Returns
+        -------
+        mask : np.ndarray[nfreq, ntime]
+            Mask array. True will mask out a time sample.
+        """
+        body = [
+            ephemeris.source_dictionary[src]
+            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
+        ]
+
+        mask = np.zeros((freq.size, times.size), dtype=bool)
+
+        for b_ in body:
+            mask |= transit_flag(b_, times, freq=freq, nsigma=self.transit_width)
+
+        return mask
+
+    def _day_flag_hook(self, times):
+        """Mask times during the day.
+
+        Parameters
+        ----------
+        times : np.ndarray[ntime]
+            Array of timestamps.
+
+        Returns
+        -------
+        mask : np.ndarray[ntime]
+            Mask array. True will mask out a time sample.
+        """
+        return daytime_flag(times)
+
+
 class RFISensitivityMask(dflagging.RFISensitivityMask):
     """CHIME version of RFISensitivityMask.
 
@@ -176,8 +236,11 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         # Time spans where we apply the MAD filter.
         madtimes = np.abs(times - suntt) < time_window
 
-        # Select bright source transit times. Only CasA, CygA and TauA.
-        sources = [ephemeris.CasA, ephemeris.CygA, ephemeris.TauA]
+        # Select bright source transit times.
+        sources = [
+            ephemeris.source_dictionary[src]
+            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
+        ]
 
         ra_axis = np.radians(ephemeris.lsa(times))
 
@@ -1246,29 +1309,35 @@ def daytime_flag(time):
     return flag
 
 
-def transit_flag(body, time, nsigma=2.0):
+def transit_flag(body, time, freq=400.0, nsigma=2.0):
     """Return a flag that indicates if times occured near transit of a celestial body.
 
     Parameters
     ----------
     body : skyfield.starlib.Star
         Skyfield representation of a celestial body.
-    time : np.ndarray[ntime,]
+    time : np.ndarray[ntime]
         Unix timestamps.
+    freq : float or np.ndarray[nfreq]
+        Evaluate the beam width at this frequency in MHz.
     nsigma : float
         Number of sigma to flag on either side of transit.
 
     Returns
     -------
-    flag : np.ndarray[ntime,]
+    flag : np.ndarray[ntime] or np.ndarray[nfreq, ntime]
         Boolean flag that is True if the times occur within nsigma of transit
-        and False otherwise.
+        and False otherwise.  This will have one dimension if freq is a scalar.
     """
     time = np.atleast_1d(time)
     obs = ephemeris.chime
 
     # Create boolean flag
-    flag = np.zeros(time.size, dtype=bool)
+    if np.isscalar(freq):
+        flag = np.zeros(time.size, dtype=bool)
+    else:
+        flag = np.zeros((freq.size, time.size), dtype=bool)
+        freq = freq[:, np.newaxis]
 
     # Find transit times
     transit_times = obs.transit_times(
@@ -1291,7 +1360,7 @@ def transit_flag(body, time, nsigma=2.0):
             # primary beam.  We use the lowest frequency and E-W (or X) polarisation,
             # since this is the most conservative (largest sigma).
             window_deg = nsigma * cal_utils.guess_fwhm(
-                400.0, pol="X", dec=dec.radians, sigma=True
+                freq, pol="X", dec=dec.radians, sigma=True
             )
             window_sec = window_deg * 240.0 * ephemeris.SIDEREAL_S
 
