@@ -181,7 +181,7 @@ class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
         for b_ in body:
-            mask |= transit_flag(b_, times, freq=freq, nsigma=self.transit_width)
+            mask |= transit_flag(b_, times, nsigma=self.transit_width, freq=freq)
 
         return mask
 
@@ -1309,7 +1309,7 @@ def daytime_flag(time):
     return flag
 
 
-def transit_flag(body, time, freq=400.0, nsigma=2.0):
+def transit_flag(body, time, nsigma=2.0, freq=400.0):
     """Return a flag that indicates if times occured near transit of a celestial body.
 
     Parameters
@@ -1318,16 +1318,16 @@ def transit_flag(body, time, freq=400.0, nsigma=2.0):
         Skyfield representation of a celestial body.
     time : np.ndarray[ntime]
         Unix timestamps.
-    freq : float or np.ndarray[nfreq]
-        Evaluate the beam width at this frequency in MHz.
     nsigma : float
         Number of sigma to flag on either side of transit.
+    freq : float or np.ndarray[nfreq]
+        Evaluate the beam width at this frequency in MHz.
 
     Returns
     -------
     flag : np.ndarray[ntime] or np.ndarray[nfreq, ntime]
         Boolean flag that is True if the times occur within nsigma of transit
-        and False otherwise.  This will have one dimension if freq is a scalar.
+        and False otherwise.  This will have a single dimension if freq is a scalar.
     """
     time = np.atleast_1d(time)
     obs = ephemeris.chime
