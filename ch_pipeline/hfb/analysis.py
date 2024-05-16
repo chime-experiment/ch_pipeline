@@ -352,7 +352,7 @@ class HFBDifference(task.SingleTask):
 
 
 class HFBOnOffDifference(task.SingleTask):
-    """Computes the on-off differencing
+    """Computes on-off differencing.
 
     Used for flattening sub-frequency band shape by differencing on-source and
     off-source data.
@@ -362,12 +362,13 @@ class HFBOnOffDifference(task.SingleTask):
     nsamples = config.Property(proptype=int, default=5)
 
     def process(self, stream):
-        """Take difference and place in container.
+        """Takes the average of off-source data and subtract it from on-source data.
 
         Parameters
         ----------
         stream : HFBHighResRingMap
-            Container with stacked HFB data and weights.
+            Container for HFB data and weights with a single high-resolution frequency
+            axis.
 
         Returns
         -------
@@ -399,12 +400,12 @@ class HFBOnOffDifference(task.SingleTask):
             dat_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
 
-        # Then, convolve the kernel above  with the weights to find the sum
+        # Then, convolve the kernel above with the weights to find the sum
         # of off-source weights (denominator of the weighted average)
         weight_fft = np.fft.fft(weight, axis=2)
 
         # n is the sum of off-source weights over ra axis
-        n = np.fft.ifft(
+        sum_weight = np.fft.ifft(
             weight_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
 
@@ -412,13 +413,16 @@ class HFBOnOffDifference(task.SingleTask):
         # value for n. This number goes to the denominator of weighted mean
         # and makes the weighted mean very large. To avoid such numerical
         # error (10^-16), zero n whereever weight is zero.
-        n[weight == 0] = 0
+        sum_weight[weight == 0] = 0
 
         # Weighted average of off-source data
-        off = sum_data * tools.invert_no_zero(n)
+        off = sum_data * tools.invert_no_zero(sum_weight)
+
+        # Weighted average of on-source data
+        on = data * weight * tools.invert_no_zero(weight)
 
         # And on-off difference is:
-        on_off = data * weight * tools.invert_no_zero(weight) - off
+        on_off = on - off
 
         # Now, evaluate the weight of on-off differenced data
 
@@ -430,7 +434,7 @@ class HFBOnOffDifference(task.SingleTask):
 
         # Weight of average of off-source data is the sum over weights
         # That sum if given by n. So variance is 1/n
-        var_off = tools.invert_no_zero(n)
+        var_off = tools.invert_no_zero(sum_weight)
 
         # variance of on-off data
         var_diff = var + var_off
@@ -553,9 +557,7 @@ class HFBStackDays(task.SingleTask):
 
             # For uniform weighting, invert the accumulated variances and
             # multiply by number of days squared to finalize stack.weight.
-            self.stack.weight[:] = norm**2 * tools.invert_no_zero(
-                self.stack.weight[:]
-            )
+            self.stack.weight[:] = norm**2 * tools.invert_no_zero(self.stack.weight[:])
 
             # For uniform weighting, simply normalize accumulated data by number
             # of days to finalize stack.hfb.
