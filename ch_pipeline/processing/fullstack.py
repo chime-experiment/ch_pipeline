@@ -205,7 +205,7 @@ class FullStackProcessing(base.ProcessingType):
     """
 
     type_name = "fullstack"
-    tag_pattern = "stack"
+    tag_pattern = r"stack((_p\d){1}|_all|$)"
 
     # Parameters of the job processing
     default_params = {
@@ -240,7 +240,7 @@ class FullStackProcessing(base.ProcessingType):
         # Select the stacking class to use based on the input type
         if input_type == "quarterstack":
             self.default_params["stacker_instance"] = "SiderealStackerMatch"
-        elif input_type == "daily":
+        else:
             self.default_params["stacker_instance"] = None
             raise NotImplementedError(
                 "Stacking directly from individual days is not currently supported."
@@ -249,33 +249,39 @@ class FullStackProcessing(base.ProcessingType):
         # Set the default parameters for this revision
         self.default_params["input_type"] = input_type
         self.default_params["input_rev"] = input_rev.revision
+
+        stacks = {"stack_all": []}
+        inputs = {}
+
+        for tag in input_rev.ls():
+            # Figure out which partition these belong to
+            _, _, part = input_rev._parse_tag(tag)
+            # Add this tag to the full stack and partition stack
+            stacks["stack_all"].append(tag)
+            stacks.setdefault(f"p{part}", []).append(tag)
+            # Construct the full file path and add to inputs
+            inputs[tag] = str(input_rev.base_path) + "/" + tag
+
         # Store the full file path for each input to this revision
-        self.default_params["inputs"] = {
-            d: str(input_rev.base_path) + "/" + d for d in input_rev.ls()
-        }
+        self.default_params["inputs"] = inputs
+        self.default_params["stacks"] = stacks
 
     def _available_tags(self):
         """Return all the tags that are available to run.
 
-        Right now, this just returns a single tag.
+        Returns the full stack and each partition stack.
         """
-        return ["stack"]
+        return list(self._revparams["stacks"].keys())
 
     def _finalise_jobparams(self, tag, jobparams):
         """Modify the job parameters before the final config is made."""
 
-        inputs = self._revparams["inputs"]
-        input_type = self._revparams["input_type"]
+        inputs = self._revparams["stacks"][tag]
+        paths = self._revparams["inputs"]
 
-        if input_type == "quarterstack":
-            input_list_str = "\n" + "\n".join(
-                [f"- {path}/sstack.zarr.zip" for path in inputs.values()]
-            )
-
-        elif input_type == "daily":
-            input_list_str = "\n" + "\n".join(
-                [f"- {path}/sstream_lsd_{d}.zarr.zip" for d, path in inputs.items()]
-            )
+        input_list_str = "\n" + "\n".join(
+            [f"- {paths[t]}/sstack.zarr.zip" for t in inputs]
+        )
 
         jobparams.update({"inputs": input_list_str})
 
