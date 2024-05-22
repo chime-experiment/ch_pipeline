@@ -6,6 +6,7 @@ pre-map making flagging on m-modes.
 """
 
 from typing import Union
+
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
@@ -141,6 +142,64 @@ class RFIFilter(task.SingleTask):
         return out
 
 
+class RFIStokesIMask(dflagging.RFIStokesIMask):
+    """CHIME version of RFIFourierMask.
+
+    This has a static mask for the local environment and will use the MAD
+    algorithm (over SumThreshold) when bright sources are visible.
+    """
+
+    transit_width = config.Property(proptype=float, default=2.0)
+
+    def _static_rfi_mask_hook(self, freq, timestamp=None):
+        """Use the static CHIME RFI mask.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq]
+            1D array of frequencies in the data (in MHz).
+
+        timestamp : np.array[float]
+            Start observing time (in unix time)
+
+        Returns
+        -------
+        mask : np.ndarray[nfreq]
+            Mask array. True will mask a frequency channel.
+        """
+        return rfi.frequency_mask(freq, timestamp=timestamp)
+
+    def _source_flag_hook(self, times):
+        """Flag times where bright sources are transiting or sun is up.
+
+        Parameters
+        ----------
+        times : np.ndarray[float]
+            Array of timestamps associated with the full dataset.
+
+        Returns
+        -------
+        mask : np.ndarray[float]
+            Mask array. True will flag a time sample.
+        """
+        moon = ephemeris.skyfield_wrapper.ephemeris["moon"]
+        sun = ephemeris.skyfield_wrapper.ephemeris["sun"]
+        body = [
+            ephemeris.source_dictionary[src]
+            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
+        ]
+        body += [sun, moon]
+
+        mask = np.zeros_like(times, dtype=bool)
+
+        for b_ in body:
+            mask |= transit_flag(b_, times, nsigma=self.transit_width)
+
+        mask |= daytime_flag(times)
+
+        return mask
+
+
 class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
     """CHIME version of RFIMaskChisqHighDelay.
 
@@ -271,6 +330,47 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             Mask array. True will include a frequency channel, False masks it out.
         """
         return ~rfi.frequency_mask(freq, timestamp=timestamp)
+
+
+class RFIStaticMask(task.SingleTask):
+    """Get the static mask for the time period covered by the data.
+
+    This is the same static mask used in :class:`RFIFilter` and
+    :class:`RFISensitivityMask`.
+    """
+
+    def process(self, data):
+        """Create a mask with all static frequency bands for a given day.
+
+        Parameters
+        ----------
+        data
+            container with data to mask. Should have either a time-like axis
+            or a `lsd` attribute which can be converted to a UNIX timestamp.
+
+        Returns
+        -------
+        mask
+            boolean mask that can be applied to the input container
+        """
+        # Redistribute across frequency
+        data.redistribute("freq")
+
+        # Create mask container. draco RFIMask is not distributed.
+        if "ra" in data.index_map:
+            csd = data.attrs.get("lsd", data.attrs.get("csd"))
+            timestamp = ephemeris.csd_to_unix(csd)
+            out = dcontainers.SiderealRFIMask(attrs_from=data, axes_from=data)
+        elif "time" in data.index_map:
+            timestamp = data.time[0]
+            out = dcontainers.RFIMask(attrs_from=data, axes_from=data)
+        else:
+            raise ValueError("No definition for `time` or `ra` axes.")
+
+        # Expand 1D mask to proper shape
+        out.mask[:] = rfi.frequency_mask(data.freq, timestamp=timestamp)[:, np.newaxis]
+
+        return out
 
 
 class ChannelFlagger(task.SingleTask):

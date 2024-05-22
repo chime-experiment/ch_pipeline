@@ -351,6 +351,108 @@ class HFBDifference(task.SingleTask):
         return out
 
 
+class HFBOnOffDifference(task.SingleTask):
+    """Computes on-off differencing.
+
+    Used for flattening sub-frequency band shape by differencing on-source and
+    off-source data.
+    """
+
+    offset = config.Property(proptype=int, default=5)
+    nsamples = config.Property(proptype=int, default=5)
+
+    def process(self, stream):
+        """Takes the average of off-source data and subtract it from on-source data.
+
+        Parameters
+        ----------
+        stream : HFBHighResRingMap
+            Container for HFB data and weights with a single high-resolution frequency
+            axis.
+
+        Returns
+        -------
+        out : HFBHighResRingMap
+            Container with HFB data and weights; the result of the on-off differencing.
+        """
+
+        # Load data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+        ra = stream.ra[:]
+        nra = len(ra)
+        # Create a 1D kernel to select off-source data.
+        kernel = np.zeros_like(ra)
+        # Fill desired elements with one. nsample elements on either sides
+        left = np.arange(self.offset + 1, self.offset + self.nsamples + 1)
+        right = np.arange(nra - self.offset - self.nsamples, nra - self.offset)
+        kernel[left] = 1
+        kernel[right] = 1
+        # We want the weighted average of off-source data, which is
+        # sum(off-source data * weights) / sum(off-source weights)
+
+        # Take the weighted sum of off-source data (numerator of the
+        # weighted average). To do that, convolve the kernel above
+        # with the data
+        ker_fft = np.fft.fft(kernel)
+        dat_fft = np.fft.fft(data * weight, axis=2)
+        sum_data = np.fft.ifft(
+            dat_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
+        ).real
+
+        # Then, convolve the kernel above with the weights to find the sum
+        # of off-source weights (denominator of the weighted average)
+        weight_fft = np.fft.fft(weight, axis=2)
+
+        # n is the sum of off-source weights over ra axis
+        sum_weight = np.fft.ifft(
+            weight_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
+        ).real
+
+        # If the weight is zero, ifft above returns very small, but non-zero
+        # value for n. This number goes to the denominator of weighted mean
+        # and makes the weighted mean very large. To avoid such numerical
+        # error (10^-16), zero n whereever weight is zero.
+        sum_weight[weight == 0] = 0
+
+        # Weighted average of off-source data
+        off = sum_data * tools.invert_no_zero(sum_weight)
+
+        # Weighted average of on-source data
+        on = data * weight * tools.invert_no_zero(weight)
+
+        # And on-off difference is:
+        on_off = on - off
+
+        # Now, evaluate the weight of on-off differenced data
+
+        # Note that this only returns the weights corresponding to
+        # inverse variance weighted data
+        # TODO: Compute the weights corresponding to uniform average of data
+        # On-source variance
+        var = tools.invert_no_zero(weight)
+
+        # Weight of average of off-source data is the sum over weights
+        # That sum if given by n. So variance is 1/n
+        var_off = tools.invert_no_zero(sum_weight)
+
+        # variance of on-off data
+        var_diff = var + var_off
+        var_diff[var == 0] = 0
+
+        # weight of on-off data
+        weight_diff = tools.invert_no_zero(var_diff)
+
+        # Create container to hold output
+        out = containers.HFBHighResRingMap(axes_from=stream, attrs_from=stream)
+
+        # Save data and weights to output container
+        out.hfb[:] = on_off
+        out.weight[:] = weight_diff
+
+        return out
+
+
 class HFBStackDays(task.SingleTask):
     """Combine HFB data of multiple days.
 
