@@ -208,6 +208,8 @@ class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
 
     Attributes
     ----------
+    sources : list of str
+        Bright sources to consider when constructing the mask.
     transit_width : float
         Ignore any times that occur within this number of sigma from
         the transit of a bright source.  Here sigma refers to the standard
@@ -215,6 +217,9 @@ class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
         Default is 1.0.
     """
 
+    sources = config.Property(
+        proptype=list, default=["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
+    )
     transit_width = config.Property(proptype=float, default=1.0)
 
     def _source_flag_hook(self, times, freq):
@@ -232,10 +237,7 @@ class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
         mask : np.ndarray[nfreq, ntime]
             Mask array. True will mask out a time sample.
         """
-        body = [
-            ephemeris.source_dictionary[src]
-            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
-        ]
+        body = [ephemeris.source_dictionary[src] for src in self.sources]
 
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
@@ -268,14 +270,25 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
 
     Attributes
     ----------
-    transit_width : float
-        Ignore any times that occur within this number of sigma from
+    sources : list of str
+        Bright sources to consider when constructing the mask.
+    transit_width_source : float
+        Use MAD for any times that occur within this number of sigma from
         the transit of a bright source.  Here sigma refers to the standard
         deviation of a a Gaussian approximation to the primary beam.
         Default is 1.0.
+    transit_width_sun : float
+        Use MAD for any times that occur within this number of sigma from
+        the transit of the sun.  Here sigma refers to the standard
+        deviation of a a Gaussian approximation to the primary beam.
+        Default is 3.0.
     """
 
-    transit_width = config.Property(proptype=float, default=1.0)
+    sources = config.Property(
+        proptype=list, default=["CAS_A", "CYG_A", "TAU_A", "B0329+54"]
+    )
+    transit_width_source = config.Property(proptype=float, default=1.0)
+    transit_width_sun = config.Property(proptype=float, default=3.0)
 
     def _combine_st_mad_hook(self, times, freq):
         """Use the MAD mask (over SumThreshold) whenever a bright source is overhead.
@@ -294,15 +307,17 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             filled from the MAD, if `False` use the SumThreshold algorithm.
         """
         body = [
-            ephemeris.source_dictionary[src]
-            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
+            (ephemeris.source_dictionary[src], self.transit_width_source)
+            for src in self.sources
         ]
-        body.append(ephemeris.skyfield_wrapper.ephemeris["sun"])
+        body.append(
+            (ephemeris.skyfield_wrapper.ephemeris["sun"], self.transit_width_sun)
+        )
 
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
-        for b_ in body:
-            mask |= transit_flag(b_, times, nsigma=self.transit_width, freq=freq)
+        for b_, n_ in body:
+            mask |= transit_flag(b_, times, nsigma=n_, freq=freq)
 
         return mask
 
