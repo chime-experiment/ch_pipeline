@@ -265,53 +265,46 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
 
     This has a static mask for the local environment and will use the MAD
     algorithm (over SumThreshold) when bright sources are visible.
+
+    Attributes
+    ----------
+    transit_width : float
+        Ignore any times that occur within this number of sigma from
+        the transit of a bright source.  Here sigma refers to the standard
+        deviation of a a Gaussian approximation to the primary beam.
+        Default is 1.0.
     """
 
-    def _combine_st_mad_hook(self, times):
+    transit_width = config.Property(proptype=float, default=1.0)
+
+    def _combine_st_mad_hook(self, times, freq):
         """Use the MAD mask (over SumThreshold) whenever a bright source is overhead.
 
         Parameters
         ----------
         times : np.ndarray[ntime]
-            Times of the data at floating point UNIX time.
+            Array of Unix timestamps.
+        freq : np.ndarray[nfreq]
+            Array of frequencies.
 
         Returns
         -------
-        combine : np.ndarray[ntime]
+        combine : np.ndarray[nfreq, ntime]
             Mixing array as a function of time. If `True` that sample will be
             filled from the MAD, if `False` use the SumThreshold algorithm.
         """
-        # Switch for 4 deg each side of the source
-        beam_window = np.radians(4.0)
-        SIDEREAL_DAY = ephemeris.SIDEREAL_S * 24 * 3600
-
-        # Select Sun transit times
-        suntt = ephemeris.solar_transit(times[0])  # Sun transit time
-
-        # Mask the sun for the maximum aparent dec of ~24 deg
-        ra_window = beam_window / np.cos(np.deg2rad(24))
-        time_window = ra_window / (2 * np.pi) * SIDEREAL_DAY
-
-        # Time spans where we apply the MAD filter.
-        madtimes = np.abs(times - suntt) < time_window
-
-        # Select bright source transit times.
-        sources = [
+        body = [
             ephemeris.source_dictionary[src]
             for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A", "B0329+54"]
         ]
+        body.append(ephemeris.skyfield_wrapper.ephemeris["sun"])
 
-        ra_axis = np.radians(ephemeris.lsa(times))
+        mask = np.zeros((freq.size, times.size), dtype=bool)
 
-        # Include bright point source transits in MAD times
-        for src in sources:
-            ra = src.ra.radians
-            dec = src.dec.radians
-            ra_window = beam_window / np.cos(dec)
+        for b_ in body:
+            mask |= transit_flag(b_, times, nsigma=self.transit_width, freq=freq)
 
-            madtimes |= np.abs(ra_axis - ra) < ra_window
-
-        return madtimes
+        return mask
 
     def _static_rfi_mask_hook(self, freq, timestamp=None):
         """Use the static CHIME RFI mask.
