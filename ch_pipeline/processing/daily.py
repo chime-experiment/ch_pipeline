@@ -762,38 +762,6 @@ class DailyProcessing(base.ProcessingType):
             {"start": "CSD1883", "step": 7},
             {"start": "CSD1884", "step": 7},
         ],
-        # These flags (and corresponding days) are already known
-        # and cannot be recovered. These flags do not exist
-        # in the database
-        "flags": {
-            # Missing timing correction file
-            "no_timing_correction": [
-                "CSD1940",
-                "CSD2000",
-                "CSD2007",
-                "CSD2008",
-                "CSD2017",
-                "CSD2052",
-                "CSD2053",
-                "CSD2054",
-                "CSD2055",
-                "CSD2056",
-                "CSD2057",
-                "CSD2061",
-                "CSD2088",
-                "CSD2092",
-                "CSD2151",
-                "CSD2176",
-                "CSD2187",
-                "CSD2205",
-            ],
-            # Timing correction flag edge
-            "timing_correction_edge": ["CSD2307"],
-            # Missing weather data
-            "no_weather_data": ["CSD2815"],
-            # Corrupted corrdata file
-            "corrupted_file": ["CSD2173"],
-        },
         # Any days flagged by these flags are excluded from
         # the days to run
         "exclude_flags": [
@@ -864,12 +832,10 @@ class DailyProcessing(base.ProcessingType):
         for t in self.default_params["intervals"]:
             intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
         # Save out a list of heavily flagged days
-        self.default_params["flags"].update(
-            get_flagged_csds(
-                [csd for i in intervals for csd in expand_csd_range(*i)],
-                self.default_params["exclude_flags"],
-                self.default_params["frac_flagged"],
-            )
+        self.default_params["flags"] = get_flagged_csds(
+            [csd for i in intervals for csd in expand_csd_range(*i)],
+            self.default_params["exclude_flags"],
+            self.default_params["frac_flagged"],
         )
 
     def _load_hook(self):
