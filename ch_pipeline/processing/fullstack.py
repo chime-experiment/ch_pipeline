@@ -71,19 +71,19 @@ pipeline:
         selections:
           freq_range: [{freq[0]:d}, {freq[1]:d}]
 
-    - type: draco.analysis.sidereal.{stacker_instance}
+    # Apply a gradient correction fix for rebinned data
+    - type: draco.analysis.sidereal.RebinGradientFix
       in: sstream
+      out: sstream_grad
+
+    - type: draco.analysis.sidereal.{stacker_instance}
+      in: sstream_grad
       out: fstack
       params:
         tag: "fullstack"
 
-    # Apply a gradient correction fix for rebinned data
-    - type: draco.analysis.sidereal.RebinGradientFix
-      in: fstack
-      out: fstack_grad
-
     - type: draco.core.io.Truncate
-      in: fstack_grad
+      in: fstack
       out: fstack_trunc
       params:
         dataset:
@@ -108,12 +108,12 @@ pipeline:
     # Block the pipeline until the stack is written out
     - type: draco.core.misc.WaitUntil
       requires: fstack_trunc_handle
-      in: fstack_grad
-      out: fstack_grad2
+      in: fstack
+      out: fstack2
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: fstack_grad2
+      in: fstack2
       params:
         single_beam: true
         weight: natural
@@ -126,7 +126,7 @@ pipeline:
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: fstack_grad2
+      in: fstack2
       params:
         single_beam: true
         weight: natural
@@ -139,7 +139,7 @@ pipeline:
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: fstack_grad2
+      in: fstack2
       out: fstack_flag_src
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
