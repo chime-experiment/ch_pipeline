@@ -61,39 +61,33 @@ class BeamSelectionMixin:
 
         Returns
         -------
-        fancy_beam_sel : np.ndarray
+        beam_sel : np.ndarray
             Array of beam indices to select.
         """
 
-        if self.beam_ew_include or self.beam_ns_index or self.beam_ns_range:
-            # Grid of all beam indices, with shape (4, 256) (i.e., EW x NS)
-            beam_index_grid = np.arange(1024).reshape(4, 256)
+        # Grid of all beam indices, with shape (4, 256) (i.e., EW x NS)
+        beam_index_grid = np.arange(1024).reshape(4, 256)
 
-            # Resolve selection of EW beams, creating a column vector to allow
-            # correct broadcasting in case `beam_ns_index` is used for NS beams
-            if self.beam_ew_include:
-                beam_ew_sel = np.array(self.beam_ew_include)[:, np.newaxis]
-            else:
-                beam_ew_sel = slice(None)
-
-            # Resolve selection of NS beams, with `beam_ns_range` taking
-            # precedence over `beam_ns_index`
-            if self.beam_ns_range:
-                beam_ns_sel = slice(*self.beam_ns_range)
-            elif self.beam_ns_index:
-                beam_ns_sel = self.beam_ns_index
-            else:
-                beam_ns_sel = slice(None)
-
-            # Select beam indices from grid
-            fancy_beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
-
+        # Resolve selection of EW beams, creating a column vector to allow
+        # correct broadcasting in case `beam_ns_index` is used for NS beams
+        if self.beam_ew_include:
+            beam_ew_sel = np.array(self.beam_ew_include)[:, np.newaxis]
         else:
-            # If none of the relevant attributes were passed, return None to
-            # prevent this beam-selection mechanism from operating in BaseLoadFiles
-            fancy_beam_sel = None
+            beam_ew_sel = slice(None)
 
-        return fancy_beam_sel
+        # Resolve selection of NS beams, with `beam_ns_range` taking
+        # precedence over `beam_ns_index`
+        if self.beam_ns_range:
+            beam_ns_sel = slice(*self.beam_ns_range)
+        elif self.beam_ns_index:
+            beam_ns_sel = self.beam_ns_index
+        else:
+            beam_ns_sel = slice(None)
+
+        # Select beam indices from grid
+        beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
+
+        return beam_sel
 
 
 class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
@@ -164,10 +158,6 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         # (via `draco.core.io.SelectionsMixin`)
         super().setup()
 
-        # Resolve any beam selections provided through the `beam_ew_include`,
-        # `beam_ns_index`, and `beam_ns_range` attributes (via `BeamSelectionsMixin`)
-        fancy_beam_sel = self.resolve_beam_sel()
-
         # Look up source in catalog
         if self.source_name:
             hfb_cat = HFBCatalog[self.source_name]
@@ -223,12 +213,11 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
                 self.beam_sel = list(
                     np.arange(1024)[self.beam_sel][self.beam_ew_include]
                 )
-        elif fancy_beam_sel is not None:
-            # Beam selection via the `beam_ew_include` and/or `beam_ns_index`
-            # or `beam_ns_range` attributes
-            self.beam_sel = fancy_beam_sel
+        elif self.beam_ew_include or self.beam_ns_index or self.beam_ns_range:
+            # Beam selection via the `BeamSelectionMixin`
+            self.beam_sel = self.resolve_beam_sel()
         elif "beam_sel" in self._sel:
-            # Beam selection via the `selections` attribute
+            # Manual beam index selection via the `selections` attribute
             self.beam_sel = self._sel["beam_sel"]
         else:
             self.beam_sel = slice(None)

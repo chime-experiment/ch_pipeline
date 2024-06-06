@@ -843,10 +843,10 @@ class SelectBeam(BeamSelectionMixin):
         # Resolve the selections provided through the `beam_ew_include`,
         # `beam_ns_index`, and `beam_ns_range` attributes (via
         # `ch_pipeline.hfb.io.BeamSelectionsMixin`)
-        self.fancy_beam_sel = self.resolve_beam_sel()
+        self.beam_sel = self.resolve_beam_sel()
 
     def process(self, stream):
-        """Selet a subset of beams.
+        """Select a subset of beams.
 
         Parameters
         ----------
@@ -860,7 +860,7 @@ class SelectBeam(BeamSelectionMixin):
         """
 
         # Create new container with subset of beams
-        newstream = dcontainers.empty_like(stream, beam=self.fancy_beam_sel)
+        newstream = dcontainers.empty_like(stream, beam=self.beam_sel)
 
         # Make sure all datasets are initialised
         for name in stream.datasets.keys():
@@ -868,7 +868,7 @@ class SelectBeam(BeamSelectionMixin):
                 newstream.add_dataset(name)
 
         # Find indices in current beam axis of selected subset of beams
-        selindex = np.flatnonzero(np.isin(stream.beam, self.fancy_beam_sel)).tolist()
+        selindex = np.flatnonzero(np.isin(stream.beam, self.beam_sel)).tolist()
 
         # Copy over datasets
         dcontainers.copy_datasets_filter(stream, newstream, "beam", selindex)
