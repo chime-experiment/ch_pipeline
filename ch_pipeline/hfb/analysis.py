@@ -22,6 +22,7 @@ from draco.core import containers as dcontainers
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
 
 from . import containers
+from .io import BeamSelectionMixin
 from .pfb import DeconvolvePFB
 
 
@@ -827,6 +828,52 @@ class HFBSelectTransit(task.SingleTask):
 
         # Return output container
         return out
+
+
+class SelectBeam(BeamSelectionMixin):
+    """Select a subset of EW and/or NS beams from a container.
+
+    The selection is made by passing `beam_ew_include` and/or `beam_ns_index` or
+    `beam_ns_range` attributes (see documentation in :class:`BeamSelectionsMixin`).
+    """
+
+    def setup(self):
+        """Resolve the beam selection."""
+
+        # Resolve the selections provided through the `beam_ew_include`,
+        # `beam_ns_index`, and `beam_ns_range` attributes (via
+        # `ch_pipeline.hfb.io.BeamSelectionsMixin`)
+        self.beam_sel = self.resolve_beam_sel()
+
+    def process(self, stream):
+        """Select a subset of beams.
+
+        Parameters
+        ----------
+        stream : containers.HFBBeamContainer
+            An HFB container with a beam axis.
+
+        Returns
+        -------
+        newstream : containers.HFBBeamContainer
+            New container with a selection of beams.
+        """
+
+        # Create new container with subset of beams
+        newstream = dcontainers.empty_like(stream, beam=self.beam_sel)
+
+        # Make sure all datasets are initialised
+        for name in stream.datasets.keys():
+            if name not in newstream.datasets:
+                newstream.add_dataset(name)
+
+        # Find indices in current beam axis of selected subset of beams
+        selindex = np.flatnonzero(np.isin(stream.beam, self.beam_sel)).tolist()
+
+        # Copy over datasets
+        dcontainers.copy_datasets_filter(stream, newstream, "beam", selindex)
+
+        return newstream
 
 
 class HFBFlattenPFB(task.SingleTask):
