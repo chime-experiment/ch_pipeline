@@ -556,9 +556,21 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
             "distributed": True,
             "distributed_axis": "el",
         },
+        "amplitude": {
+            "axes": ["width", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
     }
 
     @property
     def ln_lambda(self):
         """The log-likelihood-ratio dataset."""
         return self.datasets["ln_lambda"]
+
+    @property
+    def amplitude(self):
+        """The absorption-feature-amplitude dataset."""
+        return self.datasets["amplitude"]
