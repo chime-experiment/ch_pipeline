@@ -915,7 +915,7 @@ class HFBSelectTransit(task.SingleTask):
         return out
 
 
-class SelectBeam(BeamSelectionMixin):
+class SelectBeam(BeamSelectionMixin, task.SingleTask):
     """Select a subset of EW and/or NS beams from a container.
 
     The selection is made by passing `beam_ew_include` and/or `beam_ns_index` or
