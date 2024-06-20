@@ -266,7 +266,7 @@ def generate(
 @item.command("update")
 @click.argument("revision", type=PREV)
 @click.option(
-    "--clean",
+    "--clear",
     is_flag=True,
     help="Remove data files which are no longer needed by this revision.",
 )
@@ -278,6 +278,7 @@ def generate(
 def update_files(revision, clear, retrieve):
     """Manage files between project and long-term storage spaces."""
     nfiles = revision.update_files(retrieve=retrieve, clear=clear)
+
     if retrieve:
         click.echo(f"Retrieving {nfiles['nretrieve']} files.")
     if clear:
