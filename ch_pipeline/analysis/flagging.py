@@ -147,6 +147,14 @@ class RFIStokesIMask(dflagging.RFIStokesIMask):
 
     This has a static mask for the local environment and will use the MAD
     algorithm (over SumThreshold) when bright sources are visible.
+
+    Attributes
+    ----------
+    transit_width : float, optional
+        Ignore any times that occur within this number of sigma from
+        the transit of a bright source.  Here sigma refers to the standard
+        deviation of a a Gaussian approximation to the primary beam.
+        Default is 2.0.
     """
 
     transit_width = config.Property(proptype=float, default=2.0)
@@ -198,6 +206,23 @@ class RFIStokesIMask(dflagging.RFIStokesIMask):
         mask |= daytime_flag(times)
 
         return mask
+
+    def _solar_transit_hook(self, times):
+        """Override to flag solar transit times.
+
+        Parameters
+        ----------
+        times : np.ndarray[float]
+            Array of timestamps.
+
+        Returns
+        -------
+        mask : np.ndarray[float]
+            Mask array. True will mask out a time sample.
+        """
+        sun = ephemeris.skyfield_wrapper.ephemeris["sun"]
+
+        return transit_flag(sun, times, nsigma=self.transit_width)
 
 
 class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
