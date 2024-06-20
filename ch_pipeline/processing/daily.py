@@ -210,6 +210,7 @@ pipeline:
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
       in: sensitivity
+      out: sensitivity_day
       params:
         save: true
         output_name: "sensitivity_{{tag}}.h5"
@@ -251,40 +252,61 @@ pipeline:
       in: [tstream_bbm, decorr_cyl_mask_day_exp]
       out: tstream_dcm
 
-    # Calculate the RFI mask from the autocorrelation data
-    - type: ch_pipeline.analysis.flagging.RFIFilter
-      in: tstream_dcm
-      out: rfimask
+    # Calculate a RFI mask from the sensitivity metric
+    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
+      in: sensitivity_day
+      out: rfimask_sensitivity
       params:
-        stack: true
-        flag1d: false
-        rolling: true
-        apply_static_mask: true
-        keep_auto: true
-        keep_ndev: true
-        freq_width: 10.0
-        time_width: 420.0
-        threshold_mad: 6.0
-        use_draco_container: true
         save: true
-        output_name: "rfi_mask_{{tag}}.h5"
-        nan_check: false
+        output_name: "rfi_mask_sensitivity_{{tag}}.h5"
 
-    # Apply the RFI mask. This will modify the data in place.
+    # Calculate a RFI mask from Stokes I visibilities
+    - type: ch_pipeline.analysis.flagging.RFIStokesIMask
+      requires: manager
+      in: tstream_dcm
+      out: [rfimask_stokesi, _]
+      params:
+        save: true
+        output_name:
+          - "rfi_mask_stokesi_{{tag}}.h5"
+          - "lowpass_power_2cyl_{{tag}}.h5"
+
+    # Apply the StokesI RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_dcm, rfimask]
+      in: [tstream_dcm, rfimask_stokesi]
       out: tstream_day_rfi
+
+    # Apply the Sensitivity RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream_day_rfi, rfimask_sensitivity]
+      out: tstream_day_rfi2
+
+    # Fully remove any frequencies which are mostly flagged. A threshold
+    # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data,
+    # but has a noticeably positive effect on high-delay noise
+    - type: draco.analysis.flagging.MaskFreq
+      in: tstream_day_rfi2
+      out: freq_mask
+      params:
+        freq_frac: 0.3
+        save: true
+        output_name: "rfi_mask_freq_{{tag}}.h5"
+
+    # Apply the frequency mask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream_day_rfi2, freq_mask]
+      out: tstream_day_freq_cut
 
     # Calculate the thermal gain correction
     - type: ch_pipeline.analysis.calibration.ThermalCalibration
-      in: tstream_day_rfi
+      in: tstream_day_freq_cut
       out: thermal_gain
       params:
         caltime_path: "{caltimes_file}"
 
     # Apply the thermal correction
     - type: draco.core.misc.ApplyGain
-      in: [tstream_day_rfi, thermal_gain]
+      in: [tstream_day_freq_cut, thermal_gain]
       out: tstream_thermal_corrected
       params:
         inverse: false
@@ -294,10 +316,38 @@ pipeline:
       in: tstream_thermal_corrected
       out: tstream_day_smoothweight
 
-    # Regrid the data onto a regular grid in sidereal time
-    - type: draco.analysis.sidereal.SiderealRegridder
+    # Apply an aggressive delay filter and
+    # check consistency of data with noise at high delay.
+    - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
       requires: manager
       in: tstream_day_smoothweight
+      out: chisq_day_filtered
+      params:
+        tauw: 0.400
+        single_mask: false
+        atten_threshold: 0.0
+        reduce_baseline: true
+        mask_short: 20.0
+        save: true
+        output_name: "chisq_{{tag}}.h5"
+
+    # Generate an RFI mask from the chi-squared test statistic.
+    - type: ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay
+      in: chisq_day_filtered
+      out: rfimask_chisq
+      params:
+        save: true
+        output_name: "rfi_mask_chisq_{{tag}}.h5"
+
+    # Apply the RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream_day_smoothweight, rfimask_chisq]
+      out: tstream_day_rfi3
+
+    # Regrid the data onto a regular grid in sidereal time
+    - type: draco.analysis.sidereal.SiderealRebinner
+      requires: manager
+      in: tstream_day_rfi3
       out: sstream
       params:
         samples: 4096
@@ -328,41 +378,27 @@ pipeline:
         output_name: "sstream_{{tag}}.zarr.zip"
         remove: true
 
-    # Flag out low weight samples to remove transient RFI artifacts at the edges of
-    # flagged regions
-    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
-      requires: manager
+    # Load the stack used to calculate a binning gradient correction.
+    # This is the same dataset used in blending, but we don't want to
+    # keep it in memory while making ringmaps
+    - type: draco.core.io.LoadBasicCont
+      out: sstack_grad_fix
+      params:
+        files:
+          - "{blend_stack_file}"
+        selections:
+          freq_range: [{freq[0]:d}, {freq[1]:d}]
+
+    # Apply a gradient correction to the rebinned sidereal stream
+    - type: draco.analysis.sidereal.RebinGradientCorrection
+      requires: sstack_grad_fix
       in: sstream
-      out: full_tvwb_mask
-      params:
-        relative_threshold: 0.5
-        ignore_absolute_threshold: -1
-        average_type: "mean"
-        pols_to_flag: "all"
-
-    # Apply the tvwb mask. This will modify the data inplace.
-    - type: draco.analysis.flagging.ApplyBaselineMask
-      in: [sstream, full_tvwb_mask]
-      out: sstream_tvwb
-
-    # Generate the second RFI mask using targeted knowledge of the instrument
-    - type: draco.analysis.flagging.RFIMask
-      in: sstream_tvwb
-      out: rfimask2
-      params:
-        stack_ind: 66
-        output_name: "rfi_mask2_{{tag}}.h5"
-        save: true
-
-    # Apply the RFI mask. This will modify the data in place.
-    - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [sstream_tvwb, rfimask2]
-      out: sstream_mask
+      out: sstream_grad_fix
 
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_mask
+      in: sstream_grad_fix
       out: ringmap
       params:
         single_beam: true
@@ -402,7 +438,7 @@ pipeline:
     # cross talk and emphasis point sources
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_mask
+      in: sstream_grad_fix
       out: ringmap_int
       params:
         single_beam: true
@@ -445,7 +481,7 @@ pipeline:
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream_mask
+      in: sstream_grad_fix
       out: sstream_inter
       params:
         share: vis
@@ -458,9 +494,16 @@ pipeline:
         files:
         - "{catalogs[0]}"
 
+    # Wait until the catalog is loaded, otherwise this task will
+    # run its setup method and significantly increase memory used
+    - type: draco.core.misc.WaitUntil
+      requires: source_catalog_nocollapse
+      in: sstream_inter
+      out: sstream_inter2
+
     # Measure the beamformed visibility as a function of hour angle
     - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_inter]
+      requires: [manager, sstream_inter2]
       in: source_catalog_nocollapse
       out: sourceflux_nocollapse
       params:
@@ -468,13 +511,14 @@ pipeline:
         collapse_ha: false
         save: true
         output_name: "sourceflux_vs_ha_{{tag}}.h5"
+        limit_outputs: 1
 
-    # Wait until the additional catalog is loaded, otherwise this task will
-    # run its setup method and significantly increase memory used
+    # Wait until the first beam forming task is done in order to
+    # avoid unnecessary memory usage
     - type: draco.core.misc.WaitUntil
       requires: sourceflux_nocollapse
       in: sstream_inter
-      out: sstream_inter2
+      out: sstream_inter3
 
     # Load the source catalogs to measure fluxes of
     - type: draco.core.io.LoadBasicCont
@@ -488,16 +532,17 @@ pipeline:
 
     # Measure the observed fluxes of the point sources in the catalogs
     - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_inter2]
+      requires: [manager, sstream_inter3]
       in: source_catalog
       params:
         timetrack: 300.0
         save: true
         output_name: "sourceflux_{{tag}}.h5"
+        limit_outputs: 4
 
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
-      in: sstream_mask
+      in: sstream_grad_fix
       out: sstream_mask1
 
     - type: ch_pipeline.analysis.flagging.MaskMoon
@@ -517,7 +562,14 @@ pipeline:
           - bad_calibration_gains
           - decorrelated_cylinder
           - globalflag
-          - rain1mm
+
+    # Find and flag periods of rainfall over 1mm
+    - type: ch_pipeline.analysis.flagging.FlagRainfall
+      in: sstream_mask3
+      out: sstream_mask4
+      params:
+        accumulation_time: 30.0
+        threshold: 1.0
 
     # Load the stack that we will blend into the daily data
     - type: draco.core.io.LoadBasicCont
@@ -530,10 +582,11 @@ pipeline:
 
     - type: draco.analysis.flagging.BlendStack
       requires: sstack
-      in: sstream_mask3
+      in: sstream_mask4
       out: sstream_blend1
       params:
         frac: 1e-4
+        mask_freq: true
 
     # Mask the daytime data again. This ensures that we only see the time range in
     # the delay spectrum we would expect
@@ -550,7 +603,7 @@ pipeline:
 
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
-    # Also, mask out some additional frequencies:
+    # Also, mask out some additional frequencies that are not masked in the stack:
     # 506.25 - 511.71 MHz: band which isn't that visible in the data but generates
     # a lot of high delay power
     # 519.14 - 525.4 MHz: unmasked band in the stack that seems to generate a lot
@@ -565,24 +618,49 @@ pipeline:
       params:
         factorize: true
         bad_freq_ind: [[738, 753], [703, 720], [490, 509], [857, 873], [485, 488]]
+        save: true
+        output_name: "rfi_mask_factorized_{{tag}}.h5"
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [sstream_blend3, factmask]
       out: sstream_blend4
 
-    # Estimate the delay power spectrum of the data. This is a good diagnostic
-    # of instrument performance
-    - type: draco.analysis.delay.DelaySpectrumEstimator
+    # Estimate the delay power spectrum of the data using the NRML
+    # estimator. This is a good diagnostic of instrument performance
+    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
       requires: manager
       in: sstream_blend4
       params:
+        freq_frac: 0.01
+        time_frac: 0.01
+        remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 40
+        nsamp: 100
+        maxpost: true
+        maxpost_tol: 1.0e-4
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
+
+    # Use the gibbs estimator to produce a non-converged backup. This
+    # estimator is slower to converge, but was used in the past, so
+    # this will provide a good comparison with older data
+    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
+      requires: manager
+      in: sstream_blend4
+      params:
+        freq_frac: 0.01
+        time_frac: 0.01
+        remove_mean: true
+        freq_zero: 800.0
+        nfreq: {nfreq_delay}
+        nsamp: 40
+        maxpost: false
+        complex_timedomain: true
+        save: true
+        output_name: "delayspectrum_gibbs_{{tag}}.h5"
 
     # Apply delay filter to stream
     - type: draco.analysis.delay.DelayFilter
@@ -596,13 +674,18 @@ pipeline:
 
     # Estimate the delay power spectrum of the data after applying
     # the delay filter
-    - type: draco.analysis.delay.DelaySpectrumEstimator
+    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
       requires: manager
       in: sstream_dfilter
       params:
+        freq_frac: 0.01
+        time_frac: 0.01
+        remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 40
+        nsamp: 100
+        maxpost: true
+        maxpost_tol: 1.0e-4
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
