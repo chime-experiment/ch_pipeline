@@ -845,6 +845,8 @@ class DailyProcessing(base.ProcessingType):
             {"start": "CSD1883", "step": 7},
             {"start": "CSD1884", "step": 7},
         ],
+        # Fixed CSDS to ignore
+        "flags": {},
         # Any days flagged by these flags are excluded from
         # the days to run
         "exclude_flags": [
@@ -860,9 +862,9 @@ class DailyProcessing(base.ProcessingType):
         # Minimum data coverage in order to process a day
         "required_coverage": 0.3,
         # Whether to look for offline data and request it be brought online
-        "include_offline_files": False,
+        "include_offline_files": True,
         # Number of recent days to prioritize in queue
-        "num_recent_days_first": 0,
+        "num_recent_days_first": 7,
         # Frequencies to process
         "freq": [0, 1024],
         # Frequencies to save for validation ringmaps
@@ -897,10 +899,10 @@ class DailyProcessing(base.ProcessingType):
         ),
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2022.06",
+        "modlist": "chime/python/2024.04",
         "nfreq_delay": 1025,
         # Job params
-        "time": 100,  # How long in minutes?
+        "time": 150,  # How long in minutes?
         "nodes": 12,  # Number of nodes to use.
         "ompnum": 4,  # Number of OpenMP threads
         "pernode": 12,  # Jobs per node
@@ -915,10 +917,12 @@ class DailyProcessing(base.ProcessingType):
         for t in self.default_params["intervals"]:
             intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
         # Save out a list of heavily flagged days
-        self.default_params["flags"] = get_flagged_csds(
-            [csd for i in intervals for csd in expand_csd_range(*i)],
-            self.default_params["exclude_flags"],
-            self.default_params["frac_flagged"],
+        self.default_params["flags"].update(
+            get_flagged_csds(
+                [csd for i in intervals for csd in expand_csd_range(*i)],
+                self.default_params["exclude_flags"],
+                self.default_params["frac_flagged"],
+            )
         )
 
     def _load_hook(self):
@@ -1535,9 +1539,9 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
     for csd in csds:
         start = ephemeris.csd_to_unix(csd)
         end = ephemeris.csd_to_unix(csd + 1)
-        flagged_intervals = []
 
         for flag_name, flag_list in out_flags.items():
+            flagged_intervals = []
             # Iterate over the individual flags
             for flag in flag_list:
                 # Iterate over flagged intervals for this flag
@@ -1555,11 +1559,17 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
 
                     if not overlap:
                         # This is part of a new interval
-                        flagged_intervals.append([flag.start_time, flag.finish_time])
+                        flagged_intervals.append(
+                            [max(flag.start_time, start), min(flag.finish_time, end)]
+                        )
 
-        # Figure out what fraction of this day is flagged
-        flagged_time = np.sum([t[1] - t[0] for t in flagged_intervals])
-        if flagged_time > frac_flagged * (end - start):
-            flagged_days[flag_name].append(f"CSD{csd}")
+            # Figure out what fraction of this day is flagged
+            flagged_time = np.sum([t[1] - t[0] for t in flagged_intervals])
+            if flagged_time > frac_flagged * (end - start):
+                flagged_days[flag_name].append(f"CSD{csd}")
+
+    # Ensure flagged CSDS are unique and sorted
+    for key, val in flagged_days.items():
+        flagged_days[key] = sorted(set(val))
 
     return flagged_days
