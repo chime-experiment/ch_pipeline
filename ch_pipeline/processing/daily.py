@@ -986,7 +986,9 @@ class DailyProcessing(base.ProcessingType):
         nfiles = {"nretrieve": 0, "nclear": 0}
 
         if not self._include_offline_files:
-            return
+            # Cannot try to retrieve files if forbidden. Can
+            # still clear out files which are no longer needed
+            retrieve = False
 
         rev_stats = self.status(user=user)
         # Get the upcoming jobs
@@ -1048,9 +1050,15 @@ class DailyProcessing(base.ProcessingType):
                 if key in requeue
             ] + to_run
 
+        # Ensure that the current in-progress acquisition does not get queued
+        today = ephemeris.chime.get_current_lsd()
+        to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
+
         # Prioritize some number of recent days
-        today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
-        priority = [csd for csd in to_run if today - int(csd) <= self._num_recent_days]
+        today = np.floor(today).astype(int)
+        priority = [
+            csd for csd in to_run if (today - int(csd)) <= self._num_recent_days
+        ]
 
         if priority_only:
             return priority
@@ -1413,38 +1421,61 @@ def request_offline_csds(csds: list, pad: float = 0):
     pad
         fraction of data from adjacent days that should also be copied online
     """
-    _, files = db_get_corr_files_in_range(csds[0], csds[-1])
-    request_files = get_filenames_used_by_csds(csds, files, pad)
 
-    db.connect(read_write=True)
-
-    target_group = di.StorageGroup.get(name="cedar_online")
-    offline_node = di.StorageNode.get(name="cedar_nearline")
-
-    # Request these files be brought back online
-    for file_ in request_files:
+    def _make_copy_request(file, source, target):
         try:
             # Check if an activate request already exists. If so,
             # leave alpenhorn alone to do its thing
             di.ArchiveFileCopyRequest.get(
-                file=file_,
-                group_to=target_group,
-                node_from=offline_node,
+                file=file,
+                group_to=target,
+                node_from=source,
                 completed=False,
                 cancelled=False,
             )
+            return 0
         except pw.DoesNotExist:
             di.ArchiveFileCopyRequest.insert(
                 file=file_,
-                group_to=target_group,
-                node_from=offline_node,
+                group_to=target,
+                node_from=source,
                 cancelled=0,
                 completed=0,
                 n_requests=1,
                 timestamp=datetime.now(),
             ).execute()
+            return 1
 
-    return len(request_files)
+    # Figure out which chimestack files are needed
+    online_files, files = db_get_corr_files_in_range(csds[0] - pad, csds[-1] + pad)
+    # Only check files that are not online
+    files = [f for f in files if f not in online_files]
+    request_corr_files = get_filenames_used_by_csds(csds, files, pad)
+
+    # Repeat for weather data. These are usually always online
+    online_files, files = db_get_weather_files_in_range(csds[0] - pad, csds[-1] + pad)
+    files = [f for f in files if f not in online_files]
+    request_weather_files = get_filenames_used_by_csds(csds, files, pad)
+
+    db.connect(read_write=True)
+
+    target_node = di.StorageGroup.get(name="cedar_online")
+    offline_node = di.StorageNode.get(name="cedar_nearline")
+    smallfile_node = di.StorageNode.get(name="cedar_smallfile")
+
+    nrequests = 0
+
+    # Request chimestack files be brought back online
+    for file_ in request_corr_files:
+        nr = _make_copy_request(file_, offline_node, target_node)
+        nrequests += nr
+
+    # Request weather files be brought back online
+    for file_ in request_weather_files:
+        nr = _make_copy_request(file_, smallfile_node, target_node)
+        nrequests += nr
+
+    return nrequests
 
 
 def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
