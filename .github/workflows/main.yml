@@ -47,8 +47,8 @@ jobs:
         pip install future
         pip install numpy
         pip install cython
-        pip install --use-deprecated=legacy-resolver -r requirements.txt
-        pip install --use-deprecated=legacy-resolver -r doc/requirements.txt
+        pip install --use-deprecated=legacy-resolver -r requirements.txt --no-binary bitshuffle
+        pip install --use-deprecated=legacy-resolver -r doc/requirements.txt --no-binary bitshuffle
 
     - name: Install ch_pipeline
       run: pip install -e .
