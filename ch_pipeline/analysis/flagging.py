@@ -2542,7 +2542,7 @@ def compute_cumulative_rainfall(
 
     # Load rainfall measurements within relevant time range
     rain_timestamps, rain_meas = load_rainfall(
-        times[0] - accumulation_time_s * 3600 - _TIME_BUFFER,
+        times[0] - accumulation_time_s - _TIME_BUFFER,
         times[-1] + _TIME_BUFFER,
         node_spoof,
     )
@@ -2569,6 +2569,13 @@ def compute_cumulative_rainfall(
     # that occurs after this time. This errs on the side of potentially
     # overestimating the cumulative rainfall at a given input time.
     time_timestamp_idx = np.searchsorted(rain_timestamps, times, side="left")
+    # If the rightmost value(s) of `times` are greater than `rain_timestamps`,
+    # `searchsorted` returns the last index + 1, which is out of bounds.
+    # If this is the case, assume that the last available rainfall value
+    # extends to times with no data
+    time_timestamp_idx[time_timestamp_idx >= len(rain_timestamps)] = (
+        len(rain_timestamps) - 1
+    )
     cumu_rainfall = cumu_rainfall[time_timestamp_idx]
 
     return cumu_rainfall
