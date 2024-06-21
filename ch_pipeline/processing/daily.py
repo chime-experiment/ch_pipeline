@@ -861,6 +861,9 @@ class DailyProcessing(base.ProcessingType):
         "padding": 0.02,
         # Minimum data coverage in order to process a day
         "required_coverage": 0.3,
+        # Weather files are usuall only produced once per day, so
+        # full coverage should generally be required
+        "weather_coverage": 1.0,
         # Whether to look for offline data and request it be brought online
         "include_offline_files": True,
         # Number of recent days to prioritize in queue
@@ -932,7 +935,8 @@ class DailyProcessing(base.ProcessingType):
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
         self._padding = self._revparams.get("padding", 0)
-        self._min_coverage = self._revparams.get("required_coverage", 0)
+        self._min_coverage = self._revparams.get("required_coverage", 0.0)
+        self._weather_coverage = self._revparams.get("weather_coverage", 1.0)
         self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
         self._include_offline_files = self._revparams.get(
             "include_offline_files", False
@@ -954,7 +958,10 @@ class DailyProcessing(base.ProcessingType):
         csds_sorted = sorted(csds)
         # Get a list of CSDS whose files are entirely available online
         csds_to_run = available_csds(
-            csds_sorted, pad=self._padding, required_coverage=self._min_coverage
+            csds_sorted,
+            pad=self._padding,
+            required_coverage=self._min_coverage,
+            weather_coverage=self._weather_coverage,
         )
 
         tags = [f"{csd:.0f}" for csd in csds if csd in csds_to_run]
@@ -1170,7 +1177,12 @@ def files_in_timespan(start, end, file_times):
     return available, len(file_times) - 1
 
 
-def available_csds(csds: list, pad: float = 0.0, required_coverage: float = 0.0) -> set:
+def available_csds(
+    csds: list,
+    pad: float = 0.0,
+    required_coverage: float = 0.0,
+    weather_coverage: float = 1.0,
+) -> set:
     """Return the subset of csds in `csds` for whom all files are online.
 
     Parameters
@@ -1187,6 +1199,10 @@ def available_csds(csds: list, pad: float = 0.0, required_coverage: float = 0.0)
       would indicate that all the data must be available.
       Even if all files are online, if the data coverage is less than this
       fraction, the day shouldn't be processed.
+    weather_coverage
+        What fraction of the day must have weather coverage. Generally,
+        weather files are only produced once per day, so this should be
+        set to 1.0 unless there are changes to data format.
 
     Returns
     -------
@@ -1203,9 +1219,9 @@ def available_csds(csds: list, pad: float = 0.0, required_coverage: float = 0.0)
         csds[0] - pad, csds[-1] + pad
     )
 
-    def _available(filenames_online, filenames_that_exist):
+    def _available(filenames_online, filenames_that_exist, coverage):
         available = set()
-        coverage_ = required_coverage * 86400
+        coverage = coverage * 86400
 
         for csd in csds:
             start_time = ephemeris.csd_to_unix(csd - pad)
@@ -1228,7 +1244,7 @@ def available_csds(csds: list, pad: float = 0.0, required_coverage: float = 0.0)
                 for tr in online:
                     time_range += tr[2] - tr[1]
 
-                if time_range > coverage_:
+                if time_range > coverage:
                     available.add(csd)
 
             # The final file in the span may contain more than one sidereal day
@@ -1240,8 +1256,8 @@ def available_csds(csds: list, pad: float = 0.0, required_coverage: float = 0.0)
 
         return available
 
-    corr_available = _available(corr_online, corr_that_exist)
-    weather_available = _available(weather_online, weather_that_exist)
+    corr_available = _available(corr_online, corr_that_exist, required_coverage)
+    weather_available = _available(weather_online, weather_that_exist, weather_coverage)
 
     return corr_available & weather_available
 
