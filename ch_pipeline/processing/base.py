@@ -442,13 +442,9 @@ class ProcessingType(object):
                 re.compile(r"ValueError(.*?)infs(.*?)NaNs"),
             ],
             # Find out of memory errors
-            "out_of_memory": [
-                re.compile(r"numpy.core._exceptions._ArrayMemoryError(.*?)MPI_ABORT")
-            ],
+            "out_of_memory": [re.compile(r"numpy.core._exceptions._ArrayMemoryError")],
             # Error connecting to chimedb database
-            "chimedb_error": [
-                re.compile(r"chimedb.core.exceptions.ConnectionError(.*?)MPI_ABORT")
-            ],
+            "chimedb_error": [re.compile(r"chimedb.core.exceptions.ConnectionError")],
             # Find crashes due to job timeout
             "time_limit": [
                 re.compile(r"slurmstepd: error:(.*?)CANCELLED(.*?)TIME LIMIT"),
