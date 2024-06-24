@@ -629,16 +629,21 @@ def classify_failed(
         if not file.is_file():
             continue
         # Get the end of the file. Assume an average of 100 characters
-        # per line, so get around 300 lines.
+        # per line.
         with open(file, "rb") as f:
             try:
                 f.seek(-300 * 100, os.SEEK_END)
             except OSError:
+                # Assume that this is just a small log file, so read
+                # the entire thing
+                pass
+
+            try:
+                tail = f.read().decode()
+            except OSError:
                 # There was an issue reading the log file, so just assume
                 # that there's nothing there and classify this tag accordingly
                 tail = " "
-            else:
-                tail = f.read().decode()
 
         # See if any of the patterns that we are looking for
         # exist in the stdout
