@@ -546,16 +546,18 @@ class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
 class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
     """Container for holding results of blind search."""
 
+    _axes = ("width",)
+
     _dataset_spec = {
-        "max_snr": {
-            "axes": ["beam_ew", "el", "ra", "freq"],
+        "ln_lambda": {
+            "axes": ["width", "beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
         },
-        "best_width": {
-            "axes": ["beam_ew", "el", "ra", "freq"],
+        "amplitude": {
+            "axes": ["width", "beam_ew", "el", "ra", "freq"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
@@ -564,11 +566,11 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
     }
 
     @property
-    def max_snr(self):
-        """Get the dataset of maximum SNR over template widths."""
-        return self.datasets["max_snr"]
+    def ln_lambda(self):
+        """The log-likelihood-ratio dataset."""
+        return self.datasets["ln_lambda"]
 
     @property
-    def best_width(self):
-        """Get the dataset of the template width corresponding to the maximum SNR."""
-        return self.datasets["best_width"]
+    def amplitude(self):
+        """The absorption-feature-amplitude dataset."""
+        return self.datasets["amplitude"]
