@@ -457,10 +457,17 @@ class HFBOnOffDifference(task.SingleTask):
         out : HFBHighResRingMap
             Container with HFB data and weights; the result of the on-off differencing.
         """
+        stream.redistribute("el")
 
         # Load data and weights
         data = stream.hfb[:]
         weight = stream.weight[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
         ra = stream.ra[:]
         nra = len(ra)
         # Create a 1D kernel to select off-source data.
