@@ -625,25 +625,32 @@ def classify_failed(
     failed = {k: [] for k in list(patterns.keys())}
 
     for tag in tags:
-        file = Path(dir) / tag / "job" / "jobout.log"
-        if not file.is_file():
-            continue
-        # Get the end of the file. Assume an average of 100 characters
-        # per line.
-        with open(file, "rb") as f:
-            try:
-                f.seek(-300 * 100, os.SEEK_END)
-            except OSError:
-                # Assume that this is just a small log file, so read
-                # the entire thing
-                pass
+        fpath = Path(dir) / tag / "job"
+        # Look at the job file first, but also check any slurm-generated
+        # output files
+        files = [fpath / "jobout.log", *fpath.glob("slurm*")]
 
-            try:
-                tail = f.read().decode()
-            except OSError:
-                # There was an issue reading the log file, so just assume
-                # that there's nothing there and classify this tag accordingly
-                tail = " "
+        tail = "\n"
+
+        for file in files:
+            if not file.is_file():
+                continue
+            # Get the end of the file. Assume an average of 100 characters
+            # per line.
+            with open(file, "rb") as f:
+                try:
+                    f.seek(-300 * 100, os.SEEK_END)
+                except OSError:
+                    # Assume that this is just a small file, so read
+                    # the entire thing
+                    pass
+
+                try:
+                    tail += f.read().decode() + "\n"
+                except OSError:
+                    # There was an issue reading the file, so just assume
+                    # that there's nothing there and classify this tag accordingly
+                    pass
 
         # See if any of the patterns that we are looking for
         # exist in the stdout
