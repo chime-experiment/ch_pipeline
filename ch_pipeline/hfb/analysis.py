@@ -4,6 +4,7 @@
 import numpy as np
 
 from scipy.interpolate import interp1d
+from scipy.signal import convolve
 
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
@@ -1429,4 +1430,98 @@ class HFBMedianSubtraction(task.SingleTask):
         out.hfb[:] = diff
         out.weight[:] = weight
 
+        return out
+
+
+class HFBSearch(task.SingleTask):
+    """Search spectra for absorption lines.
+
+
+
+    Attributes
+    ----------
+
+    """
+
+    length = config.Property(proptype=int, default=None)
+    std = config.Property(proptype=float, default=None)
+
+    def setup(self):
+        """Gaussian template centred at zero"""
+        half_length = int(self.length / 2)
+        n = np.arange(-1 * half_length, half_length)
+        self.template = -1 * np.exp(-((n) ** 2) / 2 * (self.std) ** 2)
+
+    def process(self, stream):
+        """Signal to noise ratio at every single frequency for each spectrum.
+
+        Parameters
+        ----------
+        stream : HFBData, HFBHighResData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBSearchResult
+            Signal to noise ratio.
+        """
+        # Load data and weights
+        weight = stream.weight[:].local_array
+        data = stream.hfb[:].local_array
+        weighted_data = data * weight
+
+        # Extract axes lengths
+        nbeam, nel, nra, _ = stream.hfb.shape
+
+        # Signal to noise ratio array
+        SN = np.zeros(stream.hfb.shape)
+        # Half length of the template
+        hl = int(self.length / 2)
+
+        # Signal to noise ratio for each spectrum. nbeam is number of EW beams.
+        for ibeam in range(nbeam):
+            for iel in range(nel):
+                for ira in range(nra):
+                    # Sums
+                    sum_data = np.sum(weighted_data[ibeam, iel, ira, :])
+                    sum_weight = np.sum(weight[ibeam, iel, ira, :])
+                    inv_sum_weight = tools.invert_no_zero(sum_weight)
+                    # Convolutions
+                    template_data = convolve(
+                        self.template,
+                        weighted_data[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
+                    )
+                    template_weight = convolve(
+                        self.template,
+                        weight[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
+                    )
+                    template2_weight = convolve(
+                        self.template**2,
+                        weight[ibeam, iel, ira, :],
+                        "full",
+                        method="direct",
+                    )
+                    # Amplitude A
+                    num = template_data - sum_data * inv_sum_weight * template_weight
+                    denom = template2_weight - (template_weight) ** 2 * inv_sum_weight
+                    A = num * tools.invert_no_zero(denom)
+                    # Signal to noise ratio, Lambda
+                    c1 = sum_data * inv_sum_weight
+                    c2 = (
+                        sum_data * inv_sum_weight - A * template_weight * inv_sum_weight
+                    )
+                    Lambda = (
+                        (c1**2 - c2**2) * (sum_weight)
+                        - 2 * (c1 - c2) * (sum_data)
+                        - (A**2 * template2_weight)
+                        - 2 * A * c2 * (template_weight)
+                        + 2 * A * template_data
+                    )
+                    SN[ibeam, iel, ira, :] = Lambda[hl - 1 : -hl]
+        out = containers.HFBSearchResult(axes_from=stream, attrs_from=stream)
+        out.max_snr[:] = SN[:]
         return out
