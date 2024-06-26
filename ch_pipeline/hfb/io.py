@@ -293,9 +293,9 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
             cont = rd.read()
         else:
             kwargs = {}
-            if self.freq_sel:
+            if self.freq_sel is not None:
                 kwargs["freq_sel"] = self.freq_sel
-            if self.beam_sel:
+            if self.beam_sel is not None:
                 kwargs["beam_sel"] = self.beam_sel
 
             cont = HFBData.from_file(files[0], distributed=self.distributed, **kwargs)
