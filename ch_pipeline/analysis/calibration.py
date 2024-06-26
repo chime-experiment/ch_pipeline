@@ -26,6 +26,9 @@ from ch_util import cal_utils
 from draco.core import task, containers
 from draco.util import _fast_tools
 
+from beam_model.composite import FutureMostAccurateCompositeBeamModel
+from beam_model.utils import get_position_from_equatorial
+
 from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
@@ -3029,3 +3032,104 @@ def _calculate_uv(freq, prod, inputmap):
     uv = dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
 
     return uv
+
+
+class HFBCalibration(task.SingleTask):
+    """Calculate calibration factor (Jy/raw) for HFB data.
+
+    Attributes
+    ----------
+    source : str
+        Name of the source (same format as `ephemeris.source_dictionary`).
+    trans_time : float
+        Unix time of calibrator transit
+    """
+
+    source = config.Property(proptype=str, default=None)
+    ttrans = config.Property(proptype=float, default=None)
+
+    def setup(self):
+
+        # Choose beam model
+        self.beam_mdl = FutureMostAccurateCompositeBeamModel(interpolate_bad_freq=True)
+
+        # Grid of beam numbers
+        beam_ind = np.concatenate((np.arange(0, 256),
+                                   np.arange(1000, 1256),
+                                   np.arange(2000, 2256),
+                                   np.arange(3000, 3256)))
+
+        # Frequency (in MHz) at which to find closest NS beam
+        freq = 600.
+
+        # Find beam positions and widths
+        self.beams_xy = self.beam_mdl.get_beam_positions(beam_ind, freq).squeeze()
+
+    def process(self, data):
+        """Add calibration factor attribute to container.
+
+        Parameters
+        ----------
+        data : containers.HFBData
+            Container covering the calibrator transit.
+
+        Returns
+        -------
+        data : containers.HFBData
+            Container covering the calibrator transit, now with `calfac` attribute.
+        """
+
+        # Determine source name and transit time.
+        # If not provided as config property, then check data attributes.
+        source_name = self.source or data.attrs.get("source_name", None)
+        transit_time = self.ttrans or data.attrs.get("transit_time", None)
+        if source_name is None or transit_time is None:
+            raise ValueError(
+                "The source name and transit time must be specified as "
+                "configuration properties or added to input container "
+                "attributes by an earlier task."
+            )
+
+        # Find time index of time closest to transit time and corresponding time
+        itt = np.abs(data.time - transit_time).argmin()
+        t_closest = data.time[itt]
+
+        # Obtain coordinates of calibration source at transit time
+        source_obj = ephemeris.source_dictionary[source_name]
+        src_ra, src_dec = ephemeris.object_coords(source_obj, date=t_closest, deg=True)
+
+        # Get telescope x, y coords of calibration source at transit time
+        cal_xy = get_position_from_equatorial(src_ra, src_dec, t_closest)
+
+        # Find NS beam number of beam closest to calibration source
+        ib_ns = np.abs(self.beams_xy[256:512, 1] - cal_xy[1]).argmin()
+
+        # Dynamic spectrum, i.e., light curve for each frequency
+        ds = np.median(data.hfb[:, :, ib_ns + 256, :], axis=1)
+
+        # Raw at transit time
+        raw = ds[:, itt]
+
+        # Take minimum in raw light curve to be the sky background
+        sky = np.min(ds, axis=1)
+
+        # Sky subtraction
+        sky_subt = raw - sky
+
+        # Get sensitivity of beam at transit time
+        beam_sens = self.beam_mdl.get_sensitivity(ib_ns + 1000,
+                                                  np.array([cal_xy]),
+                                                  data.freq).squeeze()
+
+        # Correction for beam sensitivity
+        cor = sky_subt / beam_sens
+
+        # Extract flux density of the source (Jy)
+        flux_density = fluxcat.FluxCatalog[source_name].predict_flux(data.freq)
+
+        # Compute calibration factor (Jy / raw units)
+        calfac = flux_density / cor
+
+        data.attrs["calfac"] = calfac
+
+        return data
