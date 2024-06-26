@@ -438,6 +438,14 @@ class HFBOnOffDifference(task.SingleTask):
 
     Used for flattening sub-frequency band shape by differencing on-source and
     off-source data.
+
+    Attributes
+    ----------
+    offset : int
+        Number of samples on either side of the on-source sample to be ignored.
+    nsamples : int
+        Number of off-source samples on either side of the on-source sample to
+        be averaged.
     """
 
     offset = config.Property(proptype=int, default=5)
