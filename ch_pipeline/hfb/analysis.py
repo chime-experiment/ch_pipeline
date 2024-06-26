@@ -438,6 +438,14 @@ class HFBOnOffDifference(task.SingleTask):
 
     Used for flattening sub-frequency band shape by differencing on-source and
     off-source data.
+
+    Attributes
+    ----------
+    offset : int
+        Number of samples on either side of the on-source sample to be ignored.
+    nsamples : int
+        Number of off-source samples on either side of the on-source sample to
+        be averaged.
     """
 
     offset = config.Property(proptype=int, default=5)
@@ -457,10 +465,17 @@ class HFBOnOffDifference(task.SingleTask):
         out : HFBHighResRingMap
             Container with HFB data and weights; the result of the on-off differencing.
         """
+        stream.redistribute("el")
 
         # Load data and weights
         data = stream.hfb[:]
         weight = stream.weight[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
         ra = stream.ra[:]
         nra = len(ra)
         # Create a 1D kernel to select off-source data.
