@@ -1,16 +1,27 @@
+"""Chime Daily Pipeline processing type.
+
+This processing type is used to run the Chime daily pipeline.
+
+Classes
+=======
+- :py:class:`DailyProcessing`
+- :py:class:`TestDailyProcessing`
+"""
+
+import logging
 import math
-import numpy as np
 from datetime import datetime
-import peewee as pw
+from typing import ClassVar
 
 import chimedb.core as db
 import chimedb.data_index as di
 import chimedb.dataflag as df
-from ch_util import ephemeris
+import numpy as np
+import peewee as pw
 from caput.tools import unique_ordered
-from ch_pipeline.processing import base
+from ch_util import ephemeris
 
-import logging
+from ch_pipeline.processing import base
 
 logger = logging.getLogger(__name__)
 
@@ -795,13 +806,17 @@ pipeline:
 
 
 class DailyProcessing(base.ProcessingType):
-    """ """
+    """Chime daily processing pipeline processing type.
+
+    Processes individual chimestack files into one CSD in RA, along with
+    ringmaps and other data products.
+    """
 
     type_name = "daily"
     tag_pattern = r"\d+"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         # Time range(s) to process
         "intervals": [
             # Two short two-day intervals either side of the caltime change
@@ -912,7 +927,7 @@ class DailyProcessing(base.ProcessingType):
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove chimestack files before this CSD
-    daemon_config = {"keep_online": {"start": "CSD1800", "end": "CSD2650"}}
+    daemon_config: ClassVar = {"keep_online": {"start": "CSD1800", "end": "CSD2650"}}
 
     def _create_hook(self):
         """Produce a list of bad days based on the following criteria."""
@@ -964,20 +979,17 @@ class DailyProcessing(base.ProcessingType):
             weather_coverage=self._weather_coverage,
         )
 
-        tags = [f"{csd:.0f}" for csd in csds if csd in csds_to_run]
-
-        return tags
+        return [f"{csd:.0f}" for csd in csds if csd in csds_to_run]
 
     @property
     def _all_tags(self) -> list:
         """Return all tags desired from the config."""
         return unique_ordered(
-            (csd for i in self._intervals for csd in expand_csd_range(*i))
+            csd for i in self._intervals for csd in expand_csd_range(*i)
         )
 
     def _finalise_jobparams(self, tag, jobparams):
         """Set bounds for this CSD."""
-
         csd = float(tag)
         jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
 
@@ -989,7 +1001,6 @@ class DailyProcessing(base.ProcessingType):
         This includes requesting that soon-to-be needed files get brought
         online, and that files that are no longer needed be moved offline.
         """
-
         nfiles = {"nretrieve": 0, "nclear": 0}
 
         if not self._include_offline_files:
@@ -1032,7 +1043,8 @@ class DailyProcessing(base.ProcessingType):
                 *rev_stats["pending"],
                 *rev_stats["failed"],
                 *rev_stats["not_yet_submitted"],
-            ] + list(expand_csd_range(*self.daemon_config["keep_online"].values()))
+                *expand_csd_range(*self.daemon_config["keep_online"].values()),
+            ]
             exclude_tags = sorted([int(tag) for tag in exclude_tags])
             if remove_request_tags:
                 # Submit the request to remove these files
@@ -1104,7 +1116,7 @@ class TestDailyProcessing(DailyProcessing):
 
 
 def expand_csd_range(start, end, step=1):
-    """Get the CSDs within a time range.
+    r"""Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
@@ -1117,12 +1129,13 @@ def expand_csd_range(start, end, step=1):
     end : str or parseable to datetime
         End of interval. If `None` use now. Note that for CSD intervals the
         end is *inclusive* (unlike a `range`).
+    step : int
+        step size to use when traversing interval
 
     Returns
     -------
     csds : list of ints
     """
-
     if start is None:
         start_csd = 0
     if start.startswith("CSD"):
@@ -1139,8 +1152,7 @@ def expand_csd_range(start, end, step=1):
         end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
         end_csd = math.ceil(end_csd)
 
-    csds = [day for day in range(start_csd, end_csd + 1, step)]
-    return csds
+    return list(range(start_csd, end_csd + 1, step))
 
 
 def files_in_timespan(start, end, file_times):
@@ -1209,7 +1221,6 @@ def available_csds(
     available
         set of all available csds
     """
-
     # Figure out which files exist online and which ones exist entirely
     # Repeat the process for corr data and weather data
     corr_online, corr_that_exist = db_get_corr_files_in_range(
@@ -1318,11 +1329,11 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
     online_node = di.StorageNode.get(name="cedar_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
-    files_online = sorted([t for t in files_online.tuples()], key=lambda x: x[1])
+    files_online = sorted(files_online.tuples(), key=lambda x: x[1])
     # files_that_exist might contain the same file multiple files
     # if it exists in multiple locations (nearline, online, gossec, etc)
     # we only want to include it once, so we initially create a set
-    files_that_exist = sorted({t for t in archive_files.tuples()}, key=lambda x: x[1])
+    files_that_exist = sorted(set(archive_files.tuples()), key=lambda x: x[1])
 
     return files_online, files_that_exist
 
@@ -1380,11 +1391,11 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
     online_node = di.StorageNode.get(name="cedar_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
-    files_online = sorted([t for t in files_online.tuples()], key=lambda x: x[1])
+    files_online = sorted(files_online.tuples(), key=lambda x: x[1])
     # files_that_exist might contain the same file multiple files
     # if it exists in multiple locations (nearline, online, gossec, etc)
     # we only want to include it once, so we initially create a set
-    files_that_exist = sorted({t for t in archive_files.tuples()}, key=lambda x: x[1])
+    files_that_exist = sorted(set(archive_files.tuples()), key=lambda x: x[1])
 
     return files_online, files_that_exist
 

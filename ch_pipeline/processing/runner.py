@@ -1,19 +1,19 @@
-from datetime import datetime
-import logging
+"""Mini daemon for running pipeline jobs."""
+
+import asyncio
+import atexit
 import getpass
 import json
-from functools import partial, lru_cache
-from pathlib import Path
-import atexit
-import asyncio
+import logging
 import traceback
-
-from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
+from functools import lru_cache, partial
+from pathlib import Path
 
 import chimedb.core as db
+from apscheduler.schedulers.background import BackgroundScheduler
 
-from ch_pipeline.processing import base
-from ch_pipeline.processing import client
+from ch_pipeline.processing import base, client
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +43,6 @@ def _format_revision(revision: base.ProcessingType):
 
 def setup(revision: base.ProcessingType, config: dict = {}):
     """Set up a revision and update the global config."""
-
     # Check the socket. If it already exists, assume that the
     # pipeline service is running and we just have to submit
     # another job to it. Otherwise, set up the server
@@ -155,8 +154,8 @@ class _AsyncServer:
 
         Parameters
         ----------
-        socket
-            path to the unix socket as a `pathlib.Path` object
+        revision
+            revision (given as <type>:<rev>) for which to run a server.
 
         Returns
         -------
@@ -222,7 +221,7 @@ class _AsyncServer:
                 # Get whatever is set at this route
                 try:
                     ret = await func(request["data"])
-                except:
+                except:  # noqa: E722
                     response["result"] = False
                     response["msg"] = traceback.format_exc()
                 else:
@@ -315,7 +314,7 @@ class _AsyncServer:
         response = response.decode("utf-8")
         try:
             response = json.loads(response)
-        except Exception:
+        except Exception:  # noqa: BLE001
             response = None
 
         return response
@@ -387,7 +386,6 @@ async def metrics(request: dict):
 @SERVER.route("/add")
 async def add_job(request: dict):
     """Add a processing job to the pipeline runner."""
-
     revision_name = request.get("revision")
     config = request.get("config", {})
 
@@ -444,7 +442,6 @@ def _run_pipeline(revision):
 @db.atomic
 def _generate(revision):
     """Submit some jobs to the queue."""
-
     revision_name = _format_revision(revision)
 
     fs = base.slurm_fairshare("rpp-chime_cpu")
@@ -475,7 +472,7 @@ def _generate(revision):
         )
         priority_only = True
 
-    number_in_queue, number_running = [len(l) for l in revision.queued()]
+    number_in_queue, number_running = (len(l) for l in revision.queued())
     number_to_submit = max(
         GLOBAL_CONFIG[revision_name]["max_jobs_number"]
         - number_in_queue
@@ -496,14 +493,12 @@ def _generate(revision):
 @db.atomic
 def _update_files(revision, *args, **kwargs):
     """Run the file update method for a revision."""
-
     kwargs.update({"user": GLOBAL_CONFIG["user"]})
     revision.update_files(*args, **kwargs)
 
 
 def _check_finished(revision):
     """Check if this revision is finished."""
-
     revision_name = _format_revision(revision)
 
     if GLOBAL_CONFIG[revision_name]["run_indefinitely"]:
