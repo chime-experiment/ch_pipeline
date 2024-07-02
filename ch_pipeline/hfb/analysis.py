@@ -672,6 +672,7 @@ class HFBStackDays(task.SingleTask):
 
         return self.stack
 
+
 class HFBSearch(task.SingleTask):
     """Search spectra for absorption lines.
 
@@ -682,7 +683,7 @@ class HFBSearch(task.SingleTask):
     width: List of the width of templates.
     """
 
-    width = config.Property(proptype=list, default=None) 
+    width = config.Property(proptype=list, default=None)
 
     def process(self, stream):
         """Ln(Lambda) and amplitudes at every single frequency for each spectrum.
@@ -710,9 +711,8 @@ class HFBSearch(task.SingleTask):
             ns_beam = ns_beam[local_ns]
             data = data.local_array
             weight = weight.local_array
-        
+
         freq = stream.freq[:]
-        
 
         freq_centre = freq[64::128]
         # Weighted data
@@ -720,29 +720,24 @@ class HFBSearch(task.SingleTask):
 
         # Extract axes lengths
         nEW, nbeam, nra, nfreq = data.shape
-        #number of templates
+        # number of templates
         ntemplate = len(self.width)
 
         # Ln(lambda) and amplitude arrays
         shape = tuple([ntemplate, nEW, nbeam, nra, nfreq])
         SN = np.zeros(shape)
         amp = np.zeros(shape)
-    
-        
+
         chime_nfreq = int(nfreq / 128)
         # Signal to noise ratio for each spectrum. nbeam is number of EW beams.
         for ibeam, ns in enumerate(ns_beam):
             for iwidth, std in enumerate(self.width):
                 # Find jumping frequencies
                 y = mdl.get_beam_positions(ns, freq_centre).squeeze()[:, 1]
-                freq_chunks = np.where(np.abs(y[1:]-y[:-1])>0.1)[0]
+                freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
                 freq_chunks = np.append(freq_chunks, chime_nfreq)
                 channel_i = 0
-                for (
-                    channel_f
-                ) in (
-                    freq_chunks
-                ):  
+                for channel_f in freq_chunks:
                     if channel_f != chime_nfreq:
                         channel_f = channel_f + 1
                     else:
@@ -753,36 +748,41 @@ class HFBSearch(task.SingleTask):
                     l = int(nfreq * 128)
                     n = np.arange(-l, l + 1)
                     x = np.arange(0, l)
-                    t = self.template(n, std) 
+                    t = self.template(n, std)
                     for iEW in range(nEW):
                         for ira in range(nra):
-                            sel_weighted_data = weighted_data[iEW, ibeam, ira, 128 * channel_i : 128 * channel_f]
-                            sel_weight = weight[iEW, ibeam, ira, 128 * channel_i : 128 * channel_f]
-                            
-                            #sums
+                            sel_weighted_data = weighted_data[
+                                iEW, ibeam, ira, 128 * channel_i : 128 * channel_f
+                            ]
+                            sel_weight = weight[
+                                iEW, ibeam, ira, 128 * channel_i : 128 * channel_f
+                            ]
+
+                            # sums
                             sum_weight = np.sum(sel_weight)
 
                             if (
                                 sum_weight == 0
                             ):  # If all the weights are zero, determinent vanishes which returns singular matrix error
-                                SN[iwidth, iEW, ibeam, ira, 128 * channel_i : 128 * channel_f] = 0
-                                amp[iwidth, iEW, ibeam, ira, 128 * channel_i : 128 * channel_f] = 0
+                                SN[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = 0
+                                amp[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = 0
                             else:
-                                sum_data = np.sum(
-                                    sel_weighted_data
-                                )
-                                sum_xdata = np.sum(
-                                    x
-                                    * sel_weighted_data
-                                )
-                                sum_xweight = np.sum(
-                                    x
-                                    * sel_weight
-                                )
-                                sum_x2weight = np.sum(
-                                    (x**2)
-                                    * sel_weight
-                                )
+                                sum_data = np.sum(sel_weighted_data)
+                                sum_xdata = np.sum(x * sel_weighted_data)
+                                sum_xweight = np.sum(x * sel_weight)
+                                sum_x2weight = np.sum((x**2) * sel_weight)
 
                                 # Convolutions
                                 template_data = convolve(
@@ -832,7 +832,9 @@ class HFBSearch(task.SingleTask):
 
                                 num = np.zeros((3, 1, nfreq * 128))
                                 num[0, 0, :] = sum_data  # This is sum of weighted data
-                                num[1, 0, :] = sum_xdata  # This is sum of x*weighted data
+                                num[1, 0, :] = (
+                                    sum_xdata  # This is sum of x*weighted data
+                                )
                                 num[2, 0, :] = template_data
 
                                 p = np.sum(inv * num.transpose(1, 0, 2), axis=1)
@@ -881,21 +883,35 @@ class HFBSearch(task.SingleTask):
                                     - (b2 * c2 - b1 * c1) * (sum_xweight)
                                     - A * b2 * template_xweight
                                 )
-                                SN[iwidth, iEW, ibeam, ira, 128 * channel_i : 128 * channel_f] = Lambda
-                                amp[iwidth, iEW, ibeam, ira, 128 * channel_i : 128 * channel_f] = A
-                                
+                                SN[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = Lambda
+                                amp[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = A
+
                     channel_i = channel_f
 
-        #Create container to hold output
-        out = containers.HFBSearchResult(axes_from=stream, attrs_from=stream, width=np.asarray(self.width))
+        # Create container to hold output
+        out = containers.HFBSearchResult(
+            axes_from=stream, attrs_from=stream, width=np.asarray(self.width)
+        )
 
         ## Save ln(lambda) and amplitudes to output container
         out.ln_lambda[:] = SN[:]
         out.amplitude[:] = amp[:]
-        
+
         return out
 
-    def template(self,n,std):
+    def template(self, n, std):
         """Gaussian template centred at zero
 
         Parameters
@@ -903,8 +919,9 @@ class HFBSearch(task.SingleTask):
         n : Length of the template
         std: Standard deviation of the gaussian template
         """
-        t = np.exp(-(n ** 2) / (2 * std ** 2))
+        t = np.exp(-(n**2) / (2 * std**2))
         return t
+
 
 class HFBSelectTransit(task.SingleTask):
     """Find transit data through FRB beams.
