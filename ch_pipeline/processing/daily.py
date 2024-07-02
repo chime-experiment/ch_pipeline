@@ -1014,6 +1014,11 @@ class DailyProcessing(base.ProcessingType):
                 *rev_stats["failed"],
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
+            # Prioritize recent days to ensure that data is available
+            today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
+            all_tags = [
+                tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
+            ]
             # Search the next 20 tags and request any that we may want to be brought online.
             online_request_tags = sorted(
                 [int(tag) for tag in all_tags[:20] if tag not in upcoming]
