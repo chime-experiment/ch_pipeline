@@ -543,7 +543,7 @@ class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
     }
 
 
-class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
+class HFBSearchResult(HFBBeamRingMap, HFBHighResContainer):
     """Container for holding results of blind search."""
 
     _axes = ("width",)
