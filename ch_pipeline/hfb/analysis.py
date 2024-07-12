@@ -674,7 +674,7 @@ class HFBStackDays(task.SingleTask):
 
 
 class HFBSearchLinear(task.SingleTask):
-    """Search spectra for absorption lines using 
+    """Search spectra for absorption lines using
        a matched-filter with a linear model.
 
 
@@ -699,7 +699,7 @@ class HFBSearchLinear(task.SingleTask):
         out : containers.HFBSearchResult
             Ln(likelihood ratio) and amplitudes.
         """
-        
+
         # Load on-off differenced data and weights
         weight = stream.weight[:]
         data = stream.hfb[:]
@@ -736,10 +736,10 @@ class HFBSearchLinear(task.SingleTask):
                 # Frequency chunks
                 freq_chunks = self.split(ns, freq_centre, chime_nfreq)
 
-                for ichannel in range(len(freq_chunks)-1):
+                for ichannel in range(len(freq_chunks) - 1):
 
                     channel_i = freq_chunks[ichannel]
-                    channel_f = freq_chunks[ichannel+1]
+                    channel_f = freq_chunks[ichannel + 1]
 
                     nfreq = channel_f - channel_i
 
@@ -933,24 +933,24 @@ class HFBSearchLinear(task.SingleTask):
         """
 
         mdl = FFTFormedActualBeamModel()
-        #Find jumps due to clamping
+        # Find jumps due to clamping
         y = mdl.get_beam_positions(beam, freq_centre).squeeze()[:, 1]
         freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
-        #Make the frequency chunks: beginning index of the intervals
-        freq_chunks = np.append(0,freq_chunks+1)
-        freq_chunks = np.append(freq_chunks,chime_nfreq)
-        #If the length of frequency chunk is greater than 8, split it such 
-        # that the interval length is at most 8 coarse channels. 
+        # Make the frequency chunks: beginning index of the intervals
+        freq_chunks = np.append(0, freq_chunks + 1)
+        freq_chunks = np.append(freq_chunks, chime_nfreq)
+        # If the length of frequency chunk is greater than 8, split it such
+        # that the interval length is at most 8 coarse channels.
         B = []
-        for i in range(len(freq_chunks)-1):
-            B.append(np.arange(freq_chunks[i],freq_chunks[i+1]))
+        for i in range(len(freq_chunks) - 1):
+            B.append(np.arange(freq_chunks[i], freq_chunks[i + 1]))
         B = np.asarray(B)
         D = []
 
-        for i,item in enumerate(B):
-            delta = int(item.shape[0]/8)
-            split_points = [8*(i+1) for i in range(delta)]
-            C = np.split(B[i],split_points)
+        for i, item in enumerate(B):
+            delta = int(item.shape[0] / 8)
+            split_points = [8 * (i + 1) for i in range(delta)]
+            C = np.split(B[i], split_points)
             non_empty_arrays = [arr for arr in C if arr.size > 0]
             for i in range(len(non_empty_arrays)):
                 D.append(non_empty_arrays[i][0])
@@ -961,7 +961,7 @@ class HFBSearchLinear(task.SingleTask):
 
 
 class HFBSearchQuadratic(task.SingleTask):
-    """Search spectra for absorption lines using 
+    """Search spectra for absorption lines using
        a matched-filter with a model up to quadratic term.
 
 
@@ -973,7 +973,7 @@ class HFBSearchQuadratic(task.SingleTask):
     width = config.Property(proptype=list, default=None)
 
     def process(self, stream):
-        """ Estimating Ln(likelihood ratio) and amplitudes
+        """Estimating Ln(likelihood ratio) and amplitudes
         at every single frequency for each line of sight
 
         Parameters
@@ -986,7 +986,7 @@ class HFBSearchQuadratic(task.SingleTask):
         out : containers.HFBSearchResult
             Ln(likelihood ratio) and amplitudes.
         """
-        
+
         # Load on-off differenced data and weights
         weight = stream.weight[:]
         data = stream.hfb[:]
@@ -1023,10 +1023,10 @@ class HFBSearchQuadratic(task.SingleTask):
                 # Frequency chunks
                 freq_chunks = self.split(ns, freq_centre, chime_nfreq)
 
-                for ichannel in range(len(freq_chunks)-1):
-                    
+                for ichannel in range(len(freq_chunks) - 1):
+
                     channel_i = freq_chunks[ichannel]
-                    channel_f = freq_chunks[ichannel+1]
+                    channel_f = freq_chunks[ichannel + 1]
 
                     nfreq = channel_f - channel_i
 
@@ -1105,7 +1105,6 @@ class HFBSearchQuadratic(task.SingleTask):
                                     method="fft",
                                 )[l:-l]
 
-
                                 ##Parameter estimation assuming there's signal (3 Parameters, A, b2, c2)
                                 denom = np.zeros((4, 4, nfreq * 128))
                                 denom[0, 0, :] = sum_weight
@@ -1151,7 +1150,7 @@ class HFBSearchQuadratic(task.SingleTask):
                                 # Slope b2:
                                 b2 = p[1, :]
                                 # Curvature m2:
-                                m2 = p[2, :] 
+                                m2 = p[2, :]
 
                                 # Parameter estimation assuming no signal (b1 and c1):
                                 # I don't need to find it as a function of frequency, because b1 and c1 are constant.
@@ -1164,7 +1163,7 @@ class HFBSearchQuadratic(task.SingleTask):
                                 denom[1, 0] = sum_xweight
                                 denom[1, 1] = sum_x2weight
                                 denom[1, 2] = sum_x3weight
-                                
+
                                 denom[2, 0] = sum_x2weight
                                 denom[2, 1] = sum_x3weight
                                 denom[2, 2] = sum_x4weight
@@ -1190,7 +1189,6 @@ class HFBSearchQuadratic(task.SingleTask):
                                 # Curvature m1:
                                 m1 = p[2, :]
 
-
                                 # Ln(Lambda)
                                 Lambda = (
                                     (c1**2 - c2**2) * (sum_weight * 0.5)
@@ -1204,11 +1202,11 @@ class HFBSearchQuadratic(task.SingleTask):
                                     - A * b2 * template_xweight
                                     - A * m2 * template_x2weight
                                     - (A**2 * template2_weight * 0.5)
-                                    + (m1*b1 - m2*b2) * (sum_x3weight)
-                                    + (m1*c1 - m2*c2) * (sum_x2weight)
-                                    + (b1*c1 - b2*c2) * (sum_xweight)   
+                                    + (m1 * b1 - m2 * b2) * (sum_x3weight)
+                                    + (m1 * c1 - m2 * c2) * (sum_x2weight)
+                                    + (b1 * c1 - b2 * c2) * (sum_xweight)
                                 )
-                                
+
                                 SN[
                                     iwidth,
                                     iEW,
@@ -1260,24 +1258,24 @@ class HFBSearchQuadratic(task.SingleTask):
         """
 
         mdl = FFTFormedActualBeamModel()
-        #Find jumps due to clamping
+        # Find jumps due to clamping
         y = mdl.get_beam_positions(beam, freq_centre).squeeze()[:, 1]
         freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
-        #Make the frequency chunks: beginning index of the intervals
-        freq_chunks = np.append(0,freq_chunks+1)
-        freq_chunks = np.append(freq_chunks,chime_nfreq)
-        #If the length of frequency chunk is greater than 8, split it such 
-        # that the interval length is at most 8 coarse channels. 
+        # Make the frequency chunks: beginning index of the intervals
+        freq_chunks = np.append(0, freq_chunks + 1)
+        freq_chunks = np.append(freq_chunks, chime_nfreq)
+        # If the length of frequency chunk is greater than 8, split it such
+        # that the interval length is at most 8 coarse channels.
         B = []
-        for i in range(len(freq_chunks)-1):
-            B.append(np.arange(freq_chunks[i],freq_chunks[i+1]))
+        for i in range(len(freq_chunks) - 1):
+            B.append(np.arange(freq_chunks[i], freq_chunks[i + 1]))
         B = np.asarray(B)
         D = []
 
-        for i,item in enumerate(B):
-            delta = int(item.shape[0]/8)
-            split_points = [8*(i+1) for i in range(delta)]
-            C = np.split(B[i],split_points)
+        for i, item in enumerate(B):
+            delta = int(item.shape[0] / 8)
+            split_points = [8 * (i + 1) for i in range(delta)]
+            C = np.split(B[i], split_points)
             non_empty_arrays = [arr for arr in C if arr.size > 0]
             for i in range(len(non_empty_arrays)):
                 D.append(non_empty_arrays[i][0])
