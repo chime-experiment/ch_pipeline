@@ -673,9 +673,9 @@ class HFBStackDays(task.SingleTask):
         return self.stack
 
 
-class HFBSearch(task.SingleTask):
-    """Search spectra for absorption lines.
-
+class HFBSearchLinear(task.SingleTask):
+    """Search spectra for absorption lines using 
+       a matched-filter with a linear model.
 
 
     Attributes
@@ -686,7 +686,8 @@ class HFBSearch(task.SingleTask):
     width = config.Property(proptype=list, default=None)
 
     def process(self, stream):
-        """Ln(Lambda) and amplitudes at every single frequency for each spectrum.
+        """Estimating Ln(likelihood ratio) and amplitudes
+        at every single frequency for each line of sight
 
         Parameters
         ----------
@@ -696,9 +697,9 @@ class HFBSearch(task.SingleTask):
         Returns
         -------
         out : containers.HFBSearchResult
-            Ln(Lambda) and amplitudes.
+            Ln(likelihood ratio) and amplitudes.
         """
-        mdl = FFTFormedActualBeamModel()
+        
         # Load on-off differenced data and weights
         weight = stream.weight[:]
         data = stream.hfb[:]
@@ -732,16 +733,14 @@ class HFBSearch(task.SingleTask):
         # Signal to noise ratio for each spectrum. nbeam is number of EW beams.
         for ibeam, ns in enumerate(ns_beam):
             for iwidth, std in enumerate(self.width):
-                # Find jumping frequencies
-                y = mdl.get_beam_positions(ns, freq_centre).squeeze()[:, 1]
-                freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
-                freq_chunks = np.append(freq_chunks, chime_nfreq)
-                channel_i = 0
-                for channel_f in freq_chunks:
-                    if channel_f != chime_nfreq:
-                        channel_f = channel_f + 1
-                    else:
-                        channel_f = channel_f
+                # Frequency chunks
+                freq_chunks = self.split(ns, freq_centre, chime_nfreq)
+
+                for ichannel in range(len(freq_chunks)-1):
+
+                    channel_i = freq_chunks[ichannel]
+                    channel_f = freq_chunks[ichannel+1]
+
                     nfreq = channel_f - channel_i
 
                     # length of the template (equal to the total length of frequency)
@@ -898,7 +897,332 @@ class HFBSearch(task.SingleTask):
                                     128 * channel_i : 128 * channel_f,
                                 ] = A
 
-                    channel_i = channel_f
+        # Create container to hold output
+        out = containers.HFBSearchResult(
+            axes_from=stream, attrs_from=stream, width=np.asarray(self.width)
+        )
+
+        ## Save ln(lambda) and amplitudes to output container
+        out.ln_lambda[:] = SN[:]
+        out.amplitude[:] = amp[:]
+
+        return out
+
+    def template(self, n, std):
+        """Gaussian template centred at zero
+
+        Parameters
+        ----------
+        n : Length of the template
+        std: Standard deviation of the gaussian template
+        """
+        t = np.exp(-(n**2) / (2 * std**2))
+        return t
+
+    def split(self, beam, freq_centre, chime_nfreq):
+        """Finds clamping frequencies. If the length of
+         clamping interval is greater than 8 coarse frequencies,
+         split the interval such that the interval length is at most 8.
+
+
+        Parameters
+        ----------
+        beam : North-South beam index
+        freq_centre: Frequency centre of coarse frequency channels in MHz.
+        chime_nfreq: Total number of coarse frequency channels
+        """
+
+        mdl = FFTFormedActualBeamModel()
+        #Find jumps due to clamping
+        y = mdl.get_beam_positions(beam, freq_centre).squeeze()[:, 1]
+        freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
+        #Make the frequency chunks: beginning index of the intervals
+        freq_chunks = np.append(0,freq_chunks+1)
+        freq_chunks = np.append(freq_chunks,chime_nfreq)
+        #If the length of frequency chunk is greater than 8, split it such 
+        # that the interval length is at most 8 coarse channels. 
+        B = []
+        for i in range(len(freq_chunks)-1):
+            B.append(np.arange(freq_chunks[i],freq_chunks[i+1]))
+        B = np.asarray(B)
+        D = []
+
+        for i,item in enumerate(B):
+            delta = int(item.shape[0]/8)
+            split_points = [8*(i+1) for i in range(delta)]
+            C = np.split(B[i],split_points)
+            non_empty_arrays = [arr for arr in C if arr.size > 0]
+            for i in range(len(non_empty_arrays)):
+                D.append(non_empty_arrays[i][0])
+        D.append(freq_chunks[-1])
+        D = np.asarray(D)
+
+        return D
+
+
+class HFBSearchQuadratic(task.SingleTask):
+    """Search spectra for absorption lines using 
+       a matched-filter with a model up to quadratic term.
+
+
+    Attributes
+    ----------
+    width: List of the width of templates.
+    """
+
+    width = config.Property(proptype=list, default=None)
+
+    def process(self, stream):
+        """ Estimating Ln(likelihood ratio) and amplitudes
+        at every single frequency for each line of sight
+
+        Parameters
+        ----------
+        stream : HFBHighResRingMap
+            Container with on-off difference data and weights.
+
+        Returns
+        -------
+        out : containers.HFBSearchResult
+            Ln(likelihood ratio) and amplitudes.
+        """
+        
+        # Load on-off differenced data and weights
+        weight = stream.weight[:]
+        data = stream.hfb[:]
+
+        ns_beam = stream.beam_ns[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            local_ns = data.local_bounds
+            ns_beam = ns_beam[local_ns]
+            data = data.local_array
+            weight = weight.local_array
+
+        freq = stream.freq[:]
+
+        freq_centre = freq[64::128]
+        # Weighted data
+        weighted_data = data[:] * weight[:]
+
+        # Extract axes lengths
+        nEW, nbeam, nra, nfreq = data.shape
+        # number of templates
+        ntemplate = len(self.width)
+
+        # Ln(lambda) and amplitude arrays
+        shape = tuple([ntemplate, nEW, nbeam, nra, nfreq])
+        SN = np.zeros(shape)
+        amp = np.zeros(shape)
+
+        chime_nfreq = int(nfreq / 128)
+        # Signal to noise ratio for each spectrum. nbeam is number of EW beams.
+        for ibeam, ns in enumerate(ns_beam):
+            for iwidth, std in enumerate(self.width):
+                # Frequency chunks
+                freq_chunks = self.split(ns, freq_centre, chime_nfreq)
+
+                for ichannel in range(len(freq_chunks)-1):
+                    
+                    channel_i = freq_chunks[ichannel]
+                    channel_f = freq_chunks[ichannel+1]
+
+                    nfreq = channel_f - channel_i
+
+                    # length of the template (equal to the total length of frequency)
+                    l = int(nfreq * 128)
+                    n = np.arange(-l, l + 1)
+                    x = np.arange(0, l)
+                    t = self.template(n, std)
+                    for iEW in range(nEW):
+                        for ira in range(nra):
+                            sel_weighted_data = weighted_data[
+                                iEW, ibeam, ira, 128 * channel_i : 128 * channel_f
+                            ]
+                            sel_weight = weight[
+                                iEW, ibeam, ira, 128 * channel_i : 128 * channel_f
+                            ]
+
+                            # sums
+                            sum_weight = np.sum(sel_weight)
+
+                            if (
+                                sum_weight == 0
+                            ):  # If all the weights are zero, determinent vanishes which returns singular matrix error
+                                SN[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = 0
+                                amp[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = 0
+                            else:
+                                sum_data = np.sum(sel_weighted_data)
+                                sum_xdata = np.sum(x * sel_weighted_data)
+                                sum_x2data = np.sum((x**2) * sel_weighted_data)
+                                sum_xweight = np.sum(x * sel_weight)
+                                sum_x2weight = np.sum((x**2) * sel_weight)
+                                sum_x3weight = np.sum((x**3) * sel_weight)
+                                sum_x4weight = np.sum((x**4) * sel_weight)
+
+                                # Convolutions
+                                template_data = convolve(
+                                    t,
+                                    sel_weighted_data,
+                                    "full",
+                                    method="fft",
+                                )[l:-l]
+                                template_weight = convolve(
+                                    t,
+                                    sel_weight,
+                                    "full",
+                                    method="fft",
+                                )[l:-l]
+                                template2_weight = convolve(
+                                    t**2,
+                                    sel_weight,
+                                    "full",
+                                    method="fft",
+                                )[l:-l]
+                                template_xweight = convolve(
+                                    t,
+                                    x * sel_weight,
+                                    "full",
+                                    method="fft",
+                                )[l:-l]
+                                template_x2weight = convolve(
+                                    t,
+                                    (x**2) * sel_weight,
+                                    "full",
+                                    method="fft",
+                                )[l:-l]
+
+
+                                ##Parameter estimation assuming there's signal (3 Parameters, A, b2, c2)
+                                denom = np.zeros((4, 4, nfreq * 128))
+                                denom[0, 0, :] = sum_weight
+                                denom[0, 1, :] = sum_xweight
+                                denom[0, 2, :] = sum_x2weight
+                                denom[0, 3, :] = template_weight
+
+                                denom[1, 0, :] = sum_xweight
+                                denom[1, 1, :] = sum_x2weight
+                                denom[1, 2, :] = sum_x3weight
+                                denom[1, 3, :] = template_xweight
+
+                                denom[2, 0, :] = sum_x2weight
+                                denom[2, 1, :] = sum_x3weight
+                                denom[2, 2, :] = sum_x4weight
+                                denom[2, 3, :] = template_x2weight
+
+                                denom[3, 0, :] = template_weight
+                                denom[3, 1, :] = template_xweight
+                                denom[3, 2, :] = template_x2weight
+                                denom[3, 3, :] = template2_weight
+
+                                # note that inv(M^T) is inv(M)^T. I did the transpose for broadcasting
+                                try:
+                                    inv = np.linalg.inv(denom.T).T
+                                except:
+                                    inv = np.linalg.pinv(denom.T).T
+
+                                num = np.zeros((4, 1, nfreq * 128))
+                                num[0, 0, :] = sum_data  # This is sum of weighted data
+                                num[1, 0, :] = (
+                                    sum_xdata  # This is sum of x*weighted data
+                                )
+                                num[2, 0, :] = sum_x2data
+                                num[3, 0, :] = template_data
+
+                                p = np.sum(inv * num.transpose(1, 0, 2), axis=1)
+
+                                # Amplitude:
+                                A = p[3, :]
+                                # Background c2
+                                c2 = p[0, :]
+                                # Slope b2:
+                                b2 = p[1, :]
+                                # Curvature m2:
+                                m2 = p[2, :] 
+
+                                # Parameter estimation assuming no signal (b1 and c1):
+                                # I don't need to find it as a function of frequency, because b1 and c1 are constant.
+                                denom = np.zeros((3, 3))
+
+                                denom[0, 0] = sum_weight
+                                denom[0, 1] = sum_xweight
+                                denom[0, 2] = sum_x2weight
+
+                                denom[1, 0] = sum_xweight
+                                denom[1, 1] = sum_x2weight
+                                denom[1, 2] = sum_x3weight
+                                
+                                denom[2, 0] = sum_x2weight
+                                denom[2, 1] = sum_x3weight
+                                denom[2, 2] = sum_x4weight
+
+                                # np.inv is faster than pinv. Use np.inv whenever possible, otherwise np.pinv
+                                try:
+                                    inv = np.linalg.inv(denom.T).T
+                                except:
+                                    inv = np.linalg.pinv(denom.T).T
+
+                                num = np.zeros((3, 1))
+                                num[0, 0] = (
+                                    sum_data  # This is sum of weighted data and equal to convolution of I*d
+                                )
+                                num[1, 0] = sum_xdata  # This is sum of x*weighted data
+                                num[2, 0] = sum_x2data
+
+                                p = np.matmul(inv, num)
+                                # Background c1:
+                                c1 = p[0, :]
+                                # slope b1:
+                                b1 = p[1, :]
+                                # Curvature m1:
+                                m1 = p[2, :]
+
+
+                                # Ln(Lambda)
+                                Lambda = (
+                                    (c1**2 - c2**2) * (sum_weight * 0.5)
+                                    + (b1**2 - b2**2) * (sum_x2weight * 0.5)
+                                    + (m1**2 - m2**2) * (sum_x4weight * 0.5)
+                                    - (c1 - c2) * (sum_data)
+                                    - (b1 - b2) * (sum_xdata)
+                                    - (m1 - m2) * (sum_x2data)
+                                    - A * c2 * template_weight
+                                    + A * template_data
+                                    - A * b2 * template_xweight
+                                    - A * m2 * template_x2weight
+                                    - (A**2 * template2_weight * 0.5)
+                                    + (m1*b1 - m2*b2) * (sum_x3weight)
+                                    + (m1*c1 - m2*c2) * (sum_x2weight)
+                                    + (b1*c1 - b2*c2) * (sum_xweight)   
+                                )
+                                
+                                SN[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = Lambda
+                                amp[
+                                    iwidth,
+                                    iEW,
+                                    ibeam,
+                                    ira,
+                                    128 * channel_i : 128 * channel_f,
+                                ] = A
 
         # Create container to hold output
         out = containers.HFBSearchResult(
@@ -921,6 +1245,46 @@ class HFBSearch(task.SingleTask):
         """
         t = np.exp(-(n**2) / (2 * std**2))
         return t
+
+    def split(self, beam, freq_centre, chime_nfreq):
+        """Finds clamping frequencies. If the length of
+         clamping interval is greater than 8 coarse frequencies,
+         split the interval such that the interval length is at most 8.
+
+
+        Parameters
+        ----------
+        beam : North-South beam index
+        freq_centre: Frequency centre of coarse frequency channels in MHz.
+        chime_nfreq: Total number of coarse frequency channels
+        """
+
+        mdl = FFTFormedActualBeamModel()
+        #Find jumps due to clamping
+        y = mdl.get_beam_positions(beam, freq_centre).squeeze()[:, 1]
+        freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
+        #Make the frequency chunks: beginning index of the intervals
+        freq_chunks = np.append(0,freq_chunks+1)
+        freq_chunks = np.append(freq_chunks,chime_nfreq)
+        #If the length of frequency chunk is greater than 8, split it such 
+        # that the interval length is at most 8 coarse channels. 
+        B = []
+        for i in range(len(freq_chunks)-1):
+            B.append(np.arange(freq_chunks[i],freq_chunks[i+1]))
+        B = np.asarray(B)
+        D = []
+
+        for i,item in enumerate(B):
+            delta = int(item.shape[0]/8)
+            split_points = [8*(i+1) for i in range(delta)]
+            C = np.split(B[i],split_points)
+            non_empty_arrays = [arr for arr in C if arr.size > 0]
+            for i in range(len(non_empty_arrays)):
+                D.append(non_empty_arrays[i][0])
+        D.append(freq_chunks[-1])
+        D = np.asarray(D)
+
+        return D
 
 
 class HFBSelectTransit(task.SingleTask):
