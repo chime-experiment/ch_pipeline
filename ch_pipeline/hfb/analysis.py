@@ -25,6 +25,7 @@ from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from . import containers
 from .io import BeamSelectionMixin
 from .pfb import DeconvolvePFB
+import gc
 
 
 class HFBAverage(task.SingleTask):
@@ -517,6 +518,9 @@ class HFBOnOffDifference(task.SingleTask):
 
         # Weighted average of off-source data
         off = sum_data_off * tools.invert_no_zero(sum_weight_off)
+ 
+        del sum_data_off, ker_fft, off_kernel
+        gc.collect()
 
         # Computing weighted average of on-source data
         on_kernel = np.zeros(nra)
@@ -533,8 +537,16 @@ class HFBOnOffDifference(task.SingleTask):
         # Weighted average of on-source data
         on = sum_data_on * tools.invert_no_zero(sum_weight_on)
 
+        del sum_data_on, ker_fft, on_kernel
+
+        gc.collect()
+
+
         # And on-off difference is:
         on_off = on - off
+
+        del on, off
+        gc.collect()
 
         # Now, evaluate the weight of on-off differenced data
 
@@ -549,6 +561,10 @@ class HFBOnOffDifference(task.SingleTask):
         # variance of on-off data
         var_diff = var_on + var_off
         var_diff[var_on == 0] = 0
+
+        del var_on, var_off
+
+        gc.collect()
 
         # weight of on-off data
         weight_diff = tools.invert_no_zero(var_diff)
@@ -1432,8 +1448,16 @@ class HFBMedianSubtraction(task.SingleTask):
         # Calculate weighted median (to exclude flagged data) along beam axis:
         median = weighted_median.weighted_median(data_s, binary_weight)
 
+        del binary_weight
+        del data_s
+
         # Subtract weighted median along all beams from the data
         diff = data - median[:, :, np.newaxis, :]
+
+        del median
+
+        # Collect garbage
+        gc.collect()
 
         # Create container to hold output
         out = containers.HFBData(stream)
