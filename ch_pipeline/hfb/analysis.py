@@ -518,7 +518,7 @@ class HFBOnOffDifference(task.SingleTask):
 
         # Weighted average of off-source data
         off = sum_data_off * tools.invert_no_zero(sum_weight_off)
- 
+
         del sum_data_off, ker_fft, off_kernel
         gc.collect()
 
@@ -540,7 +540,6 @@ class HFBOnOffDifference(task.SingleTask):
         del sum_data_on, ker_fft, on_kernel
 
         gc.collect()
-
 
         # And on-off difference is:
         on_off = on - off
