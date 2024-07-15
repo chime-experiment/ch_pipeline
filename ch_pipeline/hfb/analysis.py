@@ -320,8 +320,6 @@ class HFBAlignEWBeams(task.SingleTask):
     def setup(self):
         """Load offsets and reference angles from CHIME/FRB beam model."""
 
-        from beam_model.formed import FFTFormedActualBeamModel
-
         # Get the offsets in CHIME/FRB x coord (in deg) of the EW beams and the
         # reference zenith angles (CHIME/FRB y coord; in deg) of the NS beams
         # from the CHIME/FRB beam model
@@ -345,12 +343,23 @@ class HFBAlignEWBeams(task.SingleTask):
 
         from ch_util.ephemeris import bmxy_to_hadec
 
+        stream.redistribute("el")
+
         data = stream.hfb[:]
         weight = stream.weight[:]
+        ns_beam = stream.beam_ns[:]
+        ew_beam = stream.beam_ew[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            local_ns = data.local_bounds
+            ns_beam = ns_beam[local_ns]
+            data = data.local_array
+            weight = weight.local_array
 
         # Find CHIME/FRB XY coordinates of beams
-        x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
-        y_beam_list = self.ns_reference_angles_deg[stream.beam_ns]
+        x_beam_list = self.ew_beam_offset_deg[ew_beam]
+        y_beam_list = self.ns_reference_angles_deg[ns_beam]
 
         # Compute hour angles of beams
         x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
@@ -360,7 +369,7 @@ class HFBAlignEWBeams(task.SingleTask):
         data_aligned = np.zeros_like(data)
         weight_aligned = np.zeros_like(weight)
 
-        for insb, nsb in enumerate(stream.beam_ns):
+        for insb, nsb in enumerate(ns_beam):
             for iewb, ewb in enumerate(stream.beam_ew):
                 # Compute actual RA of samples per beam
                 ra_true = stream.ra - ha_beam[insb, ewb]
@@ -377,8 +386,7 @@ class HFBAlignEWBeams(task.SingleTask):
                     y=data[iewb, insb, :, :],
                     w=weight[iewb, insb, :, :],
                     xeval=stream.ra,
-                    mode="wrap",
-                    xperiod=360.0,
+                    mode="zero",
                 )
 
         # Create output container; add data and weights
