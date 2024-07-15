@@ -504,11 +504,11 @@ class HFBOnOffDifference(task.SingleTask):
         # Then, convolve the kernel above with the weights to find the sum
         # of off-source weights (denominator of the weighted average)
         weight_fft = np.fft.fft(weight, axis=2)
-
         # Sum of off-source weights over ra axis
         sum_weight_off = np.fft.ifft(
             weight_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
+
 
         # If the weight is zero, ifft above returns very small, but non-zero
         # value for n. This number goes to the denominator of weighted mean
@@ -520,7 +520,9 @@ class HFBOnOffDifference(task.SingleTask):
         off = sum_data_off * tools.invert_no_zero(sum_weight_off)
 
         del sum_data_off, ker_fft, off_kernel
-        gc.collect()
+
+        self.log.debug('The following intermediate arrays are removed: sum_data_off, ker_fft, off_kernel')
+
 
         # Computing weighted average of on-source data
         on_kernel = np.zeros(nra)
@@ -538,14 +540,14 @@ class HFBOnOffDifference(task.SingleTask):
         on = sum_data_on * tools.invert_no_zero(sum_weight_on)
 
         del sum_data_on, ker_fft, on_kernel
+        self.log.debug('The following intermediate arrays are removed: sum_data_on, ker_fft, on_kernel')
 
-        gc.collect()
 
         # And on-off difference is:
         on_off = on - off
 
         del on, off
-        gc.collect()
+        self.log.debug('The following intermediate arrays are removed: on, off')
 
         # Now, evaluate the weight of on-off differenced data
 
@@ -562,7 +564,9 @@ class HFBOnOffDifference(task.SingleTask):
         var_diff[var_on == 0] = 0
 
         del var_on, var_off
+        self.log.debug('The following intermediate arrays are removed: var_on, var_off')
 
+        #Garbage collection
         gc.collect()
 
         # weight of on-off data
@@ -1447,15 +1451,16 @@ class HFBMedianSubtraction(task.SingleTask):
         # Calculate weighted median (to exclude flagged data) along beam axis:
         median = weighted_median.weighted_median(data_s, binary_weight)
 
-        del binary_weight
-        del data_s
+        del binary_weight, data_s
+        self.log.debug('The following intermediate arrays are removed: binary_weight, data_s')
 
         # Subtract weighted median along all beams from the data
         diff = data - median[:, :, np.newaxis, :]
 
         del median
+        self.log.debug('The following intermediate array is removed: median')
 
-        # Collect garbage
+        # Garbage collection
         gc.collect()
 
         # Create container to hold output
