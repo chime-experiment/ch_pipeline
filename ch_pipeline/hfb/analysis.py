@@ -509,7 +509,6 @@ class HFBOnOffDifference(task.SingleTask):
             weight_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
 
-
         # If the weight is zero, ifft above returns very small, but non-zero
         # value for n. This number goes to the denominator of weighted mean
         # and makes the weighted mean very large. To avoid such numerical
@@ -521,8 +520,9 @@ class HFBOnOffDifference(task.SingleTask):
 
         del sum_data_off, ker_fft, off_kernel
 
-        self.log.debug('The following intermediate arrays are removed: sum_data_off, ker_fft, off_kernel')
-
+        self.log.debug(
+            "The following intermediate arrays are removed: sum_data_off, ker_fft, off_kernel"
+        )
 
         # Computing weighted average of on-source data
         on_kernel = np.zeros(nra)
@@ -540,14 +540,15 @@ class HFBOnOffDifference(task.SingleTask):
         on = sum_data_on * tools.invert_no_zero(sum_weight_on)
 
         del sum_data_on, ker_fft, on_kernel
-        self.log.debug('The following intermediate arrays are removed: sum_data_on, ker_fft, on_kernel')
-
+        self.log.debug(
+            "The following intermediate arrays are removed: sum_data_on, ker_fft, on_kernel"
+        )
 
         # And on-off difference is:
         on_off = on - off
 
         del on, off
-        self.log.debug('The following intermediate arrays are removed: on, off')
+        self.log.debug("The following intermediate arrays are removed: on, off")
 
         # Now, evaluate the weight of on-off differenced data
 
@@ -564,9 +565,9 @@ class HFBOnOffDifference(task.SingleTask):
         var_diff[var_on == 0] = 0
 
         del var_on, var_off
-        self.log.debug('The following intermediate arrays are removed: var_on, var_off')
+        self.log.debug("The following intermediate arrays are removed: var_on, var_off")
 
-        #Garbage collection
+        # Garbage collection
         gc.collect()
 
         # weight of on-off data
@@ -1452,13 +1453,15 @@ class HFBMedianSubtraction(task.SingleTask):
         median = weighted_median.weighted_median(data_s, binary_weight)
 
         del binary_weight, data_s
-        self.log.debug('The following intermediate arrays are removed: binary_weight, data_s')
+        self.log.debug(
+            "The following intermediate arrays are removed: binary_weight, data_s"
+        )
 
         # Subtract weighted median along all beams from the data
         diff = data - median[:, :, np.newaxis, :]
 
         del median
-        self.log.debug('The following intermediate array is removed: median')
+        self.log.debug("The following intermediate array is removed: median")
 
         # Garbage collection
         gc.collect()
