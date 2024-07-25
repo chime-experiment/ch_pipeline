@@ -912,7 +912,8 @@ class DailyProcessing(base.ProcessingType):
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove chimestack files before this CSD
-    daemon_config = {"keep_online": {"start": "CSD1800", "end": "CSD2650"}}
+    # Range is from 2018/10/14 to 2020/01/06
+    daemon_config = {"keep_online": {"start": "CSD1800", "end": "CSD2250"}}
 
     def _create_hook(self):
         """Produce a list of bad days based on the following criteria."""
