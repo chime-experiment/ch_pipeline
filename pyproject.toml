@@ -1,10 +1,51 @@
 [build-system]
-requires = ['setuptools', 'wheel', 'oldest-supported-numpy', 'versioneer[toml]']
+requires = [
+    "setuptools>=61.0.0",
+    "wheel",
+    "oldest-supported-numpy",
+    "setuptools-git-versioning"
+]
+build-backend = "setuptools.build_meta"
 
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "ch_pipeline/_version.py"
-versionfile_build = "ch_pipeline/_version.py"
-tag_prefix = ""
-parentdir_prefix = "ch_pipeline-"
+[project]
+name = "ch_pipeline"
+authors = [
+  {name = "The CHIME Collaboration", email = "dvw@phas.ubc.ca"}
+]
+description = "CHIME Pipeline"
+requires-python = ">=3.9"
+dynamic = ["readme", "version"]
+license = {file = "LICENSE"}
+dependencies = [
+    "caput @ git+https://github.com/radiocosmology/caput.git",
+    "ch_util @ git+https://github.com/chime-experiment/ch_util.git",
+    "cora @ git+https://github.com/radiocosmology/cora.git",
+    "driftscan @ git+https://github.com/radiocosmology/driftscan.git",
+    "draco @ git+https://github.com/radiocosmology/draco.git",
+    "apscheduler",
+    "click",
+    "numpy<2",
+    "pytz"
+]
+
+[project.optional-dependencies]
+doc = [
+    "docutils",
+    "Sphinx",
+    "sphinx_rtd_theme"
+]
+hfb = [
+    "beam-model @ git+ssh://git@github.com/CHIMEFRB/beam-model.git"
+]
+test = [
+    "pytest >= 7.0"
+]
+
+[project.scripts]
+chp = "ch_pipeline.processing.client:cli"
+
+[tool.setuptools.dynamic]
+readme = {file = ["README.md"], content-type = "text/markdown"}
+
+[tool.setuptools-git-versioning]
+enabled = true
