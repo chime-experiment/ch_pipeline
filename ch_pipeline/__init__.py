@@ -12,6 +12,11 @@ Submodules
 
 """
 
-from . import _version
+from importlib.metadata import version, PackageNotFoundError
 
-__version__ = _version.get_versions()["version"]
+try:
+    __version__ = version("ch_pipeline")
+except PackageNotFoundError:
+    # package is not installed
+    pass
+del version, PackageNotFoundError
