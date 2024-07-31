@@ -48,25 +48,45 @@ Please don't use long lived, person specific branches e.g. `richard-dev`.
 
 ### Dependencies
 
-Dependencies should be installable python packages. This means that they must
-have a `setup.py` script in their root directory, and should be installable
-using `python setup.py install`. They are kept track of in a `requirements.txt`
-file. This file can contain references to exact versions of dependencies, using
-both version tags, and commit hashes. An example `requirements.txt` file is
-given below:
+Dependencies should be python packages installable with `pip`.  The list of
+dependencies is kept in the `pyproject.toml` file.  This dependency list can
+contain references to exact versions of dependencies, using both version tags,
+and commit hashes. An example dependency list that you might find in
+`pyproject.toml` is given below:
+
+```toml
+dependencies = [
+    "caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d",
+    "ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util",
+    "cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0",
+    "driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0"
+]
 ```
-caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d
-ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util
-cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0
-driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0
-```
+
 Here, the first two requirements specify an exact git hash, whereas the second two use git tags as a shorthand.
 
 These dependencies can be installed using:
 ```bash
-$ pip install -r requirements.txt
+pip install .
 ```
 This is automatically done by the `mkchimeenv` script.
+
+Additional, optional dependencies can also be specified in `pyproject.toml`, in the
+`[project.optional-dependencies]` section.  Each list of optional dependencies needs a tag
+and should be specified using syntax similar to this:
+
+```toml
+[project.optional-dependencies]
+my_tag = [
+    "my_optional_dependency",
+    "another_optional_dependency"
+]
+```
+
+These optional dependencies may be installed with pip by using the tag, e.g.:
+```bash
+pip install .[my_tag]
+```
 
 ### Virtualenv
 
