@@ -29,7 +29,7 @@ def model_extended_sources(
     min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
-    **kwargs
+    **kwargs,
 ):
     """Generate a model for the visibilities.
 
@@ -441,7 +441,7 @@ class SolveSources(task.SingleTask):
             param=param_name,
             axes_from=data,
             attrs_from=data,
-            **output_kwargs
+            **output_kwargs,
         )
 
         # Determine extended source model
@@ -495,7 +495,7 @@ class SolveSources(task.SingleTask):
                         dist_pol,
                         timestamp,
                         self.bodies,
-                        **self.extended_source_kwargs
+                        **self.extended_source_kwargs,
                     )
                     ext_model = ext_model[0]
 
@@ -920,7 +920,7 @@ class SolveSourcesWithBeam(SolveSources):
             param=param_name,
             axes_from=data,
             attrs_from=data,
-            **output_kwargs
+            **output_kwargs,
         )
 
         out.add_dataset("coeff")
