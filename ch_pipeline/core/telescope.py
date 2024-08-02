@@ -128,7 +128,8 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Fix base properties
     cylinder_width = 20.0
-    cylinder_spacing = tools._PF_SPACE
+    # XXX CHECK: Should CHIME be using the Pathfinder antenna spacing?
+    cylinder_spacing = tools.PF_SPACE
 
     _exwidth = [0.7]
     _eywidth = _exwidth
