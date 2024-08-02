@@ -10,7 +10,10 @@ from scipy.constants import c as speed_of_light
 import scipy.signal
 
 from caput import config
-from ch_util import andata, ephemeris, tools
+import caput.time as ctime
+from ch_ephem.observers import chime
+from ch_ephem.sources import source_dictionary
+from ch_util import andata, tools
 from ch_util.fluxcat import FluxCatalog
 from draco.core import task, io
 
@@ -110,10 +113,10 @@ def model_extended_sources(
     )
 
     # Setup for calculating source coordinates
-    lat = np.radians(ephemeris.CHIMELATITUDE)
-    date = ephemeris.unix_to_skyfield_time(timestamp)
+    lat = np.radians(chime.latitude)
+    date = ctime.unix_to_skyfield_time(timestamp)
 
-    observer = ephemeris.chime.skyfield_obs().at(date)
+    observer = chime.skyfield_obs().at(date)
 
     # Generate polynomials
     ncoeff_x = degree_x + 1
@@ -135,7 +138,9 @@ def model_extended_sources(
         src_ra, src_dec = src_radec[0], src_radec[1]
         src_alt, src_az = src_altaz[0], src_altaz[1]
 
-        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians)
+        ha = _correct_phase_wrap(
+            np.radians(chime.unix_to_lsa(timestamp)) - src_ra.radians
+        )
         dec = src_dec.radians
 
         weight = src_alt.radians > np.radians(min_altitude)
@@ -290,7 +295,7 @@ class SolveSources(task.SingleTask):
     min_ha = config.Property(proptype=float, default=0.0)
 
     min_distance = config.Property(proptype=list, default=[10.0, 0.0])
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     max_iter = config.Property(proptype=int, default=4)
 
     def setup(self, tel):
@@ -305,9 +310,9 @@ class SolveSources(task.SingleTask):
 
         self.bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -370,7 +375,7 @@ class SolveSources(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
             output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
@@ -653,9 +658,9 @@ class SubtractSources(task.SingleTask):
 
         bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
@@ -677,7 +682,7 @@ class SubtractSources(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
         else:
@@ -793,9 +798,9 @@ class SolveSourcesWithBeam(SolveSources):
 
         self.bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -849,7 +854,7 @@ class SolveSourcesWithBeam(SolveSources):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
             output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
@@ -1013,9 +1018,9 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
@@ -1037,7 +1042,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
         else:

@@ -497,7 +497,7 @@ class FilterExisting(task.MPILoggedTask):
             # Search the database to get the start and end times of all correlation files
             from chimedb import data_index as di
             from chimedb.core import connect
-            from ch_util import ephemeris
+            from ch_ephem.observers import chime
 
             connect()
             query = (
@@ -516,8 +516,8 @@ class FilterExisting(task.MPILoggedTask):
                 if start is None or finish is None:
                     continue
 
-                start_csd = ephemeris.csd(start)
-                finish_csd = ephemeris.csd(finish)
+                start_csd = chime.unix_to_lsd(start)
+                finish_csd = chime.unix_to_lsd(finish)
 
                 name = os.path.join(acq, fname)
                 self.corr_files[name] = (start_csd, finish_csd)

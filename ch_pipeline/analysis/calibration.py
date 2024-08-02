@@ -12,10 +12,13 @@ from mpi4py import MPI
 
 from caput import config, pipeline, memh5
 from caput import mpiarray, mpiutil
+import caput.time as ctime
+
+from ch_ephem.observers import chime
+from ch_ephem import coord, sources
 
 from ch_util import andata
 from ch_util import tools
-from ch_util import ephemeris
 from ch_util import ni_utils
 from ch_util import cal_utils
 from ch_util import fluxcat
@@ -493,7 +496,7 @@ class DetermineSourceTransit(task.SingleTask):
     ----------
     source_list : list of str
         List of source names to consider.  If not specified, all sources
-        contained in `ch_util.ephemeris.source_dictionary` will be considered.
+        contained in `ch_ephem.sources.source_dictionary` will be considered.
     freq : float
         Frequency in MHz.  Sort the sources by the flux at this frequency.
     require_transit: bool
@@ -509,7 +512,7 @@ class DetermineSourceTransit(task.SingleTask):
         """Set list of sources, sorted by flux in descending order."""
         self.source_list = reversed(
             sorted(
-                self.source_list or ephemeris.source_dictionary.keys(),
+                self.source_list or sources.source_dictionary.keys(),
                 key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
             )
         )
@@ -533,20 +536,20 @@ class DetermineSourceTransit(task.SingleTask):
             timestamp = sstream.time
         else:
             lsd = sstream.attrs.get("lsd", sstream.attrs.get("csd"))
-            timestamp = ephemeris.csd_to_unix(lsd + sstream.ra / 360.0)
+            timestamp = chime.lsd_to_unix(lsd + sstream.ra / 360.0)
 
         # Loop over sources and check if there is a transit within time range
         # covered by container.  If so, then add attributes describing that source
         # and break from the loop.
         contains_transit = False
         for src in self.source_list:
-            transit_time = ephemeris.transit_times(
-                ephemeris.source_dictionary[src], timestamp[0], timestamp[-1]
+            transit_time = chime.transit_times(
+                sources.source_dictionary[src], timestamp[0], timestamp[-1]
             )
             if transit_time.size > 0:
                 self.log.info(
                     "Data stream contains %s transit on LSD %d."
-                    % (src, ephemeris.csd(transit_time[0]))
+                    % (src, chime.unix_to_lsd(transit_time[0]))
                 )
                 sstream.attrs["source_name"] = src
                 sstream.attrs["transit_time"] = transit_time[0]
@@ -570,7 +573,7 @@ class EigenCalibration(task.SingleTask):
     Attributes
     ----------
     source : str
-        Name of the source (same format as `ephemeris.source_dictionary`).
+        Name of the source (same format as `sources.source_dictionary`).
     eigen_ref : int
         Index of the feed that is current phase reference of the eigenvectors.
     phase_ref : list
@@ -604,7 +607,7 @@ class EigenCalibration(task.SingleTask):
     max_hour_angle = config.Property(proptype=float, default=10.0)
     window = config.Property(proptype=float, default=0.75)
     dyn_rng_threshold = config.Property(proptype=float, default=3.0)
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
 
     def process(self, data, inputmap):
         """Determine feed response from eigendecomposition.
@@ -647,14 +650,14 @@ class EigenCalibration(task.SingleTask):
         )
 
         # Determine source coordinates
-        ttrans = ephemeris.transit_times(source_obj.skyfield, data.time[0])[0]
-        csd = int(np.floor(ephemeris.unix_to_csd(ttrans)))
+        ttrans = chime.transit_times(source_obj.skyfield, data.time[0])[0]
+        csd = int(np.floor(chime.unix_to_lsd(ttrans)))
 
-        src_ra, src_dec = ephemeris.object_coords(
+        src_ra, src_dec = coord.object_coords(
             source_obj.skyfield, date=ttrans, deg=True
         )
 
-        ra = ephemeris.lsa(data.time)
+        ra = chime.unix_to_lsa(data.time)
 
         ha = ra - src_ra
         ha = ((ha + 180.0) % 360.0) - 180.0
@@ -671,7 +674,7 @@ class EigenCalibration(task.SingleTask):
         itrans = np.argmin(np.abs(ha))
 
         src_dec = np.radians(src_dec)
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Dereference datasets
         evec = data.datasets["evec"][:].local_array
@@ -813,9 +816,9 @@ class EigenCalibration(task.SingleTask):
 
         # Add an attribute that indicates if the transit occured during the daytime
         is_daytime = 0
-        solar_rise = ephemeris.solar_rising(ttrans - 86400.0)
+        solar_rise = chime.solar_rising(ttrans - 86400.0)
         for sr in solar_rise:
-            ss = ephemeris.solar_setting(sr)[0]
+            ss = chime.solar_setting(sr)[0]
             if (ttrans >= sr) and (ttrans <= ss):
                 is_daytime = 1
                 break
@@ -1019,10 +1022,10 @@ class TransitFit(task.SingleTask):
         freq = response.freq[response.vis[:].local_bounds]
 
         # Calculate the hour angle using the source and transit time saved to attributes
-        source_obj = ephemeris.source_dictionary[response.attrs["source_name"]]
+        source_obj = sources.source_dictionary[response.attrs["source_name"]]
         ttrans = response.attrs["transit_time"]
 
-        src_ra, src_dec = ephemeris.object_coords(source_obj, date=ttrans, deg=True)
+        src_ra, src_dec = coord.object_coords(source_obj, date=ttrans, deg=True)
 
         ha = response.ra[:] - src_ra
         ha = ((ha + 180.0) % 360.0) - 180.0
@@ -1527,10 +1530,10 @@ class SiderealCalibration(task.SingleTask):
         freq = sstream.freq["centre"][sstream.vis[:].local_bounds]
 
         # Fetch source
-        source = ephemeris.source_dictionary[self.source]
+        source = sources.source_dictionary[self.source]
 
         # Estimate the RA at which the transiting source peaks
-        peak_ra = ephemeris.peak_RA(source, deg=True)
+        peak_ra = coord.peak_ra(source, deg=True)
 
         # Find closest array index
         idx = np.argmin(np.abs(sstream.ra - peak_ra))
@@ -1856,7 +1859,7 @@ class ThermalCalibration(task.SingleTask):
 
     def _ra2unix(self, csd, ra):
         """csd must be integer"""
-        return ephemeris.csd_to_unix(csd + ra / 360.0)
+        return chime.lsd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime_result, timestamp, frequency):
         """
@@ -2638,7 +2641,7 @@ class FlagNarrowbandGainError(task.SingleTask):
                 data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             )
 
-            timestamp = ephemeris.csd_to_unix(
+            timestamp = chime.lsd_to_unix(
                 lsd[:, np.newaxis] + ra[np.newaxis, :] / 360.0
             )
 
@@ -2773,7 +2776,7 @@ class CalibrationCorrection(task.SingleTask):
         The name of the DataFlag.
     """
 
-    rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    rotation = config.Property(proptype=float, default=chime.rotation)
     name_of_flag = config.Property(proptype=str, default="")
 
     def setup(self):
@@ -2828,7 +2831,7 @@ class CalibrationCorrection(task.SingleTask):
             )
             if hasattr(csd, "__iter__"):
                 csd = sorted(csd)[len(csd) // 2]
-            timestamp = ephemeris.csd_to_unix(csd + ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + ra / 360.0)
         else:
             timestamp = sstream.time
 
@@ -2881,10 +2884,10 @@ class CalibrationCorrection(task.SingleTask):
                         np.sum(in_range),
                         in_range.size,
                         self.name_of_flag,
-                        ephemeris.unix_to_datetime(flag.start_time).strftime(
+                        ctime.unix_to_datetime(flag.start_time).strftime(
                             "%Y%m%dT%H%M%SZ"
                         ),
-                        ephemeris.unix_to_datetime(flag.finish_time).strftime(
+                        ctime.unix_to_datetime(flag.finish_time).strftime(
                             "%Y%m%dT%H%M%SZ"
                         ),
                     )
@@ -2937,9 +2940,9 @@ class CorrectTimeOffset(CalibrationCorrection):
             "time offset on the calibrator %s." % (time_offset, calibrator)
         )
 
-        body = ephemeris.source_dictionary[calibrator]
+        body = sources.source_dictionary[calibrator]
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Compute feed positions with rotation
         tools.change_chime_location(rotation=self.rotation)
@@ -2949,11 +2952,11 @@ class CorrectTimeOffset(CalibrationCorrection):
         tools.change_chime_location(default=True)
 
         # Determine location of calibrator
-        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+        ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
 
-        ha = np.radians(ephemeris.lsa(ttrans + time_offset)) - ra
+        ha = np.radians(chime.unix_to_lsa(ttrans + time_offset)) - ra
 
         # Calculate and return the phase correction, which is old offset minus new time offset
         # since we previously divided the chimestack data by the response to the calibrator.
@@ -2991,9 +2994,9 @@ class CorrectTelescopeRotation(CalibrationCorrection):
             % (rotation, self.rotation, calibrator)
         )
 
-        body = ephemeris.source_dictionary[calibrator]
+        body = sources.source_dictionary[calibrator]
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Compute feed positions with old rotation
         tools.change_chime_location(rotation=rotation)
@@ -3007,9 +3010,9 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         tools.change_chime_location(default=True)
 
         # Determine location of calibrator
-        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+        ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.

@@ -6,8 +6,9 @@ import peewee as pw
 import chimedb.core as db
 import chimedb.data_index as di
 import chimedb.dataflag as df
-from ch_util import ephemeris
+import caput.time as ctime
 from caput.tools import unique_ordered
+from ch_ephem.observers import chime
 from ch_pipeline.processing import base
 
 import logging
@@ -1016,7 +1017,7 @@ class DailyProcessing(base.ProcessingType):
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
             # Prioritize recent days to ensure that data is available
-            today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
+            today = np.floor(chime.get_current_lsd()).astype(int)
             priority = [
                 tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
             ]
@@ -1065,7 +1066,7 @@ class DailyProcessing(base.ProcessingType):
             ] + to_run
 
         # Ensure that the current in-progress acquisition does not get queued
-        today = ephemeris.chime.get_current_lsd()
+        today = chime.get_current_lsd()
         to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
 
         # Prioritize some number of recent days
@@ -1115,7 +1116,7 @@ def expand_csd_range(start, end, step=1):
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
-    form that `ephemeris.ensure_unix` understands.
+    form that `caput.time.ensure_unix` understands.
 
     Parameters
     ----------
@@ -1135,15 +1136,15 @@ def expand_csd_range(start, end, step=1):
     if start.startswith("CSD"):
         start_csd = int(start[3:])
     else:
-        start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
+        start_csd = chime.unix_to_lsd(ctime.ensure_unix(start))
         start_csd = math.floor(start_csd)
 
     if end is None:
-        end_csd = int(ephemeris.chime.get_current_lsd())
+        end_csd = int(chime.get_current_lsd())
     elif end.startswith("CSD"):
         end_csd = int(end[3:])
     else:
-        end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
+        end_csd = chime.unix_to_lsd(ctime.ensure_unix(end))
         end_csd = math.ceil(end_csd)
 
     csds = [day for day in range(start_csd, end_csd + 1, step)]
@@ -1231,8 +1232,8 @@ def available_csds(
         coverage = coverage * 86400
 
         for csd in csds:
-            start_time = ephemeris.csd_to_unix(csd - pad)
-            end_time = ephemeris.csd_to_unix(csd + 1 + pad)
+            start_time = chime.lsd_to_unix(csd - pad)
+            end_time = chime.lsd_to_unix(csd + 1 + pad)
 
             # online - list of file start and end times that are online
             # between start_time and end_time
@@ -1297,8 +1298,8 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
         all chimestack files available in the timespan
     """
     # Query all the files in this time range
-    start_time = ephemeris.csd_to_unix(start_csd)
-    end_time = ephemeris.csd_to_unix(end_csd + 1)
+    start_time = chime.lsd_to_unix(start_csd)
+    end_time = chime.lsd_to_unix(end_csd + 1)
 
     db.connect()
 
@@ -1361,8 +1362,8 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
     filenames_that_exist
         all chimestack files available in the timespan
     """
-    start_time = ephemeris.csd_to_unix(start_csd)
-    end_time = ephemeris.csd_to_unix(end_csd + 1)
+    start_time = chime.lsd_to_unix(start_csd)
+    end_time = chime.lsd_to_unix(end_csd + 1)
 
     db.connect()
 
@@ -1419,8 +1420,8 @@ def get_filenames_used_by_csds(csds: list, files: list, pad: float = 0):
     """
     files_used = set()
     for csd in csds:
-        start_time = ephemeris.csd_to_unix(csd - pad)
-        end_time = ephemeris.csd_to_unix(csd + 1 + pad)
+        start_time = chime.lsd_to_unix(csd - pad)
+        end_time = chime.lsd_to_unix(csd + 1 + pad)
         # Get all the files in this timespan which exist in `files`
         f, index = files_in_timespan(start_time, end_time, files)
         files_used.update(f)
@@ -1591,8 +1592,8 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
 
     # Iterate over csds and flags to find which ones need to be excluded
     for csd in csds:
-        start = ephemeris.csd_to_unix(csd)
-        end = ephemeris.csd_to_unix(csd + 1)
+        start = chime.lsd_to_unix(csd)
+        end = chime.lsd_to_unix(csd + 1)
 
         for flag_name, flag_list in out_flags.items():
             flagged_intervals = []

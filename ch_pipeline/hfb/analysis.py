@@ -13,8 +13,7 @@ from caput import mpiarray
 from caput import mpiutil
 from caput import weighted_median
 
-from ch_util.hfbcat import HFBCatalog
-from ch_util.ephemeris import chime, get_doppler_shifted_freq
+from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
 
 from draco.core import task
 from draco.util import tools
@@ -343,7 +342,7 @@ class HFBAlignEWBeams(task.SingleTask):
             HFB ringmap container with EW beams aligned in RA.
         """
 
-        from ch_util.ephemeris import bmxy_to_hadec
+        from ch_ephem.coord import bmxy_to_hadec
 
         data = stream.hfb[:]
         weight = stream.weight[:]
@@ -1160,7 +1159,10 @@ class HFBDopplerShift(task.SingleTask):
         """
 
         # Set up the default Observer
-        self.observer = chime if observer is None else observer
+        if observer is None:
+            from ch_ephem.observers import chime as observer
+
+        self.observer = observer
 
     def process(self, stream):
         """Doppler shift a container with high-resolution HFB data.

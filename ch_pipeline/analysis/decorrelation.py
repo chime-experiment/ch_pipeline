@@ -31,7 +31,9 @@ from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
 import numpy as np
 from datetime import datetime
 from caput import config
-from ch_util import tools, ephemeris
+from ch_util import tools
+from ch_ephem import sources
+from ch_ephem.observers import chime
 from draco.core import containers, task
 from draco.util.tools import invert_no_zero
 
@@ -59,7 +61,7 @@ class CorrectDecorrelation(task.SingleTask):
 
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
@@ -82,7 +84,7 @@ class CorrectDecorrelation(task.SingleTask):
         tstream.redistribute("freq")
 
         prod_map = tstream.prodstack
-        src = ephemeris.source_dictionary[self.source]
+        src = sources.source_dictionary[self.source]
 
         # Rotate the telescope
         tools.change_chime_location(rotation=self.telescope_rotation)

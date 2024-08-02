@@ -44,11 +44,13 @@ import os
 
 import numpy as np
 
-from caput import mpiutil, config, pipeline
+from caput import mpiutil, config, pipeline, time as ctime
 from draco.core import task
 from chimedb import data_index as di, dataset as ds
 from chimedb.core import exceptions
-from ch_util import tools, ephemeris, finder, layout, andata
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import tools, finder, layout, andata
 from ch_pipeline.core import containers
 
 
@@ -221,9 +223,9 @@ class QueryDatabase(task.MPILoggedTask):
             if self.start_time:
                 st, et = self.start_time, self.end_time
             elif self.start_csd:
-                st = ephemeris.csd_to_unix(self.start_csd)
+                st = chime.lsd_to_unix(self.start_csd)
                 et = (
-                    ephemeris.csd_to_unix(self.end_csd)
+                    chime.lsd_to_unix(self.end_csd)
                     if self.end_csd is not None
                     else None
                 )
@@ -265,9 +267,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.include_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.include_transits(bdy, time_delta=tdelta)
 
@@ -282,9 +282,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.exclude_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.exclude_transits(bdy, time_delta=tdelta)
 
@@ -672,7 +670,7 @@ class QueryInputs(task.MPILoggedTask):
 
         if mpiutil.rank0:
             # Get the datetime of the middle of the file
-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+            time = ctime.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
 
             inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
