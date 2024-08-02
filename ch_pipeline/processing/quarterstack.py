@@ -3,9 +3,9 @@ import re
 import numpy as np
 
 from caput import time as ctime
-from ch_util import ephemeris
 from chimedb import core
 from chimedb import dataflag as df
+from ch_ephem.observers import chime
 
 from . import base, daily
 
@@ -406,7 +406,7 @@ class QuarterStackProcessing(base.ProcessingType):
 
         # Map each LSD into the quarter it belongs in and find which quarters we have
         # data for
-        dates = ctime.unix_to_datetime(ephemeris.csd_to_unix(np.array(lsds)))
+        dates = ctime.unix_to_datetime(chime.lsd_to_unix(np.array(lsds)))
         yq = np.array([f"{d.year}q{(d.month - 1) // 3 + 1}" for d in dates])
         quarters = np.unique(yq)
 

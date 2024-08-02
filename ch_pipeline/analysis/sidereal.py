@@ -18,8 +18,11 @@ import numpy as np
 from mpi4py import MPI
 
 from caput import pipeline, config, tod
+import caput.time as ctime
 from caput.weighted_median import weighted_median
-from ch_util import andata, ephemeris, tools
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import andata, tools
 from draco.core import task, containers
 from draco.analysis import sidereal
 
@@ -75,7 +78,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         filemap = None
         if self.comm.rank == 0:
             se_times = get_times(self.files)
-            se_csd = ephemeris.csd(se_times)
+            se_csd = chime.unix_to_lsd(se_times)
             days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Construct list of files in each day
@@ -178,7 +181,7 @@ class SiderealGrouper(sidereal.SiderealGrouper):
         """
 
         # Set up the default Observer
-        observer = ephemeris.chime if observer is None else observer
+        observer = chime if observer is None else observer
 
         sidereal.SiderealGrouper.setup(self, observer)
 
@@ -202,7 +205,7 @@ class WeatherGrouper(SiderealGrouper):
         # Calculate the length of data in this current LSD
         start = self._timestream_list[0].time[0]
         end = self._timestream_list[-1].time[-1]
-        sid_seconds = 86400.0 / ephemeris.SIDEREAL_S
+        sid_seconds = 86400.0 / ctime.SIDEREAL_S
 
         if (end - start) < (sid_seconds + 2 * self.padding):
             self.log.info("Not enough weather data - skipping this day")
@@ -257,7 +260,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
             raise ValueError("A Telescope object must be supplied if down_mix=True.")
 
         # Set up the default Observer
-        observer = ephemeris.chime if observer is None else observer
+        observer = chime if observer is None else observer
 
         sidereal.SiderealRegridder.setup(self, observer)
 
@@ -317,7 +320,7 @@ class SiderealMean(task.SingleTask):
 
         self.body = []
         if self.mask_sources:
-            for src, body in ephemeris.source_dictionary.items():
+            for src, body in sources.source_dictionary.items():
                 if src in fluxcat.FluxCatalog:
                     if (
                         fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
@@ -354,13 +357,13 @@ class SiderealMean(task.SingleTask):
         # Calculate the right ascension, method differs depending on input container
         if "ra" in sstream.index_map:
             ra = sstream.ra
-            timestamp = {dd: ephemeris.csd_to_unix(dd + ra / 360.0) for dd in lsd_list}
+            timestamp = {dd: chime.lsd_to_unix(dd + ra / 360.0) for dd in lsd_list}
             flag_quiet = np.ones(ra.size, dtype=bool)
 
         elif "time" in sstream.index_map:
-            ra = ephemeris.lsa(sstream.time)
+            ra = chime.unix_to_lsa(sstream.time)
             timestamp = {lsd: sstream.time}
-            flag_quiet = np.fix(ephemeris.unix_to_csd(sstream.time)) == lsd
+            flag_quiet = np.fix(chime.unix_to_lsd(sstream.time)) == lsd
 
         else:
             raise RuntimeError("Format of `sstream` argument is unknown.")

@@ -11,8 +11,11 @@ import numpy as np
 import scipy.constants
 
 from caput import config, mpiutil, tod
+import caput.time as ctime
+from ch_ephem import coord, sources
+from ch_ephem.observers import chime
 from draco.core import task
-from ch_util import ephemeris, tools, cal_utils
+from ch_util import tools, cal_utils
 
 from ..core import containers
 
@@ -57,17 +60,17 @@ def sun_coord(unix_time, deg=True):
 
     """
 
-    date = ephemeris.ensure_unix(np.atleast_1d(unix_time))
-    skyfield_time = ephemeris.unix_to_skyfield_time(date)
+    date = ctime.ensure_unix(np.atleast_1d(unix_time))
+    skyfield_time = ctime.unix_to_skyfield_time(date)
     ntime = date.size
 
     coord = np.zeros((ntime, 4), dtype=np.float64)
 
-    planets = ephemeris.skyfield_wrapper.ephemeris
+    planets = ctime.skyfield_wrapper.ephemeris
     # planets = skyfield.api.load('de421.bsp')
     sun = planets["sun"]
 
-    observer = ephemeris.chime.skyfield_obs()
+    observer = chime.skyfield_obs()
 
     apparent = observer.at(skyfield_time).observe(sun).apparent()
 
@@ -81,7 +84,7 @@ def sun_coord(unix_time, deg=True):
 
     # Convert to hour angle
     # defined as local stellar angle minus source right ascension
-    coord[:, 0] = _correct_phase_wrap(np.radians(ephemeris.lsa(date)) - coord[:, 0])
+    coord[:, 0] = _correct_phase_wrap(np.radians(chime.unix_to_lsa(date)) - coord[:, 0])
 
     if deg:
         coord = np.degrees(coord)
@@ -271,26 +274,26 @@ class SolarCalibrationN2(task.SingleTask):
         # Get times (ra in degrees)
         if hasattr(sstream, "time"):
             time = sstream.time
-            ra = ephemeris.lsa(time)
+            ra = chime.unix_to_lsa(time)
         else:
             ra = sstream.ra
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            time = chime.lsd_to_unix(csd + ra / 360.0)
 
         # Only examine data between sunrise and sunset
         time_flag = np.zeros(len(time), dtype=bool)
-        rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+        rise = chime.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
         for rr in rise:
-            ss = ephemeris.solar_setting(rr)[0]
+            ss = chime.solar_setting(rr)[0]
             time_flag |= (time >= rr) & (time <= ss)
 
         if not np.any(time_flag):
             self.log.debug(
                 "No daytime data between %s and %s.",
-                ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
-                ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
+                ctime.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
+                ctime.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
             )
             return None
 
@@ -470,9 +473,9 @@ class SolarCalibrationN2(task.SingleTask):
 
                 # Define windows around bright point source transits
                 source_window = []
-                for ss, src in ephemeris.source_dictionary.iteritems():
+                for ss, src in sources.source_dictionary.iteritems():
                     if isinstance(src, skyfield.starlib.Star):
-                        peak_ra = ephemeris.peak_RA(src, deg=True)
+                        peak_ra = coord.peak_ra(src, deg=True)
                         window_ra = 3.0 * cal_utils.guess_fwhm(
                             freq[ff_local],
                             pol=["X", "Y"][ipol],
@@ -510,7 +513,7 @@ class SolarCalibrationN2(task.SingleTask):
                             if np.abs(sha) < span:
                                 src_phase = tools.fringestop_phase(
                                     np.radians(sha),
-                                    np.radians(ephemeris.CHIMELATITUDE),
+                                    np.radians(chime.latitude),
                                     src._dec,
                                     u,
                                     v,
@@ -528,7 +531,7 @@ class SolarCalibrationN2(task.SingleTask):
                         # Fringestop
                         vis *= tools.fringestop_phase(
                             sun_pos[tt_out, 0],
-                            np.radians(ephemeris.CHIMELATITUDE),
+                            np.radians(chime.latitude),
                             sun_pos[tt_out, 1],
                             u,
                             v,
@@ -691,7 +694,7 @@ class SolarCleanN2(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            stime = ephemeris.csd_to_unix(csd + ra / 360.0)
+            stime = chime.lsd_to_unix(csd + ra / 360.0)
 
         # Extract gain array
         gtime = suntrans.time[:]
@@ -765,7 +768,7 @@ class SolarCleanN2(task.SingleTask):
 
                         # Determine phase of sun
                         sunphase = tools.fringestop_phase(
-                            ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v
+                            ha, np.radians(chime.latitude), dec, u, v
                         ).conj()
 
                         # Determine model for sun's extended emission
@@ -847,9 +850,9 @@ class SolarBeamform(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            time = ephemeris.csd_to_unix(csd + sstream.ra / 360.0)
+            time = chime.lsd_to_unix(csd + sstream.ra / 360.0)
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Get position of sun at every time sample (in radians)
         sun_pos = sun_coord(time, deg=False)
@@ -1045,9 +1048,9 @@ class SolarClean(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            times = ephemeris.csd_to_unix(csd + sstream.ra / 360.0)
+            times = chime.lsd_to_unix(csd + sstream.ra / 360.0)
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Get position of sun at every time sample (in radians)
         sun_pos = sun_coord(times, deg=False)

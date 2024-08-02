@@ -10,7 +10,10 @@ from typing import Union
 import numpy as np
 
 from caput import mpiutil, mpiarray, memh5, config, pipeline, tod
-from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata, finder
+import caput.time as ctime
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import rfi, data_quality, tools, cal_utils, andata, finder
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 
@@ -190,10 +193,10 @@ class RFIStokesIMask(dflagging.RFIStokesIMask):
         mask : np.ndarray[float]
             Mask array. True will flag a time sample.
         """
-        moon = ephemeris.skyfield_wrapper.ephemeris["moon"]
-        sun = ephemeris.skyfield_wrapper.ephemeris["sun"]
+        moon = ctime.skyfield_wrapper.ephemeris["moon"]
+        sun = ctime.skyfield_wrapper.ephemeris["sun"]
         body = [
-            ephemeris.source_dictionary[src]
+            sources.source_dictionary[src]
             for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
         ]
         body += [sun, moon]
@@ -220,7 +223,7 @@ class RFIStokesIMask(dflagging.RFIStokesIMask):
         mask : np.ndarray[float]
             Mask array. True will mask out a time sample.
         """
-        sun = ephemeris.skyfield_wrapper.ephemeris["sun"]
+        sun = ctime.skyfield_wrapper.ephemeris["sun"]
 
         return transit_flag(sun, times, nsigma=self.transit_width)
 
@@ -262,7 +265,7 @@ class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
         mask : np.ndarray[nfreq, ntime]
             Mask array. True will mask out a time sample.
         """
-        body = [ephemeris.source_dictionary[src] for src in self.sources]
+        body = [sources.source_dictionary[src] for src in self.sources]
 
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
@@ -332,12 +335,10 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             filled from the MAD, if `False` use the SumThreshold algorithm.
         """
         body = [
-            (ephemeris.source_dictionary[src], self.transit_width_source)
+            (sources.source_dictionary[src], self.transit_width_source)
             for src in self.sources
         ]
-        body.append(
-            (ephemeris.skyfield_wrapper.ephemeris["sun"], self.transit_width_sun)
-        )
+        body.append((ctime.skyfield_wrapper.ephemeris["sun"], self.transit_width_sun))
 
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
@@ -392,7 +393,7 @@ class RFIStaticMask(task.SingleTask):
         # Create mask container. draco RFIMask is not distributed.
         if "ra" in data.index_map:
             csd = data.attrs.get("lsd", data.attrs.get("csd"))
-            timestamp = ephemeris.csd_to_unix(csd)
+            timestamp = chime.lsd_to_unix(csd)
             out = dcontainers.SiderealRFIMask(attrs_from=data, axes_from=data)
         elif "time" in data.index_map:
             timestamp = data.time[0]
@@ -550,7 +551,7 @@ class MonitorCorrInput(task.SingleTask):
         if mpiutil.rank0:
             # Determine the days in each file and the days in all files
             se_times = get_times(files)
-            se_csd = ephemeris.csd(se_times)
+            se_csd = chime.unix_to_lsd(se_times)
             days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Determine the relevant files for each day
@@ -558,7 +559,7 @@ class MonitorCorrInput(task.SingleTask):
 
             # Determine the time range for each day
             timemap = [
-                (day, ephemeris.csd_to_unix(np.array([day, day + 1]))) for day in days
+                (day, chime.lsd_to_unix(np.array([day, day + 1]))) for day in days
             ]
 
             # Extract the frequency and inputs for the first day
@@ -1434,9 +1435,9 @@ def daytime_flag(time):
     time = np.atleast_1d(time)
     flag = np.zeros(time.size, dtype=bool)
 
-    rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+    rise = chime.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
     for rr in rise:
-        ss = ephemeris.solar_setting(rr)[0]
+        ss = chime.solar_setting(rr)[0]
         flag |= (time >= rr) & (time <= ss)
 
     return flag
@@ -1463,7 +1464,7 @@ def transit_flag(body, time, nsigma=2.0, freq=400.0):
         and False otherwise.  This will have a single dimension if freq is a scalar.
     """
     time = np.atleast_1d(time)
-    obs = ephemeris.chime
+    obs = chime
 
     # Create boolean flag
     if np.isscalar(freq):
@@ -1480,7 +1481,7 @@ def transit_flag(body, time, nsigma=2.0, freq=400.0):
     # Loop over transit times
     for ttrans in transit_times:
         # Compute source coordinates
-        sf_time = ephemeris.unix_to_skyfield_time(ttrans)
+        sf_time = ctime.unix_to_skyfield_time(ttrans)
         pos = obs.skyfield_obs().at(sf_time).observe(body)
 
         alt = pos.apparent().altaz()[0]
@@ -1495,7 +1496,7 @@ def transit_flag(body, time, nsigma=2.0, freq=400.0):
             window_deg = nsigma * cal_utils.guess_fwhm(
                 freq, pol="X", dec=dec.radians, sigma=True
             )
-            window_sec = window_deg * 240.0 * ephemeris.SIDEREAL_S
+            window_sec = window_deg * 240.0 * ctime.SIDEREAL_S
 
             # Flag +/- window_sec around transit time
             begin = ttrans - window_sec
@@ -1591,12 +1592,12 @@ class MaskDay(task.SingleTask):
             ra = sstream.ra[:]
             ntaper = int(
                 self.taper_width
-                / (np.abs(np.median(np.diff(ra))) * 240.0 * ephemeris.SIDEREAL_S)
+                / (np.abs(np.median(np.diff(ra))) * 240.0 * ctime.SIDEREAL_S)
             )
 
             flag = np.zeros(ra.size, dtype=bool)
             for cc in csd:
-                time = ephemeris.csd_to_unix(cc + ra / 360.0)
+                time = chime.lsd_to_unix(cc + ra / 360.0)
                 flag |= self._flag(time)
 
         # Log how much data were masking
@@ -1636,7 +1637,7 @@ class MaskSource(MaskDay):
     Attributes
     ----------
     source : str or list of str
-        Name of the source(s) in the same format as `ephemeris.source_dictionary`.
+        Name of the source(s) in the same format as `ch_ephem.sources.source_dictionary`.
     nsigma : float
         Mask this number of sigma on either side of source transit.
         Here sigma is the exepected width of the primary beam for
@@ -1658,7 +1659,7 @@ class MaskSource(MaskDay):
         else:
             source = [self.source]
 
-        self.body = [ephemeris.source_dictionary[src] for src in source]
+        self.body = [sources.source_dictionary[src] for src in source]
 
     def _flag(self, time):
         flag = np.zeros(time.size, dtype=bool)
@@ -1673,7 +1674,7 @@ class MaskSun(MaskSource):
 
     def setup(self):
         """Save the skyfield body for the sun."""
-        planets = ephemeris.skyfield_wrapper.load("de421.bsp")
+        planets = ctime.skyfield_wrapper.load("de421.bsp")
         self.body = [planets["sun"]]
 
 
@@ -1682,7 +1683,7 @@ class MaskMoon(MaskSource):
 
     def setup(self):
         """Save the skyfield body for the moon."""
-        planets = ephemeris.skyfield_wrapper.load("de421.bsp")
+        planets = ctime.skyfield_wrapper.load("de421.bsp")
         self.body = [planets["moon"]]
 
 
@@ -2249,7 +2250,7 @@ class DataFlagger(task.SingleTask):
                 csd = timestream.attrs["lsd"]
             else:
                 csd = timestream.attrs["csd"]
-            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            time = chime.lsd_to_unix(csd + ra / 360.0)
         else:
             time = timestream.time
 
@@ -2281,10 +2282,10 @@ class DataFlagger(task.SingleTask):
                             np.sum(time_idx),
                             time_idx.size,
                             flag_type,
-                            ephemeris.unix_to_datetime(flag.start_time).strftime(
+                            ctime.unix_to_datetime(flag.start_time).strftime(
                                 "%Y%m%dT%H%M%SZ"
                             ),
-                            ephemeris.unix_to_datetime(flag.finish_time).strftime(
+                            ctime.unix_to_datetime(flag.finish_time).strftime(
                                 "%Y%m%dT%H%M%SZ"
                             ),
                         )
@@ -2348,7 +2349,7 @@ class ApplyInputFlag(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-        self.observer = ephemeris.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
         self.input_flags = andata.FlagInputData.from_acq_h5(files, datasets=["flag"])
 
@@ -2628,7 +2629,7 @@ class FlagRainfall(task.SingleTask):
                 csd = stream.attrs["lsd"]
             else:
                 csd = stream.attrs["csd"]
-            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            time = chime.lsd_to_unix(csd + ra / 360.0)
         else:
             time = stream.time
 

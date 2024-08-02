@@ -9,8 +9,9 @@ import numpy as np
 
 from caput import pipeline
 from caput import config
+import caput.time as ctime
 
-from ch_util import ephemeris
+from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
 
 from draco.core import io
@@ -152,7 +153,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         """
 
         # Set up the default Observer
-        self.observer = ephemeris.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
         # (via `draco.core.io.SelectionsMixin`)
@@ -232,7 +233,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         """
 
         # Find source's telescope-y coordinate
-        src_y = self.source_dec - ephemeris.CHIMELATITUDE
+        src_y = self.source_dec - chime.latitude
 
         # Choose beam model
         mdl = FFTFormedActualBeamModel()
@@ -376,7 +377,7 @@ class LoadFilesFromParams(BaseLoadFiles):
         ts.attrs["lsd"] = lsd
 
         # Add calendar date in YYYYMMDD format to attributes
-        calendar_date = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
+        calendar_date = ctime.unix_to_datetime(container_time).strftime("%Y%m%d")
         ts.attrs["calendar_date"] = calendar_date
 
         # Create tag from LSD, unless manually overridden

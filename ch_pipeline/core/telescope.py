@@ -23,7 +23,7 @@ from drift.telescope import cylbeam
 from draco.core import task
 from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
 
-from ch_util import ephemeris, tools
+from ch_util import tools
 from caput.cache import cached_property
 
 # Get the logger for the module
@@ -144,13 +144,14 @@ class CHIME(telescope.PolarisedTelescope):
 
     def __init__(self, feeds=None):
         import datetime
+        from ch_ephem.observers import chime
 
         self._feeds = feeds
 
         # Set location properties
-        self.latitude = ephemeris.CHIMELATITUDE
-        self.longitude = ephemeris.CHIMELONGITUDE
-        self.altitude = ephemeris.CHIMEALTITUDE
+        self.latitude = chime.latitude
+        self.longitude = chime.longitude
+        self.altitude = chime.altitude
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
@@ -261,9 +262,13 @@ class CHIME(telescope.PolarisedTelescope):
     @property
     def rotation_angle(self):
         if self.correlator == "pathfinder":
-            return tools._PF_ROT
+            from ch_ephem.observers import pathfinder
+
+            return pathfinder.rotation
         elif self.correlator == "chime":
-            return tools._CHIME_ROT
+            from ch_ephem.observers import chime
+
+            return chime.rotation
         else:
             return 0.0
 

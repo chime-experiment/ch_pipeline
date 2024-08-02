@@ -12,7 +12,7 @@ from draco.core import task
 from draco.core import io
 from draco.util import tools
 
-from ch_util import ephemeris
+from ch_ephem.observers import chime
 
 from ..core import containers
 
@@ -96,7 +96,9 @@ class RingMapMaker(task.SingleTask):
         nfreq = sstream.vis.local_shape[0]
 
         # Extract the right ascension (or calculate from timestamp)
-        ra = sstream.ra if "ra" in sstream.index_map else ephemeris.lsa(sstream.time)
+        ra = (
+            sstream.ra if "ra" in sstream.index_map else chime.unix_to_lsa(sstream.time)
+        )
         nra = ra.size
 
         # Construct mapping from vis array to unpacked 2D grid

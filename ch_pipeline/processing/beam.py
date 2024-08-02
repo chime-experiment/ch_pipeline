@@ -1,5 +1,5 @@
+from caput import time as ctime
 from ch_util import holography as holo
-from ch_util import ephemeris as ephem
 from chimedb.core import connect as connect_db
 
 from . import base
@@ -160,8 +160,8 @@ class HolographyFringestop(base.ProcessingType):
     def _available_tags(self):
         self._tags = {}
         # Divide observations by source and in groups
-        start_t = ephem.ensure_unix(self._revparams["start_time"])
-        end_t = ephem.ensure_unix(self._revparams["end_time"])
+        start_t = ctime.ensure_unix(self._revparams["start_time"])
+        end_t = ctime.ensure_unix(self._revparams["end_time"])
         connect_db()
         for src in self._revparams["src_db"]:
             # query database for observations within time range and sort by time

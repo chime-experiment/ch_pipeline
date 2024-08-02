@@ -9,9 +9,10 @@ from scipy import constants
 
 from caput import config, tod, mpiarray, mpiutil
 from caput.pipeline import PipelineRuntimeError
-from caput.time import STELLAR_S
+from caput.time import STELLAR_S, unix_to_datetime
 
-from ch_util import ephemeris as ephem
+from ch_ephem import coord, sources
+from ch_ephem.observers import chime
 from ch_util import tools, layout, holography
 from chimedb import data_index as di
 from chimedb.core import connect as connect_database
@@ -42,7 +43,7 @@ class TransitGrouper(task.SingleTask):
     min_span: float
         Minimum span (deg) of a transit to accept.
     source: str
-        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+        Name of the transiting source. (Must match what is used in `ch_ephem.sources`.)
     db_source: str
         Name of the transiting source as listed in holography database.
         This is a hack until a better solution is implemented.
@@ -64,18 +65,18 @@ class TransitGrouper(task.SingleTask):
         Raises
         ------
         `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
+            If config value ``source`` doesn't match any in `ch_ephem.sources`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
         try:
-            self.src = ephem.source_dictionary[self.source]
-        except KeyError:
+            self.src = sources.source_dictionary[self.source]
+        except KeyError as e:
             msg = (
-                "Could not find source {} in catalogue. "
-                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+                f"Could not find source '{self.source}' in "
+                "`ch_ephem.sources.source_dictionary`."
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise config.CaputConfigError(msg) from e
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -172,9 +173,7 @@ class TransitGrouper(task.SingleTask):
             self.log.info("Did not find any transits.")
             return None
         self.log.debug(
-            "Finalising transit for {}...".format(
-                ephem.unix_to_datetime(self.cur_transit)
-            )
+            "Finalising transit for {}...".format(unix_to_datetime(self.cur_transit))
         )
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
@@ -196,7 +195,7 @@ class TransitGrouper(task.SingleTask):
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = self.tstreams[0]
-            _, dec = ephem.object_coords(
+            _, dec = coord.object_coords(
                 self.src, all_t[0], deg=True, obs=self.observer
             )
             ts.attrs["dec"] = dec
@@ -206,7 +205,7 @@ class TransitGrouper(task.SingleTask):
             ts.attrs["tag"] = "{}_{:0>4d}_{}".format(
                 self.source,
                 self.obs_id,
-                ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
+                unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
             )
             ts.attrs["archivefiles"] = filenames
         else:
@@ -237,7 +236,7 @@ class TransitGrouper(task.SingleTask):
         if len(this_run) == 0:
             self.log.warning(
                 "Could not find source transit in holography database for {}.".format(
-                    ephem.unix_to_datetime(self.cur_transit)
+                    unix_to_datetime(self.cur_transit)
                 )
             )
             # skip this file
@@ -262,7 +261,7 @@ class TransitRegridder(Regridder):
     snr_cov: float
         Ratio of signal covariance to noise covariance (used for Wiener filter).
     source: str
-        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+        Name of the transiting source. (Must match what is used in `ch_ephem.sources`.)
     """
 
     samples = config.Property(proptype=int, default=1024)
@@ -282,20 +281,20 @@ class TransitRegridder(Regridder):
         Raises
         ------
         `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
+            If config value ``source`` doesn't match any in `ch_ephem.sources`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
         # Setup bounds for interpolation grid
         self.start = -self.ha_span / 2
         self.end = self.ha_span / 2
 
         try:
-            self.src = ephem.source_dictionary[self.source]
+            self.src = sources.source_dictionary[self.source]
         except KeyError:
             msg = (
-                "Could not find source {} in catalogue. "
-                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+                f"Could not find source '{self.source}' in "
+                "`ch_ephem.sources.source_dictionary`."
             )
             self.log.error(msg)
             raise config.CaputConfigError(msg)
@@ -322,9 +321,9 @@ class TransitRegridder(Regridder):
         vis_data = data.vis[:].view(np.ndarray)
 
         # Get apparent source RA, including precession effects
-        ra, _ = ephem.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
+        ra, _ = coord.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
         # Get catalogue RA for reference
-        ra_icrs, _ = ephem.object_coords(self.src, deg=True, obs=self.observer)
+        ra_icrs, _ = coord.object_coords(self.src, deg=True, obs=self.observer)
 
         # Convert input times to hour angle
         lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
@@ -442,7 +441,7 @@ class TransitResampler(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
     def process(self, beam, data):
         """Resample the measured beam at arbitrary RA by convolving with a Lanczos kernel.
@@ -1176,8 +1175,8 @@ class TransitStacker(task.SingleTask):
         time_range = np.percentile(self.stack.attrs["transit_time"], [0, 100])
         self.stack.attrs["tag"] = "{}_{}_to_{}".format(
             self.stack.attrs["source_name"],
-            ephem.unix_to_datetime(time_range[0]).strftime("%Y%m%dT%H%M%S"),
-            ephem.unix_to_datetime(time_range[1]).strftime("%Y%m%dT%H%M%S"),
+            unix_to_datetime(time_range[0]).strftime("%Y%m%dT%H%M%S"),
+            unix_to_datetime(time_range[1]).strftime("%Y%m%dT%H%M%S"),
         )
 
         return self.stack
@@ -1268,13 +1267,13 @@ class FilterHolographyProcessed(task.MPILoggedTask):
             if len(this_obs) == 0:
                 self.log.warning(
                     "Could not find source transit in holography database for {}.".format(
-                        ephem.unix_to_datetime(start)
+                        unix_to_datetime(start)
                     )
                 )
             elif this_obs[0].id in self.proc_transits:
                 self.log.warning(
                     "Already processed transit for {}. Skipping.".format(
-                        ephem.unix_to_datetime(start)
+                        unix_to_datetime(start)
                     )
                 )
             else:
