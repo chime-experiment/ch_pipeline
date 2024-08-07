@@ -7,7 +7,9 @@ Classes
 - :py:class:`QuarterStackProcessing`
 """
 
+import os
 import re
+import warnings
 from typing import ClassVar
 
 import numpy as np
@@ -386,7 +388,7 @@ class QuarterStackProcessing(base.ProcessingType):
     default_params: ClassVar = {
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
-        "daily_revisions": ["rev_07"],
+        "daily_revisions": ["rev_08"],
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
@@ -394,7 +396,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "opinion_overrides": {
             "rev_03": "rev_02",
         },
-        "daily_root": "/project/rpp-chime/chime/chime_processed/",
+        "daily_root": None,
         # Frequencies to process
         "freq": [0, 1024],
         "nfreq_delay": 1025,
@@ -402,7 +404,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2022.06",
+        "modlist": "chime/python/2025.03",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
@@ -451,50 +453,78 @@ class QuarterStackProcessing(base.ProcessingType):
         This tries to determine which days are good and bad, and partitions the
         available good days into the individual stacks.
         """
-        days = {}
+        # Request additional information from the user
+        daily_revs = input(
+            "Enter the daily revisions to include (<rev_ij>,<rev_ik>,...): "
+        )
+        if daily_revs:
+            daily_revs = re.compile(r"rev_[0-9]{2}").findall(daily_revs)
+            for d in daily_revs:
+                if d not in self.default_params["daily_revisions"]:
+                    self.default_params["daily_revisions"].append(d)
 
-        core.connect()
+        days = {}
 
         opinion_overrides = self.default_params.get("opinion_overrides", {})
 
         # Go over each revision and construct the set of LSDs we should stack, and save
-        # the path to each.
-        # NOTE: later entries in `daily_revisions` will override LSDs found in earlier
-        # revisions.
+        # the path to each. Later entries in `daily_revisions` will override LSDs found
+        # in earlier revisions.
         for rev in self.default_params["daily_revisions"]:
-            daily_path = (
-                self.root_path
-                if self.default_params["daily_root"] is None
-                else self.default_params["daily_root"]
-            )
-            daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
+            # Figure out where to look for daily data
+            if self.default_params["daily_root"] is None:
+                # Request a daily file path from the user
+                daily_path = input(
+                    "Enter the root path to the daily data [blank to use current root path]: "
+                )
+
+                if not daily_path:
+                    daily_path = self.root_path
+                else:
+                    # The user might have provided the path to the daily directory
+                    # instead of the pipeline root directory
+                    daily_path = os.path.normpath(daily_path).removesuffix("daily")
+                    # Make sure this is a valid path
+                    daily_path = os.path.join(daily_path, "")
+            else:
+                daily_path = self.default_params["daily_root"]
+
+            try:
+                daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
+            except Exception:  # noqa: BLE001
+                warnings.warn(f"Could not load revision {rev} at '{daily_path}'")
+                continue
 
             # Get the revision used to determine the opinions, by default this is the
             # revision, but it can be overriden
             opinion_rev = opinion_overrides.get(rev, rev)
 
-            # Get all the bad days in this revision
-            revision = df.DataRevision.get(name=opinion_rev)
-            query = (
-                df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
-                .distinct()
-                .where(
-                    df.DataFlagOpinion.revision == revision,
-                    df.DataFlagOpinion.decision == "bad",
-                )
-            )
-            bad_days = [x[0] for x in query.tuples()]
+            if opinion_rev is not None:
+                # Establish a database connection
+                core.connect()
 
-            # Get all the good days
-            query = (
-                df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
-                .distinct()
-                .where(
-                    df.DataFlagOpinion.revision == revision,
-                    df.DataFlagOpinion.decision == "good",
+                # Get all the bad days in this revision
+                revision = df.DataRevision.get(name=opinion_rev)
+                query = (
+                    df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
+                    .distinct()
+                    .where(
+                        df.DataFlagOpinion.revision == revision,
+                        df.DataFlagOpinion.decision == "bad",
+                    )
                 )
-            )
-            good_days = [x[0] for x in query.tuples()]
+                bad_days = [x[0] for x in query.tuples()]
+
+                # Get all the good days
+                query = (
+                    df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
+                    .distinct()
+                    .where(
+                        df.DataFlagOpinion.revision == revision,
+                        df.DataFlagOpinion.decision == "good",
+                    )
+                )
+                good_days = [x[0] for x in query.tuples()]
 
             for d in daily_rev.ls():
                 try:
@@ -504,9 +534,12 @@ class QuarterStackProcessing(base.ProcessingType):
                         f'Could not parse string tag "{d}" into a valid LSD'
                     ) from e
 
-                # Filter out known bad days here
-                if (lsd in bad_days) or (lsd not in good_days):
-                    continue
+                # Filter out known bad days here. If `opinion_rev` is None,
+                # ignore opinions and automatically include all available days.
+                # This is only true if the opinion override is explicitly set
+                if opinion_rev is not None:
+                    if (lsd in bad_days) or (lsd not in good_days):
+                        continue
 
                 # Insert the day and path into the dict, this will replace the entries
                 # from prior revisions
