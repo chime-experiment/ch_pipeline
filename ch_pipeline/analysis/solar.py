@@ -278,7 +278,7 @@ class SolarCalibrationN2(task.SingleTask):
 
         # Only examine data between sunrise and sunset
         time_flag = np.zeros(len(time), dtype=bool)
-        rise = chime.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+        rise = chime.solar_rising(time[0] - 24.0 * 3600.0, t1=time[-1])
         for rr in rise:
             ss = chime.solar_setting(rr)[0]
             time_flag |= (time >= rr) & (time <= ss)
