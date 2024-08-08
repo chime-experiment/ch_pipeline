@@ -1434,7 +1434,7 @@ def daytime_flag(time):
     time = np.atleast_1d(time)
     flag = np.zeros(time.size, dtype=bool)
 
-    rise = chime.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+    rise = chime.solar_rising(time[0] - 24.0 * 3600.0, t1=time[-1])
     for rr in rise:
         ss = chime.solar_setting(rr)[0]
         flag |= (time >= rr) & (time <= ss)
