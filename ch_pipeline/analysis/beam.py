@@ -1337,9 +1337,9 @@ def unwrap_lha(lsa, src_ra):
     lsa += start_lsa
     # subtract source RA
     return np.where(
-        np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.0),
+        np.abs(lsa - src_ra) < np.abs(lsa - (src_ra + 360.0)),
         lsa - src_ra,
-        lsa - src_ra + 360.0,
+        lsa - src_ra - 360.0,
     )
 
 
