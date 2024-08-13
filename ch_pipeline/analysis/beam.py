@@ -949,7 +949,11 @@ class HolographyTransitFit(TransitFit):
         sigma = sigma[:, np.newaxis] * np.ones((1, ninput), dtype=sigma.dtype)
 
         # Find index into pol axis that yields copolar products
-        pol_axis = list(transit.index_map["pol"])
+        index_map_pol = transit.index_map["pol"]
+        if index_map_pol.dtype.kind == "S":
+            pol_axis = [pol.decode("UTF-8") for pol in index_map_pol]
+        else:
+            pol_axis = list(index_map_pol)
         if "co" in pol_axis:
             copolar_slice = (slice(None), pol_axis.index("co"))
         else:
