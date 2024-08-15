@@ -2,7 +2,7 @@
 
 import click
 
-from . import base
+from . import base, beam, daily, quarterstack  # noqa: F401
 
 click.disable_unicode_literals_warning = True
 
