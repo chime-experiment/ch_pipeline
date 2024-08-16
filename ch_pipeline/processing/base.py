@@ -337,7 +337,7 @@ class ProcessingType:
         return []
 
     @property
-    def _all_tags(self) -> list:
+    def _config_tags(self) -> list:
         """Return the list of tags requested by the config."""
         return []
 
@@ -558,7 +558,7 @@ class ProcessingType:
         return {
             "available": available_tags,
             "not_available": [
-                tag for tag in self._all_tags if str(tag) not in available_tags
+                tag for tag in self._config_tags if str(tag) not in available_tags
             ],
             "not_yet_submitted": not_submitted_tags,
             "pending": pending_tags,
