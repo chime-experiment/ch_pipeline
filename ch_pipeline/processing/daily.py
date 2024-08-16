@@ -968,27 +968,30 @@ class DailyProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-        # Get all desired csds from the config file
-        csds = self._all_tags
-        # Automatically exclude bad days
-        csds = [csd for csd in csds if csd not in self._exclude]
-        csds_sorted = sorted(csds)
-        # Get a list of CSDS whose files are entirely available online
-        csds_to_run = available_csds(
-            csds_sorted,
-            pad=self._padding,
-            required_coverage=self._min_coverage,
-            weather_coverage=self._weather_coverage,
-        )
+        csds = self.runnable_tags(require_online=True)
 
-        return [f"{csd:.0f}" for csd in csds if csd in csds_to_run]
+        return [str(int(csd)) for csd in csds]
 
     @property
-    def _all_tags(self) -> list:
+    def _config_tags(self) -> list:
         """Return all tags desired from the config."""
         return unique_ordered(
             csd for i in self._intervals for csd in expand_csd_range(*i)
         )
+
+    def runnable_tags(self, require_online=False) -> list:
+        """Return all runnable tags, whether or not the data is available."""
+        csds = [csd for csd in self._config_tags if csd not in self._exclude]
+
+        runnable = available_csds(
+            sorted(csds),
+            self._padding,
+            self._min_coverage,
+            self._weather_coverage,
+            require_online=require_online,
+        )
+
+        return [csd for csd in csds if csd in runnable]
 
     def _finalise_jobparams(self, tag, jobparams):
         """Set bounds for this CSD."""
@@ -1013,9 +1016,8 @@ class DailyProcessing(base.ProcessingType):
         rev_stats = self.status(user=user)
         # Get the upcoming jobs
         upcoming = rev_stats["not_yet_submitted"]
-        # Get all the tags requested by the config, including those that
-        # are not currently available online
-        all_tags = [str(tag) for tag in self._all_tags]
+        # Get all the runnable tags
+        all_tags = [str(tag) for tag in self.runnable_tags(require_online=False)]
 
         if retrieve:
             # If there are any upcoming jobs which require offline data,
@@ -1202,6 +1204,7 @@ def available_csds(
     pad: float = 0.0,
     required_coverage: float = 0.0,
     weather_coverage: float = 1.0,
+    require_online: bool = False,
 ) -> set:
     """Return the subset of csds in `csds` for whom all files are online.
 
@@ -1223,6 +1226,9 @@ def available_csds(
         What fraction of the day must have weather coverage. Generally,
         weather files are only produced once per day, so this should be
         set to 1.0 unless there are changes to data format.
+    require_online
+        If True, a CSD must have all files available online to be considered
+        available. Default is True.
 
     Returns
     -------
@@ -1242,36 +1248,49 @@ def available_csds(
         available = set()
         coverage = coverage * 86400
 
+        def _check_coverage(x):
+            time_range = 0
+            for tr in x:
+                time_range += tr[2] - tr[1]
+
+            if time_range > coverage:
+                return True
+
+            return False
+
         for csd in csds:
             start_time = chime.lsd_to_unix(csd - pad)
             end_time = chime.lsd_to_unix(csd + 1 + pad)
 
-            # online - list of file start and end times that are online
-            # between start_time and end_time
-            # index_online - the final index in which data was located
-            online, index_online = files_in_timespan(
-                start_time, end_time, filenames_online
-            )
             exists, index_exists = files_in_timespan(
                 start_time, end_time, filenames_that_exist
             )
 
-            if (len(online) == len(exists)) and (len(online) != 0):
-                # All files for this CSD are online
-                # Check that we have the required data coverage
-                time_range = 0
-                for tr in online:
-                    time_range += tr[2] - tr[1]
-
-                if time_range > coverage:
-                    available.add(csd)
+            available_offline = _check_coverage(exists)
 
             # The final file in the span may contain more than one sidereal day
-            index_online = max(index_online - 1, 0)
             index_exists = max(index_exists - 1, 0)
-
-            filenames_online = filenames_online[index_online:]
             filenames_that_exist = filenames_that_exist[index_exists:]
+
+            if not available_offline:
+                # We can't get this data no matter what
+                continue
+
+            if require_online:
+                # online - list of file start and end times that are online
+                # between start_time and end_time
+                # index_online - the final index in which data was located
+                online, index_online = files_in_timespan(
+                    start_time, end_time, filenames_online
+                )
+
+                if _check_coverage(online) & (len(online) == len(exists)):
+                    available.add(csd)
+
+                index_online = max(index_online - 1, 0)
+                filenames_online = filenames_online[index_online:]
+            else:
+                available.add(csd)
 
         return available
 
