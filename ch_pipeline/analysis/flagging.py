@@ -1556,25 +1556,25 @@ class MaskDay(task.SingleTask):
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
 
-    def process(self, sstream):
+    def process(self, dstream):
         """Set the weight to zero during day time.
 
         Parameters
         ----------
-        sstream : dcontainers.SiderealStream or equivalent
-            Unmasked sidereal stack.
+        dstream : dcontainers.SiderealStream or equivalent
+            Data stream to be masked. Must have a time or ra axis.
 
         Returns
         -------
         mstream : dcontainers.SiderealStream or equivalent
-            Masked sidereal stream.
+            Masked data stream.
         """
         # Redistribute over frequency
-        sstream.redistribute("freq")
+        dstream.redistribute("freq")
 
         # Get flag that indicates day times (RAs)
-        if "time" in sstream.index_map:
-            time = sstream.time[:]
+        if "time" in dstream.index_map:
+            time = dstream.time[:]
             ntaper = int(self.taper_width / np.abs(np.median(np.diff(time))))
 
             flag = self._flag(time)
@@ -1584,12 +1584,12 @@ class MaskDay(task.SingleTask):
             # there will be multiple LSDs and the flag will be the logical OR of the
             # flag from each individual LSD.
             csd = (
-                sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
+                dstream.attrs["lsd"] if "lsd" in dstream.attrs else dstream.attrs["csd"]
             )
             if not hasattr(csd, "__iter__"):
                 csd = [csd]
 
-            ra = sstream.ra[:]
+            ra = dstream.ra[:]
             ntaper = int(
                 self.taper_width
                 / (np.abs(np.median(np.diff(ra))) * 240.0 * ctime.SIDEREAL_S)
@@ -1607,18 +1607,27 @@ class MaskDay(task.SingleTask):
         if np.any(flag):
             # If requested, apply taper.
             if ntaper > 0:
-                self.log.info("Applying taper over %d time samples." % ntaper)
+                self.log.info(f"Applying taper over {ntaper} time samples.")
                 flag = taper_mask(flag, ntaper, outer=self.outer_taper)
 
             # Apply the mask to the weights
-            sstream.weight[:] *= 1.0 - flag
+            if hasattr(dstream, "weight"):
+                dstream.weight[:] *= 1.0 - flag
 
             # If requested, apply the mask to the data
-            if self.zero_data:
-                sstream.vis[:] *= 1.0 - flag
+            if self.zero_data and hasattr(dstream, "vis"):
+                dstream.vis[:] *= 1.0 - flag
+
+            # If a mask dataset exists, apply the flag, accounting
+            # for mask tapering
+            if "mask" in dstream.datasets:
+                if self.outer_taper:
+                    dstream.mask[:] |= ~np.isclose(flag, 0.0)
+                else:
+                    dstream.mask[:] |= np.isclose(flag, 1.0)
 
         # Return masked sidereal stream
-        return sstream
+        return dstream
 
     def _flag(self, time):
         return daytime_flag(time)
