@@ -28,7 +28,7 @@ from .pfb import DeconvolvePFB
 import gc
 from beam_model.formed import FFTFormedActualBeamModel
 from scipy.signal import convolve
-
+import scipy.linalg as la
 
 class HFBAverage(task.SingleTask):
     """Take average of HFB data over any axis.
@@ -1311,7 +1311,7 @@ class HFBSearchQuadratic(task.SingleTask):
         B = []
         for i in range(len(freq_chunks) - 1):
             B.append(np.arange(freq_chunks[i], freq_chunks[i + 1]))
-        B = np.asarray(B)
+        B = np.asarray(B, type='object')
         D = []
 
         for i, item in enumerate(B):
@@ -1326,6 +1326,159 @@ class HFBSearchQuadratic(task.SingleTask):
 
         return D
 
+class HPFFrequency(task.SingleTask):
+    """High-pass filtering along frequency axis.
+
+    This is to remove fluctuations in the spectra.
+    
+    Attributes
+    ----------
+    tau: 
+    prior:
+    """
+
+    tau = config.Property(proptype=int, default=384)
+    prior = config.Property(proptype=int, default=2)
+
+    def process(self, stream):
+        """High-pass filter data along frequency axis.
+
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : containers.HFBData
+            Container with HFB data and weights.
+        """
+
+        # Extract data from container
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        ns_beam = stream.beam_ns[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            local_ns = data.local_bounds
+            ns_beam = ns_beam[local_ns]
+            data = data.local_array
+            weight = weight.local_array
+
+        freq = stream.freq[:]
+
+        freq_centre = freq[64::128]
+
+        hpf = np.zeros_like(data)
+
+        # Extract axes lengths
+        nEW, nbeam, nra, nfreq = data.shape
+
+        chime_nfreq = int(nfreq / 128)
+
+        for ibeam, ns in enumerate(ns_beam):
+            freq_chunks = self.split(ns, freq_centre, chime_nfreq)
+            
+            for ichannel in range(len(freq_chunks)-1):
+
+                channel_i = freq_chunks[ichannel]
+                channel_f = freq_chunks[ichannel+1]
+
+                self.log.info('channel_i = %s, channel_f=%s'%(channel_i,channel_f))
+                nfreq = (channel_f - channel_i) * 128
+                frequency = np.arange(nfreq)
+                if self.tau > nfreq:
+                    self.log.info('changed tau from %s to %s'%(self.tau,nfreq))
+                    new_tau = nfreq
+                    total_f = nfreq + 2 * new_tau 
+                else:
+                    total_f = nfreq + 2 * self.tau 
+                
+                nmodes = int(np.ceil(total_f / self.tau))
+                f_freq = np.arange(-nmodes, nmodes) / total_f
+                F = np.exp(2.0j * np.pi * frequency[:, np.newaxis] * f_freq[np.newaxis, :])
+                Fh = F.T.conj().copy()
+                
+                dflat = data[:,ibeam,:,128 * channel_i : 128 * channel_f].reshape(-1, nfreq) #Flatten the other dimensionions
+                wflat = weight[:,ibeam,:,128 * channel_i : 128 * channel_f].reshape(-1, nfreq) #Flatten the other dimensionions
+                
+                h = np.zeros(dflat.shape) #An array for storing high-pass filtered data
+
+                Si = np.identity(2 * nmodes) * self.prior**-2
+                for ii in range(dflat.shape[0]):
+                    d, w = dflat[ii,:], wflat[ii,:]
+                    wsum = w.sum()
+                    if wsum == 0:
+                        continue #Note that continue goes to the next iteration! not continuing the same iteration!
+                    m = np.sum(d * w) / wsum
+
+                    # dirty = Fh @ ((d - m) * w)
+                    # Ci = Fh @ (w[:, np.newaxis] * F)
+                    d -= m
+                    dirty = np.dot(Fh, (d * w))
+                    Ci = np.dot(Fh, w[:, np.newaxis] * F)
+                    Ci += Si
+
+                    f_lpf = la.solve(Ci, dirty, assume_a="pos")
+
+                    # As we know the result will be real, split up the matrix multiplication to
+                    # guarantee this
+                    t_lpf = np.dot(F.real, f_lpf.real) - np.dot(F.imag, f_lpf.imag)
+                    d -= t_lpf
+                    h[ii,:] = d
+                hpf[:,ibeam,:,128 * channel_i : 128 * channel_f] = h.reshape((nEW,nra,nfreq))
+        
+        # Create container to hold output
+        out = containers.HFBHighResRingMap(axes_from=stream, attrs_from=stream)
+
+        # Place diff in output container
+        out.hfb[:] = hpf
+        out.weight[:] = weight
+
+        return out
+
+    def split(self, beam, freq_centre, chime_nfreq):
+        """Finds clamping frequencies. If the length of
+         clamping interval is greater than 8 coarse frequencies,
+         split the interval such that the interval length is at most 8.
+
+
+        Parameters
+        ----------
+        beam : North-South beam index
+        freq_centre: Frequency centre of coarse frequency channels in MHz.
+        chime_nfreq: Total number of coarse frequency channels
+        """
+
+        mdl = FFTFormedActualBeamModel()
+        # Find jumps due to clamping
+        y = mdl.get_beam_positions(beam, freq_centre).squeeze()[:, 1]
+        freq_chunks = np.where(np.abs(y[1:] - y[:-1]) > 0.1)[0]
+        # Make the frequency chunks: beginning index of the intervals
+        freq_chunks = np.append(0, freq_chunks + 1)
+        freq_chunks = np.append(freq_chunks, chime_nfreq)
+        # If the length of frequency chunk is greater than 8, split it such
+        # that the interval length is at most 8 coarse channels.
+        B = []
+        for i in range(len(freq_chunks) - 1):
+            B.append(np.arange(freq_chunks[i], freq_chunks[i + 1]))
+        B = np.asarray(B)
+        D = []
+
+        for i, item in enumerate(B):
+            delta = int(item.shape[0] / 8)
+            split_points = [8 * (i + 1) for i in range(delta)]
+            C = np.split(B[i], split_points)
+            non_empty_arrays = [arr for arr in C if arr.size > 0]
+            for i in range(len(non_empty_arrays)):
+                D.append(non_empty_arrays[i][0])
+        D.append(freq_chunks[-1])
+        D = np.asarray(D)
+
+        return D
 
 class HFBSelectTransit(task.SingleTask):
     """Find transit data through FRB beams.
