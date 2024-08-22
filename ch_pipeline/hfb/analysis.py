@@ -346,12 +346,23 @@ class HFBAlignEWBeams(task.SingleTask):
 
         from ch_util.ephemeris import bmxy_to_hadec
 
+        stream.redistribute("el")
+
         data = stream.hfb[:]
         weight = stream.weight[:]
+        ns_beam = stream.beam_ns[:]
+        ew_beam = stream.beam_ew[:]
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            local_ns = data.local_bounds
+            ns_beam = ns_beam[local_ns]
+            data = data.local_array
+            weight = weight.local_array
 
         # Find CHIME/FRB XY coordinates of beams
-        x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
-        y_beam_list = self.ns_reference_angles_deg[stream.beam_ns]
+        x_beam_list = self.ew_beam_offset_deg[ew_beam]
+        y_beam_list = self.ns_reference_angles_deg[ns_beam]
 
         # Compute hour angles of beams
         x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
@@ -361,7 +372,7 @@ class HFBAlignEWBeams(task.SingleTask):
         data_aligned = np.zeros_like(data)
         weight_aligned = np.zeros_like(weight)
 
-        for insb, nsb in enumerate(stream.beam_ns):
+        for insb, nsb in enumerate(ns_beam):
             for iewb, ewb in enumerate(stream.beam_ew):
                 # Compute actual RA of samples per beam
                 ra_true = stream.ra - ha_beam[insb, ewb]
@@ -378,8 +389,7 @@ class HFBAlignEWBeams(task.SingleTask):
                     y=data[iewb, insb, :, :],
                     w=weight[iewb, insb, :, :],
                     xeval=stream.ra,
-                    mode="wrap",
-                    xperiod=360.0,
+                    mode="zero",
                 )
 
         # Create output container; add data and weights
@@ -501,14 +511,16 @@ class HFBOnOffDifference(task.SingleTask):
             dat_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
 
+        self.log.info('sum_data_off is generated')
         # Then, convolve the kernel above with the weights to find the sum
         # of off-source weights (denominator of the weighted average)
         weight_fft = np.fft.fft(weight, axis=2)
-
+        self.log.info('weight_off is generated')
         # Sum of off-source weights over ra axis
         sum_weight_off = np.fft.ifft(
             weight_fft * ker_fft[np.newaxis, np.newaxis, :, np.newaxis], axis=2
         ).real
+
 
         # If the weight is zero, ifft above returns very small, but non-zero
         # value for n. This number goes to the denominator of weighted mean
@@ -521,6 +533,8 @@ class HFBOnOffDifference(task.SingleTask):
 
         del sum_data_off, ker_fft, off_kernel
         gc.collect()
+        self.log.info('sum_data_off deleted')
+
 
         # Computing weighted average of on-source data
         on_kernel = np.zeros(nra)
@@ -546,6 +560,7 @@ class HFBOnOffDifference(task.SingleTask):
 
         del on, off
         gc.collect()
+        self.log.info('on and off deleted')
 
         # Now, evaluate the weight of on-off differenced data
 
@@ -562,7 +577,6 @@ class HFBOnOffDifference(task.SingleTask):
         var_diff[var_on == 0] = 0
 
         del var_on, var_off
-
         gc.collect()
 
         # weight of on-off data
@@ -2048,9 +2062,11 @@ class HFBMedianSubtraction(task.SingleTask):
         # make a mask of non-zero weights
         mask = weight != 0
 
+
         # Generate binary weight
         binary_weight = mask.astype(np.float32)
 
+        
         # Change the order of axes in data and mask arrays, as weighted median
         # is calculated along the last axis
         data_s = np.swapaxes(data, 2, 3)
@@ -2059,8 +2075,10 @@ class HFBMedianSubtraction(task.SingleTask):
         # Calculate weighted median (to exclude flagged data) along beam axis:
         median = weighted_median.weighted_median(data_s, binary_weight)
 
-        del binary_weight
-        del data_s
+        del binary_weight, data_s
+        
+        # Collect garbage
+        gc.collect()
 
         # Subtract weighted median along all beams from the data
         diff = data - median[:, :, np.newaxis, :]
