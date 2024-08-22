@@ -2,12 +2,13 @@
 
 import beam_model.formed as fm
 import numpy as np
-from caput import config, tools
+from caput import config, mpiarray, tools
 from draco.analysis.sidereal import _search_nearest
 from draco.core import task
 from draco.core.containers import LocalizedRFIMask
 from scipy.spatial.distance import cdist
 
+from . import containers
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
 
 
@@ -122,6 +123,100 @@ class ApplyHFBMask(task.SingleTask):
             # If requested, apply the mask to the data
             if self.zero_data:
                 stream.hfb[:] *= 1.0 - flag
+
+        return stream
+        
+
+class HFBRFIMask(task.SingleTask):
+    """Mask RFI bands.
+
+    Attributes
+    ----------
+    chime_freq : list
+        List of CHIME frequency indices to be masked
+    fine_freq : list
+        List of fine frequency indices to be masked. 
+        Example: [[2300,2350],[3120,3145]] masks [2300:2350] and [3120:3145]
+    """
+
+    chime_freq = config.Property(proptype=list)
+    fine_freq = config.Property(proptype=list)
+
+    def process(self, stream):
+        """Set weights to zero for flagged data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+        Returns
+        -------
+        stream : containers.HFBData
+            Container with HFB data and weights, with weights of flagged frequencies
+            set to zero."""
+
+        # Load on-off differenced data and weights
+        weight = stream.weight[:]
+        data = stream.hfb[:]
+
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        for channel in self.chime_freq[:]:
+            weight[...,channel*128:(channel+1)*128] = 0 
+
+        for channel in self.fine_freq: 
+            weight[...,channel[0]:channel[1]+1] = 0
+
+        return stream
+        
+
+class HFBRFIMask(task.SingleTask):
+    """Mask RFI bands.
+
+    Attributes
+    ----------
+    chime_freq : list
+        List of CHIME frequency indices to be masked
+    fine_freq : list
+        List of fine frequency indices to be masked. 
+        Example: [[2300,2350],[3120,3145]] masks [2300:2350] and [3120:3145]
+    """
+
+    chime_freq = config.Property(proptype=list)
+    fine_freq = config.Property(proptype=list)
+
+    def process(self, stream):
+        """Set weights to zero for flagged data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+        Returns
+        -------
+        stream : containers.HFBData
+            Container with HFB data and weights, with weights of flagged frequencies
+            set to zero."""
+
+        # Load on-off differenced data and weights
+        weight = stream.weight[:]
+        data = stream.hfb[:]
+
+
+        # Change data and weights to numpy array, so that it can be reshaped
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        for channel in self.chime_freq[:]:
+            weight[...,channel*128:(channel+1)*128] = 0 
+
+        for channel in self.fine_freq: 
+            weight[...,channel[0]:channel[1]+1] = 0
 
         return stream
 
