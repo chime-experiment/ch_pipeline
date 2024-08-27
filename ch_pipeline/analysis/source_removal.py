@@ -19,8 +19,9 @@ from draco.core import containers as dcontainers
 from ..core import containers
 
 
-def _correct_phase_wrap(phi):
-    return ((phi + np.pi) % (2.0 * np.pi)) - np.pi
+def _correct_phase_wrap(phi, deg=False):
+    offset = 180.0 if deg else np.pi
+    return ((phi + offset) % (2.0 * offset)) - offset
 
 
 def model_extended_sources(
@@ -399,9 +400,11 @@ class SolveSources(task.SingleTask):
         self.inputmap = telescope.feeds
 
         self.bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in self.sources
         ]
 
@@ -802,9 +805,11 @@ class SubtractSources(task.SingleTask):
         source_model_kwargs = json.loads(model.attrs["source_model_kwargs"])
 
         bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in sources
         ]
 
@@ -910,22 +915,22 @@ class SubtractSources(task.SingleTask):
         return data
 
 
-class AccumulateBeam(task.SingleTask):
+class AccumulateBeam(task.MPILoggedTask):
     """Accumulate the stacked beam for each source."""
 
-    def setup(self):
+    def __init__(self):
         """Create a class dictionary to hold the beam for each source."""
-
+        super().__init__()
         self.beam_stack = {}
 
-    def process(self, beam_stack):
+    def next(self, beam_stack):
         """Add the beam for this source to the class dictionary."""
 
         self.beam_stack[beam_stack.attrs["source_name"]] = beam_stack
 
         return None
 
-    def process_finish(self):
+    def finish(self):
         """Return the class dictionary containing the beam for all sources."""
 
         return self.beam_stack
@@ -956,9 +961,11 @@ class SolveSourcesWithBeam(SolveSources):
         self.inputmap = telescope.feeds
 
         self.bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in self.sources
         ]
 
@@ -1261,14 +1268,19 @@ class SolveSourcesWithBeam(SolveSources):
                             ..., np.newaxis
                         ]
 
-                # Conjugate if necessary.
+                # Conjugate if necessary
                 to_conj = pol_conj[pp]
                 if to_conj.size > 0:
                     vis[to_conj] = vis[to_conj].conj()
                     source_model[to_conj] = source_model[to_conj].conj()
 
                 # Solve for the coefficients
-                out_dset[ff, pp] = self.solver(vis, weight, source_model)
+                if self.time_variable:
+                    out_dset[ff, pp][valid_time] = self.solver(
+                        vis, weight, source_model
+                    )
+                else:
+                    out_dset[ff, pp] = self.solver(vis, weight, source_model)
 
         # Save a few attributes necessary to interpret the data
         out.attrs["min_distance"] = min_distance
@@ -1337,9 +1349,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
             self.log.info(f"Resetting max_ha to {self.max_ha:0.1f}.")
 
         bodies = [
-            ephemeris.source_dictionary[src]
-            if src in ephemeris.source_dictionary
-            else ephemeris.skyfield_wrapper.ephemeris[src]
+            (
+                ephemeris.source_dictionary[src]
+                if src in ephemeris.source_dictionary
+                else ephemeris.skyfield_wrapper.ephemeris[src]
+            )
             for src in sources
         ]
 
@@ -1449,8 +1463,6 @@ class SubtractSourcesWithBeam(task.SingleTask):
             coeff = model.coeff[:].view(np.ndarray)
         except KeyError:
             coeff = model.amplitude[:].view(np.ndarray)
-        else:
-            coeff = coeff[:, :, np.newaxis, :]
 
         bvis, bweight = {}, {}
         for key, val in beams.items():
@@ -1481,6 +1493,11 @@ class SubtractSourcesWithBeam(task.SingleTask):
                     continue
 
                 flg = flag_lsd[:, valid_time] if flag_lsd is not None else None
+                co = (
+                    coeff[ff, pp, np.newaxis, :]
+                    if coeff.ndim < 4
+                    else coeff[ff, pp, valid_time, :]
+                )
 
                 # Calculate source model
                 source_model, sedge = model_extended_sources(
@@ -1515,10 +1532,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
                 if to_conj.size > 0:
                     source_model[to_conj] = source_model[to_conj].conj()
 
-                mdl = np.sum(
-                    coeff[ff, pp, np.newaxis, :, :] * source_model,
-                    axis=-1,
-                )
+                mdl = np.sum(co[np.newaxis, :, :] * source_model, axis=-1)
 
                 if to_conj.size > 0:
                     mdl[to_conj] = mdl[to_conj].conj()
