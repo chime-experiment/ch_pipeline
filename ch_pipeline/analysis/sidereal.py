@@ -263,7 +263,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
 
 
 class SiderealMean(task.SingleTask):
-    """Calculate the weighted mean(median) over time for each visibility.
+    """Calculate the weighted mean(median) over time.
 
     Parameters
     ----------
@@ -330,17 +330,18 @@ class SiderealMean(task.SingleTask):
                         self.body.append(body)
 
     def process(self, sstream):
-        """Calculate the mean(median) over the sidereal day.
+        """Calculate the mean (median) over the sidereal day.
 
         Parameters
         ----------
-        sstream : andata.CorrData or containers.SiderealStream
-            Timestream or sidereal stream.
+        sstream : andata.CorrData, containers.TimeStream, containers.SiderealStream,
+                  containers.HybridVisStream, containers.RingMap
 
         Returns
         -------
         mustream : same as sstream
-            Sidereal stream containing only the mean(median) value.
+            Same type of container as the input but with a singleton time axis
+            that contains the mean (or median) value.
         """
         from .flagging import daytime_flag, transit_flag
 
@@ -391,7 +392,7 @@ class SiderealMean(task.SingleTask):
 
         # Create output container
         newra = np.mean(ra[flag_quiet], keepdims=True)
-        mustream = containers.SiderealStream(
+        mustream = sstream.__class__(
             ra=newra,
             axes_from=sstream,
             attrs_from=sstream,
@@ -411,11 +412,15 @@ class SiderealMean(task.SingleTask):
             all_weight = (all_weight > 0.0).astype(np.float32)
 
         # Only include freqs/baselines where enough data is actually present
-        frac_present = all_weight.sum(axis=-1) / flag_quiet.sum(axis=-1)
+        frac_present = (all_weight > 0.0).sum(axis=-1) / flag_quiet.sum(axis=-1)
         all_weight *= (frac_present > self.missing_threshold)[..., np.newaxis]
 
+        # Log number of frequencies that do not have enough data
+        waxis = sstream.weight.attrs["axis"][:-1]
+        caxind = tuple([ii for ii, ax in enumerate(waxis) if ax != "freq"])
+
         num_freq_missing_local = int(
-            (frac_present < self.missing_threshold).all(axis=1).sum()
+            (frac_present <= self.missing_threshold).all(axis=caxind).sum()
         )
         num_freq_missing = self.comm.allreduce(num_freq_missing_local, op=MPI.SUM)
 
@@ -428,21 +433,44 @@ class SiderealMean(task.SingleTask):
         # container
         mustream.weight[:] = np.sum(all_weight, axis=-1, keepdims=True)
 
-        # If requested, compute median (requires loop over frequencies and baselines)
-        if self.median:
-            mu_vis[..., 0].real = weighted_median(all_vis.real.copy(), all_weight)
-            mu_vis[..., 0].imag = weighted_median(all_vis.imag.copy(), all_weight)
+        # Identify any axis not contained in weight
+        if isinstance(sstream, containers.HybridVisStream):
+            vslc = [np.s_[:, :, :, ee] for ee in range(all_vis.shape[3])]
 
-            # Where all the weights are zero explicitly set the median to zero
+        elif isinstance(sstream, containers.Ringmap):
+            vslc = [bb for bb in range(all_vis.shape[0])]
+
+        else:
+            vslc = [slice(None)]
+
+        # If requested, compute median
+        if self.median:
+
             missing = ~(all_weight.any(axis=-1))
-            mu_vis[missing, 0] = 0.0
+
+            # Loop over all axes not shared with weight dataset
+            for slc in vslc:
+
+                mu_vis[slc][..., 0].real = weighted_median(
+                    np.ascontiguousarray(all_vis[slc].real, dtype=np.float32),
+                    all_weight,
+                )
+                mu_vis[slc][..., 0].imag = weighted_median(
+                    np.ascontiguousarray(all_vis[slc].imag, dtype=np.float32),
+                    all_weight,
+                )
+
+                # Where all the weights are zero explicitly set the median to zero
+                mu_vis[slc][..., 0][missing] = 0.0
 
         else:
             # Otherwise calculate the mean
-            mu_vis[:] = np.sum(all_weight * all_vis, axis=-1, keepdims=True)
-            mu_vis[:] *= tools.invert_no_zero(mustream.weight[:])
+            # Again loop over all axes not shared with weight dataset
+            for slc in vslc:
+                mu_vis[slc] = np.sum(all_weight * all_vis[slc], axis=-1, keepdims=True)
+                mu_vis[slc] *= tools.invert_no_zero(mustream.weight[:])
 
-        # Return sidereal stream containing the mean value
+        # Return container with singleton time axis containing the mean value
         return mustream
 
 
@@ -476,26 +504,37 @@ class ChangeSiderealMean(task.SingleTask):
         # Check that input visibilities have consistent shapes
         sshp, mshp = sstream.vis.shape, mustream.vis.shape
 
-        if np.any(sshp[0:2] != mshp[0:2]):
+        if np.any(sshp[0:-1] != mshp[0:-1]):
             ValueError("Frequency or product axis differ between inputs.")
 
-        if (len(mshp) != 3) or (mshp[-1] != 1):
-            ValueError("Mean value has incorrect shape, must be (nfreq, nprod, 1).")
+        if mshp[-1] != 1:
+            ValueError("Mean value has incorrect shape, must be (..., 1).")
 
         # Ensure both inputs are distributed over frequency
         sstream.redistribute("freq")
         mustream.redistribute("freq")
 
         # Determine indices of autocorrelations
-        prod = mustream.index_map["prod"][mustream.index_map["stack"]["prod"]]
-        not_auto = (prod["input_a"] != prod["input_b"]).astype(np.float32)
-        not_auto = not_auto[np.newaxis, :, np.newaxis]
+        if "prod" in mustream.index_map:
+            prod = mustream.index_map["prod"][mustream.index_map["stack"]["prod"]]
+            not_auto = prod["input_a"] != prod["input_b"]
+
+            pslc = tuple(
+                [
+                    slice(None) if ax in ["prod", "stack"] else np.newaxis
+                    for ax in mustream.vis.attrs["axis"]
+                ]
+            )
+
+            mu = np.where(not_auto[pslc], mustream.vis[:].local_array, 0.0)
+        else:
+            mu = mustream.vis[:].local_array
 
         # Add or subtract value to the cross-correlations
         if self.add:
-            sstream.vis[:].local_array[:] += mustream.vis[:].local_array * not_auto
+            sstream.vis[:].local_array[:] += mu
         else:
-            sstream.vis[:].local_array[:] -= mustream.vis[:].local_array * not_auto
+            sstream.vis[:].local_array[:] -= mu
 
         # Set weights to zero if there was no mean
         sstream.weight[:].local_array[:] *= (
