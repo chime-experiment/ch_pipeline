@@ -2229,18 +2229,20 @@ class DataFlagger(task.SingleTask):
         # Redistribute over the frequency direction
         timestream.redistribute("freq")
 
-        # Determine whether timestream is stacked data
-        stacked = len(timestream.index_map["prod"]) > len(
-            timestream.index_map["stack"]["prod"]
+        # Extract the weight dataset and identify its axes
+        waxis = list(timestream.weight.attrs["axis"])
+        weight = timestream.weight[:].local_array
+
+        # Determine whether input dependent flags can be applied
+        apply_input_flags = "input" in waxis or (
+            ("prod" in waxis) and not timestream.is_stacked
         )
 
         # If not stacked, determine which inputs are in the timestream.
         # If stacked, assume flags apply to all products.
-        if not stacked:
+        if apply_input_flags:
             inputs = timestream.index_map["input"]["chan_id"][:]
-            ninputs = len(inputs)
-        else:
-            ninputs = 1
+            prod = timestream.prodstack
 
         # Get time axis or convert RA axis
         if "ra" in timestream.index_map:
@@ -2250,23 +2252,21 @@ class DataFlagger(task.SingleTask):
             else:
                 csd = timestream.attrs["csd"]
             time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            taxis = "ra"
         else:
             time = timestream.time
-
-        ntime = len(time)
+            taxis = "time"
 
         # Determine local frequencies
-        sf = timestream.weight.local_offset[0]
-        ef = sf + timestream.weight.local_shape[0]
-        local_freq = timestream.freq[sf:ef]
-        nfreq = len(local_freq)
+        local_slice = timestream.weight[:].local_bounds
+        local_freq = timestream.freq[local_slice]
 
         # Find the bin number of each local frequency
         basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
         local_bin = np.array([np.argmin(np.abs(ff - basefreq)) for ff in local_freq])
 
         # Initiate weight mask (1 means not flagged)
-        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=bool)
+        weight_mask = np.ones(weight.shape, dtype=bool)
 
         # Loop over flags of requested types
         for flag_type, flag_list in self.flags.items():
@@ -2292,42 +2292,42 @@ class DataFlagger(task.SingleTask):
                     self.log.info(msg)
 
                     # Refine the mask based on any frequency or input selection
-                    flag_mask = time_idx[np.newaxis, np.newaxis, :]
+                    tslc = [slice(None) if ax == taxis else None for ax in waxis]
+                    flag_mask = time_idx[tuple(tslc)]
                     if flag.freq is not None:
                         # `and` with flagged local frequencies
                         # By default, all frequencies are flagged
-                        flag_mask = (
-                            flag_mask
-                            & flag.freq_mask[local_bin, np.newaxis, np.newaxis]
-                        )
+                        fslc = [local_bin if ax == "freq" else None for ax in waxis]
+                        flag_mask = flag_mask & flag.freq_mask[tuple(fslc)]
 
-                    if flag.inputs is not None and not stacked:
+                    if flag.inputs is not None and apply_input_flags:
                         # `and` with flagged inputs
                         # By default, all inputs are flagged
-                        flag_mask = (
-                            flag_mask & flag.input_mask[np.newaxis, inputs, np.newaxis]
-                        )
+                        islc = [
+                            inputs if ax in ["input", "prod", "stack"] else None
+                            for ax in waxis
+                        ]
+                        flag_mask = flag_mask & flag.input_mask[tuple(islc)]
 
                     # set weight=0 where flag=1
                     weight_mask = weight_mask & np.logical_not(flag_mask)
 
         # Multiply weight mask by existing weight dataset
-        weight = timestream.weight[:]
-        weight_mask = weight_mask.astype(weight.dtype)
-        if stacked:
-            # Apply same mask to all products
-            weight.local_array[:] *= weight_mask
-        else:
-            # Use apply_gain function to apply mask based on product map
-            products = timestream.index_map["prod"][
-                timestream.index_map["stack"]["prod"]
-            ]
-            tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
+        if np.any(~weight_mask):
 
-        self.log.info(
-            "%0.2f percent of data was flagged as bad."
-            % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
-        )
+            if apply_input_flags and "input" not in waxis:
+                # Use apply_gain function to apply mask based on product map
+                weight_mask = weight_mask.astype(weight.dtype)
+                tools.apply_gain(weight, weight_mask, out=weight, prod_map=prod)
+            else:
+                weight[:] *= weight_mask
+
+            self.log.info(
+                "%0.2f percent of data was flagged as bad."
+                % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
+            )
+        else:
+            self.log.info("No DataFlags applied.")
 
         return timestream
 
@@ -2610,12 +2610,14 @@ class FlagRainfall(task.SingleTask):
 
         Parameters
         ----------
-        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
             Stream to flag.
 
         Returns
         -------
-        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
             Returns the same stream object with a modified weight dataset.
         """
         # Redistribute over the frequency direction
@@ -2629,8 +2631,10 @@ class FlagRainfall(task.SingleTask):
             else:
                 csd = stream.attrs["csd"]
             time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            taxis = "ra"
         else:
             time = stream.time
+            taxis = "time"
 
         # Compute cumulative rainfall within specified time interval.
         # Only run on rank 0, because a database query is required
@@ -2649,9 +2653,10 @@ class FlagRainfall(task.SingleTask):
         # Compute mask corresponding to times when rainfall is below threshold
         rainfall_mask = rainfall < self.threshold
 
-        # Multiply weights by mask
-        weight = stream.weight[:]
-        weight.local_array[:] *= rainfall_mask[np.newaxis, np.newaxis, :]
+        # Multiply weights by mask.
+        waxis = stream.weight.attrs["axis"]
+        tslc = [slice(None) if ax == taxis else None for ax in waxis]
+        stream.weight[:].local_array[:] *= rainfall_mask[tuple(tslc)]
 
         # Report how much data has been flagged due to rainfall
         self.log.info(
