@@ -1434,7 +1434,7 @@ def daytime_flag(time):
     time = np.atleast_1d(time)
     flag = np.zeros(time.size, dtype=bool)
 
-    rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+    rise = ephemeris.solar_rising(time.min() - 24.0 * 3600.0, end_time=time.max())
     for rr in rise:
         ss = ephemeris.solar_setting(rr)[0]
         flag |= (time >= rr) & (time <= ss)
