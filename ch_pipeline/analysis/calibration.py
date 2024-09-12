@@ -4,15 +4,26 @@ import json
 
 import caput.time as ctime
 import numpy as np
-from caput import config, memh5, mpiarray, mpiutil
-from ch_ephem import coord, sources
-from ch_ephem.observers import chime
-from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
-from draco.core import containers, task
-from draco.util import _fast_tools
-from mpi4py import MPI
+import scipy.signal
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
+from mpi4py import MPI
+
+from caput import config, memh5
+from caput import mpiarray, mpiutil
+from caput import weighted_median
+
+from ch_util import andata
+from ch_util import tools
+from ch_util import ephemeris
+from ch_util import ni_utils
+from ch_util import cal_utils
+from ch_util import fluxcat
+from ch_util import finder
+from ch_util import rfi
+
+from draco.core import task, containers
+from draco.util import _fast_tools
 
 from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -2429,6 +2440,862 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
         return out
 
 
+class ReconstructGainError(task.SingleTask):
+    """Estimate the fractional error in the calibration gain.
+
+    The "true" gain is estimated by low-pass filtering the
+    applied gain along the frequency axis.  The ratio of the
+    applied gain to the true gain is then output.
+
+    The low-pass filtering is sensitive to narrowband features in
+    the gain due to RFI.  An iterative algorithm is used to
+    identify these narrowband features by low-pass filtering,
+    taking the ratio, averaging over all baselines, masking the
+    `nperiter` largest absolute deviations relative to the
+    median absolute deviation, and then repeating the procedure.
+    The frequencies identified as containing narrowband features
+    should be masked in the visibility dataset.
+
+    This procedure requires access to all frequencies and inputs.
+    For this reason, it is recommended to provide the gain over
+    many nights so that the procedure can be distributed over time.
+
+    Attributes
+    ----------
+    full_output : bool
+        If False, then only output the fractional error in the
+        calibration gains.  If True, then the low-pass filtered gains,
+        frequency-time mask, and an archive of the baseline-averaged
+        fractional error at each iteration will be output as well.
+    simple_lpf : bool
+        If True, then use a simple FIR low-pass filter.  If False,
+        then use the DAYENUREST technique to construct the filter.
+    numtaps : float
+        Number of taps in the FIR low-pass filter if simple_lpf is True.
+        Note this is specified in MHz with the actual number of taps
+        obtained by dividing this number by the frequency channel width.
+    remove_hpf : bool
+        Remove a high-pass filtered version of the gains using DAYENU
+        prior to fitting DPSS modes to obtain the low-pass filtered version.
+        Can suffer from numerical issues when inverting the signal covariance.
+        Only relevant if simple_lpf is False.
+    rcond : float
+        The condition number used to calculate the pseudo-inverse of the masked
+        frequency-frequency covariance matrix when using DAYENU.  Only relevant
+        if remove_hpf is True and simple_lpf is False.
+    niter : int
+        Maximum number of iterations used to mask narrowband features in the gains.
+    window: int
+        Width of the window, in number of frequency channnels, used to estimate
+        the noise by calculating a local median absolute deviation. If not provided,
+        then will use the entire band.
+    nsigma_outlier : float
+        Number of median absolute deviations beyond which a frequency channel
+        is considered an outlier.  The algorithm terminates when there are
+        no longer any frequency channels that exceed this threshold
+        or the maximum number of iterations is reached.
+    nperiter: int
+        Maximum number of frequency channels to flag on any iteration. Note that
+        the low-pass filtering will leak power from outliers to neighboring
+        frequencies, so it is recommended to keep this number small in order to
+        avoid accidentally masking good frequencies contaminated by a neighbor.
+    mask_rfi_bands : bool
+        Ignore the persistent RFI bands when calculating the gain error.
+        These bands are specified in ch_util.rfi.frequency_mask.
+    tau_centre : float or np.ndarray[nstopband,]
+        The centre of the pass-band regions in micro-seconds.
+    tau_width : float or np.ndarray[nstopband,]
+        The half width of the pass-band regions in micro-seconds.
+    epsilon: float
+        Stop-band rejection of the filter.
+    threshold: float
+        Filter is constructed from eigenmodes of the signal covariance whose
+        eigenvalue is larger than this factor times the maximum eigenvalue.
+    """
+
+    full_output = config.Property(proptype=bool, default=True)
+
+    simple_lpf = config.Property(proptype=bool, default=False)
+    numtaps = config.Property(proptype=float, default=20.0)
+
+    remove_hpf = config.Property(proptype=bool, default=False)
+    rcond = config.Property(proptype=float, default=1.0e-15)
+
+    niter = config.Property(proptype=int, default=40)
+    window = config.Property(proptype=int)
+    nsigma_outlier = config.Property(proptype=float, default=4.0)
+    nperiter = config.Property(proptype=int, default=1)
+    mask_rfi_bands = config.Property(proptype=bool, default=True)
+
+    tau_centre = config.Property(proptype=np.atleast_1d, default=0.0)
+    tau_width = config.Property(proptype=np.atleast_1d, default=0.2)
+    epsilon = config.Property(proptype=np.atleast_1d, default=1.0e-12)
+    threshold = config.Property(proptype=float, default=1.0e-12)
+
+    def setup(self):
+        """Determine the frequency axis.
+
+        This is necessary because the frequency axis in the gains is saved
+        as float32 instead of float64, which causes issues when constructing
+        the delay filter.
+        """
+        self.freq = np.linspace(800.0, 400.0, 1024, endpoint=False, dtype=float)
+        self.dfreq = np.median(np.abs(np.diff(self.freq)))
+
+    def process(self, gain):
+        """Identify features in the gains at high delay.
+
+        Parameters
+        ----------
+        gain: GainData
+            Original gain data.
+
+        Returns
+        -------
+        out_err: GainData
+            Ratio of the original gain and a low-pass filtered version of the gain.
+        out_lpf: GainData
+            Low-pass filtered version of the gain.  Only output if full_output is True.
+        out_mask: RFIMask
+            Frequencies and times that were identified as outliers by the iterative
+            high-pass-filter masking algorithm.  Only output if full_output is True.
+        archive: GainData
+            The gain error averaged over all baselines for each iteration of the
+            high-pass-filter masking algorithm.  The input axis of this container is
+            used to accomodate iteration number.  Only output if full_output is True.
+        """
+        # Redistribute over time
+        gain.redistribute("time")
+
+        # Dereference datasets
+        g = gain.gain[:].local_array
+        w = gain.weight[:].local_array
+
+        nfreq, ninput, ntime = g.shape
+
+        freq = self._get_freq(gain.freq)
+
+        unix_times = gain.time[gain.gain[:].local_bounds]
+
+        # Create a mask that identifies flagged data
+        flag = w > 0.0  # & (np.abs(g) > 1.0)
+
+        # Create output gain errors
+        out_err = containers.GainData(
+            freq=freq,
+            axes_from=gain,
+            attrs_from=gain,
+            distributed=gain.distributed,
+            comm=gain.comm,
+        )
+
+        out_err.add_dataset("weight")
+        out_err.add_dataset("update_id")
+        out_err.redistribute("time")
+
+        out_err.update_id[:] = gain.update_id[:]
+
+        gout_err = out_err.gain[:].local_array
+        wout_err = out_err.weight[:].local_array
+
+        gout_err[:] = 0.0
+        wout_err[:] = 0.0
+
+        # The following containers are only output if requested
+        if self.full_output:
+
+            # Create output LPF gain
+            out_lpf = containers.GainData(
+                freq=freq,
+                axes_from=gain,
+                attrs_from=gain,
+                distributed=gain.distributed,
+                comm=gain.comm,
+            )
+
+            out_lpf.add_dataset("weight")
+            out_lpf.add_dataset("update_id")
+            out_lpf.redistribute("time")
+
+            out_lpf.update_id[:] = gain.update_id[:]
+
+            gout_lpf = out_lpf.gain[:].local_array
+            wout_lpf = out_lpf.weight[:].local_array
+
+            gout_lpf[:] = 0.0
+            wout_lpf[:] = 0.0
+
+            # Create archive of iterations
+            archive = containers.GainData(
+                freq=freq,
+                input=np.arange(self.niter - 1, dtype=int),
+                axes_from=gain,
+                attrs_from=gain,
+                distributed=gain.distributed,
+                comm=gain.comm,
+            )
+
+            archive.add_dataset("weight")
+            archive.redistribute("time")
+
+            garch = archive.gain[:].local_array
+            warch = archive.weight[:].local_array
+
+            garch[:] = 0.0
+            warch[:] = 0.0
+
+            # Create output RFI mask
+            out_mask = containers.RFIMask(freq=freq, axes_from=gain, attrs_from=gain)
+            out_mask.mask[:] = False
+
+            mask = np.zeros((nfreq, ntime), dtype=bool)
+
+        # Determine eigen-modes of the signal covariance
+        freq = out_err.freq
+
+        cov = self._get_cov(freq)
+        evalue, evec = np.linalg.eig(cov)
+
+        isort = np.argsort(evalue)[::-1]
+        evalue = evalue[isort] / evalue[isort[0]]
+        evec = evec[:, isort]
+
+        imax = np.min(np.flatnonzero(np.abs(evalue) < self.threshold))
+
+        self.log.info(f"Fitting {imax} DPSS modes (of {evalue.size}).")
+
+        A = evec[:, 0:imax]
+        AT = A.T.conj()
+
+        # Loop over times
+        for tt, timestamp in enumerate(unix_times):
+
+            # Make sure the flags can be factorized into an input flag and frequency flag
+            fmeas = flag[..., tt]
+
+            input_flag = np.any(fmeas, axis=0)
+            good_input = np.flatnonzero(input_flag)
+
+            if not np.all(fmeas[:, good_input] == fmeas[:, good_input[0], np.newaxis]):
+                raise RuntimeError(
+                    "Must have the same frequency mask for all good inputs."
+                )
+
+            # Extact gain for good inputs and global frequency mask
+            gmeas = g[..., tt][:, good_input]
+            wmeas = w[..., tt][:, good_input]
+            vmeas = tools.invert_no_zero(wmeas)
+
+            if self.mask_rfi_bands:
+                freq_flag0 = fmeas[:, good_input[0]] & ~rfi.frequency_mask(
+                    freq, timestamp=timestamp
+                )
+            else:
+                freq_flag0 = fmeas[:, good_input[0]]
+
+            freq_flag = freq_flag0.copy()
+
+            rcond = self.rcond
+            for ii in range(self.niter):
+
+                self.log.info(f"Iteration {ii} of {self.niter}.")
+
+                # Low-pass filter the gains
+                if self.simple_lpf and (ii == (self.niter - 1)):
+
+                    # If the simple LPF was requested, then we first need to interpolate
+                    # over the masked frequencies.  This is slow, so we only do this for
+                    # the last iteration.  Otherwise we use the faster DAYENUREST method
+                    # for identify outlier frequencies.
+                    ginterp = self._interpolate(freq, gmeas, wmeas, freq_flag)
+                    inv_ginterp = tools.invert_no_zero(
+                        self._apply_simple_lpf(freq, ginterp)
+                    )
+
+                else:
+                    # If requested, first subtract off a HPF version of the gains obtained
+                    # by applying DAYENU.  If the signal covariance matrix inversion fails,
+                    # then we increase the condition number (rcond) and try again.
+                    if self.remove_hpf:
+
+                        try:
+                            H = self._get_hpf(cov, freq_flag, rcond=rcond)
+
+                        except np.linalg.LinAlgError as exc:
+                            self.log.error(
+                                "Failed to converge while processing "
+                                f"iteration {ii} (rcond is {rcond:0.1e}):  "
+                                f"{exc}"
+                            )
+                            rcond = rcond * 10.0
+                            continue
+                        else:
+                            rcond = self.rcond
+
+                        ghpf = np.matmul(H, gmeas)
+                        glpf = freq_flag[:, np.newaxis] * (gmeas - ghpf)
+
+                    else:
+                        glpf = freq_flag[:, np.newaxis] * gmeas
+
+                    # Obtain low-pass-filtered gains by fitting the DPSS modes,
+                    # ignoring masked frequencies.
+                    E = np.matmul(AT, freq_flag[:, np.newaxis] * A)
+
+                    ginterp = np.matmul(A, np.linalg.solve(E, np.matmul(AT, glpf)))
+                    inv_ginterp = tools.invert_no_zero(ginterp)
+
+                # Calculate the ratio of the gains to the low-pass-filtered gains.
+                ratio = gmeas * inv_ginterp
+
+                if ii < (self.niter - 1):
+
+                    # Collapse over feeds
+                    avg_ratio = self._average_over_feeds(ratio)
+
+                    # Flag
+                    dratio = np.where(freq_flag, avg_ratio - 1.0, 0.0)
+
+                    masked_freq = self._identify_outliers(dratio, freq_flag)
+
+                    if masked_freq is None:
+                        perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
+                        self.log.info(
+                            f"Iteration {ii}, finished.  "
+                            f"Masked {perc_masked:0.3f} percent of frequencies in total."
+                        )
+                        break
+
+                    else:
+                        # Update the frequency mask
+                        freq_flag &= ~masked_freq
+
+                        # Print total number off frequencies masked thus far
+                        perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
+                        self.log.info(
+                            f"Iteration {ii}, finished.  "
+                            f"Masked {perc_masked:0.3f} percent of frequencies in total."
+                        )
+
+                        if self.full_output:
+                            garch[:, ii, tt] = avg_ratio
+                            warch[:, ii, tt] = freq_flag
+
+            # Save final result
+            var = vmeas * np.abs(inv_ginterp) ** 2
+
+            gout_err[:, :, tt][:, good_input] = ratio
+            wout_err[:, :, tt][:, good_input] = np.where(
+                freq_flag[:, np.newaxis], tools.invert_no_zero(var), 0.0
+            )
+
+            if self.full_output:
+                gout_lpf[:, :, tt][:, good_input] = ginterp
+                wout_lpf[:, :, tt][:, good_input] = vmeas
+
+                mask[:, tt] = ~freq_flag & freq_flag0
+
+        # Prepare output depending on config parameters
+        if self.full_output:
+            out_mask.mask[:] = mpiarray.MPIArray.wrap(
+                mask, axis=1, comm=gain.comm
+            ).allgather()
+
+            out = (out_err, out_lpf, out_mask, archive)
+        else:
+            out = out_err
+
+        return out
+
+    def _average_over_feeds(self, ratio):
+        """Average the product of the fractional gain error over all pairs of feeds.
+
+        Parameters
+        ----------
+        ratio : np.ndarray[nfreq, ninput]
+            Gain divided by a low-pass-filtered version of the gain.
+
+        Returns
+        -------
+        vis : np.ndarray[nfreq,]
+            Effective error in the beamformed visibilities due to gain errors.
+        """
+
+        ratio_conj = ratio.conj()
+
+        shp = ratio.shape[:-1]
+        nfeed = ratio.shape[-1]
+        nprod = (nfeed * (nfeed + 1)) // 2
+
+        vis = np.zeros(shp, dtype=ratio.dtype)
+        for ii in range(nfeed):
+            vis += np.sum(ratio[..., ii, np.newaxis] * ratio_conj[..., ii:], axis=-1)
+
+        return vis / nprod
+
+    def _identify_outliers(self, dy, flag):
+        """Identify frequencies where fractional gain error exceeds some threshold.
+
+        Parameters
+        ----------
+        dy : np.ndarray[nfreq,]
+            Fractional errors in the gain, averaged over all pairs of feeds.
+        flag : np.ndarray[nfreq,]
+            Boolean flag where True indicates good frequency channels and False
+            indicates previously masked frequency channels.
+
+        Returns
+        -------
+        new_mask : np.ndarray[nfreq,]
+            Boolean mask where True indicates the frequency channel is an outlier.
+        """
+
+        # Calculate the local median absolute deviation
+        ady = np.ascontiguousarray(np.abs(dy), dtype=np.float64)
+        w = np.ascontiguousarray(flag, dtype=np.float64)
+
+        if self.window is not None:
+            sigma = 1.48625 * weighted_median.moving_weighted_median(
+                ady, w, self.window, method="split"
+            )
+        else:
+            sigma = 1.48625 * weighted_median.weighted_median(ady, w, method="split")
+
+        # Calculate the signal to noise
+        s2n = ady * tools.invert_no_zero(sigma)
+
+        # Identify frequency channels that are above the signal to noise threshold
+        above_threshold = np.flatnonzero(s2n > self.nsigma_outlier)
+
+        if above_threshold.size == 0:
+            return None
+
+        # Find the largest nperiter frequency channels that are above the threshold
+        ibad = above_threshold[np.argsort(-ady[above_threshold])[0 : self.nperiter]]
+
+        # Flag those frequency channels
+        new_mask = np.zeros_like(flag)
+        new_mask[ibad] = True
+
+        return new_mask
+
+    def _get_freq(self, freq):
+        """Find the appropriate float64 representation of the frequencies.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq,]
+            Frequencies in MHz.
+
+        Returns
+        -------
+        faxis : np.ndarray[nfreq,] with dtype [("centre", <f8), ("width", <f8)]
+            Float64 representation of the frequencies to be used
+            in filter construction.
+        """
+        imatch = np.array([np.argmin(np.abs(nu - self.freq)) for nu in freq])
+
+        freq_match = self.freq[imatch]
+        if np.any(np.abs(freq - freq_match) > (0.1 * self.dfreq)):
+            raise RuntimeError("Frequency axis unexpected.")
+
+        faxis = np.zeros(freq_match.size, dtype=[("centre", float), ("width", float)])
+        faxis["centre"] = freq_match
+        faxis["width"] = self.dfreq
+
+        return faxis
+
+    def _get_cov(self, freq):
+        """Construct a model for the signal covariance.
+
+        Assumes the signal is the sum of one or more
+        top hats in delay space located at tau_centre
+        with half-width tau_width.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq,]
+            Frequency in MHz.
+
+        Returns
+        -------
+        cov : np.ndarray[nfreq, nfreq]
+            Model for the signal covariance.
+        """
+
+        args = (self.tau_centre, self.tau_width, self.epsilon)
+
+        nfreq = freq.size
+        dfreq = freq[:, np.newaxis] - freq[np.newaxis, :]
+
+        cov = np.zeros((nfreq, nfreq), dtype=complex)
+
+        for tt, (tc, tw, eps) in enumerate(zip(*args)):
+
+            self.log.info(
+                f"Filter component {tt}: "
+                f"tau_c = {tc:0.2f} usec, "
+                f"tau_w = {tw:0.2f} usec, "
+                f"eps = {eps:0.1e}"
+            )
+
+            cov += np.exp(-2.0j * np.pi * tc * dfreq) * np.sinc(2.0 * tw * dfreq) / eps
+
+        return cov
+
+    def _get_hpf(self, cov, flag, rcond=None):
+        """Construct a high pass filter from foreground covariance and frequency mask.
+
+        Parameters
+        ----------
+        cov : np.ndarray[nfreq, nfreq]
+            Model for the signal covariance.
+        flag : np.ndarray[nfreq,]
+            Boolean flag where True indicates a good frequency and
+            False indicates a bad frequency.
+
+        Returns
+        -------
+        pinv : np.ndarray[nfreq, nfreq]
+            Pseudo-inverse of the foreground covariance times
+            outer product of the mask with itself.
+        """
+
+        nfreq = flag.size
+
+        uflag = flag[:, np.newaxis] & flag[np.newaxis, :]
+        ucov = uflag * (np.eye(nfreq, dtype=cov.dtype) + cov)
+
+        pinv = np.linalg.pinv(ucov, hermitian=True, rcond=rcond) * uflag
+
+        return pinv
+
+    def _interpolate(self, freq, gain, weight, flag):
+        """Use Gaussian Process Regression to interpolate gains to missing frequencies.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq,]
+            Frequency in MHz.
+        gain : np.ndarray[nfreq, ninput]
+            Complex gain as a function of frequency for each input.
+        weight : np.ndarray[nfreq, ninput]
+            Uncertainty on the gain expressed as an inverse variance.
+        flag : np.ndarray[nfreq,]
+            Boolean flag where True indicates a good frequency and
+            False indicates a bad frequency.
+
+        Returns
+        -------
+        ginterp : np.ndarray[nfreq, ninput]
+            Gain at all frequencies.  Previously flagged frequencies
+            have been interpolated from neighboring channels.
+        """
+
+        if np.all(flag):
+            return gain
+
+        flag = np.ones(weight.shape, dtype=bool) & flag[:, np.newaxis]
+
+        ginterp, _ = cal_utils.interpolate_gain_quiet(freq, gain, weight, flag=flag)
+
+        return ginterp
+
+    def _apply_simple_lpf(self, freq, gain):
+        """Apply a simple FIR low-pass filter to the gains as a function of frequency
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq,]
+            Frequency in MHz.
+        gain : np.ndarray[nfreq, ninput]
+            Complex gain as a function of frequency for each input.
+
+        Returns
+        -------
+        gfilt : np.ndarray[nfreq, ninput]
+            Gains low-pass filtered along the frequency axis.
+        """
+
+        cutoff = self.tau_width[0]
+
+        dfreq = np.median(np.abs(np.diff(freq)))
+        fs = 1.0 / dfreq
+
+        numtaps = np.round(self.numtaps / dfreq)
+        numtaps = int(numtaps + int(not (numtaps % 2)))
+
+        coeff = scipy.signal.firwin(numtaps, cutoff, window=("dpss", 5), fs=fs)
+
+        gfilt = scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
+
+        return gfilt
+
+
+class CorrectGainError(task.SingleTask):
+    """Correct stacked visibilities for errors in the gains applied in real-time.
+
+    This correction is imperfect because the redundant baselines are not actually
+    redundant.
+
+    Attributes
+    ----------
+    ignore_input_flags : bool
+        When calculating the correction, do not exclude
+        feeds that were identified as bad and excluded
+        from the stacked visibilities (faster).
+    """
+
+    ignore_input_flags = config.Property(proptype=bool, default=False)
+
+    def setup(self, gains):
+        """Prepare the gain errors as a function of time.
+
+        Parameters
+        ----------
+        gains: containers.GainData
+            Narrowband gain errors generated by the
+            ReconstructGainError task.
+        """
+        gains.redistribute("freq")
+
+        if "time" in gains.index_map:
+
+            self.timestamp = gains.time
+
+            self.frac_error = gains.gain[:].local_array
+            self.flag = gains.weight[:].local_array > 0.0
+
+        elif "time" in gains.attrs:
+
+            self.timestamp = np.atleast_1d(gains.attrs["time"])
+
+            self.frac_error = gains.gain[:].local_array[:, :, np.newaxis]
+            self.flag = gains.weight[:].local_array[:, :, np.newaxis] > 0.0
+
+        else:
+            raise RuntimeError("gain must have a time axis or attribute.")
+
+        self.gains = gains
+
+    def process(self, data):
+        """Look up gain errors, stack over baselines, and apply to visibilities.
+
+        Parameters
+        ----------
+        data: TimeStream or SiderealStream
+            Visibilities.
+
+        Returns
+        -------
+        data: TimeStream or SiderealStream
+            Visibilities with the gain errors removed.
+        """
+        # Make sure the frequencies are the same
+        if not np.array_equal(self.gains.freq, data.freq):
+            raise ValueError("Frequencies do not match for gain error and timestream.")
+
+        data.redistribute("freq")
+
+        stacked_vis = data.vis[:].local_array
+        stacked_weight = data.weight[:].local_array
+
+        stack = data.reverse_map["stack"]["stack"]
+        conj = data.reverse_map["stack"]["conjugate"]
+        nstack = stacked_vis.shape[1]
+
+        # Determine the time axis.  This will be an (nlsd, ntime) array.
+        if "ra" in data.index_map:
+            ra = data.ra
+            lsd = np.atleast_1d(
+                data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            )
+
+            if lsd.size > 1:
+                raise RuntimeError(
+                    "Currently only able to handle single sidereal days."
+                )
+
+            timestamp = ephemeris.csd_to_unix(lsd[0] + ra / 360.0)
+
+        else:
+            # The input container has a time axis.
+            timestamp = data.time
+
+        # Determine dimensions
+        ntime = timestamp.size
+
+        nfreq, ninput, nupdate = self.frac_error.shape
+
+        # We may want to replace the code below with something
+        # based on the dataset id.
+        tindex = np.digitize(timestamp, self.timestamp) - 1
+
+        self.log.info(f"Unique time indices are: {np.unique(tindex)}")
+
+        before = tindex < 0
+        if np.any(before):
+            nbefore = np.sum(before)
+            tbefore = np.max(self.timestamp.min() - timestamp[before]) / 3600.0
+            # raise RuntimeError(
+            self.log.warning(
+                f"{nbefore:0.0f} requested timestamps are before the earliest "
+                f"gain update time by as much as {tbefore:0.1f} hours."
+            )
+
+        after = tindex == (nupdate - 1)
+        if np.any(after):
+            nafter = np.sum(after)
+            tafter = np.max(timestamp[after] - self.timestamp.max()) / 3600.0
+            self.log.warning(
+                f"{nafter:0.0f} requested timestamps are after the latest"
+                f"gain update time by as much as {tafter:0.1f} hours."
+            )
+
+        # Determine if we have valid input flags
+        try:
+            input_flag = data.input_flags[:].astype(bool)
+        except AttributeError:
+            input_flag = None
+        else:
+            if not np.any(input_flag):
+                input_flag = None
+
+        # Different calculation whether or not we have input flags
+        index = np.zeros((ntime, 2), dtype=int)
+        index[:, 0] = tindex
+
+        if self.ignore_input_flags or input_flag is None:
+            self.log.info(f"Ignoring input flags ({self.ignore_input_flags})")
+            uniq_input_flag = np.ones((ninput, 1), dtype=bool)
+
+        else:
+            uniq_input_flag, windex = np.unique(input_flag, return_inverse=True, axis=1)
+            nuw = uniq_input_flag.shape[1]
+
+            self.log.info(f"Found {nuw} unique sets of input flags.")
+
+            index[:, 1] = windex
+
+        uindex, oindex = np.unique(index, return_inverse=True, axis=0)
+        nuniq = uindex.shape[0]
+
+        # Loop over the unique combinations of gains and input flags
+        for uu in range(nuniq):
+
+            self.log.info(
+                f"Processing unique gains/flags {uu} of {nuniq}. "
+                f"Time index is {uindex[uu, 0]}.  Flag index is {uindex[uu, 1]}."
+            )
+
+            oind = np.flatnonzero(oindex == uu)
+
+            flag = (
+                uniq_input_flag[np.newaxis, :, uindex[uu, 1]]
+                & self.flag[:, :, uindex[uu, 0]]
+            )
+
+            ratio = flag * self.frac_error[:, :, uindex[uu, 0]]
+
+            # Calculate outer product
+            flag = tools.fast_pack_product_array(
+                flag[:, :, np.newaxis] & flag[:, np.newaxis, :]
+            )
+
+            vis = tools.fast_pack_product_array(
+                ratio[:, :, np.newaxis] * ratio[:, np.newaxis, :].conj()
+            )
+            vis = np.where(conj, vis.conj(), vis)
+
+            for ff in range(nfreq):
+
+                corr = np.bincount(
+                    stack, weights=vis[ff].real, minlength=nstack + 1
+                ) + 1.0j * np.bincount(
+                    stack, weights=vis[ff].imag, minlength=nstack + 1
+                )
+
+                count = np.bincount(
+                    stack, weights=flag[ff].astype(float), minlength=nstack + 1
+                )
+
+                corr *= tools.invert_no_zero(count)
+
+                stacked_vis[ff][:, oind] *= tools.invert_no_zero(
+                    corr[:nstack, np.newaxis]
+                )
+                stacked_weight[ff][:, oind] *= np.abs(corr[:nstack, np.newaxis]) ** 2
+
+        return data
+
+
+class CollapseGainError(task.SingleTask):
+    """Average gain errors over all pairs of feeds."""
+
+    def process(self, gain):
+        """Calculate the baseline-averaged gain error.
+
+        Approximates the effect of the gain errors on
+        the frequency dependence of a ringmap.
+
+        Parameters
+        ----------
+        gain : StaticGainData
+            Ratio of the applied gain to the "true" gain.
+            The "true" gain is usually estimated by
+            low-pass filtering along the frequency axis.
+
+        Returns
+        -------
+        out : StaticGainData
+            Baseline-averaged gain error placed into a
+            StaticGainData container with a size 1
+            input axis.
+        """
+        # Redistribute over freq
+        gain.redistribute("freq")
+
+        # Dereference datasets
+        g = gain.gain[:].local_array
+        w = gain.weight[:].local_array
+        v = tools.invert_no_zero(w)
+
+        nfreq, ninput = g.shape
+
+        # Identify flagged data
+        gflag = w > 0.0
+
+        # Calculate the outer product of the gains
+        flag = tools.fast_pack_product_array(
+            gflag[:, :, np.newaxis] & gflag[:, np.newaxis, :]
+        )
+        vis = tools.fast_pack_product_array(
+            g[:, :, np.newaxis] * g[:, np.newaxis, :].conj()
+        )
+        var = tools.fast_pack_product_array(v[:, :, np.newaxis] + v[:, np.newaxis, :])
+
+        count = np.sum(flag, axis=-1)
+        avg_vis = np.sum(flag * vis, axis=-1) * tools.invert_no_zero(count)
+        avg_var = np.sum(flag * var, axis=-1) * tools.invert_no_zero(count**2)
+
+        # Save to output container
+        out = containers.StaticGainData(
+            input=np.array(["baseline-averaged"]),
+            axes_from=gain,
+            attrs_from=gain,
+            distributed=gain.distributed,
+            comm=gain.comm,
+        )
+
+        out.add_dataset("weight")
+        out.redistribute("freq")
+
+        out.gain[:].local_array[:] = avg_vis[:, np.newaxis]
+        out.weight[:].local_array[:] = tools.invert_no_zero(avg_var)[:, np.newaxis]
+
+        return out
+
+
 class EstimateNarrowbandGainError(task.SingleTask):
     """Estimate error in gains due to narrowband features.
 
@@ -2654,7 +3521,7 @@ class FlagNarrowbandGainError(task.SingleTask):
         if np.any(after):
             nafter = np.sum(after)
             tafter = np.max(ftimestamp[after] - self.gains.time.max()) / 3600.0
-            self.log.warn(
+            self.log.warning(
                 f"{nafter:0.0f} requested timestamps are after the latest"
                 f"gain update time by as much as {tafter:0.1f} hours."
             )
