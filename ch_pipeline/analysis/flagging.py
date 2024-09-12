@@ -2788,6 +2788,28 @@ class MaskHighFracLost(task.SingleTask):
 
 
 def search_grid(xeval, window, x, wrap=False):
+    """Find indices into a uniformly space grid that extract desired regions.
+
+    Parameters
+    ----------
+    xeval : np.ndarray
+        Coordinate of the centre of each region.
+    window : np.ndarray
+        Half-width of each region.  Must broadcast against xeval.
+    x : np.ndarray[nsample,]
+        Coordinate grid.  Must be uniformly spaced and monotonically increasing.
+    wrap : bool
+        Wrap around if a region exceeds the first or last point in the grid.
+        Otherwise the region will be restricted in size to remain in the grid.
+
+    Returns
+    -------
+    xlb : np.ndarray
+        The index into the grid the defines the lower bound of each region.
+    xub : np.ndarray
+        The index into the grid the defines the upper bound of each region.
+        Each region can be selected with slice(xlb, xub).
+    """
 
     min_x, max_x = np.percentile(x, [0, 100])
     dx = np.median(np.abs(np.diff(x)))
