@@ -2777,9 +2777,9 @@ class MaskHighFracLost(task.SingleTask):
 
         # Create output container
         if "ra" in stream.axes:
-            mask_cont = containers.SiderealRFIMask(axes_from=stream, attrs_from=stream)
+            mask_cont = dcontainers.SiderealRFIMask(axes_from=stream, attrs_from=stream)
         elif "time" in stream.axes:
-            mask_cont = containers.RFIMask(axes_from=stream, attrs_from=stream)
+            mask_cont = dcontainers.RFIMask(axes_from=stream, attrs_from=stream)
 
         # Identify times and frequencies with significant frac_lost
         mask = frac_lost > self.threshold
