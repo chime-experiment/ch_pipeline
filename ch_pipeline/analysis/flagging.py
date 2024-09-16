@@ -1436,7 +1436,7 @@ def daytime_flag(time):
     time = np.atleast_1d(time)
     flag = np.zeros(time.size, dtype=bool)
 
-    rise = ephemeris.solar_rising(time.min() - 24.0 * 3600.0, end_time=time.max())
+    rise = chime.solar_rising(time.min() - 24.0 * 3600.0, end_time=time.max())
     for rr in rise:
         ss = chime.solar_setting(rr)[0]
         flag |= (time >= rr) & (time <= ss)
@@ -2262,7 +2262,6 @@ class DataFlagger(task.SingleTask):
                 csd = timestream.attrs["lsd"]
             else:
                 csd = timestream.attrs["csd"]
-
             time = chime.lsd_to_unix(csd + ra / 360.0)
             taxis = "ra"
         else:
@@ -2638,7 +2637,6 @@ class FlagRainfall(task.SingleTask):
                 csd = stream.attrs["lsd"]
             else:
                 csd = stream.attrs["csd"]
-
             time = chime.lsd_to_unix(csd + ra / 360.0)
             taxis = "ra"
         else:
