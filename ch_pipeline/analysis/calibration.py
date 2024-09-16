@@ -5,25 +5,15 @@ import json
 import caput.time as ctime
 import numpy as np
 import scipy.signal
+from caput import config, memh5, mpiarray, mpiutil, weighted_median
+from ch_ephem import coord, sources
+from ch_ephem.observers import chime
+from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
+from draco.core import containers, task
+from draco.util import _fast_tools
+from mpi4py import MPI
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
-from mpi4py import MPI
-
-from caput import config, memh5
-from caput import mpiarray, mpiutil
-from caput import weighted_median
-
-from ch_util import andata
-from ch_util import tools
-from ch_util import ephemeris
-from ch_util import ni_utils
-from ch_util import cal_utils
-from ch_util import fluxcat
-from ch_util import finder
-from ch_util import rfi
-
-from draco.core import task, containers
-from draco.util import _fast_tools
 
 from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -2766,20 +2756,19 @@ class ReconstructGainError(task.SingleTask):
                         )
                         break
 
-                    else:
-                        # Update the frequency mask
-                        freq_flag &= ~masked_freq
+                    # Update the frequency mask
+                    freq_flag &= ~masked_freq
 
-                        # Print total number off frequencies masked thus far
-                        perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
-                        self.log.info(
-                            f"Iteration {ii}, finished.  "
-                            f"Masked {perc_masked:0.3f} percent of frequencies in total."
-                        )
+                    # Print total number off frequencies masked thus far
+                    perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
+                    self.log.info(
+                        f"Iteration {ii}, finished.  "
+                        f"Masked {perc_masked:0.3f} percent of frequencies in total."
+                    )
 
-                        if self.full_output:
-                            garch[:, ii, tt] = avg_ratio
-                            warch[:, ii, tt] = freq_flag
+                    if self.full_output:
+                        garch[:, ii, tt] = avg_ratio
+                        warch[:, ii, tt] = freq_flag
 
             # Save final result
             var = vmeas * np.abs(inv_ginterp) ** 2
@@ -2820,7 +2809,6 @@ class ReconstructGainError(task.SingleTask):
         vis : np.ndarray[nfreq,]
             Effective error in the beamformed visibilities due to gain errors.
         """
-
         ratio_conj = ratio.conj()
 
         shp = ratio.shape[:-1]
@@ -2849,7 +2837,6 @@ class ReconstructGainError(task.SingleTask):
         new_mask : np.ndarray[nfreq,]
             Boolean mask where True indicates the frequency channel is an outlier.
         """
-
         # Calculate the local median absolute deviation
         ady = np.ascontiguousarray(np.abs(dy), dtype=np.float64)
         w = np.ascontiguousarray(flag, dtype=np.float64)
@@ -2922,7 +2909,6 @@ class ReconstructGainError(task.SingleTask):
         cov : np.ndarray[nfreq, nfreq]
             Model for the signal covariance.
         """
-
         args = (self.tau_centre, self.tau_width, self.epsilon)
 
         nfreq = freq.size
@@ -2953,6 +2939,9 @@ class ReconstructGainError(task.SingleTask):
         flag : np.ndarray[nfreq,]
             Boolean flag where True indicates a good frequency and
             False indicates a bad frequency.
+        rcond : float, optional
+            Cutoff for small singular values passed to `np.linalg.pinv`.
+            Default is None.
 
         Returns
         -------
@@ -2960,15 +2949,12 @@ class ReconstructGainError(task.SingleTask):
             Pseudo-inverse of the foreground covariance times
             outer product of the mask with itself.
         """
-
         nfreq = flag.size
 
         uflag = flag[:, np.newaxis] & flag[np.newaxis, :]
         ucov = uflag * (np.eye(nfreq, dtype=cov.dtype) + cov)
 
-        pinv = np.linalg.pinv(ucov, hermitian=True, rcond=rcond) * uflag
-
-        return pinv
+        return np.linalg.pinv(ucov, hermitian=True, rcond=rcond) * uflag
 
     def _interpolate(self, freq, gain, weight, flag):
         """Use Gaussian Process Regression to interpolate gains to missing frequencies.
@@ -2991,7 +2977,6 @@ class ReconstructGainError(task.SingleTask):
             Gain at all frequencies.  Previously flagged frequencies
             have been interpolated from neighboring channels.
         """
-
         if np.all(flag):
             return gain
 
@@ -3002,7 +2987,7 @@ class ReconstructGainError(task.SingleTask):
         return ginterp
 
     def _apply_simple_lpf(self, freq, gain):
-        """Apply a simple FIR low-pass filter to the gains as a function of frequency
+        """Apply a simple FIR low-pass filter to the gains as a function of frequency.
 
         Parameters
         ----------
@@ -3016,7 +3001,6 @@ class ReconstructGainError(task.SingleTask):
         gfilt : np.ndarray[nfreq, ninput]
             Gains low-pass filtered along the frequency axis.
         """
-
         cutoff = self.tau_width[0]
 
         dfreq = np.median(np.abs(np.diff(freq)))
@@ -3027,9 +3011,7 @@ class ReconstructGainError(task.SingleTask):
 
         coeff = scipy.signal.firwin(numtaps, cutoff, window=("dpss", 5), fs=fs)
 
-        gfilt = scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
-
-        return gfilt
+        return scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
 
 
 class CorrectGainError(task.SingleTask):
