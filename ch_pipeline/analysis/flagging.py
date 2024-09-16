@@ -9,21 +9,17 @@ from typing import Union
 
 import caput.time as ctime
 import numpy as np
-from caput import config, memh5, mpiarray, mpiutil, pipeline, tod
+import scipy.constants
+from caput import config, interferometry, memh5, mpiarray, mpiutil, pipeline, tod
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, cal_utils, data_quality, finder, rfi, tools
-import scipy.constants
-import numpy as np
-
-from caput import mpiutil, mpiarray, memh5, config, pipeline, tod, interferometry
-from ch_util import rfi, data_quality, tools, ephemeris, cal_utils, andata, finder
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 from draco.analysis import flagging as dflagging
+from draco.analysis.ringmapmaker import find_grid_indices
 from draco.core import containers as dcontainers
 from draco.core import io, task
-from draco.analysis.ringmapmaker import find_grid_indices
 
 from ..core import containers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -2338,8 +2334,8 @@ class DataFlagger(task.SingleTask):
                 weight[:] *= weight_mask
 
             self.log.info(
-                "%0.2f percent of data was flagged as bad."
-                % (100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))),)
+                f"{100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))):.2f} "
+                "percent of data was flagged as bad."
             )
         else:
             self.log.info("No DataFlags applied.")
@@ -2822,7 +2818,6 @@ def search_grid(xeval, window, x, wrap=False):
         The index into the grid the defines the upper bound of each region.
         Each region can be selected with slice(xlb, xub).
     """
-
     min_x, max_x = np.percentile(x, [0, 100])
     dx = np.median(np.abs(np.diff(x)))
     nx = x.size
