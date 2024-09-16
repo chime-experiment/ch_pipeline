@@ -2803,10 +2803,15 @@ class ReconstructGainError(task.SingleTask):
                 mask[:, tt] = ~freq_flag & freq_flag0
 
         # Prepare output depending on config parameters
+        out_err.redistribute("freq")
+
         if self.full_output:
             out_mask.mask[:] = mpiarray.MPIArray.wrap(
                 mask, axis=1, comm=gain.comm
             ).allgather()
+
+            out_lpf.redistribute("freq")
+            archive.redistribute("freq")
 
             out = (out_err, out_lpf, out_mask, archive)
         else:
@@ -3382,14 +3387,14 @@ class EstimateNarrowbandGainError(task.SingleTask):
 
 
 class ConcatenateGains(task.SingleTask):
-    """Repackage a list of StaticGainData into a single GainData container."""
+    """Repackage a list of StaticGainData/GainData into a single GainData container."""
 
     def process(self, gains):
         """Concatenate gain updates.
 
         Parameters
         ----------
-        gains: list of StaticGainData
+        gains: list of GainData or StaticGainData
             List of gain updates.
 
         Returns
@@ -3398,26 +3403,42 @@ class ConcatenateGains(task.SingleTask):
             The list of gain updates sorted by time and
             placed in a single container with a time axis.
         """
-        # Sort by update time
-        update_time = np.array([g.attrs["time"] for g in gains])
+        # Sort by time
+        timestamp, index = [], []
+        for ii, gain in enumerate(gains):
+            t = list(gain.time) if "time" in gain.index_map else [gain.attrs["time"]]
+            timestamp += t
+            index += [(ii, jj) for jj in range(len(t))]
+            gain.redistribute("freq")
 
-        isort = np.argsort(update_time)
-        update_time = update_time[isort]
+        isort = np.argsort(timestamp)
+        timestamp = np.array(timestamp)[isort]
+        index = [index[iso] for iso in isort]
 
-        g0 = gains[isort[0]]
-        out = containers.GainData(axes_from=g0, time=update_time, comm=g0.comm)
+        g0 = gains[index[0][0]]
+        out = containers.GainData(axes_from=g0, time=timestamp, comm=g0.comm)
         out.add_dataset("weight")
-        out.add_dataset("update_id")
+
+        if "update_id" in g0.datasets:
+            out.add_dataset("update_id")
 
         out.redistribute("freq")
 
-        for tt, ss in enumerate(isort):
-            g = gains[ss]
-            g.redistribute("freq")
+        for tt, (gg, ii) in enumerate(index):
 
-            out.gain[:, :, tt] = g.gain[:]
-            out.weight[:, :, tt] = g.weight[:]
-            out.update_id[tt] = g.attrs["update_id"]
+            gain = gains[gg]
+
+            if "time" in gain.index_map:
+                out.gain[:, :, tt] = gain.gain[:, :, ii]
+                out.weight[:, :, tt] = gain.weight[:, :, ii]
+                if "update_id" in out.datasets:
+                    out.update_id[tt] = gain.update_id[ii]
+
+            else:
+                out.gain[:, :, tt] = gain.gain[:]
+                out.weight[:, :, tt] = gain.weight[:]
+                if "update_id" in out.datasets:
+                    out.update_id[tt] = gain.attrs["update_id"]
 
         return out
 
