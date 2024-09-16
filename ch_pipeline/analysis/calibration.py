@@ -2,27 +2,18 @@
 
 import json
 
+import caput.time as ctime
 import numpy as np
 import scipy.signal
+from caput import config, memh5, mpiarray, mpiutil, weighted_median
+from ch_ephem import coord, sources
+from ch_ephem.observers import chime
+from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
+from draco.core import containers, task
+from draco.util import _fast_tools
+from mpi4py import MPI
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
-from mpi4py import MPI
-
-from caput import config, memh5
-from caput import mpiarray, mpiutil
-from caput import weighted_median
-
-from ch_util import andata
-from ch_util import tools
-from ch_util import ephemeris
-from ch_util import ni_utils
-from ch_util import cal_utils
-from ch_util import fluxcat
-from ch_util import finder
-from ch_util import rfi
-
-from draco.core import task, containers
-from draco.util import _fast_tools
 
 from ..core import containers as ccontainers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -63,10 +54,9 @@ def _extract_diagonal(utmat, axis=1):
     slice1 = (np.s_[:],) * (len(utmat.shape) - axis - 1)
 
     # Extract wanted elements with a giant slice
-    sl = slice0 + (diag_ind,) + slice1
-    diag_array = utmat[sl]
+    sl = (*slice0, diag_ind, *slice1)
 
-    return diag_array
+    return utmat[sl]
 
 
 def solve_gain(data, feeds=None, norm=None):
@@ -119,8 +109,8 @@ def solve_gain(data, feeds=None, norm=None):
 
     elif norm.shape != gain.shape:
         ValueError(
-            "Input normalization matrix has shape %s, should have shape %s."
-            % (norm.shape, gain.shape)
+            f"Input normalization matrix has shape {norm.shape}, "
+            f"should have shape {gain.shape}."
         )
 
     # Pre-generate the array of inverted norms
@@ -288,11 +278,9 @@ class NoiseSourceFold(task.SingleTask):
         else:
             ni_params = {"ni_period": self.period, "ni_on_bins": self.phase}
 
-        folded_ts = ni_utils.process_synced_data(
+        return ni_utils.process_synced_data(
             ts, ni_params=ni_params, only_off=self.only_off
         )
-
-        return folded_ts
 
 
 class NoiseInjectionCalibration(task.MPILoggedTask):
@@ -491,7 +479,7 @@ class DetermineSourceTransit(task.SingleTask):
     ----------
     source_list : list of str
         List of source names to consider.  If not specified, all sources
-        contained in `ch_util.ephemeris.source_dictionary` will be considered.
+        contained in `ch_ephem.sources.source_dictionary` will be considered.
     freq : float
         Frequency in MHz.  Sort the sources by the flux at this frequency.
     require_transit: bool
@@ -505,11 +493,10 @@ class DetermineSourceTransit(task.SingleTask):
 
     def setup(self):
         """Set list of sources, sorted by flux in descending order."""
-        self.source_list = reversed(
-            sorted(
-                self.source_list or ephemeris.source_dictionary.keys(),
-                key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
-            )
+        self.source_list = sorted(
+            self.source_list or ephemeris.source_dictionary.keys(),
+            key=lambda src: fluxcat.FluxCatalog[src].predict_flux(self.freq),
+            reverse=True,
         )
 
     def process(self, sstream):
@@ -531,20 +518,20 @@ class DetermineSourceTransit(task.SingleTask):
             timestamp = sstream.time
         else:
             lsd = sstream.attrs.get("lsd", sstream.attrs.get("csd"))
-            timestamp = ephemeris.csd_to_unix(lsd + sstream.ra / 360.0)
+            timestamp = chime.lsd_to_unix(lsd + sstream.ra / 360.0)
 
         # Loop over sources and check if there is a transit within time range
         # covered by container.  If so, then add attributes describing that source
         # and break from the loop.
         contains_transit = False
         for src in self.source_list:
-            transit_time = ephemeris.transit_times(
-                ephemeris.source_dictionary[src], timestamp[0], timestamp[-1]
+            transit_time = chime.transit_times(
+                sources.source_dictionary[src], timestamp[0], timestamp[-1]
             )
             if transit_time.size > 0:
                 self.log.info(
                     "Data stream contains %s transit on LSD %d."
-                    % (src, ephemeris.csd(transit_time[0]))
+                    % (src, chime.unix_to_lsd(transit_time[0]))
                 )
                 sstream.attrs["source_name"] = src
                 sstream.attrs["transit_time"] = transit_time[0]
@@ -553,8 +540,8 @@ class DetermineSourceTransit(task.SingleTask):
 
         if contains_transit or not self.require_transit:
             return sstream
-        else:
-            return None
+
+        return None
 
 
 class EigenCalibration(task.SingleTask):
@@ -568,7 +555,7 @@ class EigenCalibration(task.SingleTask):
     Attributes
     ----------
     source : str
-        Name of the source (same format as `ephemeris.source_dictionary`).
+        Name of the source (same format as `sources.source_dictionary`).
     eigen_ref : int
         Index of the feed that is current phase reference of the eigenvectors.
     phase_ref : list
@@ -602,7 +589,7 @@ class EigenCalibration(task.SingleTask):
     max_hour_angle = config.Property(proptype=float, default=10.0)
     window = config.Property(proptype=float, default=0.75)
     dyn_rng_threshold = config.Property(proptype=float, default=3.0)
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
 
     def process(self, data, inputmap):
         """Determine feed response from eigendecomposition.
@@ -620,7 +607,6 @@ class EigenCalibration(task.SingleTask):
         response : containers.SiderealStream
             Response of each feed to the point source.
         """
-
         # Ensure that we are distributed over frequency
         data.redistribute("freq")
 
@@ -645,14 +631,14 @@ class EigenCalibration(task.SingleTask):
         )
 
         # Determine source coordinates
-        ttrans = ephemeris.transit_times(source_obj.skyfield, data.time[0])[0]
-        csd = int(np.floor(ephemeris.unix_to_csd(ttrans)))
+        ttrans = chime.transit_times(source_obj.skyfield, data.time[0])[0]
+        csd = int(np.floor(chime.unix_to_lsd(ttrans)))
 
-        src_ra, src_dec = ephemeris.object_coords(
+        src_ra, src_dec = coord.object_coords(
             source_obj.skyfield, date=ttrans, deg=True
         )
 
-        ra = ephemeris.lsa(data.time)
+        ra = chime.unix_to_lsa(data.time)
 
         ha = ra - src_ra
         ha = ((ha + 180.0) % 360.0) - 180.0
@@ -669,7 +655,7 @@ class EigenCalibration(task.SingleTask):
         itrans = np.argmin(np.abs(ha))
 
         src_dec = np.radians(src_dec)
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Dereference datasets
         evec = data.datasets["evec"][:].local_array
@@ -750,8 +736,7 @@ class EigenCalibration(task.SingleTask):
         no_distance = np.flatnonzero(np.any(np.isnan(dist), axis=1))
         if (no_distance.size > 0) and np.any(input_flags[no_distance]):
             raise RuntimeError(
-                "Do not have positions for feeds: %s"
-                % str(no_distance[input_flags[no_distance]])
+                f"Do not have positions for feeds: {no_distance[input_flags[no_distance]]!s}"
             )
 
         # Determine the number of eigenvalues to include in the orthogonalization
@@ -767,7 +752,7 @@ class EigenCalibration(task.SingleTask):
         not_rfi = not_rfi[:, np.newaxis]
 
         self.log.info(
-            "Using a dynamic range threshold of %0.2f." % self.dyn_rng_threshold
+            f"Using a dynamic range threshold of {self.dyn_rng_threshold:.2f}."
         )
         dyn_flag = dyn > self.dyn_rng_threshold
 
@@ -808,9 +793,9 @@ class EigenCalibration(task.SingleTask):
 
         # Add an attribute that indicates if the transit occured during the daytime
         is_daytime = 0
-        solar_rise = ephemeris.solar_rising(ttrans - 86400.0)
+        solar_rise = chime.solar_rising(ttrans - 86400.0)
         for sr in solar_rise:
-            ss = ephemeris.solar_setting(sr)[0]
+            ss = chime.solar_setting(sr)[0]
             if (ttrans >= sr) and (ttrans <= ss):
                 is_daytime = 1
                 break
@@ -984,8 +969,8 @@ class TransitFit(task.SingleTask):
 
         else:
             raise ValueError(
-                "Do not recognize model %s.  Options are %s and %s."
-                % (self.model, "gauss_amp_poly_phase", "poly_log_amp_poly_phase")
+                f"Do not recognize model {self.model}.  Options are "
+                "`gauss_amp_poly_phase` and `poly_log_amp_poly_phase`."
             )
 
     def process(self, response, inputmap):
@@ -1014,10 +999,10 @@ class TransitFit(task.SingleTask):
         freq = response.freq[response.vis[:].local_bounds]
 
         # Calculate the hour angle using the source and transit time saved to attributes
-        source_obj = ephemeris.source_dictionary[response.attrs["source_name"]]
+        source_obj = sources.source_dictionary[response.attrs["source_name"]]
         ttrans = response.attrs["transit_time"]
 
-        src_ra, src_dec = ephemeris.object_coords(source_obj, date=ttrans, deg=True)
+        src_ra, src_dec = coord.object_coords(source_obj, date=ttrans, deg=True)
 
         ha = response.ra[:] - src_ra
         ha = ((ha + 180.0) % 360.0) - 180.0
@@ -1256,7 +1241,6 @@ class FlagAmplitude(task.SingleTask):
         gain : containers.StaticGainData
             The input gain container with modified weights.
         """
-
         # Distribute over frequency
         gain.redistribute("freq")
 
@@ -1367,8 +1351,8 @@ class FlagAmplitude(task.SingleTask):
         frac_good_freq = good_freq.size / float(gain.freq.size)
         if frac_good_freq < self.valid_gains_frac_good_freq:
             self.log.info(
-                "Only %0.1f%% of frequencies remain after flagging amplitude.  Will "
-                "not process this sidereal day further." % (100.0 * frac_good_freq,)
+                f"Only {100.0 * frac_good_freq:0.1f}% of frequencies remain after flagging amplitude.  Will "
+                "not process this sidereal day further."
             )
             return None
 
@@ -1522,10 +1506,10 @@ class SiderealCalibration(task.SingleTask):
         freq = sstream.freq["centre"][sstream.vis[:].local_bounds]
 
         # Fetch source
-        source = ephemeris.source_dictionary[self.source]
+        source = sources.source_dictionary[self.source]
 
         # Estimate the RA at which the transiting source peaks
-        peak_ra = ephemeris.peak_RA(source, deg=True)
+        peak_ra = coord.peak_ra(source, deg=True)
 
         # Find closest array index
         idx = np.argmin(np.abs(sstream.ra - peak_ra))
@@ -1721,7 +1705,6 @@ def find_contiguous_time_ranges(timestamp, dt=3600.0):
         containing the start and stop time covering
         a contiguous range of timestamps.
     """
-
     timestamp = np.sort(timestamp)
 
     start = [timestamp[0] - dt]
@@ -1850,18 +1833,19 @@ class ThermalCalibration(task.SingleTask):
         self._file_end = self.caltime_file["tend"][-1]
 
     def _ra2unix(self, csd, ra):
-        """csd must be integer"""
-        return ephemeris.csd_to_unix(csd + ra / 360.0)
+        """Csd must be integer."""
+        return chime.lsd_to_unix(csd + ra / 360.0)
 
     def _reftime2gain(self, reftime_result, timestamp, frequency):
-        """
+        """Get gain corrections based on source transit times.
+
         Parameters
         ----------
-        timestamp : array of foats
-            Unix time of data points to be calibrated.
-        reftime : array of floats
+        reftime_result : array of floats
             Unix time of same length as `timestamp'. Reference times of transit of the
             source used to calibrate the data at each time in `times'.
+        timestamp : array of foats
+            Unix time of data points to be calibrated.
         frequency : array of floats
             Frequencies to obtain the gain corrections for, in MHz.
 
@@ -2086,6 +2070,7 @@ class InvertGain(task.SingleTask):
         Parameters
         ----------
         gain: StaticGainData or GainData
+            gain data container
 
         Returns
         -------
@@ -2116,7 +2101,6 @@ class BaseCommonMode(task.SingleTask):
         pm : ProductManager
             Object describing the telescope.
         """
-
         self.input_map = pm.telescope.feeds
 
         self._set_groups(self.input_map)
@@ -2135,6 +2119,7 @@ class BaseCommonMode(task.SingleTask):
         Parameters
         ----------
         inputmap: list of CorrInput
+            map of inputs
 
         Attributes
         ----------
@@ -2148,7 +2133,6 @@ class BaseCommonMode(task.SingleTask):
         glookup: dict
             Dictionary of the format {input_index: group_index}.
         """
-
         index = np.flatnonzero([tools.is_chime(inp) for inp in inputmap])
 
         fmt = "{inp.pol}"
@@ -2190,6 +2174,7 @@ class ComputeCommonMode(BaseCommonMode):
         Parameters
         ----------
         data: StaticGainData or GainData
+            gain data container
 
         Returns
         -------
@@ -2197,7 +2182,6 @@ class ComputeCommonMode(BaseCommonMode):
             The common-mode gain *amplitude* for the different
             groups of inputs.
         """
-
         # Determine what dataset we are dealing with based on the
         # input container type and find the input axis of that dataset.
         dset = self.dataset_map[data.__class__]
@@ -2295,7 +2279,6 @@ class ExpandCommonMode(BaseCommonMode):
             The common-mode gain amplitude replicated for all inputs
             in a group.
         """
-
         dset = self.dataset_map[cmn.__class__]
         inp_axis = list(cmn[dset].attrs["axis"]).index("input")
 
@@ -2773,20 +2756,19 @@ class ReconstructGainError(task.SingleTask):
                         )
                         break
 
-                    else:
-                        # Update the frequency mask
-                        freq_flag &= ~masked_freq
+                    # Update the frequency mask
+                    freq_flag &= ~masked_freq
 
-                        # Print total number off frequencies masked thus far
-                        perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
-                        self.log.info(
-                            f"Iteration {ii}, finished.  "
-                            f"Masked {perc_masked:0.3f} percent of frequencies in total."
-                        )
+                    # Print total number off frequencies masked thus far
+                    perc_masked = 100.0 * np.mean(~freq_flag & freq_flag0)
+                    self.log.info(
+                        f"Iteration {ii}, finished.  "
+                        f"Masked {perc_masked:0.3f} percent of frequencies in total."
+                    )
 
-                        if self.full_output:
-                            garch[:, ii, tt] = avg_ratio
-                            warch[:, ii, tt] = freq_flag
+                    if self.full_output:
+                        garch[:, ii, tt] = avg_ratio
+                        warch[:, ii, tt] = freq_flag
 
             # Save final result
             var = vmeas * np.abs(inv_ginterp) ** 2
@@ -2832,7 +2814,6 @@ class ReconstructGainError(task.SingleTask):
         vis : np.ndarray[nfreq,]
             Effective error in the beamformed visibilities due to gain errors.
         """
-
         ratio_conj = ratio.conj()
 
         shp = ratio.shape[:-1]
@@ -2861,7 +2842,6 @@ class ReconstructGainError(task.SingleTask):
         new_mask : np.ndarray[nfreq,]
             Boolean mask where True indicates the frequency channel is an outlier.
         """
-
         # Calculate the local median absolute deviation
         ady = np.ascontiguousarray(np.abs(dy), dtype=np.float64)
         w = np.ascontiguousarray(flag, dtype=np.float64)
@@ -2934,7 +2914,6 @@ class ReconstructGainError(task.SingleTask):
         cov : np.ndarray[nfreq, nfreq]
             Model for the signal covariance.
         """
-
         args = (self.tau_centre, self.tau_width, self.epsilon)
 
         nfreq = freq.size
@@ -2965,6 +2944,9 @@ class ReconstructGainError(task.SingleTask):
         flag : np.ndarray[nfreq,]
             Boolean flag where True indicates a good frequency and
             False indicates a bad frequency.
+        rcond : float, optional
+            Cutoff for small singular values passed to `np.linalg.pinv`.
+            Default is None.
 
         Returns
         -------
@@ -2972,15 +2954,12 @@ class ReconstructGainError(task.SingleTask):
             Pseudo-inverse of the foreground covariance times
             outer product of the mask with itself.
         """
-
         nfreq = flag.size
 
         uflag = flag[:, np.newaxis] & flag[np.newaxis, :]
         ucov = uflag * (np.eye(nfreq, dtype=cov.dtype) + cov)
 
-        pinv = np.linalg.pinv(ucov, hermitian=True, rcond=rcond) * uflag
-
-        return pinv
+        return np.linalg.pinv(ucov, hermitian=True, rcond=rcond) * uflag
 
     def _interpolate(self, freq, gain, weight, flag):
         """Use Gaussian Process Regression to interpolate gains to missing frequencies.
@@ -3003,7 +2982,6 @@ class ReconstructGainError(task.SingleTask):
             Gain at all frequencies.  Previously flagged frequencies
             have been interpolated from neighboring channels.
         """
-
         if np.all(flag):
             return gain
 
@@ -3014,7 +2992,7 @@ class ReconstructGainError(task.SingleTask):
         return ginterp
 
     def _apply_simple_lpf(self, freq, gain):
-        """Apply a simple FIR low-pass filter to the gains as a function of frequency
+        """Apply a simple FIR low-pass filter to the gains as a function of frequency.
 
         Parameters
         ----------
@@ -3028,7 +3006,6 @@ class ReconstructGainError(task.SingleTask):
         gfilt : np.ndarray[nfreq, ninput]
             Gains low-pass filtered along the frequency axis.
         """
-
         cutoff = self.tau_width[0]
 
         dfreq = np.median(np.abs(np.diff(freq)))
@@ -3039,9 +3016,7 @@ class ReconstructGainError(task.SingleTask):
 
         coeff = scipy.signal.firwin(numtaps, cutoff, window=("dpss", 5), fs=fs)
 
-        gfilt = scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
-
-        return gfilt
+        return scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
 
 
 class CorrectGainError(task.SingleTask):
@@ -3471,7 +3446,6 @@ class FlagNarrowbandGainError(task.SingleTask):
             Narrowband gain errors generated by the
             EstimateNarrowbandGainError task.
         """
-
         gains.redistribute("freq")
         self.gains = gains
 
@@ -3496,7 +3470,6 @@ class FlagNarrowbandGainError(task.SingleTask):
         out: RFIMask or SiderealRFIMask
             Mask that removes frequencies and times.
         """
-
         # Make sure the frequencies are the same
         if not np.array_equal(self.gains.freq, data.freq):
             raise ValueError("Frequencies do not match for gain error and timestream.")
@@ -3510,7 +3483,7 @@ class FlagNarrowbandGainError(task.SingleTask):
                 data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             )
 
-            timestamp = ephemeris.csd_to_unix(
+            timestamp = chime.lsd_to_unix(
                 lsd[:, np.newaxis] + ra[np.newaxis, :] / 360.0
             )
 
@@ -3645,7 +3618,7 @@ class CalibrationCorrection(task.SingleTask):
         The name of the DataFlag.
     """
 
-    rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    rotation = config.Property(proptype=float, default=chime.rotation)
     name_of_flag = config.Property(proptype=str, default="")
 
     def setup(self):
@@ -3688,7 +3661,7 @@ class CalibrationCorrection(task.SingleTask):
             `tools.get_correlator_inputs()`
 
         Returns
-        ----------
+        -------
         sstream_out : same as sstream
             The input container with the correction applied.
         """
@@ -3700,7 +3673,7 @@ class CalibrationCorrection(task.SingleTask):
             )
             if hasattr(csd, "__iter__"):
                 csd = sorted(csd)[len(csd) // 2]
-            timestamp = ephemeris.csd_to_unix(csd + ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + ra / 360.0)
         else:
             timestamp = sstream.time
 
@@ -3753,10 +3726,10 @@ class CalibrationCorrection(task.SingleTask):
                         np.sum(in_range),
                         in_range.size,
                         self.name_of_flag,
-                        ephemeris.unix_to_datetime(flag.start_time).strftime(
+                        ctime.unix_to_datetime(flag.start_time).strftime(
                             "%Y%m%dT%H%M%SZ"
                         ),
-                        ephemeris.unix_to_datetime(flag.finish_time).strftime(
+                        ctime.unix_to_datetime(flag.finish_time).strftime(
                             "%Y%m%dT%H%M%SZ"
                         ),
                     )
@@ -3770,8 +3743,7 @@ class CalibrationCorrection(task.SingleTask):
 
                 if do_not_apply.size > 0:
                     self.log.warning(
-                        "Do not have valid baseline distance for stack indices: %s"
-                        % str(do_not_apply)
+                        f"Do not have valid baseline distance for stack indices: {do_not_apply!s}"
                     )
                     correction[:, do_not_apply, :] = 1.0 + 0.0j
 
@@ -3805,13 +3777,13 @@ class CorrectTimeOffset(CalibrationCorrection):
         time_offset = kwargs["time_offset"]
         calibrator = kwargs["calibrator"]
         self.log.info(
-            "Applying a phase correction for a %0.2f second "
-            "time offset on the calibrator %s." % (time_offset, calibrator)
+            f"Applying a phase correction for a {time_offset:0.2f} second "
+            f"time offset on the calibrator {calibrator}."
         )
 
-        body = ephemeris.source_dictionary[calibrator]
+        body = sources.source_dictionary[calibrator]
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Compute feed positions with rotation
         tools.change_chime_location(rotation=self.rotation)
@@ -3821,11 +3793,11 @@ class CorrectTimeOffset(CalibrationCorrection):
         tools.change_chime_location(default=True)
 
         # Determine location of calibrator
-        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+        ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
 
-        ha = np.radians(ephemeris.lsa(ttrans + time_offset)) - ra
+        ha = np.radians(chime.unix_to_lsa(ttrans + time_offset)) - ra
 
         # Calculate and return the phase correction, which is old offset minus new time offset
         # since we previously divided the chimestack data by the response to the calibrator.
@@ -3859,13 +3831,12 @@ class CorrectTelescopeRotation(CalibrationCorrection):
 
         self.log.info(
             "Applying a phase correction to convert from a telescope rotation "
-            "of %0.3f deg to %0.3f deg for the calibrator %s."
-            % (rotation, self.rotation, calibrator)
+            f"of {rotation:.3f} deg to {self.rotation:.3f} deg for the calibrator {calibrator}."
         )
 
-        body = ephemeris.source_dictionary[calibrator]
+        body = sources.source_dictionary[calibrator]
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Compute feed positions with old rotation
         tools.change_chime_location(rotation=rotation)
@@ -3879,9 +3850,9 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         tools.change_chime_location(default=True)
 
         # Determine location of calibrator
-        ttrans = ephemeris.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
+        ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = ephemeris.object_coords(body, date=ttrans, deg=False)
+        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.
@@ -3898,6 +3869,5 @@ def _calculate_uv(freq, prod, inputmap):
     dist = feedpos[:, prod["input_a"]] - feedpos[:, prod["input_b"]]
 
     lmbda = speed_of_light * 1e-6 / freq
-    uv = dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]
 
-    return uv
+    return dist[:, np.newaxis, :] / lmbda[np.newaxis, :, np.newaxis]

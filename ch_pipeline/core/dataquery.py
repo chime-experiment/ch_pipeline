@@ -1,5 +1,4 @@
-"""
-Dataset Specification
+"""Dataset Specification.
 
 Lookup information from the database about the data, particularly which files
 are contained in a specific dataset (defined by a `run` global flag) and what
@@ -43,14 +42,17 @@ from __future__ import annotations
 import os
 
 import numpy as np
-
-from caput import mpiutil, config, pipeline
-from draco.core import task
-from chimedb import data_index as di, dataset as ds
+from caput import config, mpiutil, pipeline
+from caput import time as ctime
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import andata, finder, layout, tools
+from chimedb import data_index as di
+from chimedb import dataset as ds
 from chimedb.core import exceptions
-from ch_util import tools, ephemeris, finder, layout, andata
-from ch_pipeline.core import containers
+from draco.core import task
 
+from ch_pipeline.core import containers
 
 _DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-chime/chime/chime_online/"}
 
@@ -59,10 +61,11 @@ def _force_list(val) -> list:
     """Ensure configuration property is a list."""
     if val is None:
         return []
-    elif hasattr(val, "__iter__") and not isinstance(val, str):
+
+    if hasattr(val, "__iter__") and not isinstance(val, str):
         return list(val)
-    else:
-        return [val]
+
+    return [val]
 
 
 class ConnectDatabase(task.MPILoggedTask):
@@ -83,8 +86,7 @@ class ConnectDatabase(task.MPILoggedTask):
     ntries = config.Property(proptype=int, default=5)
 
     def setup(self):
-        """Establish a database connection"""
-
+        """Establish a database connection."""
         import chimedb.core
 
         # Set the os connection timeout variable
@@ -191,7 +193,7 @@ class QueryDatabase(task.MPILoggedTask):
     exclude_data_flag_types = config.Property(proptype=list, default=[])
 
     def setup(self):
-        """Query the database and fetch the files
+        """Query the database and fetch the files.
 
         Returns
         -------
@@ -221,9 +223,9 @@ class QueryDatabase(task.MPILoggedTask):
             if self.start_time:
                 st, et = self.start_time, self.end_time
             elif self.start_csd:
-                st = ephemeris.csd_to_unix(self.start_csd)
+                st = chime.lsd_to_unix(self.start_csd)
                 et = (
-                    ephemeris.csd_to_unix(self.end_csd)
+                    chime.lsd_to_unix(self.end_csd)
                     if self.end_csd is not None
                     else None
                 )
@@ -265,9 +267,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.include_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.include_transits(bdy, time_delta=tdelta)
 
@@ -282,9 +282,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.exclude_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.exclude_transits(bdy, time_delta=tdelta)
 
@@ -365,10 +363,11 @@ class QueryRun(task.MPILoggedTask):
             )
 
             if run_query.count() == 0:
-                raise RuntimeError("Run %s not found in database" % self.run_name)
-            elif run_query.count() > 1:
+                raise RuntimeError(f"Run {self.run_name} not found in database")
+
+            if run_query.count() > 1:
                 raise RuntimeError(
-                    "Multiple global flags found in database for run %s" % self.run_name
+                    f"Multiple global flags found in database for run {self.run_name}"
                 )
 
             run = run_query.get()
@@ -439,7 +438,6 @@ class QueryDataspecFile(task.MPILoggedTask):
         files : list
             List of files to load
         """
-
         import yaml
 
         # Set to default datasets file
@@ -450,7 +448,7 @@ class QueryDataspecFile(task.MPILoggedTask):
         if not os.path.exists(self.dataset_file):
             raise Exception("Dataset file not found.")
 
-        with open(self.dataset_file, "r") as f:
+        with open(self.dataset_file) as f:
             dconf = yaml.safe_load(f)
 
         if "datasets" not in dconf:
@@ -460,15 +458,15 @@ class QueryDataspecFile(task.MPILoggedTask):
 
         # Find the correct dataset
         dspec = None
-        for ds in dsets:
-            if ds["name"] == self.dataset_name:
-                dspec = ds
+        for ds_ in dsets:
+            if ds_["name"] == self.dataset_name:
+                dspec = ds_
                 break
 
         # Raise exception if it's not found
         if dspec is None:
             raise Exception(
-                "Dataset %s not found in %s." % (self.dataset_name, self.dataset_file)
+                f"Dataset {self.dataset_name} not found in {self.dataset_file}."
             )
 
         if ("instrument" not in dspec) or ("timerange" not in dspec):
@@ -478,9 +476,7 @@ class QueryDataspecFile(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
-
-        return files
+        return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
 class QueryDataspec(task.MPILoggedTask):
@@ -508,16 +504,13 @@ class QueryDataspec(task.MPILoggedTask):
         files : list
             List of files to load
         """
-
         dspec = {"instrument": self.instrument, "timerange": self.timerange}
 
         # Add archive root if exists
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
-
-        return files
+        return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
 class QueryAcquisitions(task.MPILoggedTask):
@@ -563,13 +556,16 @@ class QueryAcquisitions(task.MPILoggedTask):
         def _choose_group_size(n, m, accept):
             if (n % m) < accept:
                 return m
+
             l, u = m - 1, m + 1
+
             while ((n % l) > accept) and ((n % u) > accept):
                 l, u = l - 1, u + 1
+
             if (n % l) < (n % u):
                 return l
-            else:
-                return u
+
+            return u
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
@@ -628,14 +624,11 @@ class QueryAcquisitions(task.MPILoggedTask):
         if len(self.files) == 0:
             raise pipeline.PipelineStopIteration
 
-        files = self.files.pop(0)
-
-        return files
+        return self.files.pop(0)
 
 
 class QueryInputs(task.MPILoggedTask):
-    """From a dataspec describing the data create a list of objects describing
-    the inputs in the files.
+    """From a dataspec describing the data create a list of objects describing the inputs in the files.
 
     Attributes
     ----------
@@ -662,7 +655,6 @@ class QueryInputs(task.MPILoggedTask):
         inputs : list of :class:`CorrInput`
             A list of describing the inputs as they are in the file.
         """
-
         # Fetch from the cache if we can
         if self.cache and self._cached_inputs:
             self.log.debug("Using cached inputs.")
@@ -672,7 +664,7 @@ class QueryInputs(task.MPILoggedTask):
 
         if mpiutil.rank0:
             # Get the datetime of the middle of the file
-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+            time = ctime.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
 
             inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
@@ -776,7 +768,7 @@ class QueryFrequencyMap(task.MPILoggedTask):
 
                 if "default" not in fmaps:
                     # Extract the stream_id and frequency map
-                    fmap_dict = list(fmaps.values())[0]["fmap"]
+                    fmap_dict = next(iter(fmaps.values()))["fmap"]
 
                     stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
                     fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
@@ -821,7 +813,6 @@ def finder_from_spec(spec, node_spoof=None):
     -------
     fi : ch_util.finder.Finder
     """
-
     instrument = spec["instrument"]
     timerange = spec["timerange"]
 
@@ -887,6 +878,4 @@ def files_from_spec(spec, node_spoof=None):
         files = [fname for result in results for fname in result[0]]
         files.sort()
 
-    files = mpiutil.world.bcast(files, root=0)
-
-    return files
+    return mpiutil.world.bcast(files, root=0)

@@ -1,12 +1,9 @@
 """Regrid the data to sidereal time."""
 
 import numpy as np
-
-from caput import mpiarray
-from ch_util import ephemeris
-from draco.analysis.sidereal import SiderealRegridderLinear
-
 from beam_model.formed import FFTFormedActualBeamModel
+from caput import mpiarray
+from draco.analysis.sidereal import SiderealRegridderLinear
 
 from .containers import HFBData, HFBRingMap
 
@@ -22,9 +19,11 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Set up the default Observer
-        self.observer = ephemeris.chime if observer is None else observer
+        if observer is None:
+            from ch_ephem.observers import chime as observer
+
+        self.observer = observer
 
         # Load beam model to look up reference zenith angles and hour angles of EW beams
         self.beam_mdl = FFTFormedActualBeamModel()

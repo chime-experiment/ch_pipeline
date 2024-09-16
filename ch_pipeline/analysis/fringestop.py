@@ -1,4 +1,4 @@
-"""Tasks for fringestopping CHIME data
+"""Tasks for fringestopping CHIME data.
 
 Tasks for taking the timestream data and fringestop it to a given source
 
@@ -15,14 +15,15 @@ Use this task together with:
   of the timestream data
 """
 
-from datetime import datetime
-from caput import config, mpiutil
-from ch_util import tools, ephemeris
+from caput import config
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import tools
 from draco.core import containers, task
 
 
 class FringeStop(task.SingleTask):
-    """Fringe stop CHIME data to a given source
+    """Fringe stop CHIME data to a given source.
 
     Parameters
     ----------
@@ -40,11 +41,11 @@ class FringeStop(task.SingleTask):
 
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
-        """Apply the fringe stop of CHIME data to a given source
+        """Apply the fringe stop of CHIME data to a given source.
 
         Parameters
         ----------
@@ -59,7 +60,6 @@ class FringeStop(task.SingleTask):
         tstream : andata.CorrData
             Returns the same timestream object but fringestopped
         """
-
         tstream.redistribute("freq")
 
         start_freq = tstream.vis.local_offset[0]
@@ -67,7 +67,7 @@ class FringeStop(task.SingleTask):
         end_freq = start_freq + nfreq
         freq = tstream.freq[start_freq:end_freq]
         prod_map = tstream.index_map["prod"][tstream.index_map["stack"]["prod"]]
-        src = ephemeris.source_dictionary[self.source]
+        src = sources.source_dictionary[self.source]
 
         # Rotate the telescope
         tools.change_chime_location(rotation=self.telescope_rotation)
@@ -89,8 +89,9 @@ class FringeStop(task.SingleTask):
 
         if self.overwrite:
             return tstream
-        else:
-            tstream_fs = containers.empty_like(tstream)
-            tstream_fs.vis[:] = fs_vis
-            tstream_fs.weight[:] = tstream.weight
-            return tstream_fs
+
+        tstream_fs = containers.empty_like(tstream)
+        tstream_fs.vis[:] = fs_vis
+        tstream_fs.weight[:] = tstream.weight
+
+        return tstream_fs

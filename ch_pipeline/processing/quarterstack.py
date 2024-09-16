@@ -1,14 +1,22 @@
+"""Chime Quarterstack processing type.
+
+Stacks the daily data within quarters.
+
+Classes
+=======
+- :py:class:`QuarterStackProcessing`
+"""
+
 import re
+from typing import ClassVar
 
 import numpy as np
-
 from caput import time as ctime
-from ch_util import ephemeris
+from ch_ephem.observers import chime
 from chimedb import core
 from chimedb import dataflag as df
 
 from . import base, daily
-
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -271,7 +279,7 @@ class QuarterStackProcessing(base.ProcessingType):
     tag_pattern = r"(?P<year>\d{4})q(?P<quarter>[1-4])p(?P<partition>\d)"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
         "daily_revisions": ["rev_07"],
@@ -339,7 +347,6 @@ class QuarterStackProcessing(base.ProcessingType):
         This tries to determine which days are good and bad, and partitions the
         available good days into the individual stacks.
         """
-
         days = {}
 
         core.connect()
@@ -406,7 +413,7 @@ class QuarterStackProcessing(base.ProcessingType):
 
         # Map each LSD into the quarter it belongs in and find which quarters we have
         # data for
-        dates = ctime.unix_to_datetime(ephemeris.csd_to_unix(np.array(lsds)))
+        dates = ctime.unix_to_datetime(chime.lsd_to_unix(np.array(lsds)))
         yq = np.array([f"{d.year}q{(d.month - 1) // 3 + 1}" for d in dates])
         quarters = np.unique(yq)
 
@@ -439,7 +446,6 @@ class QuarterStackProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-
         return list(self._revparams["stacks"].keys())
 
     def _finalise_jobparams(self, tag, jobparams):
@@ -449,7 +455,6 @@ class QuarterStackProcessing(base.ProcessingType):
         process and insert it as a string into the YAML. It would be nice to find a
         better way to do this.
         """
-
         days = self._revparams["stacks"][tag]
         paths = self._revparams["days"]
 
@@ -475,7 +480,6 @@ class QuarterStackProcessing(base.ProcessingType):
 
     def _parse_tag(self, tag):
         """Extract the year, quarter and partition from the tag."""
-
         mo = re.match(self.tag_pattern, tag)
 
         if not mo:

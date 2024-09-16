@@ -1,17 +1,20 @@
 """Tasks for constructing timing corrections and applying them to data."""
 
 import os
+from typing import ClassVar
 
+import caput.time as ctime
 import numpy as np
-
-from ch_util import timing, ephemeris
 from caput import config
 from caput.pipeline import PipelineRuntimeError
-from draco.core import task
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import timing
 
 # For querying DataFlag database
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
+from draco.core import task
 
 
 class ApplyTimingCorrection(task.SingleTask):
@@ -106,7 +109,7 @@ class ApplyTimingCorrection(task.SingleTask):
             csd = (
                 tstream.attrs["lsd"] if "lsd" in tstream.attrs else tstream.attrs["csd"]
             )
-            timestamp = ephemeris.csd_to_unix(csd + tstream.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + tstream.ra / 360.0)
 
         # Extract local frequencies
         tstream.redistribute("freq")
@@ -131,21 +134,21 @@ class ApplyTimingCorrection(task.SingleTask):
                 if timestamp[-1] >= flag["finish_time"]:
                     raise PipelineRuntimeError(
                         f"Data covering {timestamp[0]} to {timestamp[-1]} partially overlaps "
-                        f"needs_timing_correction DataFlag covering {ephemeris.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
-                        f"to {ephemeris.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}."
+                        f"needs_timing_correction DataFlag covering {ctime.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
+                        f"to {ctime.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}."
                     )
-                else:
-                    self.log.info(
-                        f"Data covering {timestamp[0]} to {timestamp[-1]} flagged by "
-                        f"needs_timing_correction DataFlag covering {ephemeris.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
-                        f"to {ephemeris.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}. Timing correction will be applied."
-                    )
-                    needs_timing_correction = True
-                    break
+
+                self.log.info(
+                    f"Data covering {timestamp[0]} to {timestamp[-1]} flagged by "
+                    f"needs_timing_correction DataFlag covering {ctime.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
+                    f"to {ctime.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}. Timing correction will be applied."
+                )
+                needs_timing_correction = True
+                break
 
         if not needs_timing_correction:
             self.log.info(
-                f"Data in span {ephemeris.unix_to_datetime(timestamp[0]).strftime('%Y%m%dT%H%M%SZ')} to {ephemeris.unix_to_datetime(timestamp[-1]).strftime('%Y%m%dT%H%M%SZ')} does not need timing correction"
+                f"Data in span {ctime.unix_to_datetime(timestamp[0]).strftime('%Y%m%dT%H%M%SZ')} to {ctime.unix_to_datetime(timestamp[-1]).strftime('%Y%m%dT%H%M%SZ')} does not need timing correction"
             )
             return tstream
 
@@ -154,10 +157,10 @@ class ApplyTimingCorrection(task.SingleTask):
             if timestamp[0] >= tcorr.time[0] and timestamp[-1] <= tcorr.time[-1]:
                 break
         else:
+            ts_ = tuple(ctime.unix_to_datetime([timestamp[0], timestamp[-1]]))
             msg = (
                 "Could not find timing correction file covering "
-                "range of timestream data (%s to %s)."
-                % tuple(ephemeris.unix_to_datetime([timestamp[0], timestamp[-1]]))
+                f"range of timestream data ({ts_[0]} to {ts_[1]})."
             )
 
             if self.pass_if_missing:
@@ -166,7 +169,7 @@ class ApplyTimingCorrection(task.SingleTask):
 
             raise RuntimeError(msg)
 
-        self.log.info("Using correction file %s" % tcorr.attrs["tag"])
+        self.log.info(f"Using correction file {tcorr.attrs['tag']}")
 
         # If requested, reference the timing correct with respect to source transit time
         if self.refer_to_transit:
@@ -174,8 +177,8 @@ class ApplyTimingCorrection(task.SingleTask):
             ttrans = tstream.attrs.get("transit_time", None)
             if ttrans is None:
                 source = tstream.attrs["source_name"]
-                ttrans = ephemeris.transit_times(
-                    ephemeris.source_dictionary[source],
+                ttrans = chime.transit_times(
+                    sources.source_dictionary[source],
                     tstream.time[0],
                     tstream.time[-1],
                 )
@@ -184,15 +187,13 @@ class ApplyTimingCorrection(task.SingleTask):
                         "Found %d transits of %s in timestream.  "
                         "Require single transit." % (ttrans.size, source)
                     )
-                else:
-                    ttrans = ttrans[0]
+
+                ttrans = ttrans[0]
 
             self.log.info(
-                "Referencing timing correction to %s (RA=%0.1f deg)."
-                % (
-                    ephemeris.unix_to_datetime(ttrans).strftime("%Y%m%dT%H%M%SZ"),
-                    ephemeris.lsa(ttrans),
-                )
+                "Referencing timing correction to "
+                f"{ctime.unix_to_datetime(ttrans).strftime('%Y%m%dT%H%M%SZ')} "
+                f"(RA={chime.unix_to_lsa(ttrans):.1f} deg)."
             )
 
             tcorr.set_global_reference_time(
@@ -277,7 +278,7 @@ class ConstructTimingCorrection(task.SingleTask):
     )
     output_suffix = config.Property(proptype=str, default="chimetiming_delay")
 
-    _parameters = [
+    _parameters: ClassVar[str] = [
         "min_frac_kept",
         "threshold",
         "min_freq",
@@ -292,7 +293,7 @@ class ConstructTimingCorrection(task.SingleTask):
         "input_sel",
     ]
 
-    _datasets_fixed_for_acq = [
+    _datasets_fixed_for_acq: ClassVar[str] = [
         "static_phi",
         "weight_static_phi",
         "static_phi_fit",
@@ -314,6 +315,7 @@ class ConstructTimingCorrection(task.SingleTask):
         Parameters
         ----------
         filelist : list of files
+            Path to file(s) containing the timing data.
 
         Returns
         -------
@@ -326,8 +328,8 @@ class ConstructTimingCorrection(task.SingleTask):
             raise RuntimeError(
                 "Cannot process multiple acquisitions.  Received %d." % new_acq.size
             )
-        else:
-            new_acq = new_acq[0]
+
+        new_acq = new_acq[0]
 
         # If this is a new acquisition, then ensure the
         # static phase and amplitude are recalculated
@@ -362,16 +364,17 @@ class ConstructTimingCorrection(task.SingleTask):
             elif key in tcorr.flags:
                 self.kwargs[key] = tcorr.flags[key][:]
             else:
-                msg = "Dataset %s could not be found in timing correction object." % key
-                raise RuntimeError(msg)
+                raise RuntimeError(
+                    f"Dataset {key} could not be found in timing correction object."
+                )
 
         # Save the names of the files used to construct the correction
         tcorr.attrs["archive_files"] = np.array(filelist)
 
         # Create a tag indicating the range of time processed
         tfmt = "%Y%m%dT%H%M%SZ"
-        start_time = ephemeris.unix_to_datetime(tcorr.time[0]).strftime(tfmt)
-        end_time = ephemeris.unix_to_datetime(tcorr.time[-1]).strftime(tfmt)
+        start_time = ctime.unix_to_datetime(tcorr.time[0]).strftime(tfmt)
+        end_time = ctime.unix_to_datetime(tcorr.time[-1]).strftime(tfmt)
         tag = [start_time, "to", end_time]
         if self.output_suffix:
             tag.append(self.output_suffix)

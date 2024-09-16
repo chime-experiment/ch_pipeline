@@ -1,5 +1,4 @@
-"""
-Tasks for IO
+"""Tasks for IO.
 
 Tasks for calculating IO. Notably a task which will write out the parallel
 MPIDataset classes.
@@ -27,17 +26,15 @@ Several tasks accept groups of files as arguments. These are specified in the YA
         files: ['file1.h5', 'file2.h5']
 """
 
-import re
-import os.path
 import gc
+import os.path
+import re
+from typing import ClassVar
+
 import numpy as np
-
-from caput import pipeline
-from caput import config
-
+from caput import config, pipeline
 from ch_util import andata
-
-from draco.core import task, io
+from draco.core import io, task
 
 from . import containers
 
@@ -85,6 +82,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
         Parameters
         ----------
         files : list
+            list of correlator data file paths
         """
         if not isinstance(files, (list, tuple)):
             raise RuntimeError("Argument must be list of files.")
@@ -97,7 +95,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
             freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+                {np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical}
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
@@ -120,7 +118,6 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
             The timestream file. Return type depends on the value of
             `use_draco_container`.
         """
-
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -215,7 +212,7 @@ class LoadDataFiles(task.SingleTask):
 
     acqtype = config.Property(proptype=str, default="weather")
 
-    _acqtype_reader = {
+    _acqtype_reader: ClassVar = {
         "hk": andata.HKReader,
         "hkp": andata.HKPReader,
         "weather": andata.WeatherReader,
@@ -231,6 +228,7 @@ class LoadDataFiles(task.SingleTask):
         Parameters
         ----------
         files : list
+            list of chime data file paths to load, EXCLUDING correlator data
         """
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
@@ -249,12 +247,10 @@ class LoadDataFiles(task.SingleTask):
         -------
         data : subclass of andata.BaseData
         """
-
         return self._load_next_file()
 
     def _load_next_file(self):
         """Load the next available file into memory."""
-
         if self._file_ptr == len(self.files):
             raise pipeline.PipelineStopIteration
 
@@ -269,9 +265,8 @@ class LoadDataFiles(task.SingleTask):
         rd = self._acqtype_reader[self.acqtype](file_)
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        data = rd.read()
 
-        return data
+        return rd.read()
 
 
 class LoadGainUpdates(LoadDataFiles):
@@ -355,7 +350,6 @@ class LoadGainUpdates(LoadDataFiles):
 
     def _load_next_file(self):
         """Load the next available file into memory."""
-
         gains = super()._load_next_file()
         self._time_ptr = 0
 
@@ -392,6 +386,7 @@ class LoadSetupFile(io.BaseLoadFiles):
         return cont
 
     def process(self):
+        """Override parent process method to do nothing."""
         pass
 
 
@@ -443,6 +438,7 @@ class LoadFileFromTag(io.BaseLoadFiles):
         Parameters
         ----------
         incont : subclass of `memh5.BasicCont`
+            get the `tag` attribute from this container
 
         Returns
         -------
@@ -478,7 +474,9 @@ class FilterExisting(task.MPILoggedTask):
     min_files_in_csd = config.Property(proptype=int, default=6)
 
     def __init__(self):
-        super(FilterExisting, self).__init__()
+        super().__init__()
+
+        from caput import mpiutil
 
         self.csd_list = []
         self.corr_files = {}
@@ -495,9 +493,9 @@ class FilterExisting(task.MPILoggedTask):
                         self.csd_list.append(int(mo.group(1)))
 
             # Search the database to get the start and end times of all correlation files
+            from ch_ephem.observers import chime
             from chimedb import data_index as di
             from chimedb.core import connect
-            from ch_util import ephemeris
 
             connect()
             query = (
@@ -516,8 +514,8 @@ class FilterExisting(task.MPILoggedTask):
                 if start is None or finish is None:
                     continue
 
-                start_csd = ephemeris.csd(start)
-                finish_csd = ephemeris.csd(finish)
+                start_csd = chime.unix_to_lsd(start)
+                finish_csd = chime.unix_to_lsd(finish)
 
                 name = os.path.join(acq, fname)
                 self.corr_files[name] = (start_csd, finish_csd)
@@ -530,7 +528,6 @@ class FilterExisting(task.MPILoggedTask):
 
     def next(self, files):
         """Filter the incoming file lists."""
-
         csd_list = {}
 
         for path in files:
@@ -543,7 +540,7 @@ class FilterExisting(task.MPILoggedTask):
                 continue
 
             # Figure out which CSD the file starts and ends on
-            start, end = [int(t) for t in self.corr_files[name]]
+            start, end = (int(t) for t in self.corr_files[name])
 
             # Add this file to the set of files for the relevant days
             csd_list.setdefault(start, set()).add(path)
@@ -571,4 +568,4 @@ class FilterExisting(task.MPILoggedTask):
             "Input list %i files, after filtering %i files.", len(files), len(new_files)
         )
 
-        return sorted(list(new_files))
+        return sorted(new_files)

@@ -1,21 +1,16 @@
-"""HFB tasks for reading and writing files
-"""
+"""HFB tasks for reading and writing files."""
 
-import os
 import gc
+import os
 from pathlib import Path
 
+import caput.time as ctime
 import numpy as np
-
-from caput import pipeline
-from caput import config
-
-from ch_util import ephemeris
-from ch_util.hfbcat import HFBCatalog
-
-from draco.core import io
-
 from beam_model.formed import FFTFormedActualBeamModel
+from caput import config, pipeline
+from ch_ephem.observers import chime
+from ch_util.hfbcat import HFBCatalog
+from draco.core import io
 
 from .containers import HFBData, HFBReader
 
@@ -64,7 +59,6 @@ class BeamSelectionMixin:
         beam_sel : np.ndarray
             Array of beam indices to select.
         """
-
         # Grid of all beam indices, with shape (4, 256) (i.e., EW x NS)
         beam_index_grid = np.arange(1024).reshape(4, 256)
 
@@ -85,9 +79,7 @@ class BeamSelectionMixin:
             beam_ns_sel = slice(None)
 
         # Select beam indices from grid
-        beam_sel = beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
-
-        return beam_sel
+        return beam_index_grid[beam_ew_sel, beam_ns_sel].flatten()
 
 
 class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
@@ -150,9 +142,8 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Set up the default Observer
-        self.observer = ephemeris.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
         # (via `draco.core.io.SelectionsMixin`)
@@ -196,7 +187,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
             self.freq_sel = slice(freq_index_start, freq_index_stop)
         elif self.freq_phys_list:
             self.freq_sel = sorted(
-                set([np.argmin(np.abs(cfreq - freq)) for freq in self.freq_phys_list])
+                {np.argmin(np.abs(cfreq - freq)) for freq in self.freq_phys_list}
             )
         elif "freq_sel" in self._sel:
             self.freq_sel = self._sel["freq_sel"]
@@ -223,16 +214,15 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
             self.beam_sel = slice(None)
 
     def _find_beam(self):
-        """Find NS beam number of beam closest to source at transit
+        """Find NS beam number of beam closest to source at transit.
 
         Returns
         -------
         beam_index_ns : int
             North-south index of beam closest to source at transit.
         """
-
         # Find source's telescope-y coordinate
-        src_y = self.source_dec - ephemeris.CHIMELATITUDE
+        src_y = self.source_dec - chime.latitude
 
         # Choose beam model
         mdl = FFTFormedActualBeamModel()
@@ -252,9 +242,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         beams_xy = mdl.get_beam_positions(beams_ind, freq).squeeze()
 
         # Find NS beam number of beam closest to calibration source
-        beam_index_ns = np.abs(beams_xy[:, 1] - src_y).argmin()
-
-        return beam_index_ns
+        return np.abs(beams_xy[:, 1] - src_y).argmin()
 
     def _load_filelist(self, files, time_range=(None, None)):
         """Load a list of files into the HFBData container.
@@ -266,7 +254,6 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         time_range: tuple
             Unix timestamps bracketing the part of the data to be loaded.
         """
-
         for filename in files:
             if not os.path.exists(filename):
                 raise RuntimeError(f"File does not exist: {filename}")
@@ -341,7 +328,6 @@ class LoadFilesFromParams(BaseLoadFiles):
         ts : HFBData
             The timestream of each filegroup.
         """
-
         if len(self.filegroups) == self._fgroup_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -376,7 +362,7 @@ class LoadFilesFromParams(BaseLoadFiles):
         ts.attrs["lsd"] = lsd
 
         # Add calendar date in YYYYMMDD format to attributes
-        calendar_date = ephemeris.unix_to_datetime(container_time).strftime("%Y%m%d")
+        calendar_date = ctime.unix_to_datetime(container_time).strftime("%Y%m%d")
         ts.attrs["calendar_date"] = calendar_date
 
         # Create tag from LSD, unless manually overridden

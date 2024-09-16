@@ -1,16 +1,28 @@
-import math
-import numpy as np
-from datetime import datetime
-import peewee as pw
+"""Chime Daily Pipeline processing type.
 
+This processing type is used to run the Chime daily pipeline.
+
+Classes
+=======
+- :py:class:`DailyProcessing`
+- :py:class:`TestDailyProcessing`
+"""
+
+import logging
+import math
+from datetime import datetime
+from typing import ClassVar
+
+import caput.time as ctime
 import chimedb.core as db
 import chimedb.data_index as di
 import chimedb.dataflag as df
-from ch_util import ephemeris
+import numpy as np
+import peewee as pw
 from caput.tools import unique_ordered
-from ch_pipeline.processing import base
+from ch_ephem.observers import chime
 
-import logging
+from ch_pipeline.processing import base
 
 logger = logging.getLogger(__name__)
 
@@ -795,13 +807,17 @@ pipeline:
 
 
 class DailyProcessing(base.ProcessingType):
-    """ """
+    """Chime daily processing pipeline processing type.
+
+    Processes individual chimestack files into one CSD in RA, along with
+    ringmaps and other data products.
+    """
 
     type_name = "daily"
     tag_pattern = r"\d+"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         # Time range(s) to process
         "intervals": [
             # Two short two-day intervals either side of the caltime change
@@ -913,7 +929,7 @@ class DailyProcessing(base.ProcessingType):
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove chimestack files before this CSD
     # Range is from 2018/10/14 to 2020/01/06
-    daemon_config = {"keep_online": {"start": "CSD1800", "end": "CSD2250"}}
+    daemon_config: ClassVar = {"keep_online": {"start": "CSD1800", "end": "CSD2250"}}
 
     def _create_hook(self):
         """Produce a list of bad days based on the following criteria."""
@@ -952,33 +968,33 @@ class DailyProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-        # Get all desired csds from the config file
-        csds = self._all_tags
-        # Automatically exclude bad days
-        csds = [csd for csd in csds if csd not in self._exclude]
-        csds_sorted = sorted(csds)
-        # Get a list of CSDS whose files are entirely available online
-        csds_to_run = available_csds(
-            csds_sorted,
-            pad=self._padding,
-            required_coverage=self._min_coverage,
-            weather_coverage=self._weather_coverage,
-        )
+        csds = self.runnable_tags(require_online=True)
 
-        tags = [f"{csd:.0f}" for csd in csds if csd in csds_to_run]
-
-        return tags
+        return [str(int(csd)) for csd in csds]
 
     @property
-    def _all_tags(self) -> list:
+    def _config_tags(self) -> list:
         """Return all tags desired from the config."""
         return unique_ordered(
-            (csd for i in self._intervals for csd in expand_csd_range(*i))
+            csd for i in self._intervals for csd in expand_csd_range(*i)
         )
+
+    def runnable_tags(self, require_online=False) -> list:
+        """Return all runnable tags, whether or not the data is available."""
+        csds = [csd for csd in self._config_tags if csd not in self._exclude]
+
+        runnable = available_csds(
+            sorted(csds),
+            self._padding,
+            self._min_coverage,
+            self._weather_coverage,
+            require_online=require_online,
+        )
+
+        return [csd for csd in csds if csd in runnable]
 
     def _finalise_jobparams(self, tag, jobparams):
         """Set bounds for this CSD."""
-
         csd = float(tag)
         jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
 
@@ -990,7 +1006,6 @@ class DailyProcessing(base.ProcessingType):
         This includes requesting that soon-to-be needed files get brought
         online, and that files that are no longer needed be moved offline.
         """
-
         nfiles = {"nretrieve": 0, "nclear": 0}
 
         if not self._include_offline_files:
@@ -1001,9 +1016,8 @@ class DailyProcessing(base.ProcessingType):
         rev_stats = self.status(user=user)
         # Get the upcoming jobs
         upcoming = rev_stats["not_yet_submitted"]
-        # Get all the tags requested by the config, including those that
-        # are not currently available online
-        all_tags = [str(tag) for tag in self._all_tags]
+        # Get all the runnable tags
+        all_tags = [str(tag) for tag in self.runnable_tags(require_online=False)]
 
         if retrieve:
             # If there are any upcoming jobs which require offline data,
@@ -1016,7 +1030,7 @@ class DailyProcessing(base.ProcessingType):
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
             # Prioritize recent days to ensure that data is available
-            today = np.floor(ephemeris.chime.get_current_lsd()).astype(int)
+            today = np.floor(chime.get_current_lsd()).astype(int)
             priority = [
                 tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
             ]
@@ -1039,7 +1053,8 @@ class DailyProcessing(base.ProcessingType):
                 *rev_stats["pending"],
                 *rev_stats["failed"],
                 *rev_stats["not_yet_submitted"],
-            ] + list(expand_csd_range(*self.daemon_config["keep_online"].values()))
+                *expand_csd_range(*self.daemon_config["keep_online"].values()),
+            ]
             exclude_tags = sorted([int(tag) for tag in exclude_tags])
             if remove_request_tags:
                 # Submit the request to remove these files
@@ -1065,7 +1080,7 @@ class DailyProcessing(base.ProcessingType):
             ] + to_run
 
         # Ensure that the current in-progress acquisition does not get queued
-        today = ephemeris.chime.get_current_lsd()
+        today = chime.get_current_lsd()
         to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
 
         # Prioritize some number of recent days
@@ -1111,11 +1126,11 @@ class TestDailyProcessing(DailyProcessing):
 
 
 def expand_csd_range(start, end, step=1):
-    """Get the CSDs within a time range.
+    r"""Get the CSDs within a time range.
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
-    form that `ephemeris.ensure_unix` understands.
+    form that `caput.time.ensure_unix` understands.
 
     Parameters
     ----------
@@ -1124,30 +1139,30 @@ def expand_csd_range(start, end, step=1):
     end : str or parseable to datetime
         End of interval. If `None` use now. Note that for CSD intervals the
         end is *inclusive* (unlike a `range`).
+    step : int
+        step size to use when traversing interval
 
     Returns
     -------
     csds : list of ints
     """
-
     if start is None:
         start_csd = 0
     if start.startswith("CSD"):
         start_csd = int(start[3:])
     else:
-        start_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(start))
+        start_csd = chime.unix_to_lsd(ctime.ensure_unix(start))
         start_csd = math.floor(start_csd)
 
     if end is None:
-        end_csd = int(ephemeris.chime.get_current_lsd())
+        end_csd = int(chime.get_current_lsd())
     elif end.startswith("CSD"):
         end_csd = int(end[3:])
     else:
-        end_csd = ephemeris.unix_to_csd(ephemeris.ensure_unix(end))
+        end_csd = chime.unix_to_lsd(ctime.ensure_unix(end))
         end_csd = math.ceil(end_csd)
 
-    csds = [day for day in range(start_csd, end_csd + 1, step)]
-    return csds
+    return list(range(start_csd, end_csd + 1, step))
 
 
 def files_in_timespan(start, end, file_times):
@@ -1189,6 +1204,7 @@ def available_csds(
     pad: float = 0.0,
     required_coverage: float = 0.0,
     weather_coverage: float = 1.0,
+    require_online: bool = False,
 ) -> set:
     """Return the subset of csds in `csds` for whom all files are online.
 
@@ -1210,13 +1226,15 @@ def available_csds(
         What fraction of the day must have weather coverage. Generally,
         weather files are only produced once per day, so this should be
         set to 1.0 unless there are changes to data format.
+    require_online
+        If True, a CSD must have all files available online to be considered
+        available. Default is True.
 
     Returns
     -------
     available
         set of all available csds
     """
-
     # Figure out which files exist online and which ones exist entirely
     # Repeat the process for corr data and weather data
     corr_online, corr_that_exist = db_get_corr_files_in_range(
@@ -1230,36 +1248,49 @@ def available_csds(
         available = set()
         coverage = coverage * 86400
 
-        for csd in csds:
-            start_time = ephemeris.csd_to_unix(csd - pad)
-            end_time = ephemeris.csd_to_unix(csd + 1 + pad)
+        def _check_coverage(x):
+            time_range = 0
+            for tr in x:
+                time_range += tr[2] - tr[1]
 
-            # online - list of file start and end times that are online
-            # between start_time and end_time
-            # index_online - the final index in which data was located
-            online, index_online = files_in_timespan(
-                start_time, end_time, filenames_online
-            )
+            if time_range > coverage:
+                return True
+
+            return False
+
+        for csd in csds:
+            start_time = chime.lsd_to_unix(csd - pad)
+            end_time = chime.lsd_to_unix(csd + 1 + pad)
+
             exists, index_exists = files_in_timespan(
                 start_time, end_time, filenames_that_exist
             )
 
-            if (len(online) == len(exists)) and (len(online) != 0):
-                # All files for this CSD are online
-                # Check that we have the required data coverage
-                time_range = 0
-                for tr in online:
-                    time_range += tr[2] - tr[1]
-
-                if time_range > coverage:
-                    available.add(csd)
+            available_offline = _check_coverage(exists)
 
             # The final file in the span may contain more than one sidereal day
-            index_online = max(index_online - 1, 0)
             index_exists = max(index_exists - 1, 0)
-
-            filenames_online = filenames_online[index_online:]
             filenames_that_exist = filenames_that_exist[index_exists:]
+
+            if not available_offline:
+                # We can't get this data no matter what
+                continue
+
+            if require_online:
+                # online - list of file start and end times that are online
+                # between start_time and end_time
+                # index_online - the final index in which data was located
+                online, index_online = files_in_timespan(
+                    start_time, end_time, filenames_online
+                )
+
+                if _check_coverage(online) & (len(online) == len(exists)):
+                    available.add(csd)
+
+                index_online = max(index_online - 1, 0)
+                filenames_online = filenames_online[index_online:]
+            else:
+                available.add(csd)
 
         return available
 
@@ -1297,8 +1328,8 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
         all chimestack files available in the timespan
     """
     # Query all the files in this time range
-    start_time = ephemeris.csd_to_unix(start_csd)
-    end_time = ephemeris.csd_to_unix(end_csd + 1)
+    start_time = chime.lsd_to_unix(start_csd)
+    end_time = chime.lsd_to_unix(end_csd + 1)
 
     db.connect()
 
@@ -1325,11 +1356,11 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
     online_node = di.StorageNode.get(name="cedar_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
-    files_online = sorted([t for t in files_online.tuples()], key=lambda x: x[1])
+    files_online = sorted(files_online.tuples(), key=lambda x: x[1])
     # files_that_exist might contain the same file multiple files
     # if it exists in multiple locations (nearline, online, gossec, etc)
     # we only want to include it once, so we initially create a set
-    files_that_exist = sorted({t for t in archive_files.tuples()}, key=lambda x: x[1])
+    files_that_exist = sorted(set(archive_files.tuples()), key=lambda x: x[1])
 
     return files_online, files_that_exist
 
@@ -1361,8 +1392,8 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
     filenames_that_exist
         all chimestack files available in the timespan
     """
-    start_time = ephemeris.csd_to_unix(start_csd)
-    end_time = ephemeris.csd_to_unix(end_csd + 1)
+    start_time = chime.lsd_to_unix(start_csd)
+    end_time = chime.lsd_to_unix(end_csd + 1)
 
     db.connect()
 
@@ -1387,11 +1418,11 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
     online_node = di.StorageNode.get(name="cedar_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
-    files_online = sorted([t for t in files_online.tuples()], key=lambda x: x[1])
+    files_online = sorted(files_online.tuples(), key=lambda x: x[1])
     # files_that_exist might contain the same file multiple files
     # if it exists in multiple locations (nearline, online, gossec, etc)
     # we only want to include it once, so we initially create a set
-    files_that_exist = sorted({t for t in archive_files.tuples()}, key=lambda x: x[1])
+    files_that_exist = sorted(set(archive_files.tuples()), key=lambda x: x[1])
 
     return files_online, files_that_exist
 
@@ -1419,8 +1450,8 @@ def get_filenames_used_by_csds(csds: list, files: list, pad: float = 0):
     """
     files_used = set()
     for csd in csds:
-        start_time = ephemeris.csd_to_unix(csd - pad)
-        end_time = ephemeris.csd_to_unix(csd + 1 + pad)
+        start_time = chime.lsd_to_unix(csd - pad)
+        end_time = chime.lsd_to_unix(csd + 1 + pad)
         # Get all the files in this timespan which exist in `files`
         f, index = files_in_timespan(start_time, end_time, files)
         files_used.update(f)
@@ -1591,8 +1622,8 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
 
     # Iterate over csds and flags to find which ones need to be excluded
     for csd in csds:
-        start = ephemeris.csd_to_unix(csd)
-        end = ephemeris.csd_to_unix(csd + 1)
+        start = chime.lsd_to_unix(csd)
+        end = chime.lsd_to_unix(csd + 1)
 
         for flag_name, flag_list in out_flags.items():
             flagged_intervals = []

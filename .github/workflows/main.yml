@@ -13,15 +13,18 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v2
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
       with:
-        python-version: "3.10"
+        python-version: "3.12"
 
-    - name: Install black
-      run: pip install black
+    - name: Install pip dependencies
+      run: pip install black ruff
+
+    - name: Run Ruff
+      run: ruff check .
 
     - name: Check code with black
       run: black --check .
@@ -30,28 +33,22 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install apt dependencies
       run: |
         sudo apt-get update -y
         sudo apt-get install -y libopenmpi-dev openmpi-bin libhdf5-serial-dev
 
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v2
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
       with:
-        python-version: "3.10"
+        python-version: "3.12"
 
-    - name: Install pip dependencies
-      run: |
-        pip install future
-        pip install numpy
-        pip install cython
-        pip install --use-deprecated=legacy-resolver -r requirements.txt --no-binary bitshuffle
-        pip install --use-deprecated=legacy-resolver -r doc/requirements.txt --no-binary bitshuffle
-
-    - name: Install ch_pipeline
-      run: pip install -e .
+    - name: Install requirements
+      run: pip install .[docs]
 
     - name: Build sphinx docs
       run: sphinx-build -W -b html doc/ doc/_build/html

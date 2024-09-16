@@ -1,18 +1,21 @@
-"""Tasks for analysis of the radio sun
+"""Tasks for analysis of the radio sun.
 
 Includes grouping individual files into a solar day;
 solar calibration; solar beamforming; and solar excision.
 """
 
 import datetime
-import pytz
 
+import caput.time as ctime
 import numpy as np
+import pytz
 import scipy.constants
-
-from caput import config, mpiutil, tod
+import skyfield
+from caput import config, tod
+from ch_ephem import coord, sources
+from ch_ephem.observers import chime
+from ch_util import cal_utils, tools
 from draco.core import task
-from ch_util import ephemeris, tools, cal_utils
 
 from ..core import containers
 
@@ -26,11 +29,10 @@ def unix_to_localtime(unix_time):
         Unix/POSIX time.
 
     Returns
-    --------
+    -------
     dt : :class:`datetime.datetime`
 
     """
-
     utc_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(unix_time))
 
     return utc_time.astimezone(pytz.timezone("Canada/Pacific"))
@@ -56,18 +58,17 @@ def sun_coord(unix_time, deg=True):
         sun at each time.
 
     """
-
-    date = ephemeris.ensure_unix(np.atleast_1d(unix_time))
-    skyfield_time = ephemeris.unix_to_skyfield_time(date)
+    date = ctime.ensure_unix(np.atleast_1d(unix_time))
+    skyfield_time = ctime.unix_to_skyfield_time(date)
     ntime = date.size
 
     coord = np.zeros((ntime, 4), dtype=np.float64)
 
-    planets = ephemeris.skyfield_wrapper.ephemeris
+    planets = ctime.skyfield_wrapper.ephemeris
     # planets = skyfield.api.load('de421.bsp')
     sun = planets["sun"]
 
-    observer = ephemeris.chime.skyfield_obs()
+    observer = chime.skyfield_obs()
 
     apparent = observer.at(skyfield_time).observe(sun).apparent()
 
@@ -81,7 +82,7 @@ def sun_coord(unix_time, deg=True):
 
     # Convert to hour angle
     # defined as local stellar angle minus source right ascension
-    coord[:, 0] = _correct_phase_wrap(np.radians(ephemeris.lsa(date)) - coord[:, 0])
+    coord[:, 0] = _correct_phase_wrap(np.radians(chime.unix_to_lsa(date)) - coord[:, 0])
 
     if deg:
         coord = np.degrees(coord)
@@ -102,7 +103,7 @@ class SolarGrouper(task.SingleTask):
     min_span = config.Property(proptype=float, default=2.0)
 
     def __init__(self):
-        super(SolarGrouper, self).__init__()
+        super().__init__()
         self._timestream_list = []
         self._current_day = None
 
@@ -120,7 +121,6 @@ class SolarGrouper(task.SingleTask):
             Returns the timestream of each solar day when we have received
             the last file, otherwise returns :obj:`None`.
         """
-
         # Get the start and end day of the file as an int with format YYYYMMDD
         day_start = int(unix_to_localtime(tstream.time[0]).strftime("%Y%m%d"))
         day_end = int(unix_to_localtime(tstream.time[-1]).strftime("%Y%m%d"))
@@ -149,8 +149,8 @@ class SolarGrouper(task.SingleTask):
             self._current_day = day_end
 
             return tstream_all
-        else:
-            return None
+
+        return None
 
     def process_finish(self):
         """Return the final day.
@@ -161,11 +161,8 @@ class SolarGrouper(task.SingleTask):
             Returns the timestream of the final day if it's long
             enough, otherwise returns :obj:`None`.
         """
-
         # If we are here there is no more data coming, we just need to process any remaining data
-        tstream_all = self._process_current_day()
-
-        return tstream_all
+        return self._process_current_day()
 
     def _process_current_day(self):
         # Combine the current set of files into a timestream
@@ -245,9 +242,9 @@ class SolarCalibrationN2(task.SingleTask):
         suntrans : containers.SunTransit
             Response to the sun.
         """
-
-        from operator import itemgetter
         from itertools import groupby
+        from operator import itemgetter
+
         from .calibration import _extract_diagonal, solve_gain
 
         # Hardcoded parameters related to size of sun
@@ -271,26 +268,26 @@ class SolarCalibrationN2(task.SingleTask):
         # Get times (ra in degrees)
         if hasattr(sstream, "time"):
             time = sstream.time
-            ra = ephemeris.lsa(time)
+            ra = chime.unix_to_lsa(time)
         else:
             ra = sstream.ra
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            time = ephemeris.csd_to_unix(csd + ra / 360.0)
+            time = chime.lsd_to_unix(csd + ra / 360.0)
 
         # Only examine data between sunrise and sunset
         time_flag = np.zeros(len(time), dtype=bool)
-        rise = ephemeris.solar_rising(time[0] - 24.0 * 3600.0, end_time=time[-1])
+        rise = chime.solar_rising(time[0] - 24.0 * 3600.0, t1=time[-1])
         for rr in rise:
-            ss = ephemeris.solar_setting(rr)[0]
+            ss = chime.solar_setting(rr)[0]
             time_flag |= (time >= rr) & (time <= ss)
 
         if not np.any(time_flag):
             self.log.debug(
                 "No daytime data between %s and %s.",
-                ephemeris.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
-                ephemeris.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
+                ctime.unix_to_datetime(time[0]).strftime("%b %d %H:%M"),
+                ctime.unix_to_datetime(time[-1]).strftime("%b %d %H:%M"),
             )
             return None
 
@@ -426,7 +423,6 @@ class SolarCalibrationN2(task.SingleTask):
 
         # Loop over polarizations
         for ipol, (ifeed, iprod) in enumerate(polmap):
-            p_nfeed, p_nprod = ifeed.size, iprod.size
             iauto = np.array(
                 [idx for idx, (fi, fj) in enumerate(prodmap[iprod]) if (fi == fj)]
             )
@@ -470,9 +466,9 @@ class SolarCalibrationN2(task.SingleTask):
 
                 # Define windows around bright point source transits
                 source_window = []
-                for ss, src in ephemeris.source_dictionary.iteritems():
+                for ss, src in sources.source_dictionary.iteritems():
                     if isinstance(src, skyfield.starlib.Star):
-                        peak_ra = ephemeris.peak_RA(src, deg=True)
+                        peak_ra = coord.peak_ra(src, deg=True)
                         window_ra = 3.0 * cal_utils.guess_fwhm(
                             freq[ff_local],
                             pol=["X", "Y"][ipol],
@@ -510,7 +506,7 @@ class SolarCalibrationN2(task.SingleTask):
                             if np.abs(sha) < span:
                                 src_phase = tools.fringestop_phase(
                                     np.radians(sha),
-                                    np.radians(ephemeris.CHIMELATITUDE),
+                                    np.radians(chime.latitude),
                                     src._dec,
                                     u,
                                     v,
@@ -528,19 +524,19 @@ class SolarCalibrationN2(task.SingleTask):
                         # Fringestop
                         vis *= tools.fringestop_phase(
                             sun_pos[tt_out, 0],
-                            np.radians(ephemeris.CHIMELATITUDE),
+                            np.radians(chime.latitude),
                             sun_pos[tt_out, 1],
                             u,
                             v,
                         )
 
                         # Solve for the solar response
-                        ev, resp, err_resp = [
+                        ev, resp, err_resp = (
                             np.squeeze(var)
                             for var in solve_gain(
                                 vis[edim], norm=norm[edim], neigen=self.neigen
                             )
-                        ]
+                        )
 
                         if len(resp.shape) == 1:
                             resp = resp[:, np.newaxis]
@@ -571,12 +567,12 @@ class SolarCalibrationN2(task.SingleTask):
                                 vism[icross] *= tools.invert_no_zero(model[icross])
 
                                 # Re-solve for the solar response
-                                ev, resp, err_resp = [
+                                ev, resp, err_resp = (
                                     np.squeeze(var)
                                     for var in solve_gain(
                                         vism[edim], norm=norm[edim], neigen=self.neigen
                                     )
-                                ]
+                                )
 
                                 if len(resp.shape) == 1:
                                     resp = resp[:, np.newaxis]
@@ -670,7 +666,6 @@ class SolarCleanN2(task.SingleTask):
         mstream : containers.SiderealStream
             Sidereal stream with sun removed
         """
-
         # Redistribute over frequency
         sstream.redistribute("freq")
         suntrans.redistribute("freq")
@@ -691,7 +686,7 @@ class SolarCleanN2(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            stime = ephemeris.csd_to_unix(csd + ra / 360.0)
+            stime = chime.lsd_to_unix(csd + ra / 360.0)
 
         # Extract gain array
         gtime = suntrans.time[:]
@@ -765,7 +760,7 @@ class SolarCleanN2(task.SingleTask):
 
                         # Determine phase of sun
                         sunphase = tools.fringestop_phase(
-                            ha, np.radians(ephemeris.CHIMELATITUDE), dec, u, v
+                            ha, np.radians(chime.latitude), dec, u, v
                         ).conj()
 
                         # Determine model for sun's extended emission
@@ -839,7 +834,6 @@ class SolarBeamform(task.SingleTask):
         sunstream : containers.FormedBeamTime
             Formed beam at the location of the sun.
         """
-
         # Determine the time axis
         if hasattr(sstream, "time"):
             time = sstream.time
@@ -847,9 +841,9 @@ class SolarBeamform(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            time = ephemeris.csd_to_unix(csd + sstream.ra / 360.0)
+            time = chime.lsd_to_unix(csd + sstream.ra / 360.0)
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Get position of sun at every time sample (in radians)
         sun_pos = sun_coord(time, deg=False)
@@ -1037,7 +1031,6 @@ class SolarClean(task.SingleTask):
         sscut : andata.CorrData, containers.TimeStream, or containers.SiderealStream
             Sidereal stack with sun projected out.
         """
-
         # Get the unix time
         if hasattr(sstream, "time"):
             times = sstream.time
@@ -1045,9 +1038,9 @@ class SolarClean(task.SingleTask):
             csd = (
                 sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
             )
-            times = ephemeris.csd_to_unix(csd + sstream.ra / 360.0)
+            times = chime.lsd_to_unix(csd + sstream.ra / 360.0)
 
-        lat = np.radians(ephemeris.CHIMELATITUDE)
+        lat = np.radians(chime.latitude)
 
         # Get position of sun at every time sample (in radians)
         sun_pos = sun_coord(times, deg=False)
@@ -1178,8 +1171,8 @@ class SolarClean(task.SingleTask):
 def _correct_phase_wrap(phi, deg=False):
     if deg:
         return ((phi + 180.0) % 360.0) - 180.0
-    else:
-        return ((phi + np.pi) % (2.0 * np.pi)) - np.pi
+
+    return ((phi + np.pi) % (2.0 * np.pi)) - np.pi
 
 
 def _upper_triangle_gain_vector(gain):

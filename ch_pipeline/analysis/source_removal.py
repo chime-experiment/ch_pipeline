@@ -4,15 +4,17 @@ Tasks for constructing models for bright sources and subtracting them from the d
 """
 
 import json
+
+import caput.time as ctime
 import numpy as np
-
-from scipy.constants import c as speed_of_light
 import scipy.signal
-
 from caput import config
-from ch_util import andata, ephemeris, tools
+from ch_ephem.observers import chime
+from ch_ephem.sources import source_dictionary
+from ch_util import tools
 from ch_util.fluxcat import FluxCatalog
-from draco.core import task, io
+from draco.core import io, task
+from scipy.constants import c as speed_of_light
 
 from ..core import containers
 
@@ -29,7 +31,7 @@ def model_extended_sources(
     min_altitude=5.0,
     min_ha=0.0,
     max_ha=0.0,
-    **kwargs
+    **kwargs,
 ):
     """Generate a model for the visibilities.
 
@@ -56,6 +58,8 @@ def model_extended_sources(
     max_ha : float
         Do not include a source in the model if it has an hour angle greater than
         this value in degrees.
+    kwargs : dict
+        Additional optional arguments shown below
     scale_x : nsource element list
         Angular extent of each source in arcmin in the W-E direction
     scale_y : nsource element list
@@ -110,10 +114,10 @@ def model_extended_sources(
     )
 
     # Setup for calculating source coordinates
-    lat = np.radians(ephemeris.CHIMELATITUDE)
-    date = ephemeris.unix_to_skyfield_time(timestamp)
+    lat = np.radians(chime.latitude)
+    date = ctime.unix_to_skyfield_time(timestamp)
 
-    observer = ephemeris.chime.skyfield_obs().at(date)
+    observer = chime.skyfield_obs().at(date)
 
     # Generate polynomials
     ncoeff_x = degree_x + 1
@@ -133,9 +137,11 @@ def model_extended_sources(
         src_altaz = obs.altaz()
 
         src_ra, src_dec = src_radec[0], src_radec[1]
-        src_alt, src_az = src_altaz[0], src_altaz[1]
+        src_alt, _ = src_altaz[0], src_altaz[1]
 
-        ha = _correct_phase_wrap(np.radians(ephemeris.lsa(timestamp)) - src_ra.radians)
+        ha = _correct_phase_wrap(
+            np.radians(chime.unix_to_lsa(timestamp)) - src_ra.radians
+        )
         dec = src_dec.radians
 
         weight = src_alt.radians > np.radians(min_altitude)
@@ -230,9 +236,7 @@ def solve_multiple_times(vis, weight, source_model):
     C = np.dot(S.T.conj(), weight[:, np.newaxis] * S)
 
     # Solve for model coefficients
-    coeff = np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
-
-    return coeff
+    return np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
 
 
 class SolveSources(task.SingleTask):
@@ -290,7 +294,7 @@ class SolveSources(task.SingleTask):
     min_ha = config.Property(proptype=float, default=0.0)
 
     min_distance = config.Property(proptype=list, default=[10.0, 0.0])
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     max_iter = config.Property(proptype=int, default=4)
 
     def setup(self, tel):
@@ -299,15 +303,16 @@ class SolveSources(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
 
         self.bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -348,6 +353,7 @@ class SolveSources(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            Timestream or Sidereal stream with visibilities
 
         Returns
         -------
@@ -370,7 +376,7 @@ class SolveSources(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
             output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
@@ -400,7 +406,7 @@ class SolveSources(task.SingleTask):
         tools.change_chime_location(rotation=self.telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
@@ -420,7 +426,6 @@ class SolveSources(task.SingleTask):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []
@@ -441,7 +446,7 @@ class SolveSources(task.SingleTask):
             param=param_name,
             axes_from=data,
             attrs_from=data,
-            **output_kwargs
+            **output_kwargs,
         )
 
         # Determine extended source model
@@ -495,7 +500,7 @@ class SolveSources(task.SingleTask):
                         dist_pol,
                         timestamp,
                         self.bodies,
-                        **self.extended_source_kwargs
+                        **self.extended_source_kwargs,
                     )
                     ext_model = ext_model[0]
 
@@ -587,7 +592,6 @@ class LPFSourceAmplitude(task.SingleTask):
             zero will be interpolated to a non-zero value if more than
             frac_required of the nearby data points are non-zero.
         """
-
         model.redistribute("pol")
         npol = model.amplitude.local_shape[1]
 
@@ -628,6 +632,7 @@ class SubtractSources(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -638,6 +643,7 @@ class SubtractSources(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         model : core.containers.SourceModel
             Best-fit parameters of the source model.
@@ -653,9 +659,9 @@ class SubtractSources(task.SingleTask):
 
         bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
@@ -677,7 +683,7 @@ class SubtractSources(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
         else:
@@ -705,7 +711,7 @@ class SubtractSources(task.SingleTask):
         tools.change_chime_location(rotation=telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Calculate polarisation products, determine unique values
@@ -756,19 +762,16 @@ class AccumulateBeam(task.SingleTask):
 
     def setup(self):
         """Create a class dictionary to hold the beam for each source."""
-
         self.beam_stack = {}
 
     def process(self, beam_stack):
         """Add the beam for this source to the class dictionary."""
-
         self.beam_stack[beam_stack.attrs["source_name"]] = beam_stack
 
-        return None
+        return
 
     def process_finish(self):
         """Return the class dictionary containing the beam for all sources."""
-
         return self.beam_stack
 
 
@@ -787,15 +790,16 @@ class SolveSourcesWithBeam(SolveSources):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescpe model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
 
         self.bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -821,6 +825,7 @@ class SolveSourcesWithBeam(SolveSources):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         beams : dict of andata.CorrData, core.containers.SiderealSteam, or equivalent
             Dictionary containing the beam measurements.  The keys must be
@@ -849,7 +854,7 @@ class SolveSourcesWithBeam(SolveSources):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
             output_kwargs = {"time": timestamp}
         elif "time" in data.index_map:
             timestamp = data.time
@@ -879,7 +884,7 @@ class SolveSourcesWithBeam(SolveSources):
         tools.change_chime_location(rotation=self.telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation:.4f} deg")
         tools.change_chime_location(default=True)
 
         # Flag out short baselines
@@ -899,7 +904,6 @@ class SolveSourcesWithBeam(SolveSources):
         )
 
         upol = np.unique(pol)
-        npol = len(upol)
 
         # Determine parameter names
         param_name = []
@@ -920,14 +924,14 @@ class SolveSourcesWithBeam(SolveSources):
             param=param_name,
             axes_from=data,
             attrs_from=data,
-            **output_kwargs
+            **output_kwargs,
         )
 
         out.add_dataset("coeff")
 
         out.attrs["source_model_kwargs"] = json.dumps(self.source_kwargs)
 
-        self.log.info("Beams contain following sources: %s" % str(list(beams.keys())))
+        self.log.info(f"Beams contain following sources: {list(beams.keys())!s}")
 
         # Dereference datasets
         all_vis = data.vis[:].view(np.ndarray)
@@ -982,6 +986,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         Parameters
         ----------
         tel : analysis.telescope.CHIMETelescope
+            telescope model to use
         """
         telescope = io.get_telescope(tel)
         self.inputmap = telescope.feeds
@@ -992,6 +997,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         Parameters
         ----------
         data : andata.CorrData, core.containers.SiderealStream, or equivalent
+            timestream or sidereal stream with visibilities
 
         model : core.containers.SourceModel
             Best-fit parameters of the source model.
@@ -1013,9 +1019,9 @@ class SubtractSourcesWithBeam(task.SingleTask):
 
         bodies = [
             (
-                ephemeris.source_dictionary[src]
-                if src in ephemeris.source_dictionary
-                else ephemeris.skyfield_wrapper.ephemeris[src]
+                source_dictionary[src]
+                if src in source_dictionary
+                else ctime.skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
@@ -1037,7 +1043,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         if "ra" in data.index_map:
             csd = data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
             csd = np.fix(np.mean(csd))
-            timestamp = ephemeris.csd_to_unix(csd + data.ra / 360.0)
+            timestamp = chime.lsd_to_unix(csd + data.ra / 360.0)
         elif "time" in data.index_map:
             timestamp = data.time
         else:
@@ -1065,7 +1071,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         tools.change_chime_location(rotation=telescope_rotation)
         feedpos = tools.get_feed_positions(self.inputmap).T
         distance = feedpos[:, prod_new["input_a"]] - feedpos[:, prod_new["input_b"]]
-        self.log.info("Rotation set to %0.4f deg" % self.inputmap[0]._rotation)
+        self.log.info(f"Rotation set to {self.inputmap[0]._rotation} deg")
         tools.change_chime_location(default=True)
 
         # Calculate polarisation products, determine unique values
@@ -1125,7 +1131,6 @@ def kz_coeffs(m, k):
     coeff : np.ndarray
         Array of size k * (m - 1) + 1 containing the filter coefficients.
     """
-
     # Coefficients at degree one
     coef = np.ones(m, dtype=np.float64)
 
@@ -1185,7 +1190,6 @@ def apply_kz_lpf_2d(y, flag, window=3, niter=8, mode="wrap", frac_required=0.80)
         The low-pass filtered data.  The value of the array is set to zero
         if the data is determined invalid based on frac_required argument.
     """
-
     # Parse inputs
     if np.isscalar(window):
         window = [window] * 2

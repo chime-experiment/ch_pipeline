@@ -1,10 +1,96 @@
 [build-system]
-requires = ['setuptools', 'wheel', 'oldest-supported-numpy', 'versioneer[toml]']
+requires = [
+    "setuptools>=61.0.0",
+    "wheel",
+    "oldest-supported-numpy",
+    "setuptools-git-versioning"
+]
+build-backend = "setuptools.build_meta"
 
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "ch_pipeline/_version.py"
-versionfile_build = "ch_pipeline/_version.py"
-tag_prefix = ""
-parentdir_prefix = "ch_pipeline-"
+[project]
+name = "ch_pipeline"
+authors = [
+  {name = "The CHIME Collaboration", email = "dvw@phas.ubc.ca"}
+]
+description = "CHIME Pipeline"
+requires-python = ">=3.9"
+dynamic = ["readme", "version"]
+license = {file = "LICENSE"}
+dependencies = [
+    "caput @ git+https://github.com/radiocosmology/caput.git",
+    "ch_ephem @ git+https://github.com/chime-experiment/ch_ephem.git",
+    "ch_util @ git+https://github.com/chime-experiment/ch_util.git",
+    "cora @ git+https://github.com/radiocosmology/cora.git",
+    "driftscan @ git+https://github.com/radiocosmology/driftscan.git",
+    "draco @ git+https://github.com/radiocosmology/draco.git",
+    "apscheduler",
+    "click",
+    "numpy<2",
+    "pytz"
+]
+
+[project.optional-dependencies]
+docs = [
+    "docutils",
+    "Sphinx",
+    "sphinx_rtd_theme"
+]
+hfb = [
+    "beam-model @ git+ssh://git@github.com/CHIMEFRB/beam-model.git"
+]
+test = [
+    "pytest >= 7.0"
+]
+lint = ["ruff", "black"]
+
+[project.scripts]
+chp = "ch_pipeline.processing.client:cli"
+
+[tool.setuptools.dynamic]
+readme = {file = ["README.md"], content-type = "text/markdown"}
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.ruff]
+# Enable:
+# pycodestyle ('E')
+# pydocstyle ('D')
+# pyflakes ('F')
+# isort ('I')
+# pyupgrade ('UP')
+# numpy-specific ('NPY')
+# ruff-specific ('RUF')
+# flake8-blind-except ('BLE')
+# flake8-comprehensions ('C4')
+# flake8-return ('RET')
+lint.select = ["E", "D", "F", "I", "UP", "NPY", "RUF", "BLE", "C4", "RET"]
+
+# E203, W503
+lint.ignore = [
+    "E501", # E501: line length violations. Enforce these with `black`
+    "E741", # E741: Ambiguous variable name
+    "D105", # D105: Missing docstring in magic method
+    "D107", # D107: Missing docstring in init
+    "D203", # D203: 1 blank line required before class docstring
+    "D213", # D213: Multi-line docstring summary should start at the second line
+    "D400", # D400: First line should end with a period (only ignoring this because there's another error that catches the same thing)
+    "D401", # D401: First line should be in imperative mood
+    "D402", # D402: First line should not be the function’s “signature”
+    "D413", # D413: Missing blank line after last section
+    "D416", # D416: Section name should end with a colon
+    "NPY002", # NPY002: replace legacy numpy.random calls with np.random.Generator
+    "NPY201", # NPY201: numpy 2.0 deprecation 
+]
+
+# Ignore the following directories
+exclude = [
+    ".git",
+    ".github",
+    "build",
+    "doc",
+    "test",
+    "*/__init__.py",
+]
+
+target-version = "py39"

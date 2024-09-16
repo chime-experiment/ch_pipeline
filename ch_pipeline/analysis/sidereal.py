@@ -1,5 +1,4 @@
-"""
-Tasks for sidereal regridding
+"""Tasks for sidereal regridding.
 
 Tasks for taking the timestream data and regridding it into sidereal days
 which can be stacked.
@@ -14,14 +13,17 @@ Generally you would want to use these tasks together. Starting with a
 """
 
 import gc
-import numpy as np
-from mpi4py import MPI
 
-from caput import pipeline, config, tod
+import caput.time as ctime
+import numpy as np
+from caput import config, pipeline, tod
 from caput.weighted_median import weighted_median
-from ch_util import andata, ephemeris, tools
-from draco.core import task, containers
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import andata, tools
 from draco.analysis import sidereal
+from draco.core import containers, task
+from mpi4py import MPI
 
 
 class LoadTimeStreamSidereal(task.SingleTask):
@@ -69,13 +71,12 @@ class LoadTimeStreamSidereal(task.SingleTask):
         files : list
             List of files to load.
         """
-
         self.files = files
 
         filemap = None
         if self.comm.rank == 0:
             se_times = get_times(self.files)
-            se_csd = ephemeris.csd(se_times)
+            se_csd = chime.unix_to_lsd(se_times)
             days = np.unique(np.floor(se_csd).astype(np.int64))
 
             # Construct list of files in each day
@@ -93,7 +94,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
             self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+                {np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical}
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
@@ -113,7 +114,6 @@ class LoadTimeStreamSidereal(task.SingleTask):
         ts : andata.CorrData
             The timestream of each sidereal day.
         """
-
         if len(self.filemap) == 0:
             raise pipeline.PipelineStopIteration
 
@@ -176,9 +176,8 @@ class SiderealGrouper(sidereal.SiderealGrouper):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Set up the default Observer
-        observer = ephemeris.chime if observer is None else observer
+        observer = chime if observer is None else observer
 
         sidereal.SiderealGrouper.setup(self, observer)
 
@@ -202,7 +201,7 @@ class WeatherGrouper(SiderealGrouper):
         # Calculate the length of data in this current LSD
         start = self._timestream_list[0].time[0]
         end = self._timestream_list[-1].time[-1]
-        sid_seconds = 86400.0 / ephemeris.SIDEREAL_S
+        sid_seconds = 86400.0 / ctime.SIDEREAL_S
 
         if (end - start) < (sid_seconds + 2 * self.padding):
             self.log.info("Not enough weather data - skipping this day")
@@ -250,14 +249,13 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-
         # Down mix requires the baseline distribution to work and so this simple
         # wrapper around the draco regridder will not work if it is turned on
         if self.down_mix and observer is None:
             raise ValueError("A Telescope object must be supplied if down_mix=True.")
 
         # Set up the default Observer
-        observer = ephemeris.chime if observer is None else observer
+        observer = chime if observer is None else observer
 
         sidereal.SiderealRegridder.setup(self, observer)
 
@@ -317,15 +315,14 @@ class SiderealMean(task.SingleTask):
 
         self.body = []
         if self.mask_sources:
-            for src, body in ephemeris.source_dictionary.items():
+            for src, body in sources.source_dictionary.items():
                 if src in fluxcat.FluxCatalog:
                     if (
                         fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
                         > self.flux_threshold
                     ) and (body.dec.degrees > self.dec_threshold):
                         self.log.info(
-                            "Will mask %s prior to calculating sidereal %s."
-                            % (src, self._name_of_statistic)
+                            f"Will mask {src} prior to calculating sidereal {self._name_of_statistic}."
                         )
                         self.body.append(body)
 
@@ -355,13 +352,13 @@ class SiderealMean(task.SingleTask):
         # Calculate the right ascension, method differs depending on input container
         if "ra" in sstream.index_map:
             ra = sstream.ra
-            timestamp = {dd: ephemeris.csd_to_unix(dd + ra / 360.0) for dd in lsd_list}
+            timestamp = {dd: chime.lsd_to_unix(dd + ra / 360.0) for dd in lsd_list}
             flag_quiet = np.ones(ra.size, dtype=bool)
 
         elif "time" in sstream.index_map:
-            ra = ephemeris.lsa(sstream.time)
+            ra = chime.unix_to_lsa(sstream.time)
             timestamp = {lsd: sstream.time}
-            flag_quiet = np.fix(ephemeris.unix_to_csd(sstream.time)) == lsd
+            flag_quiet = np.fix(chime.unix_to_lsd(sstream.time)) == lsd
 
         else:
             raise RuntimeError("Format of `sstream` argument is unknown.")
@@ -385,7 +382,7 @@ class SiderealMean(task.SingleTask):
             mask_ra = np.zeros(ra.size, dtype=bool)
             for ra_range in self.mask_ra:
                 self.log.info(
-                    "Using data between RA = [%0.2f, %0.2f] deg" % tuple(ra_range)
+                    f"Using data between RA = [{ra_range[0]:.2f, ra_range[1]:.2f}] deg"
                 )
                 mask_ra |= (ra >= ra_range[0]) & (ra <= ra_range[1])
             flag_quiet &= mask_ra
@@ -438,7 +435,7 @@ class SiderealMean(task.SingleTask):
             vslc = [np.s_[:, :, :, ee] for ee in range(all_vis.shape[3])]
 
         elif isinstance(sstream, containers.Ringmap):
-            vslc = [bb for bb in range(all_vis.shape[0])]
+            vslc = list(range(all_vis.shape[0]))
 
         else:
             vslc = [slice(None)]
@@ -486,7 +483,8 @@ class ChangeSiderealMean(task.SingleTask):
     add = config.Property(proptype=bool, default=False)
 
     def process(self, sstream, mustream):
-        """
+        """Add or subtract mustream from the sidereal stream.
+
         Parameters
         ----------
         sstream : andata.CorrData or containers.SiderealStream
@@ -560,14 +558,16 @@ def get_times(acq_files):
     """
     if isinstance(acq_files, list):
         return np.array([get_times(acq_file) for acq_file in acq_files])
-    elif isinstance(acq_files, str):
+
+    if isinstance(acq_files, str):
         # Load in file (but ignore all datasets)
         ad_empty = andata.AnData.from_acq_h5(acq_files, datasets=())
         start = ad_empty.timestamp[0]
         end = ad_empty.timestamp[-1]
+
         return start, end
-    else:
-        raise Exception("Input %s, not understood" % repr(acq_files))
+
+    raise TypeError(f"Input {acq_files!r}, not understood")
 
 
 def _days_in_csd(day, se_csd, extra=0.005):

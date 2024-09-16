@@ -1,4 +1,4 @@
-"""Task for correcting decorrelation due to delays between signals
+"""Task for correcting decorrelation due to delays between signals.
 
 Tasks
 =====
@@ -21,17 +21,11 @@ Use this task together with:
   of the timestream data
 """
 
-# === Start Python 2/3 compatibility
-from __future__ import absolute_import, division, print_function, unicode_literals
-from future.builtins import *  # noqa  pylint: disable=W0401, W0614
-from future.builtins.disabled import *  # noqa  pylint: disable=W0401, W0614
-
-# === End Python 2/3 compatibility
-
 import numpy as np
-from datetime import datetime
 from caput import config
-from ch_util import tools, ephemeris
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import tools
 from draco.core import containers, task
 from draco.util.tools import invert_no_zero
 
@@ -59,7 +53,7 @@ class CorrectDecorrelation(task.SingleTask):
 
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
-    telescope_rotation = config.Property(proptype=float, default=tools._CHIME_ROT)
+    telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     wterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
@@ -78,11 +72,10 @@ class CorrectDecorrelation(task.SingleTask):
         tstream : andata.CorrData
             Returns the corrected timestream.
         """
-
         tstream.redistribute("freq")
 
         prod_map = tstream.prodstack
-        src = ephemeris.source_dictionary[self.source]
+        src = sources.source_dictionary[self.source]
 
         # Rotate the telescope
         tools.change_chime_location(rotation=self.telescope_rotation)
@@ -118,8 +111,9 @@ class CorrectDecorrelation(task.SingleTask):
             # visibilities were corrected in place
             tstream.weight[:] = weight
             return tstream
-        else:
-            tstream_corr = containers.empty_like(tstream)
-            tstream_corr.vis[:] = corr_vis
-            tstream_corr.weight[:] = weight
-            return tstream_corr
+
+        tstream_corr = containers.empty_like(tstream)
+        tstream_corr.vis[:] = corr_vis
+        tstream_corr.weight[:] = weight
+
+        return tstream_corr
