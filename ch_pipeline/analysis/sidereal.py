@@ -435,7 +435,7 @@ class SiderealMean(task.SingleTask):
             vslc = [np.s_[:, :, :, ee] for ee in range(all_vis.shape[3])]
 
         elif isinstance(sstream, containers.Ringmap):
-            vslc = [bb for bb in range(all_vis.shape[0])]
+            vslc = list(range(all_vis.shape[0]))
 
         else:
             vslc = [slice(None)]
