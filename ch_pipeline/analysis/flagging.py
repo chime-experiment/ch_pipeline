@@ -3166,7 +3166,7 @@ class MaskAliasedMap(task.SingleTask):
         -------
         horizon_limit : np.ndarray[nfreq,]
             This is the value of sin(za) where the southern horizon aliases.
-            Regions of sky where \|sin(za)| is greater than or equal to
+            Regions of sky where ``|sin(za)|`` is greater than or equal to
             this value will contain aliases.
         """
         return scipy.constants.c / (freq * 1e6 * self.min_ysep) - 1.0
