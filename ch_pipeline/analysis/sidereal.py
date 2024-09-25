@@ -382,7 +382,7 @@ class SiderealMean(task.SingleTask):
             mask_ra = np.zeros(ra.size, dtype=bool)
             for ra_range in self.mask_ra:
                 self.log.info(
-                    f"Using data between RA = [{ra_range[0]:.2f, ra_range[1]:.2f}] deg"
+                    f"Using data between RA = [{ra_range[0]:.2f}, {ra_range[1]:.2f}] deg"
                 )
                 mask_ra |= (ra >= ra_range[0]) & (ra <= ra_range[1])
             flag_quiet &= mask_ra
