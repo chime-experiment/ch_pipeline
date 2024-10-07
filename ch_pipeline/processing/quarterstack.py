@@ -200,9 +200,9 @@ pipeline:
       params:
         compression:
           vis:
-            chunks: [16, 512, 512]
+            chunks: [32, 512, 2048]
           vis_weight:
-            chunks: [16, 512, 512]
+            chunks: [32, 512, 2048]
         save: true
         output_name: "sstack.zarr.zip"
         remove: true
@@ -240,9 +240,9 @@ pipeline:
       params:
         compression:
           vis:
-            chunks: [1, 16, 1, 256, 512]
+            chunks: [1, 32, 1, 512, 2048]
           vis_weight:
-            chunks: [1, 16, 1, 256, 512]
+            chunks: [1, 32, 1, 512, 2048]
         save: true
         output_name: "vis_grid.zarr.zip"
         remove: true
@@ -276,11 +276,11 @@ pipeline:
       params:
         compression:
           map:
-            chunks: [1, 1, 16, 512, 512]
+            chunks: [1, 1, 32, 512, 2048]
           weight:
-            chunks: [1, 16, 512, 512]
+            chunks: [1, 32, 512, 2048]
           dirty_beam:
-            chunks: [1, 1, 16, 512, 512]
+            chunks: [1, 1, 32, 512, 2048]
         save: true
         output_name: "ringmap.zarr.zip"
         remove: true
