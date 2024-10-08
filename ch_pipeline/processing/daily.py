@@ -10,7 +10,6 @@ Classes
 
 import logging
 import math
-from datetime import datetime
 from typing import ClassVar
 
 import caput.time as ctime
@@ -22,6 +21,7 @@ import peewee as pw
 from caput.tools import unique_ordered
 from ch_ephem.observers import chime
 
+from ch_pipeline.core import filemanagement
 from ch_pipeline.processing import base
 
 logger = logging.getLogger(__name__)
@@ -1476,30 +1476,6 @@ def request_offline_csds(csds: list, pad: float = 0):
         fraction of data from adjacent days that should also be copied online
     """
 
-    def _make_copy_request(file, source, target):
-        try:
-            # Check if an activate request already exists. If so,
-            # leave alpenhorn alone to do its thing
-            di.ArchiveFileCopyRequest.get(
-                file=file,
-                group_to=target,
-                node_from=source,
-                completed=False,
-                cancelled=False,
-            )
-            return 0
-        except pw.DoesNotExist:
-            di.ArchiveFileCopyRequest.insert(
-                file=file_,
-                group_to=target,
-                node_from=source,
-                cancelled=0,
-                completed=0,
-                n_requests=1,
-                timestamp=datetime.now(),
-            ).execute()
-            return 1
-
     # Figure out which chimestack files are needed
     online_files, files = db_get_corr_files_in_range(csds[0] - pad, csds[-1] + pad)
     # Only check files that are not online
@@ -1511,23 +1487,10 @@ def request_offline_csds(csds: list, pad: float = 0):
     files = [f for f in files if f not in online_files]
     request_weather_files = get_filenames_used_by_csds(csds, files, pad)
 
-    db.connect(read_write=True)
-
-    target_node = di.StorageGroup.get(name="cedar_online")
-    offline_node = di.StorageNode.get(name="cedar_nearline")
-    smallfile_node = di.StorageNode.get(name="cedar_smallfile")
-
+    # Request chimestack and weather files be brought back online
     nrequests = 0
-
-    # Request chimestack files be brought back online
-    for file_ in request_corr_files:
-        nr = _make_copy_request(file_, offline_node, target_node)
-        nrequests += nr
-
-    # Request weather files be brought back online
-    for file_ in request_weather_files:
-        nr = _make_copy_request(file_, smallfile_node, target_node)
-        nrequests += nr
+    nrequests += filemanagement.make_copy_request(request_corr_files)
+    nrequests += filemanagement.make_copy_request(request_weather_files)
 
     return nrequests
 
@@ -1561,14 +1524,8 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     remove_files = get_filenames_used_by_csds(csds_remove, files, pad)
     remove_files = [file for file in remove_files if file not in keep_files]
 
-    online_node = di.StorageNode.get(name="cedar_online")
-    # Establish a read-write database connection
-    db.connect(read_write=True)
     # Request that these files be removed from the online node
-    di.ArchiveFileCopy.update(wants_file="N").where(
-        di.ArchiveFileCopy.file << remove_files,
-        di.ArchiveFileCopy.node == online_node,
-    ).execute()
+    filemanagement.make_remove_request(remove_files)
 
     return len(remove_files)
 
