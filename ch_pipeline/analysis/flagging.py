@@ -2900,7 +2900,7 @@ class MaskBrightSourcePixels(task.SingleTask):
         ringmap.redistribute("freq")
 
         min_freq = np.min(ringmap.freq)
-        freq = ringmap.freq[ringmap.map[:].local_bounds]
+        freq = ringmap.freq[ringmap.data[:].local_bounds]
         nfreq = freq.size
 
         # Create output container
@@ -3141,7 +3141,7 @@ class MaskAliasedMap(task.SingleTask):
         if self.common_freq:
             freq = np.atleast_1d(np.max(ringmap.freq))
         else:
-            freq = ringmap.freq[ringmap.map[:].local_bounds]
+            freq = ringmap.freq[ringmap.data[:].local_bounds]
 
         horizon_limit = self.get_horizon_limit(freq)
 

@@ -13,6 +13,8 @@ Generally you would want to use these tasks together. Starting with a
 """
 
 import gc
+from collections import Counter
+from typing import ClassVar
 
 import caput.time as ctime
 import numpy as np
@@ -306,6 +308,14 @@ class SiderealMean(task.SingleTask):
     dec_threshold = config.Property(proptype=bool, default=5.0)
     nsigma = config.Property(proptype=float, default=2.0)
     missing_threshold = config.Property(proptype=float, default=0.0)
+    use_default_range_for_quarter = config.Property(proptype=bool, default=False)
+
+    _reference_ra_range: ClassVar[dict[str, list]] = {
+        "q1": [[150.0, 165.0]],
+        "q2": [[240.0, 255.0]],
+        "q3": [[315.0, 330.0]],
+        "q4": [[15.0, 30.0]],
+    }
 
     def setup(self):
         """Determine which sources will be masked, if any."""
@@ -377,10 +387,24 @@ class SiderealMean(task.SingleTask):
                 for body in self.body:
                     flag_quiet &= ~transit_flag(body, time_dd, nsigma=self.nsigma)
 
-        if self.mask_ra:
-            # Only use data within user specified ranges of RA
+        # Only use data within user specified ranges of RA
+        if self.use_default_range_for_quarter:
+            dates = ctime.unix_to_datetime(chime.lsd_to_unix(np.array(lsd_list)))
+            quarter = Counter([(d.month - 1) // 3 + 1 for d in dates]).most_common(1)[0]
+            ra_ranges = self._reference_ra_range[f"q{quarter[0]}"]
+            self.log.info(
+                f"Using default RA range for quarter {quarter[0]} ({quarter[1]} days)."
+            )
+
+        elif self.mask_ra:
+            ra_ranges = self.mask_ra
+
+        else:
+            ra_ranges = []
+
+        if ra_ranges:
             mask_ra = np.zeros(ra.size, dtype=bool)
-            for ra_range in self.mask_ra:
+            for ra_range in ra_ranges:
                 self.log.info(
                     f"Using data between RA = [{ra_range[0]:.2f}, {ra_range[1]:.2f}] deg"
                 )
