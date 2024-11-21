@@ -37,12 +37,15 @@ class FringeStop(task.SingleTask):
         anti-clockwise when looking down at the telescope from the sky.
     wterm : bool (default False)
         Include the w term (vertical displacement) in the fringestop phase calculation.
+    bterm : bool (default False)
+        Include a correction for the geometry of the 26m Galt telescope.
     """
 
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
     telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     wterm = config.Property(proptype=bool, default=False)
+    bterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
         """Apply the fringe stop of CHIME data to a given source.
@@ -81,6 +84,7 @@ class FringeStop(task.SingleTask):
             src=src,
             prod_map=prod_map,
             wterm=self.wterm,
+            bterm=self.bterm,
             inplace=self.overwrite,
         )
 
