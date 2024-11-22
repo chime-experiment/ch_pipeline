@@ -2,8 +2,8 @@
 requires = [
     "setuptools>=61.0.0",
     "wheel",
-    "oldest-supported-numpy",
-    "setuptools-git-versioning"
+    "setuptools-git-versioning",
+    "numpy>=2.0.0rc1",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -25,7 +25,7 @@ dependencies = [
     "draco @ git+https://github.com/radiocosmology/draco.git",
     "apscheduler",
     "click",
-    "numpy<2",
+    "numpy>=1.24",
     "pytz"
 ]
 
