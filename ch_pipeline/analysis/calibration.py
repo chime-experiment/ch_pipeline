@@ -39,11 +39,8 @@ def _extract_diagonal(utmat, axis=1):
 
     # Check that this nside is correct
     if utmat.shape[axis] != (nside * (nside + 1) // 2):
-        msg = (
-            "Array length (%i) of axis %i does not correspond upper triangle\
+        msg = f"Array length ({utmat.shape[axis]:d}) of axis {axis:d} does not correspond upper triangle\
                 of square matrix"
-            % (utmat.shape[axis], axis)
-        )
         raise RuntimeError(msg)
 
     # Find indices of the diagonal
@@ -530,8 +527,7 @@ class DetermineSourceTransit(task.SingleTask):
             )
             if transit_time.size > 0:
                 self.log.info(
-                    "Data stream contains %s transit on LSD %d."
-                    % (src, chime.unix_to_lsd(transit_time[0]))
+                    f"Data stream contains {src} transit on LSD {chime.unix_to_lsd(transit_time[0]):d}."
                 )
                 sstream.attrs["source_name"] = src
                 sstream.attrs["transit_time"] = transit_time[0]
@@ -681,15 +677,15 @@ class EigenCalibration(task.SingleTask):
             )
 
         self.log.info(
-            "%d inputs missing from eigenvalue decomposition." % np.sum(~input_flags)
+            f"{np.sum(~input_flags):d} inputs missing from eigenvalue decomposition."
         )
 
         # Check that we have data for the phase reference
         for ref in self.phase_ref:
             if not input_flags[ref]:
                 ValueError(
-                    "Requested phase reference (%d) "
-                    "was not included in decomposition." % ref
+                    f"Requested phase reference ({ref:d}) "
+                    "was not included in decomposition."
                 )
 
         # Update input_flags to include feeds not present in database
@@ -752,7 +748,7 @@ class EigenCalibration(task.SingleTask):
         not_rfi = not_rfi[:, np.newaxis]
 
         self.log.info(
-            f"Using a dynamic range threshold of {self.dyn_rng_threshold:.2f}."
+            f"Using a dynamic range threshold of {self.dyn_rng_threshold:0.2f}."
         )
         dyn_flag = dyn > self.dyn_rng_threshold
 
@@ -770,7 +766,7 @@ class EigenCalibration(task.SingleTask):
 
         # Check that we have the correct reference feed
         if np.any(np.abs(ref_resp.imag) > eps):
-            ValueError("Reference feed %d is incorrect." % self.eigen_ref)
+            ValueError(f"Reference feed {self.eigen_ref:d} is incorrect.")
 
         # Create output container
         response = containers.SiderealStream(
@@ -789,7 +785,7 @@ class EigenCalibration(task.SingleTask):
         response.attrs["source_name"] = source_name
         response.attrs["transit_time"] = ttrans
         response.attrs["lsd"] = csd
-        response.attrs["tag"] = "%s_lsd_%d" % (source_name.lower(), csd)
+        response.attrs["tag"] = f"{source_name.lower()}_lsd_{csd:d}"
 
         # Add an attribute that indicates if the transit occured during the daytime
         is_daytime = 0
@@ -1324,9 +1320,9 @@ class FlagAmplitude(task.SingleTask):
                         nsigma=self.nsigma_med_outlier,
                     )
 
+                    noutlier = np.sum(~not_outlier & med_flag)
                     self.log.info(
-                        "Pol %s:  %d frequencies are outliers."
-                        % (polstr[pp], np.sum(~not_outlier & med_flag, dtype=np.int64))
+                        f"Pol {polstr[pp]}: {noutlier:d} frequencies are outliers."
                     )
 
                 # Broadcast outlier frequencies to other ranks
@@ -1345,7 +1341,7 @@ class FlagAmplitude(task.SingleTask):
 
         flag &= flag_freq[:, np.newaxis]
 
-        self.log.info("%d good frequencies after flagging amplitude." % good_freq.size)
+        self.log.info(f"{good_freq.size:d} good frequencies after flagging amplitude.")
 
         # If fraction of good frequencies is less than threshold, stop and return None
         frac_good_freq = good_freq.size / float(gain.freq.size)
@@ -1370,7 +1366,7 @@ class FlagAmplitude(task.SingleTask):
 
         flag[:] &= flag_input[np.newaxis, :]
 
-        self.log.info("%d good inputs after flagging amplitude." % good_input.size)
+        self.log.info(f"{good_input.size:d} good inputs after flagging amplitude.")
 
         # Redistribute flags back over frequencies and update container
         flag = flag.redistribute(0)
@@ -3645,7 +3641,7 @@ class CalibrationCorrection(task.SingleTask):
         flags = self.comm.bcast(flags, root=0)
 
         # Save flags to class attribute
-        self.log.info("Found %d %s flags in total." % (len(flags), self.name_of_flag))
+        self.log.info(f"Found {len(flags):d} {self.name_of_flag} flags in total.")
         self.flags = flags
 
     def process(self, sstream, inputmap):
@@ -3718,20 +3714,16 @@ class CalibrationCorrection(task.SingleTask):
         for flag in self.flags:
             in_range = (timestamp >= flag.start_time) & (timestamp <= flag.finish_time)
             if np.any(in_range):
+                datestr_start = ctime.unix_to_datetime(flag.start_time).strftime(
+                    "%Y%m%dT%H%M%SZ"
+                )
+                datestr_end = ctime.unix_to_datetime(flag.finish_time).strftime(
+                    "%Y%m%dT%H%M%SZ"
+                )
                 msg = (
-                    "%d (of %d) samples require phase correction according to "
-                    "%s DataFlag covering %s to %s."
-                    % (
-                        np.sum(in_range),
-                        in_range.size,
-                        self.name_of_flag,
-                        ctime.unix_to_datetime(flag.start_time).strftime(
-                            "%Y%m%dT%H%M%SZ"
-                        ),
-                        ctime.unix_to_datetime(flag.finish_time).strftime(
-                            "%Y%m%dT%H%M%SZ"
-                        ),
-                    )
+                    f"{np.sum(in_range):d} (of {in_range.size:d}) samples require "
+                    f"phase correction according to {self.name_of_flag} DataFlag "
+                    f"covering {datestr_start} to {datestr_end}."
                 )
 
                 self.log.info(msg)

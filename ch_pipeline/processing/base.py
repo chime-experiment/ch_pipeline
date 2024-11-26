@@ -229,7 +229,7 @@ class ProcessingType:
 
         if revisions:
             last_rev = revisions[-1].split("_")[-1]
-            new_rev = "rev_%02i" % (int(last_rev) + 1)
+            new_rev = f"rev_{int(last_rev) + 1:02d}"
         else:
             new_rev = "rev_00"
 

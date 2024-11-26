@@ -578,8 +578,7 @@ class MonitorCorrInput(task.SingleTask):
 
                 if len(data_r.input) != ninput:
                     ValueError(
-                        "Differing number of corr inputs for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing number of corr inputs for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
                 elif (
                     np.sum(
@@ -589,19 +588,16 @@ class MonitorCorrInput(task.SingleTask):
                     > 0
                 ):
                     ValueError(
-                        "Different corr inputs for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing corr inputs for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
 
                 if len(data_r.freq) != nfreq:
                     ValueError(
-                        "Differing number of frequencies for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing number of frequencies for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
                 elif np.sum(data_r.freq["centre"] != freq["centre"]) > 0:
                     ValueError(
-                        "Different frequencies for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing frequencies for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
 
         # Broadcast results to all processes
@@ -699,7 +695,7 @@ class MonitorCorrInput(task.SingleTask):
                     input_mon.attrs["source2"] = cm.source2.name
 
                 # Construct tag from csd
-                tag = "csd_%d" % csd
+                tag = f"csd_{csd:d}"
                 input_mon.attrs["tag"] = tag
                 input_mon.attrs["csd"] = csd
 
@@ -1224,8 +1220,8 @@ class NanToNum(task.SingleTask):
                     flag
                 ] = 0.0  # Also set weights to zero so we don't trust values
                 self.log.info(
-                    "%d visibilities are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                    f"{np.sum(flag):d} visibilities are non finite for "
+                    f"frequency={fi:d} ({100 * np.sum(flag) / flag.size:0.2f}%)"
                 )
 
             # Set non-finite values of the weight equal to zero
@@ -1233,8 +1229,8 @@ class NanToNum(task.SingleTask):
             if np.any(flag):
                 timestream.weight[fi][flag] = 0
                 self.log.info(
-                    "%d weights are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                    f"{np.sum(flag):d} weights are non finite for "
+                    f"frequency={fi:d} ({100 * np.sum(flag) / flag.size:0.2f}%)"
                 )
 
         return timestream
@@ -2218,7 +2214,7 @@ class DataFlagger(task.SingleTask):
 
         # Save flags to class attribute
         self.log.info(
-            "Found %d Flags in Total." % sum([len(flg) for flg in flags.values()])
+            f"Found {sum([len(flg) for flg in flags.values()]):d} Flags in Total."
         )
         self.flags = flags
 
@@ -2286,19 +2282,16 @@ class DataFlagger(task.SingleTask):
                 time_idx = (time >= flag.start_time) & (time <= flag.finish_time)
                 if np.any(time_idx):
                     # Print info to log about why the data is being flagged
+                    datestr_start = ctime.unix_to_datetime(flag.start_time).strftime(
+                        "%Y%m%dT%H%M%SZ"
+                    )
+                    datestr_end = ctime.unix_to_datetime(flag.finish_time).strftime(
+                        "%Y%m%dT%H%M%SZ"
+                    )
                     msg = (
-                        "%d (of %d) samples flagged by a %s DataFlag covering %s to %s."
-                        % (
-                            np.sum(time_idx),
-                            time_idx.size,
-                            flag_type,
-                            ctime.unix_to_datetime(flag.start_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                            ctime.unix_to_datetime(flag.finish_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                        )
+                        f"{np.sum(time_idx):d} (of {time_idx.size:d}) samples flagged "
+                        f"by a {flag_type} DataFlag covering "
+                        f"{datestr_start} to {datestr_end}."
                     )
                     self.log.info(msg)
 

@@ -140,7 +140,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
         )
 
         # Add attributes for the CSD and a tag for labelling saved files
-        ts.attrs["tag"] = "csd_%i" % csd
+        ts.attrs["tag"] = f"csd_{csd:d}"
         ts.attrs["lsd"] = csd
 
         # Add a weight dataset if needed
@@ -231,7 +231,7 @@ class WeatherGrouper(SiderealGrouper):
         if (ts.time[0] > unix_start) or (ts.time[-1] < unix_end):
             return None
 
-        ts.attrs["tag"] = "lsd_%i" % lsd
+        ts.attrs["tag"] = f"lsd_{lsd:d}"
         ts.attrs["lsd"] = lsd
 
         return ts

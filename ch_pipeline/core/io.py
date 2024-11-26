@@ -174,7 +174,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
 
         # Use a simple incrementing string as the tag
         if "tag" not in ts.attrs:
-            tag = "file%03i" % self._file_ptr
+            tag = f"file{self._file_ptr:03d}"
             ts.attrs["tag"] = tag
 
         # Add a weight dataset if needed

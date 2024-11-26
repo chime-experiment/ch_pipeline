@@ -337,8 +337,8 @@ class SolarCalibrationN2(task.SingleTask):
         )
 
         self.log.info(
-            "Performing sun calibration with %d/%d good feeds (%d xpol, %d ypol)."
-            % (len(good_input), nfeed, len(xfeeds), len(yfeeds))
+            f"Performing sun calibration with {len(good_input):d}/{nfeed:d} "
+            f"good feeds ({len(xfeeds):d} xpol, {len(yfeeds):d} ypol)."
         )
 
         # Construct baseline vector for each visibility
@@ -719,7 +719,7 @@ class SolarCleanN2(task.SingleTask):
         elif npol == 2:
             pol_sub = np.array([0, 3])
         else:
-            ValueError("npol = %d, must be either 1 or 2." % npol)
+            ValueError(f"npol = {npol:d}, must be either 1 or 2.")
 
         # Construct baseline vector for each visibility
         feed_pos = tools.get_feed_positions(inputmap)
