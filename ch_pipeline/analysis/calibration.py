@@ -2568,7 +2568,7 @@ class ReconstructGainError(task.SingleTask):
         unix_times = gain.time[gain.gain[:].local_bounds]
 
         # Create a mask that identifies flagged data
-        flag = w > 0.0  # & (np.abs(g) > 1.0)
+        flag = w > 0.0
 
         # Create output gain errors
         out_err = containers.GainData(
@@ -3124,7 +3124,6 @@ class CorrectGainError(task.SingleTask):
         if np.any(before):
             nbefore = np.sum(before)
             tbefore = np.max(self.timestamp.min() - timestamp[before]) / 3600.0
-            # raise RuntimeError(
             self.log.warning(
                 f"{nbefore:0.0f} requested timestamps are before the earliest "
                 f"gain update time by as much as {tbefore:0.1f} hours."
