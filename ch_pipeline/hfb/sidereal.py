@@ -96,7 +96,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         )
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
-        sdata.attrs["tag"] = "lsd_%i" % self.start
+        sdata.attrs["tag"] = f"lsd_{self.start:d}"
 
         # Put regridded data into output container, one beam at a time
         sh = sdata.hfb[:]

@@ -184,8 +184,8 @@ class ApplyTimingCorrection(task.SingleTask):
                 )
                 if ttrans.size != 1:
                     raise RuntimeError(
-                        "Found %d transits of %s in timestream.  "
-                        "Require single transit." % (ttrans.size, source)
+                        f"Found {ttrans.size:d} transits of {source} in timestream.  "
+                        "Require single transit."
                     )
 
                 ttrans = ttrans[0]
@@ -326,7 +326,7 @@ class ConstructTimingCorrection(task.SingleTask):
         new_acq = np.unique([os.path.basename(os.path.dirname(ff)) for ff in filelist])
         if new_acq.size > 1:
             raise RuntimeError(
-                "Cannot process multiple acquisitions.  Received %d." % new_acq.size
+                f"Cannot process multiple acquisitions.  Received {new_acq.size:d}."
             )
 
         new_acq = new_acq[0]
@@ -340,9 +340,7 @@ class ConstructTimingCorrection(task.SingleTask):
                 self.kwargs[key] = None
 
         # Process the chimetiming data
-        self.log.info(
-            "Processing %d files from %s." % (len(filelist), self.current_acq)
-        )
+        self.log.info(f"Processing {len(filelist):d} files from {self.current_acq}.")
 
         tcorr = timing.TimingData.from_acq_h5(
             filelist,
@@ -353,7 +351,7 @@ class ConstructTimingCorrection(task.SingleTask):
         )
 
         self.log.info(
-            "Finished processing %d files from %s." % (len(filelist), self.current_acq)
+            f"Finished processing {len(filelist):d} files from {self.current_acq}."
         )
 
         # Save the static phase and amplitude to be used on subsequent iterations

@@ -9,13 +9,15 @@ from typing import Union
 
 import caput.time as ctime
 import numpy as np
-from caput import config, memh5, mpiarray, mpiutil, pipeline, tod
+import scipy.constants
+from caput import config, interferometry, memh5, mpiarray, mpiutil, pipeline, tod
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, cal_utils, data_quality, finder, rfi, tools
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
 from draco.analysis import flagging as dflagging
+from draco.analysis.ringmapmaker import find_grid_indices
 from draco.core import containers as dcontainers
 from draco.core import io, task
 
@@ -576,8 +578,7 @@ class MonitorCorrInput(task.SingleTask):
 
                 if len(data_r.input) != ninput:
                     ValueError(
-                        "Differing number of corr inputs for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing number of corr inputs for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
                 elif (
                     np.sum(
@@ -587,19 +588,16 @@ class MonitorCorrInput(task.SingleTask):
                     > 0
                 ):
                     ValueError(
-                        "Different corr inputs for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing corr inputs for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
 
                 if len(data_r.freq) != nfreq:
                     ValueError(
-                        "Differing number of frequencies for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing number of frequencies for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
                 elif np.sum(data_r.freq["centre"] != freq["centre"]) > 0:
                     ValueError(
-                        "Different frequencies for csd %d and csd %d."
-                        % (fmap[0], filemap[0][0])
+                        f"Differing frequencies for csd {fmap[0]:d} and csd {filemap[0][0]:d}."
                     )
 
         # Broadcast results to all processes
@@ -697,7 +695,7 @@ class MonitorCorrInput(task.SingleTask):
                     input_mon.attrs["source2"] = cm.source2.name
 
                 # Construct tag from csd
-                tag = "csd_%d" % csd
+                tag = f"csd_{csd:d}"
                 input_mon.attrs["tag"] = tag
                 input_mon.attrs["csd"] = csd
 
@@ -1222,8 +1220,8 @@ class NanToNum(task.SingleTask):
                     flag
                 ] = 0.0  # Also set weights to zero so we don't trust values
                 self.log.info(
-                    "%d visibilities are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                    f"{np.sum(flag):d} visibilities are non finite for "
+                    f"frequency={fi:d} ({100 * np.sum(flag) / flag.size:0.2f}%)"
                 )
 
             # Set non-finite values of the weight equal to zero
@@ -1231,8 +1229,8 @@ class NanToNum(task.SingleTask):
             if np.any(flag):
                 timestream.weight[fi][flag] = 0
                 self.log.info(
-                    "%d weights are non finite for frequency=%i (%.2f %%)"
-                    % (np.sum(flag), fi, np.sum(flag) * 100.0 / flag.size)
+                    f"{np.sum(flag):d} weights are non finite for "
+                    f"frequency={fi:d} ({100 * np.sum(flag) / flag.size:0.2f}%)"
                 )
 
         return timestream
@@ -1434,7 +1432,7 @@ def daytime_flag(time):
     time = np.atleast_1d(time)
     flag = np.zeros(time.size, dtype=bool)
 
-    rise = chime.solar_rising(time[0] - 24.0 * 3600.0, t1=time[-1])
+    rise = chime.solar_rising(time.min() - 24.0 * 3600.0, time.max())
     for rr in rise:
         ss = chime.solar_setting(rr)[0]
         flag |= (time >= rr) & (time <= ss)
@@ -1947,8 +1945,6 @@ class MaskDecorrelatedCylinder(task.SingleTask):
             Mask with True indicating that a cylinder decorrelated
             at that frequency and time.
         """
-        from draco.analysis.ringmapmaker import find_grid_indices
-
         # Distribute over frequencies
         data.redistribute("freq")
 
@@ -2218,7 +2214,7 @@ class DataFlagger(task.SingleTask):
 
         # Save flags to class attribute
         self.log.info(
-            "Found %d Flags in Total." % sum([len(flg) for flg in flags.values()])
+            f"Found {sum([len(flg) for flg in flags.values()]):d} Flags in Total."
         )
         self.flags = flags
 
@@ -2240,18 +2236,20 @@ class DataFlagger(task.SingleTask):
         # Redistribute over the frequency direction
         timestream.redistribute("freq")
 
-        # Determine whether timestream is stacked data
-        stacked = len(timestream.index_map["prod"]) > len(
-            timestream.index_map["stack"]["prod"]
+        # Extract the weight dataset and identify its axes
+        waxis = list(timestream.weight.attrs["axis"])
+        weight = timestream.weight[:].local_array
+
+        # Determine whether input dependent flags can be applied
+        apply_input_flags = "input" in waxis or (
+            ("prod" in waxis) and not timestream.is_stacked
         )
 
         # If not stacked, determine which inputs are in the timestream.
         # If stacked, assume flags apply to all products.
-        if not stacked:
+        if apply_input_flags:
             inputs = timestream.index_map["input"]["chan_id"][:]
-            ninputs = len(inputs)
-        else:
-            ninputs = 1
+            prod = timestream.prodstack
 
         # Get time axis or convert RA axis
         if "ra" in timestream.index_map:
@@ -2261,23 +2259,21 @@ class DataFlagger(task.SingleTask):
             else:
                 csd = timestream.attrs["csd"]
             time = chime.lsd_to_unix(csd + ra / 360.0)
+            taxis = "ra"
         else:
             time = timestream.time
-
-        ntime = len(time)
+            taxis = "time"
 
         # Determine local frequencies
-        sf = timestream.weight.local_offset[0]
-        ef = sf + timestream.weight.local_shape[0]
-        local_freq = timestream.freq[sf:ef]
-        nfreq = len(local_freq)
+        local_slice = timestream.weight[:].local_bounds
+        local_freq = timestream.freq[local_slice]
 
         # Find the bin number of each local frequency
         basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
         local_bin = np.array([np.argmin(np.abs(ff - basefreq)) for ff in local_freq])
 
         # Initiate weight mask (1 means not flagged)
-        weight_mask = np.ones((nfreq, ninputs, ntime), dtype=bool)
+        weight_mask = np.ones(weight.shape, dtype=bool)
 
         # Loop over flags of requested types
         for flag_type, flag_list in self.flags.items():
@@ -2286,58 +2282,56 @@ class DataFlagger(task.SingleTask):
                 time_idx = (time >= flag.start_time) & (time <= flag.finish_time)
                 if np.any(time_idx):
                     # Print info to log about why the data is being flagged
+                    datestr_start = ctime.unix_to_datetime(flag.start_time).strftime(
+                        "%Y%m%dT%H%M%SZ"
+                    )
+                    datestr_end = ctime.unix_to_datetime(flag.finish_time).strftime(
+                        "%Y%m%dT%H%M%SZ"
+                    )
                     msg = (
-                        "%d (of %d) samples flagged by a %s DataFlag covering %s to %s."
-                        % (
-                            np.sum(time_idx),
-                            time_idx.size,
-                            flag_type,
-                            ctime.unix_to_datetime(flag.start_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                            ctime.unix_to_datetime(flag.finish_time).strftime(
-                                "%Y%m%dT%H%M%SZ"
-                            ),
-                        )
+                        f"{np.sum(time_idx):d} (of {time_idx.size:d}) samples flagged "
+                        f"by a {flag_type} DataFlag covering "
+                        f"{datestr_start} to {datestr_end}."
                     )
                     self.log.info(msg)
 
                     # Refine the mask based on any frequency or input selection
-                    flag_mask = time_idx[np.newaxis, np.newaxis, :]
+                    tslc = [slice(None) if ax == taxis else None for ax in waxis]
+                    flag_mask = time_idx[tuple(tslc)]
                     if flag.freq is not None:
                         # `and` with flagged local frequencies
                         # By default, all frequencies are flagged
-                        flag_mask = (
-                            flag_mask
-                            & flag.freq_mask[local_bin, np.newaxis, np.newaxis]
-                        )
+                        fslc = [local_bin if ax == "freq" else None for ax in waxis]
+                        flag_mask = flag_mask & flag.freq_mask[tuple(fslc)]
 
-                    if flag.inputs is not None and not stacked:
+                    if flag.inputs is not None and apply_input_flags:
                         # `and` with flagged inputs
                         # By default, all inputs are flagged
-                        flag_mask = (
-                            flag_mask & flag.input_mask[np.newaxis, inputs, np.newaxis]
-                        )
+                        islc = [
+                            inputs if ax in ["input", "prod", "stack"] else None
+                            for ax in waxis
+                        ]
+                        flag_mask = flag_mask & flag.input_mask[tuple(islc)]
 
                     # set weight=0 where flag=1
                     weight_mask = weight_mask & np.logical_not(flag_mask)
 
         # Multiply weight mask by existing weight dataset
-        weight = timestream.weight[:]
-        weight_mask = weight_mask.astype(weight.dtype)
-        if stacked:
-            # Apply same mask to all products
-            weight.local_array[:] *= weight_mask
-        else:
-            # Use apply_gain function to apply mask based on product map
-            products = timestream.index_map["prod"][
-                timestream.index_map["stack"]["prod"]
-            ]
-            tools.apply_gain(weight, weight_mask, out=weight, prod_map=products)
+        if np.any(~weight_mask):
 
-        self.log.info(
-            f"{(100.0 * (1 - np.mean(weight_mask))):.2f} percent of data was flagged as bad."
-        )
+            if apply_input_flags and "input" not in waxis:
+                # Use apply_gain function to apply mask based on product map
+                weight_mask = weight_mask.astype(weight.dtype)
+                tools.apply_gain(weight, weight_mask, out=weight, prod_map=prod)
+            else:
+                weight[:] *= weight_mask
+
+            self.log.info(
+                f"{100.0 * (1.0 - (np.sum(weight_mask) / np.prod(weight_mask.shape))):.2f} "
+                "percent of data was flagged as bad."
+            )
+        else:
+            self.log.info("No DataFlags applied.")
 
         return timestream
 
@@ -2616,12 +2610,14 @@ class FlagRainfall(task.SingleTask):
 
         Parameters
         ----------
-        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
             Stream to flag.
 
         Returns
         -------
-        stream : andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
             Returns the same stream object with a modified weight dataset.
         """
         # Redistribute over the frequency direction
@@ -2635,8 +2631,10 @@ class FlagRainfall(task.SingleTask):
             else:
                 csd = stream.attrs["csd"]
             time = chime.lsd_to_unix(csd + ra / 360.0)
+            taxis = "ra"
         else:
             time = stream.time
+            taxis = "time"
 
         # Compute cumulative rainfall within specified time interval.
         # Only run on rank 0, because a database query is required
@@ -2655,9 +2653,10 @@ class FlagRainfall(task.SingleTask):
         # Compute mask corresponding to times when rainfall is below threshold
         rainfall_mask = rainfall < self.threshold
 
-        # Multiply weights by mask
-        weight = stream.weight[:]
-        weight.local_array[:] *= rainfall_mask[np.newaxis, np.newaxis, :]
+        # Multiply weights by mask.
+        waxis = stream.weight.attrs["axis"]
+        tslc = [slice(None) if ax == taxis else None for ax in waxis]
+        stream.weight[:].local_array[:] *= rainfall_mask[tuple(tslc)]
 
         # Report how much data has been flagged due to rainfall
         self.log.info(
@@ -2666,3 +2665,502 @@ class FlagRainfall(task.SingleTask):
         )
 
         return stream
+
+
+class MaskManyBadInputs(task.SingleTask):
+    """Flag spans of time where a large number of inputs were flagged as bad.
+
+    Parameters
+    ----------
+    threshold : int
+        Flag data if the number of bad inputs exceeds this value.
+    """
+
+    threshold = config.Property(proptype=int, default=150)
+
+    def process(self, stream):
+        """Set weight to zero if number of bad inputs exceeds desired threshold.
+
+        Parameters
+        ----------
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
+            Stream to flag.
+
+        Returns
+        -------
+        stream : andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,
+                 dcontainers.HybridVisStream, dcontainers.RingMap
+            Returns the same stream object with a modified weight dataset.
+        """
+        # Redistribute over the frequency direction
+        stream.redistribute("freq")
+
+        # Extract the input flags
+        try:
+            input_flags = stream.input_flags[:]
+        except KeyError:
+            self.log.warning(
+                "Input stream does not contain input_flags dataset. "
+                "No data will be flagged."
+            )
+            return stream
+
+        # Compute number of bad inputs
+        nbad = input_flags.shape[0] - np.sum(input_flags > 0, axis=0)
+
+        flag = nbad <= self.threshold
+
+        # Multiply weights by flag.
+        waxis = stream.weight.attrs["axis"]
+        tslc = [slice(None) if ax in ["ra", "time"] else None for ax in waxis]
+        stream.weight[:].local_array[:] *= flag[tuple(tslc)]
+
+        # Report how much data has been flagged due to rainfall
+        self.log.info(
+            f"{100.0 * (1.0 - np.sum(flag) / flag.size):.2f} "
+            "percent of data was flagged due to large number of bad inputs."
+        )
+
+        return stream
+
+
+class MaskHighFracLost(task.SingleTask):
+    """Mask frequencies and times with significant data loss during integration.
+
+    Parameters
+    ----------
+    threshold : int
+        Flag frequencies and times if the fraction of data lost
+        due to RFI or packet loss exceeds this threshold.
+    """
+
+    threshold = config.Property(proptype=float, default=0.02)
+
+    def process(self, stream):
+        """Create mask indicating when frac_lost exceeds desired threshold.
+
+        Parameters
+        ----------
+        stream : andata.CorrData
+            Stream to flag.
+
+        Returns
+        -------
+        mask_cont : dcontainers.RFIMask or dcontainers.SiderealRFIMask
+            Boolean mask where True indicates frac_lost is greater than
+            the threshold.
+        """
+        # Redistribute over the frequency direction
+        stream.redistribute("freq")
+
+        # Extract the frac_lost dataset
+        if ("flags" in stream) and ("frac_lost" in stream["flags"]):
+            frac_lost = stream["flags"]["frac_lost"][:].local_array
+        else:
+            self.log.warning(
+                "Input stream does not contain flags/frac_lost dataset. "
+                "No data will be flagged."
+            )
+            return stream
+
+        # Create output container
+        if "ra" in stream.axes:
+            mask_cont = dcontainers.SiderealRFIMask(axes_from=stream, attrs_from=stream)
+        elif "time" in stream.axes:
+            mask_cont = dcontainers.RFIMask(axes_from=stream, attrs_from=stream)
+
+        # Identify times and frequencies with significant frac_lost
+        mask = frac_lost > self.threshold
+
+        # Collect all parts of the mask. Method .allgather() returns a np.ndarray
+        mask = mpiarray.MPIArray.wrap(mask, axis=0).allgather()
+
+        # Log the percent of data masked
+        drop_frac = np.sum(mask) / np.prod(mask.shape)
+        self.log.info(
+            "%0.5f%% of data exceeds frac_lost threshold." % (100.0 * (drop_frac))
+        )
+
+        # Save to output container
+        mask_cont.mask[:] = mask
+
+        return mask_cont
+
+
+def search_grid(xeval, window, x, wrap=False):
+    """Find indices into a uniformly space grid that extract desired regions.
+
+    Parameters
+    ----------
+    xeval : np.ndarray
+        Coordinate of the centre of each region.
+    window : np.ndarray
+        Half-width of each region.  Must broadcast against xeval.
+    x : np.ndarray[nsample,]
+        Coordinate grid.  Must be uniformly spaced and monotonically increasing.
+    wrap : bool
+        Wrap around if a region exceeds the first or last point in the grid.
+        Otherwise the region will be restricted in size to remain in the grid.
+
+    Returns
+    -------
+    xlb : np.ndarray
+        The index into the grid the defines the lower bound of each region.
+    xub : np.ndarray
+        The index into the grid the defines the upper bound of each region.
+        Each region can be selected with slice(xlb, xub).
+    """
+    min_x, max_x = np.percentile(x, [0, 100])
+    dx = np.median(np.abs(np.diff(x)))
+    nx = x.size
+
+    xlb = np.floor((xeval - window - min_x) / dx).astype(int)
+    xub = np.ceil((xeval + window - min_x) / dx).astype(int) + 1
+
+    if wrap:
+        xlb = (nx + xlb) % nx
+        xub = xub % nx
+    else:
+        xlb = np.clip(xlb, 0, nx)
+        xub = np.clip(xub, 0, nx)
+
+    return xlb, xub
+
+
+class MaskBrightSourcePixels(task.SingleTask):
+    """Mask regions of a map near bright point sources.
+
+    Attributes
+    ----------
+    mask_alias : bool
+        Mask the frequency-dependent, north-south alias location
+        in addition to the true location.
+    common_freq : bool
+        Ensure the (non-aliased) mask is frequency independent by
+        constructing the windows using the minimum frequency.
+    nsigma_ra : bool
+        Width of the window to mask in the RA direction specified in
+        number of sigma of the primary beam.
+    nsigma_dec : bool
+        Width of the window to mask in the dec direction specified
+        in number of sigma of the synthesized beam.
+    """
+
+    mask_alias = config.Property(proptype=bool, default=False)
+    common_freq = config.Property(proptype=bool, default=False)
+
+    nsigma_ra = config.Property(proptype=float, default=3.0)
+    nsigma_dec = config.Property(proptype=float, default=3.0)
+
+    def setup(self, manager, catalog):
+        """Save the telescope instance and the catalog of bright sources.
+
+        Parameters
+        ----------
+        manager : io.TelescopeConvertible
+            Telescope/manager used to determine the location of bright sources.
+        catalog : containers.SourceCatalog
+            Catalog containing bright sources to mask.
+        """
+        # Save the telescope
+        self.telescope = io.get_telescope(manager)
+        self.latitude = np.radians(self.telescope.latitude)
+
+        # Save the minimum north-south separation
+        xind, yind, min_xsep, min_ysep = find_grid_indices(self.telescope.baselines)
+        self.min_ysep = min_ysep
+        self.max_ysep = min_ysep * np.max(np.abs(yind))
+
+        # Save the catalog
+        self.catalog = catalog
+
+    def process(self, ringmap):
+        """Generate a mask that excludes pixels near transit of bright point sources.
+
+        Parameters
+        ----------
+        ringmap : RingMap
+            Ringmap to be flagged.
+
+        Returns
+        -------
+        out : RingMapMask
+            Boolean mask with True indicating that a pixel is near
+            a bright source.
+        """
+        # Distribute over frequencies
+        ringmap.redistribute("freq")
+
+        min_freq = np.min(ringmap.freq)
+        freq = ringmap.freq[ringmap.data[:].local_bounds]
+        nfreq = freq.size
+
+        # Create output container
+        out = dcontainers.RingMapMask(
+            axes_from=ringmap,
+            attrs_from=ringmap,
+            distributed=ringmap.distributed,
+            comm=ringmap.comm,
+        )
+        out.redistribute("freq")
+
+        out.mask[:] = False
+
+        mask = out.mask[:].local_array
+
+        # Determine the coordinates of the sources in the current epoch
+        src_ra, src_dec, src_y = self.get_source_coordinates(ringmap)
+
+        nsource = src_ra.size
+
+        # Get aliased coordinates as well
+        if self.mask_alias:
+            b = scipy.constants.c / (freq[:, np.newaxis] * 1e6 * self.min_ysep)
+            src_yalias = src_y + (1.0 - 2.0 * (src_y > 0.0)) * b  # nfreq, nsource
+
+        # Get the size of the window
+        nu = np.full((nfreq, 1), min_freq) if self.common_freq else freq[:, np.newaxis]
+        wavelength = scipy.constants.c / (nu * 1e6)
+
+        ## In the sin(za) direction, we use the synthesized beam.
+        ## 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme.
+        sigma_y = 0.85 * wavelength / (self.max_ysep * 2.35482)
+        window_y = self.nsigma_dec * sigma_y
+
+        ## In the RA direction, we use the primary beam width.
+        sigma_x = cal_utils.guess_fwhm(
+            nu,
+            pol="X",
+            dec=np.radians(src_dec),
+            sigma=True,
+            voltage=False,
+            seconds=False,
+        )
+        window_x = self.nsigma_ra * sigma_x
+
+        # Get the map grid in RA and telescope y
+        x = ringmap.ra
+        y = ringmap.index_map["el"]
+
+        wrap_x = ((x[-1] + (x[1] - x[0])) % 360.0) == x[0]
+
+        # Search the grid
+        xlower, xupper = search_grid(src_ra, window_x, x, wrap=wrap_x)
+        ylower, yupper = search_grid(src_y, window_y, y, wrap=False)
+
+        if self.mask_alias:
+            y2lower, y2upper = search_grid(src_yalias, window_y, y, wrap=False)
+
+        # Loop over sources
+        for ii in np.ndindex(nfreq, nsource):
+
+            if xupper[ii] >= xlower[ii]:
+                xslice = [slice(xlower[ii], xupper[ii])]
+            else:
+                xslice = [slice(xlower[ii], x.size), slice(0, xupper[ii])]
+
+            yslice = [slice(ylower[ii], yupper[ii])]
+            if self.mask_alias:
+                yslice.append(slice(y2lower[ii], y2upper[ii]))
+
+            for xslc in xslice:
+                for yslc in yslice:
+                    mask[:, ii[0], xslc, yslc] = True
+
+        # Return the output container with the source mask
+        return out
+
+    def get_source_coordinates(self, ringmap):
+        """Determine the coordinates of bright sources in a ringmap.
+
+        Parameters
+        ----------
+        ringmap : RingMap
+            The ringmap of interest.
+
+        Returns
+        -------
+        src_ra : np.ndarray[nsource,]
+            Right ascension of the sources in the catalog.
+        src_dec : np.ndarray[nsource,]
+            Declination of the sources in the catalog.
+        src_y : np.ndarray[nsource,]
+            Telescope-y coordinate of the sources in the catalog
+            at transit.
+        """
+        from draco.analysis.beamform import icrs_to_cirs
+
+        # Determine the coordinates of the sources in the current epoch
+        if "lsd" in ringmap.attrs:
+            lsd = ringmap.attrs["lsd"]
+        elif "csd" in ringmap.attrs:
+            lsd = ringmap.attrs["csd"]
+        else:
+            lsd = None
+
+        src_ra, src_dec = (
+            self.catalog["position"]["ra"][:],
+            self.catalog["position"]["dec"][:],
+        )
+        if lsd is not None:
+            epoch = np.atleast_1d(self.telescope.lsd_to_unix(lsd))
+            coords = [icrs_to_cirs(src_ra, src_dec, ep) for ep in epoch]
+            src_ra = np.mean([coord[0] for coord in coords], axis=0)
+            src_dec = np.mean([coord[1] for coord in coords], axis=0)
+
+        # Calculate source telescope y coordinate,
+        # given by sin(za) at transit.
+        src_y = np.sin(np.radians(src_dec) - self.latitude)
+
+        return src_ra, src_dec, src_y
+
+
+class MaskBrightSourceTracks(MaskBrightSourcePixels):
+    """Mask regions of a map near the U-shaped tracks of bright point sources.
+
+    Attributes
+    ----------
+    mask_alias : bool
+        Mask the frequency-dependent, north-south alias location
+        in addition to the true location.
+    common_freq : bool
+        Ensure the (non-aliased) mask is frequency independent by
+        constructing the windows using the minimum frequency.
+    nsigma_ra : bool
+        Width of the window to mask in the RA direction specified in
+        number of sigma of the primary beam.
+    nsigma_dec : bool
+        Width of the window to mask in the dec direction specified
+        in number of sigma of the synthesized beam.
+    max_ha : float
+        Mask sources out to this hour angle in degrees.
+    """
+
+    mask_alias = config.Property(proptype=bool, default=False)
+    common_freq = config.Property(proptype=bool, default=False)
+
+    nsigma_ra = config.Property(proptype=float, default=1.0)
+    nsigma_dec = config.Property(proptype=float, default=3.0)
+
+    max_ha = config.Property(proptype=float)
+
+    def get_source_coordinates(self, ringmap):
+        """Determine the coordinates of bright source tracks in a ringmap.
+
+        Parameters
+        ----------
+        ringmap : RingMap
+            The ringmap of interest.
+
+        Returns
+        -------
+        ra : np.ndarray[ncoord,]
+            Right ascension of the U-shaped tracks of sources
+            in the catalog.  Flattened into a 1-d array.
+        dec : np.ndarray[ncoord,]
+            Declination of the sources in the catalog.  This is
+            replicated nra times for each source and flattened
+            into a 1-d array.
+        y : np.ndarray[ncoord,]
+            Telescope-y coordinate of the U-shaped tracks of
+            sources in the catalog.  Flattened into a 1-d array.
+        """
+        src_ra, src_dec, src_y = super().get_source_coordinates(ringmap)
+
+        ha = np.radians(ringmap.ra[np.newaxis, :] - src_ra[:, np.newaxis])
+        ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
+
+        x, y, z = interferometry.sph_to_ground(
+            ha, self.latitude, np.radians(src_dec[:, np.newaxis])
+        )
+
+        flag = z > 0.0
+        if self.max_ha is not None:
+            flag &= np.abs(ha) <= np.radians(self.max_ha)
+
+        valid = np.nonzero(flag)
+
+        return ringmap.ra[valid[1]], src_dec[valid[0]], y[valid]
+
+
+class MaskAliasedMap(task.SingleTask):
+    """Mask regions of a map that contain north-south aliases.
+
+    Parameters
+    ----------
+    common_freq : bool
+        Generate a common mask for all frequencies, set by the
+        maximum frequency in the container.
+    """
+
+    common_freq = config.Property(proptype=bool, default=False)
+
+    def setup(self, manager):
+        """Extract the minimum baseline separation from the telescope class.
+
+        Parameters
+        ----------
+        manager : io.TelescopeConvertible
+            Telescope/manager used to extract the baseline distances
+            to calculate the minimum separation in the north-south direction
+            needed to compute aliases.
+        """
+        # Determine the layout of the visibilities on the grid.
+        telescope = io.get_telescope(manager)
+        xind, yind, min_xsep, min_ysep = find_grid_indices(telescope.baselines)
+
+        # Save the minimum north-south separation
+        self.min_ysep = min_ysep
+
+    def process(self, ringmap):
+        """Mask data beamformed to zenith angles beyond the aliased horizon.
+
+        Parameters
+        ----------
+        ringmap : RingMap
+            Ringmap to be flagged.
+
+        Returns
+        -------
+        ringmap : RingMap
+            Input container with weights set to zero for
+            zenith angles beyond the aliased horizon.
+        """
+        # Destribute over frequency
+        ringmap.redistribute("freq")
+
+        # Extract el and freq axis
+        el = ringmap.index_map["el"]
+        if self.common_freq:
+            freq = np.atleast_1d(np.max(ringmap.freq))
+        else:
+            freq = ringmap.freq[ringmap.data[:].local_bounds]
+
+        horizon_limit = self.get_horizon_limit(freq)
+
+        flag = np.abs(el[np.newaxis, :]) < horizon_limit[:, np.newaxis]
+
+        waxis = ringmap.weight.attrs["axis"]
+        wslc = [slice(None) if wax in ["freq", "el"] else None for wax in waxis]
+
+        ringmap.weight[:].local_array[:] *= flag[tuple(wslc)]
+
+        return ringmap
+
+    def get_horizon_limit(self, freq):
+        """Calculate the value of sin(za) where the southern horizon aliases.
+
+        Parameters
+        ----------
+        freq : np.ndarray[nfreq,]
+            Frequency in MHz.
+
+        Returns
+        -------
+        horizon_limit : np.ndarray[nfreq,]
+            This is the value of sin(za) where the southern horizon aliases.
+            Regions of sky where ``|sin(za)|`` is greater than or equal to
+            this value will contain aliases.
+        """
+        return scipy.constants.c / (freq * 1e6 * self.min_ysep) - 1.0
