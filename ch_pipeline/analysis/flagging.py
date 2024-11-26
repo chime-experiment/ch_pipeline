@@ -3076,6 +3076,7 @@ class MaskBrightSourceTracks(MaskBrightSourcePixels):
         src_ra, src_dec, src_y = super().get_source_coordinates(ringmap)
 
         ha = np.radians(ringmap.ra[np.newaxis, :] - src_ra[:, np.newaxis])
+        ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
 
         x, y, z = interferometry.sph_to_ground(
             ha, self.latitude, np.radians(src_dec[:, np.newaxis])
