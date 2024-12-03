@@ -13,6 +13,7 @@ import re
 import subprocess as sp
 import tempfile
 import warnings
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar
 
@@ -398,6 +399,9 @@ class ProcessingType:
                     f"{traceback.format_exc()}"
                 )
 
+        # Check if any duplicate jobs have been submitted and cancel them
+        check_duplicates(user=user, cancel=True)
+
     def _generate_hook(self, user: str | None = None, **kwargs) -> list:
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
@@ -733,6 +737,106 @@ def slurm_jobs(user: str | None = None) -> list:
             entries.append(d)
 
     return entries
+
+
+def check_duplicates(user: str | None = None, cancel: bool = False):
+    """Return a list of job IDs corresponding to duplicate jobs.
+
+    Parameters
+    ----------
+    user
+        The user account to check
+    cancel
+        If True, cancel duplicate jobs. If any jobs are running, the most
+        most recently started job is kept. Otherwise, the most recently queued
+        job is kept. The most recent job is kept rather than the oldest to avoid
+        cases where a file has been modified by the newer job.
+
+    Returns
+    -------
+    duplicates
+        List of JOBIDs corresponding to duplicate pipeline jobs. If `cancel` is
+        True, these jobs will be cancelled.
+    """
+    jobs = slurm_jobs(user=user)
+
+    names = {}
+    duplicates = []
+
+    for job in jobs:
+        name = job["NAME"]
+        id = job["JOBID"]
+        status = job["ST"]
+        runtime = job["TIME_LEFT"]
+        subtime = job["SUBMIT_TIME"]
+
+        existing = names.get(name)
+
+        if existing is None:
+            # First time we've seen this job name
+            names[name] = (id, status, runtime, subtime)
+            continue
+
+        if existing[1] == "R":
+            # Both jobs are running. Keep the one that
+            # started most recently
+            if status == "R":
+                # Compare time left
+                h, m, s = existing[2].split(":")
+                rte = int(h) * 3600 + int(m) * 60 + int(s)
+                h, m, s = runtime.split(":")
+                rtn = int(h) * 3600 + int(m) * 60 + int(s)
+
+                if rte > rtn:
+                    # Existing job has been running for longer.
+                    # Keep the newer job
+                    duplicates.append(existing[0])
+                    names[name] = (id, status, runtime, subtime)
+                else:
+                    duplicates.append(id)
+            # The existing job is running but this one isn't.
+            # Keep the existing job
+            else:
+                duplicates.append(id)
+        else:
+            # This job is running but the existing one isn't
+            # Cancel the existing one
+            if status == "R":
+                # Keep this job and cancel the existing one
+                duplicates.append(existing[0])
+                names[name] = (id, status, runtime, subtime)
+            # Both jobs are queued but not running, so keep the
+            # more recently queued job
+            else:
+                # Compare submit time
+                fmt = "%Y-%m-%dT%H:%M:%S"
+                ste = datetime.strptime(existing[3], fmt).timestamp()
+                stn = datetime.strptime(subtime, fmt).timestamp()
+
+                if ste > stn:
+                    # Existing job has been queued for longer
+                    duplicates.append(existing[0])
+                    names[name] = (id, status, runtime, subtime)
+                else:
+                    duplicates.append(id)
+
+    if cancel:
+        # Try to cancel these jobs
+        try:
+            process = sp.Popen(
+                ["scancel", *duplicates],
+                stdout=sp.PIPE,
+                stderr=sp.PIPE,
+                shell=False,
+                universal_newlines=True,
+            )
+            _, _ = process.communicate()
+        except OSError:
+            import traceback
+
+            warnings.warn(f"Failure running 'scancel':\n{traceback.format_exc()}")
+
+    return duplicates
 
 
 def slurm_fairshare(account: str, user: str | None = None) -> tuple[str, str]:
