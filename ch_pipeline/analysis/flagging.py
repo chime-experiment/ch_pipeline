@@ -2875,13 +2875,14 @@ class MaskBrightSourcePixels(task.SingleTask):
         # Save the catalog
         self.catalog = catalog
 
-    def process(self, ringmap):
+    def process(self, data):
         """Generate a mask that excludes pixels near transit of bright point sources.
 
         Parameters
         ----------
-        ringmap : RingMap
-            Ringmap to be flagged.
+        data : RingMap or HybridVisStream
+            Beamformed dataset to be flagged. Must have a "ra" axis and
+            an "el" axis.
 
         Returns
         -------
@@ -2890,18 +2891,18 @@ class MaskBrightSourcePixels(task.SingleTask):
             a bright source.
         """
         # Distribute over frequencies
-        ringmap.redistribute("freq")
+        data.redistribute("freq")
 
-        min_freq = np.min(ringmap.freq)
-        freq = ringmap.freq[ringmap.data[:].local_bounds]
+        min_freq = np.min(data.freq)
+        freq = data.freq[data.data[:].local_bounds]
         nfreq = freq.size
 
         # Create output container
         out = dcontainers.RingMapMask(
-            axes_from=ringmap,
-            attrs_from=ringmap,
-            distributed=ringmap.distributed,
-            comm=ringmap.comm,
+            axes_from=data,
+            attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
         )
         out.redistribute("freq")
 
@@ -2910,7 +2911,7 @@ class MaskBrightSourcePixels(task.SingleTask):
         mask = out.mask[:].local_array
 
         # Determine the coordinates of the sources in the current epoch
-        src_ra, src_dec, src_y = self.get_source_coordinates(ringmap)
+        src_ra, src_dec, src_y = self.get_source_coordinates(data)
 
         nsource = src_ra.size
 
@@ -2940,8 +2941,8 @@ class MaskBrightSourcePixels(task.SingleTask):
         window_x = self.nsigma_ra * sigma_x
 
         # Get the map grid in RA and telescope y
-        x = ringmap.ra
-        y = ringmap.index_map["el"]
+        x = data.ra
+        y = data.index_map["el"]
 
         wrap_x = ((x[-1] + (x[1] - x[0])) % 360.0) == x[0]
 
@@ -2971,13 +2972,14 @@ class MaskBrightSourcePixels(task.SingleTask):
         # Return the output container with the source mask
         return out
 
-    def get_source_coordinates(self, ringmap):
+    def get_source_coordinates(self, data):
         """Determine the coordinates of bright sources in a ringmap.
 
         Parameters
         ----------
-        ringmap : RingMap
-            The ringmap of interest.
+        data : RingMap or HybridVisStream
+            Beamformed dataset to be flagged. Must have a "ra" axis and
+            an "el" axis.
 
         Returns
         -------
@@ -2992,10 +2994,10 @@ class MaskBrightSourcePixels(task.SingleTask):
         from draco.analysis.beamform import icrs_to_cirs
 
         # Determine the coordinates of the sources in the current epoch
-        if "lsd" in ringmap.attrs:
-            lsd = ringmap.attrs["lsd"]
-        elif "csd" in ringmap.attrs:
-            lsd = ringmap.attrs["csd"]
+        if "lsd" in data.attrs:
+            lsd = data.attrs["lsd"]
+        elif "csd" in data.attrs:
+            lsd = data.attrs["csd"]
         else:
             lsd = None
 
