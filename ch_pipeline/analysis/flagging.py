@@ -2828,7 +2828,7 @@ def search_grid(xeval, window, x, wrap=False):
     return xlb, xub
 
 
-class MaskBrightSourcePixels(task.SingleTask):
+class MaskSourcePixelsFromCatalog(task.SingleTask):
     """Mask regions of a map near bright point sources.
 
     Attributes
@@ -2973,7 +2973,7 @@ class MaskBrightSourcePixels(task.SingleTask):
         return out
 
     def get_source_coordinates(self, data):
-        """Determine the coordinates of bright sources in a ringmap.
+        """Determine the coordinates of bright sources in a beamformed dataset.
 
         Parameters
         ----------
@@ -3018,7 +3018,7 @@ class MaskBrightSourcePixels(task.SingleTask):
         return src_ra, src_dec, src_y
 
 
-class MaskBrightSourceTracks(MaskBrightSourcePixels):
+class MaskSourceTracksFromCatalog(MaskSourcePixelsFromCatalog):
     """Mask regions of a map near the U-shaped tracks of bright point sources.
 
     Attributes
@@ -3047,13 +3047,14 @@ class MaskBrightSourceTracks(MaskBrightSourcePixels):
 
     max_ha = config.Property(proptype=float)
 
-    def get_source_coordinates(self, ringmap):
-        """Determine the coordinates of bright source tracks in a ringmap.
+    def get_source_coordinates(self, data):
+        """Determine the coordinates of bright source tracks in a beamformed dataset.
 
         Parameters
         ----------
-        ringmap : RingMap
-            The ringmap of interest.
+        data : RingMap or HybridVisStream
+            Beamformed dataset to be flagged. Must have a "ra" axis and
+            an "el" axis.
 
         Returns
         -------
@@ -3068,9 +3069,9 @@ class MaskBrightSourceTracks(MaskBrightSourcePixels):
             Telescope-y coordinate of the U-shaped tracks of
             sources in the catalog.  Flattened into a 1-d array.
         """
-        src_ra, src_dec, src_y = super().get_source_coordinates(ringmap)
+        src_ra, src_dec, src_y = super().get_source_coordinates(data)
 
-        ha = np.radians(ringmap.ra[np.newaxis, :] - src_ra[:, np.newaxis])
+        ha = np.radians(data.ra[np.newaxis, :] - src_ra[:, np.newaxis])
         ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
 
         x, y, z = interferometry.sph_to_ground(
@@ -3083,7 +3084,11 @@ class MaskBrightSourceTracks(MaskBrightSourcePixels):
 
         valid = np.nonzero(flag)
 
-        return ringmap.ra[valid[1]], src_dec[valid[0]], y[valid]
+        return data.ra[valid[1]], src_dec[valid[0]], y[valid]
+
+
+MaskBrightSourcePixels = MaskSourcePixelsFromCatalog
+MaskBrightSourceTracks = MaskSourceTracksFromCatalog
 
 
 class MaskAliasedMap(task.SingleTask):
