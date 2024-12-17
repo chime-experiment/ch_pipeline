@@ -458,7 +458,7 @@ class SiderealMean(task.SingleTask):
         if isinstance(sstream, containers.HybridVisStream):
             vslc = [np.s_[:, :, :, ee] for ee in range(all_vis.shape[3])]
 
-        elif isinstance(sstream, containers.Ringmap):
+        elif isinstance(sstream, containers.RingMap):
             vslc = list(range(all_vis.shape[0]))
 
         else:
