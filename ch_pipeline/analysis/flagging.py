@@ -1664,7 +1664,22 @@ class MaskSource(MaskDay):
         else:
             source = [self.source]
 
-        self.body = [sources.source_dictionary[src] for src in source]
+        self.body = []
+
+        # Separate normal transits and antipodal transits
+        for src in source:
+            name = src.strip("_antipode")
+            body = sources.source_dictionary[name]
+
+            if "antipode" in src:
+                # Create a body at the antipode transit RA
+                body = ctime.skyfield_star_from_ra_dec(
+                    ra=(body.ra._degrees + 180) % 360,
+                    dec=body.dec._degrees,
+                    name=(src,),
+                )
+
+            self.body.append(body)
 
     def _flag(self, time):
         flag = np.zeros(time.size, dtype=bool)
