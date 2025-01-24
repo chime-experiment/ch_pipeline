@@ -112,6 +112,7 @@ class ApplyBTermCorrection(task.SingleTask):
         the input transit) or if a new track is returned instead. Default
         is True.
     """
+
     overwrite = config.Property(proptype=bool, default=True)
 
     def process(self, track_in, feeds):
@@ -162,15 +163,15 @@ class ApplyBTermCorrection(task.SingleTask):
         ninput = track.beam.local_shape[2]
 
         # Create a slice for the local portion of the frequency axis
-        local_slice = slice(track.beam.local_offset[0], track.beam.local_offset[0] + nfreq)
+        local_slice = slice(
+            track.beam.local_offset[0], track.beam.local_offset[0] + nfreq
+        )
 
         freq = track.freq[local_slice]
 
         # Fetch the geometric delay and turn it into a phase
         bterm_delay = tools.bterm(src_dec, feeds, prod_map)
-        bterm_phase = np.exp(
-            2.j * np.pi * np.outer(freq, bterm_delay) * 1e6
-        )
+        bterm_phase = np.exp(2.0j * np.pi * np.outer(freq, bterm_delay) * 1e6)
 
         # Reshape to multiply into data
         bterm_phase = bterm_phase.reshape(nfreq, npol, ninput, 1)
@@ -204,7 +205,6 @@ def _construct_holography_prod_map(feeds):
 
     # Initialize a numpy array to contain the product map
     prod_map_dtype = np.dtype([("input_a", np.int32), ("input_b", np.int32)])
-
     prod_map = np.zeros(2 * nfeeds, dtype=prod_map_dtype)
 
     # Loop over pols and feeds and fill the product map
@@ -218,9 +218,13 @@ def _construct_holography_prod_map(feeds):
             # the Galt inputs, so for now they are hard-coded here, with
             # the lower Galt index being Y pol and the higher being X
             if po == "co":
-                holo_input  = holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
+                holo_input = (
+                    holo_indices[0] if input_pols[ii] == "S" else holo_indices[1]
+                )
             else:
-                holo_input  = holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
+                holo_input = (
+                    holo_indices[1] if input_pols[ii] == "S" else holo_indices[0]
+                )
 
             pr = nfeeds * pp + ii
 
