@@ -116,6 +116,18 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
+        "flags/dataset_id": {
+            "axes": ["freq", "time"],
+            "dtype": "U32",
+            "initialise": True,
+            "distributed": False,
+        },
+        "flags/frac_lost": {
+            "axes": ["freq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
         "nsample": {
             "axes": ["freq", "subfreq", "beam", "time"],
             "dtype": np.uint16,
