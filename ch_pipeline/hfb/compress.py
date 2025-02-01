@@ -135,8 +135,11 @@ class UnpackHFBWeights(task.SingleTask):
                 # the outer product of the stored weights per subfrequency and
                 # per beam, multiplying by the stored normalization factor
                 weight[ifreq, :, :, itime] = (
-                    np.outer(stream.weight_subf, stream.weight_beam)
-                    * stream.weight_norm
+                    np.outer(
+                        stream.weight_subf[ifreq, :, itime],
+                        stream.weight_beam[ifreq, :, itime],
+                    )
+                    * stream.weight_norm[ifreq, itime]
                 )
 
         # Create container to hold output
