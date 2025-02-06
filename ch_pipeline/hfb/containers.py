@@ -572,3 +572,37 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
     def best_width(self):
         """Get the dataset of the template width corresponding to the maximum SNR."""
         return self.datasets["best_width"]
+
+class HFBSensitivityMask(FreqContainer,TODContainer):
+    """ Container for holding the fraction of subfrequency channels (out of 128)
+    that are free from RFI events.
+
+    """
+
+    _axes = ("freq", "beam_ns", "time",)
+
+    _dataset_spec = {
+        "mask": {
+            "axes": ["freq", "beam_ns", "time"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+
+        "frac_rfi": {
+            "axes": ["freq", "beam_ns", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def mask(self):
+        return self.datasets["mask"]
+    @property
+    def frac_rfi(self):
+        return self.datasets["frac_rfi"]
+
