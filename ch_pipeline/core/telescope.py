@@ -234,8 +234,9 @@ class CHIME(telescope.PolarisedTelescope):
 
             # Get the path of the layout file
             from importlib.resources import files
+            from . import telescope_files
 
-            layout_path = files("ch_pipeline/core/telescope_files/layouts.pkl")
+            layout_path = files(telescope_files).joinpath("layouts.pkl")
 
             with layout_path.open("rb") as layout_f:
                 layouts = pickle.load(layout_f)
@@ -275,7 +276,7 @@ class CHIME(telescope.PolarisedTelescope):
                 lay_end[-1] = datetime.datetime.today()
 
                 lay_in_use = np.where(
-                        (self.layout > lay_start) & (self.layout < lay_end)
+                    (self.layout > lay_start) & (self.layout < lay_end)
                 )[0][0]
 
                 feeds = layouts[lay_in_use]["inputs"]
