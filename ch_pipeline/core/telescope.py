@@ -5,12 +5,11 @@ configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
 """
 
+import datetime
 import logging
+import pickle
 from functools import cached_property
 from typing import ClassVar
-import pickle
-import datetime
-
 
 import healpy
 import numpy as np
@@ -234,6 +233,7 @@ class CHIME(telescope.PolarisedTelescope):
 
             # Get the path of the layout file
             from importlib.resources import files
+
             from . import telescope_files
 
             layout_path = files(telescope_files).joinpath("layouts.pkl")
