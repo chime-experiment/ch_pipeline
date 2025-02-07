@@ -238,9 +238,9 @@ class CHIME(telescope.PolarisedTelescope):
             layout_path = files("ch_pipeline/core/telescope_files/layouts.pkl")
 
             with layout_path.open("rb") as layout_f:
-                layouts = np.array(pickle.load(layout_f))
+                layouts = pickle.load(layout_f)
 
-            # Get the layout that was in use at the requested time
+            # Load layout start and end times in arrays for comparisons
             lay_start = np.array([lay["start"] for lay in layouts])
             lay_end = np.array([lay["end"] for lay in layouts])
 
@@ -274,11 +274,11 @@ class CHIME(telescope.PolarisedTelescope):
                 # The last 'end' element is None, change it to today
                 lay_end[-1] = datetime.datetime.today()
 
-                lay_in_use = layouts[
-                    (self.layout > lay_start) & (self.layout < lay_end)
-                ][0]
+                lay_in_use = np.where(
+                        (self.layout > lay_start) & (self.layout < lay_end)
+                )[0][0]
 
-                feeds = lay_in_use["inputs"]
+                feeds = layouts[lay_in_use]["inputs"]
 
         else:
             feeds = None
