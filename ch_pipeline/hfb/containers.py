@@ -11,7 +11,7 @@ from caput import memh5
 
 from ch_util import andata
 
-from ..core.containers import ContainerBase, RawContainer, FreqContainer
+from ..core.containers import RawContainer, FreqContainer
 
 from draco.core.containers import TODContainer, SiderealContainer, DataWeightContainer
 
@@ -573,13 +573,17 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
         """Get the dataset of the template width corresponding to the maximum SNR."""
         return self.datasets["best_width"]
 
-class HFBSensitivityMask(FreqContainer,TODContainer):
-    """ Container for holding the fraction of subfrequency channels (out of 128)
-    that are free from RFI events.
+
+class HFBSensitivityMask(FreqContainer, TODContainer):
+    """Container for an RFI mask based on HFB data.
+
+    This RFI mask takes advantage of the high-frequency resolution of HFB data.
+    It can also store the fraction of subfrequency channels (out of 128)
+    that detected RFI events.
 
     """
 
-    _axes = ("freq", "beam_ns", "time",)
+    _axes = ("beam_ns",)
 
     _dataset_spec = {
         "mask": {
@@ -589,7 +593,6 @@ class HFBSensitivityMask(FreqContainer,TODContainer):
             "distributed": True,
             "distributed_axis": "freq",
         },
-
         "frac_rfi": {
             "axes": ["freq", "beam_ns", "time"],
             "dtype": np.float32,
@@ -602,7 +605,11 @@ class HFBSensitivityMask(FreqContainer,TODContainer):
     @property
     def mask(self):
         return self.datasets["mask"]
+
     @property
     def frac_rfi(self):
         return self.datasets["frac_rfi"]
 
+    @property
+    def beam_ns(self):
+        return self.index_map["beam_ns"]

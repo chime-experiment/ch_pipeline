@@ -1,4 +1,3 @@
-
 """HFB Tasks for flagging data
 """
 
@@ -11,11 +10,8 @@ from caput import tools
 
 from .containers import HFBRFIMask
 from .containers import HFBSensitivityMask
-from ..core.containers import FreqContainer
 from draco.core.containers import LocalizedRFIMask
 
-from ch_util import ephemeris as ephem
-from caput import mpiarray
 import beam_model.formed as fm
 
 
@@ -156,9 +152,11 @@ class ApplyHFBMask(task.SingleTask):
 
         return stream
 
+
 class HFBSensitivityFlagging(task.SingleTask):
-    """ Produce a RFI mask based on HFB sensitivity values
-    for each N-S beam positions averaged over every 4 E-W beam positions
+    """Produce a RFI mask based on HFB sensitivity values.
+
+    The mask is for each N-S beam positions averaged over every 4 E-W beam positions
     and for each chime frequency channel averaged over every 128 HFB subfrequencies.
 
     Attributes
@@ -174,7 +172,7 @@ class HFBSensitivityFlagging(task.SingleTask):
         RFI is above this value. Default is 1.
     keep_frac_rfi : bool
          Save the fraction of subfrequency channels detecting RFI events.
-   """
+    """
 
     std = config.Property(proptype=float, default=0.15)
     threshold = config.Property(proptype=float, default=5)
@@ -182,7 +180,7 @@ class HFBSensitivityFlagging(task.SingleTask):
     keep_frac_rfi = config.Property(proptype=bool, default=False)
 
     def process(self, stream):
-        """ Produce a RFI mask.
+        """Produce a RFI mask.
 
         Parameters
         ----------
@@ -201,8 +199,8 @@ class HFBSensitivityFlagging(task.SingleTask):
         # Extract data and weight arrays
         data = stream.hfb[:].view(np.ndarray)
         weight = stream.weight[:].view(np.ndarray)
-        freq = stream._data["index_map/freq"][:].view(np.ndarray)
-        time = stream._data["index_map/time"][:].view(np.ndarray)
+        freq = stream.freq[:]
+        time = stream.time[:]
 
         # Number of samples per data point in the HFB data:
         # n_samp = delta_nu * delta_t * (1 - frac_lost), where
@@ -210,14 +208,13 @@ class HFBSensitivityFlagging(task.SingleTask):
         # delta_t the integration time (~10.066 s), and
         # frac_lost is the fraction of integration that was lost upstream
         nfreq, nsubfreq, nbeam, ntime = data.shape
-        freq_width = stream._data["index_map/freq/width"][0] * 1e6
+        freq_width = stream.index_map["freq"]["width"][0] * 1e6
         delta_nu = freq_width / nsubfreq
-        ntime = len(stream._data["index_map/time"])
-        delta_t = np.median(np.diff(stream._data["index_map/time/ctime"]))
+        delta_t = np.median(np.diff(time))
         frac_lost = stream["flags/frac_lost"][0]
         n_samp = delta_nu * delta_t * (1.0 - frac_lost)
         nbeam_ew = 4
-        nbeam_ns = nbeam//nbeam_ew 
+        nbeam_ns = nbeam // nbeam_ew
         beam_ns = np.arange(nbeam_ns)
 
         # Ideal radiometer equation
@@ -228,7 +225,9 @@ class HFBSensitivityFlagging(task.SingleTask):
         sensitivity_metric = 2.0 * tools.invert_no_zero(radiometer * weight)
 
         # Averaging over E-W beams
-        sensitivity_metric = sensitivity_metric.reshape(nfreq,nsubfreq,nbeam_ew,nbeam_ns,ntime)
+        sensitivity_metric = sensitivity_metric.reshape(
+            nfreq, nsubfreq, nbeam_ew, nbeam_ns, ntime
+        )
         sensitivity_metric = np.mean(sensitivity_metric, axis=2)
 
         # Detecting RFI
@@ -237,7 +236,7 @@ class HFBSensitivityFlagging(task.SingleTask):
         mask = count > self.threshold_subfreq
 
         # Create container to hold output
-        out = HFBSensitivityMask(beam_ns = beam_ns, freq = freq, time = time)
+        out = HFBSensitivityMask(beam_ns=beam_ns, freq=freq, time=time)
 
         # Save mask to output container
         out.mask[:] = mask
@@ -249,8 +248,10 @@ class HFBSensitivityFlagging(task.SingleTask):
         # Return output container
         return out
 
+
 class HFBMaskConversion(task.SingleTask):
-    """ Convert axes from beam_ns to el
+    """Convert axes from beam_ns to el.
+
     Note that before CSD = 3685, the time axes were not synchronized between cosmology and HFB data.
 
     Attributes
@@ -268,7 +269,7 @@ class HFBMaskConversion(task.SingleTask):
     npix = config.Property(proptype=int, default=512)
 
     def process(self, stream):
-        """ Produce a RFI mask.
+        """Produce a RFI mask.
 
         Parameters
         ----------
@@ -285,63 +286,76 @@ class HFBMaskConversion(task.SingleTask):
         """
 
         # Extract mask/frac and axes data
-        mask = stream.mask[:].view(np.ndarray)
-        freq = stream._data["index_map/freq"][:].view(np.ndarray)
-        time = stream._data["index_map/time"][:].view(np.ndarray)
-        beam_ns= stream._data["index_map/beam_ns"]
+        mask = stream.mask[:]
+        freq = stream.freq[:]
+        time = stream.time[:]
+        beam_ns = stream.beam_ns[:]
 
-        nfreq, nbeam, ntime = mask.shape
+        nfreq, nbeam_ns, ntime = mask.shape
 
         # Convert beam IDs to el values
         v = fm.FFTFormedBeamModel()
-        angles = v.get_beam_positions(beam_ns,freq['centre'])
+        angles = v.get_beam_positions(beam_ns, freq)
         el = np.sin(np.deg2rad(angles.T[1]))
 
         # Find closest el indices
-        full_el = np.linspace(-1,1,self.npix)
+        full_el = np.linspace(-1, 1, self.npix)
         el_closest_indices = np.abs(el[:, :, None] - full_el).argmin(axis=2)
 
         # Make the new el axis
         min_index = np.min(el_closest_indices)
         max_index = np.max(el_closest_indices)
-        new_el = full_el[min_index:max_index+1]
-        n_el = len(new_el)
+        new_el = full_el[min_index : max_index + 1]
+        nel = len(new_el)
 
-        # Make freq and time indices
-        freq_indices = np.arange(nfreq)[:, None]
-        time_indices = np.arange(ntime)[None, :]
+        # Generate meshgrid indices for the freq and el axes
+        n0, _, n2 = np.meshgrid(
+            np.arange(nfreq), np.arange(nbeam_ns), np.arange(ntime), indexing="ij"
+        )
+        el_closest_indices = el_closest_indices - np.min(el_closest_indices)
 
-        # Broadcast the mask data for corresponding cell
-        mask_adj = np.full((nfreq, n_el, ntime), False)
-        mask_adj[freq_indices[:,None], el_closest_indices[...,None]-min_index, time_indices[None, :]] = mask
+        # Broadcast indices along the last axis
+        index_tuple = (n0, el_closest_indices[:, :, None], n2)
+
+        # Broadcast the mask data
+        mask_adj = np.full((nfreq, nel, ntime), False)
+        mask_adj[index_tuple] = mask
 
         # Falg before and after a given true value for conservative flagging
         for repeat in range(self.spread_size):
-            mask_adj[:,:-1, :] |= mask_adj[:,1:, :]
-            mask_adj[:,1:, :] |= mask_adj[:,:-1, :]
-            mask_adj[:,:-2, :] |= mask_adj[:,2:, :]
-            mask_adj[:,2:, :] |= mask_adj[:,:-2, :]
+            mask_adj[:, :-1, :] |= mask_adj[:, 1:, :]
+            mask_adj[:, 1:, :] |= mask_adj[:, :-1, :]
+            mask_adj[:, :-2, :] |= mask_adj[:, 2:, :]
+            mask_adj[:, 2:, :] |= mask_adj[:, :-2, :]
 
         # Create container to hold output
-        out = LocalizedRFIMask(freq = freq, el = new_el, time = time)
+        out = LocalizedRFIMask(freq=freq, el=new_el, time=time)
 
         # Save the adjusted mask to output container
         out.mask[:] = mask_adj
 
+        # If the input container has the frac_rfi dataset
         if stream.datasets.get("frac_rfi", None) is not None:
-            frac_rfi = stream.frac_rfi[:].view(np.ndarray)
-            frac_rfi_adj = np.full((nfreq, n_el, ntime), 0.0)
-            frac_rfi_adj[freq_indices[:,None], el_closest_indices[...,None]-min_index, time_indices[None, :]] = frac_rfi
+            frac_rfi = stream.frac_rfi[:]
+            frac_rfi_adj = np.full((nfreq, nel, ntime), 0.0)
+            frac_rfi_adj[index_tuple] = frac_rfi
 
             for repeat in range(self.spread_size):
-                frac_rfi_adj[:, :-1, :] = np.maximum(frac_rfi_adj[:, :-1, :], frac_rfi_adj[:, 1:, :])
-                frac_rfi_adj[:, 1:, :] = np.maximum(frac_rfi_adj[:, 1:, :], frac_rfi_adj[:, :-1, :])
-                frac_rfi_adj[:, :-2, :] = np.maximum(frac_rfi_adj[:, :-2, :], frac_rfi_adj[:, 2:, :])
-                frac_rfi_adj[:, 2:, :] = np.maximum(frac_rfi_adj[:, 2:, :], frac_rfi_adj[:, :-2, :])
+                frac_rfi_adj[:, :-1, :] = np.maximum(
+                    frac_rfi_adj[:, :-1, :], frac_rfi_adj[:, 1:, :]
+                )
+                frac_rfi_adj[:, 1:, :] = np.maximum(
+                    frac_rfi_adj[:, 1:, :], frac_rfi_adj[:, :-1, :]
+                )
+                frac_rfi_adj[:, :-2, :] = np.maximum(
+                    frac_rfi_adj[:, :-2, :], frac_rfi_adj[:, 2:, :]
+                )
+                frac_rfi_adj[:, 2:, :] = np.maximum(
+                    frac_rfi_adj[:, 2:, :], frac_rfi_adj[:, :-2, :]
+                )
 
             out.add_dataset("frac_rfi")
             out.frac_rfi[:] = frac_rfi_adj
 
         # Return output container
         return out
-
