@@ -252,7 +252,7 @@ class CHIME(telescope.PolarisedTelescope):
                     "You have requested a layout from before the earliest "
                     "recorded layout. Will attempt to query the "
                     "database. To avoid this behavior, select a layout "
-                    "after September 1, 2018."
+                    f"after {lay_start[0].strftime('%B %d, %Y')}."
                 )
 
                 feeds = tools.get_correlator_inputs(self.layout, self.correlator)
@@ -261,10 +261,10 @@ class CHIME(telescope.PolarisedTelescope):
             elif self.layout > lay_start[-1]:
                 logger.warning(
                     "You have requested the latest locally recorded layout, "
-                    "from October 13, 2020. There is no guarantee that this "
-                    "is the latest layout available from the database. "
-                    "Attempt a database connection if you are certain you "
-                    "need the latest available layout."
+                    f"from {lay_start[-1].strftime('%B %d, %Y')}. There is "
+                    "no guarantee this is the latest layout available from "
+                    "the database. Attempt a database connection if you are "
+                    "certain you need the latest available layout."
                 )
 
                 feeds = layouts[-1]["inputs"]
