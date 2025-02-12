@@ -271,17 +271,17 @@ class HFBMaskConversion(task.SingleTask):
     def process(self, rfimask):
         """Produce a RFI mask.
 
-        Parameters
-        ----------
-        rfimask : containers.HFBSensitivityMask
-            RFI mask whose axes are freq, beam_ns, and time.
+                Parameters
+                ----------
+                rfimask : containers.HFBSensitivityMask
+                    RFI mask whose axes are freq, beam_ns, and time.
 
-        Returns
-        -------
-            out : containers.LocalizedRFIMask
-            Boolean mask that can be converted to a draco container `LocalizedSiderealRFIMask`
-            with the task `SiderealMaskConversion` to mask contaminated
-≈            frequencies, el, and time/ra samples.
+                Returns
+                -------
+                    out : containers.LocalizedRFIMask
+                    Boolean mask that can be converted to a draco container `LocalizedSiderealRFIMask`
+                    with the task `SiderealMaskConversion` to mask contaminated
+        ≈            frequencies, el, and time/ra samples.
 
         """
 
@@ -316,7 +316,12 @@ class HFBMaskConversion(task.SingleTask):
         ef = sf + nfreq_local
 
         # Generate meshgrid indices for the freq and el axes
-        n0, _, n2 = np.meshgrid(np.arange(nfreq_local)+sf,np.arange(nbeam_ns),np.arange(ntime),indexing="ij")
+        n0, _, n2 = np.meshgrid(
+            np.arange(nfreq_local) + sf,
+            np.arange(nbeam_ns),
+            np.arange(ntime),
+            indexing="ij",
+        )
         el_closest_indices = el_closest_indices - np.min(el_closest_indices)
 
         # Generate meshgrid indices for the freq and el axes
