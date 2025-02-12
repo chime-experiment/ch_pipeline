@@ -276,7 +276,7 @@ class CHIME(telescope.PolarisedTelescope):
                 lay_end[-1] = datetime.datetime.today()
 
                 lay_in_use = np.where(
-                    (self.layout > lay_start) & (self.layout < lay_end)
+                    (self.layout >= lay_start) & (self.layout <= lay_end)
                 )[0][0]
 
                 feeds = layouts[lay_in_use]["inputs"]
@@ -290,9 +290,14 @@ class CHIME(telescope.PolarisedTelescope):
         # Override base method to implement automatic loading of layout when
         # configuring from YAML.
 
-        if self.layout is not None:
-            logger.debug("Loading layout: %s", str(self.layout))
-            self._load_layout()
+        if self.layout is None:
+            logger.warning(
+                "You have not set the layout attribute of the telescope "
+                "in your config file. The layout will be set to today."
+            )
+            self.layout = datetime.datetime.today()
+        logger.debug("Loading layout: %s", str(self.layout))
+        self._load_layout()
 
         # Set the overall normalization of the beam
         self._set_beam_normalization()
