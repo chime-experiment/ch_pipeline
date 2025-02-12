@@ -268,12 +268,12 @@ class HFBMaskConversion(task.SingleTask):
     spread_size = config.Property(proptype=int, default=1)
     npix = config.Property(proptype=int, default=512)
 
-    def process(self, stream):
+    def process(self, rfimask):
         """Produce a RFI mask.
 
         Parameters
         ----------
-        stream : containers.HFBSensitivityMask
+        rfimask : containers.HFBSensitivityMask
             RFI mask whose axes are freq, beam_ns, and time.
 
         Returns
@@ -281,15 +281,15 @@ class HFBMaskConversion(task.SingleTask):
             out : containers.LocalizedRFIMask
             Boolean mask that can be converted to a draco container `LocalizedSiderealRFIMask`
             with the task `SiderealMaskConversion` to mask contaminated
-            frequencies, el, and time/ra samples.
+≈            frequencies, el, and time/ra samples.
 
         """
 
         # Extract mask/frac and axes data
-        mask = stream.mask[:]
-        freq = stream.freq[:]
-        time = stream.time[:]
-        beam_ns = stream.beam_ns[:]
+        mask = rfimask.mask[:]
+        freq = rfimask.freq[:]
+        time = rfimask.time[:]
+        beam_ns = rfimask.beam_ns[:]
 
         nfreq, nbeam_ns, ntime = mask.shape
 
@@ -308,6 +308,17 @@ class HFBMaskConversion(task.SingleTask):
         new_el = full_el[min_index : max_index + 1]
         nel = len(new_el)
 
+        # RFI Mask is not distributed, so we need to cut out the frequencies
+        # that are local for the tstream
+        ax = list(rfimask.mask.attrs["axis"]).index("freq")
+        nfreq_local = rfimask.mask.local_shape[ax]
+        sf = rfimask.mask.local_offset[ax]
+        ef = sf + nfreq_local
+
+        # Generate meshgrid indices for the freq and el axes
+        n0, _, n2 = np.meshgrid(np.arange(nfreq_local)+sf,np.arange(nbeam_ns),np.arange(ntime),indexing="ij")
+        el_closest_indices = el_closest_indices - np.min(el_closest_indices)
+
         # Generate meshgrid indices for the freq and el axes
         n0, _, n2 = np.meshgrid(
             np.arange(nfreq), np.arange(nbeam_ns), np.arange(ntime), indexing="ij"
@@ -315,7 +326,7 @@ class HFBMaskConversion(task.SingleTask):
         el_closest_indices = el_closest_indices - np.min(el_closest_indices)
 
         # Broadcast indices along the last axis
-        index_tuple = (n0, el_closest_indices[:, :, None], n2)
+        index_tuple = (n0, el_closest_indices[sf:ef, :, None], n2)
 
         # Broadcast the mask data
         mask_adj = np.full((nfreq, nel, ntime), False)
@@ -335,8 +346,8 @@ class HFBMaskConversion(task.SingleTask):
         out.mask[:] = mask_adj
 
         # If the input container has the frac_rfi dataset
-        if stream.datasets.get("frac_rfi", None) is not None:
-            frac_rfi = stream.frac_rfi[:]
+        if rfimask.datasets.get("frac_rfi", None) is not None:
+            frac_rfi = rfimask.frac_rfi[:]
             frac_rfi_adj = np.full((nfreq, nel, ntime), 0.0)
             frac_rfi_adj[index_tuple] = frac_rfi
 
