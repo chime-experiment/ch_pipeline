@@ -209,7 +209,10 @@ class CHIME(telescope.PolarisedTelescope):
             # If we're reading locally, use the pickled layouts file
             feeds = self._read_local_layout()
         else:
-            # If not, fetch feed layout from database
+            feeds = None
+
+        # If not, or if the file I/O failed, fetch feed layout from database
+        if feeds is None:
             feeds = tools.get_correlator_inputs(self.layout, self.correlator)
 
         if mpiutil.size > 1:
@@ -223,10 +226,10 @@ class CHIME(telescope.PolarisedTelescope):
     def _read_local_layout(self):
         """Load the telescope layout from a file saved to this repository.
 
-        Note that this function will fallback to a database query if the
-        requested layout is earlier than September 1, 2018. As with
-        :method:`CHIME._load_layout`, this routine should not be called
-        directly.
+        If the file I/O fails, or if a layout from before the earliest recorded
+        date is requested, this method returns `None`, triggering a fallback
+        database query. As with :method:`CHIME._load_layout`, this routine
+        should not be called directly.
         """
         # Do I/O, and resolve the layout, only on rank 0
         if mpiutil.rank == 0:
@@ -238,8 +241,16 @@ class CHIME(telescope.PolarisedTelescope):
 
             layout_path = files(telescope_files).joinpath("layouts.pkl")
 
-            with layout_path.open("rb") as layout_f:
-                layouts = pickle.load(layout_f)
+            try:
+                with layout_path.open("rb") as layout_f:
+                    layouts = pickle.load(layout_f)
+
+            except OSError as e:
+                logger.warning(
+                    f"Failed to load local layout: {e}. Will try to "
+                    "load from the database."
+                )
+                return None
 
             # Load layout start and end times in arrays for comparisons
             lay_start = np.array([lay["start"] for lay in layouts])
@@ -255,7 +266,7 @@ class CHIME(telescope.PolarisedTelescope):
                     f"after {lay_start[0].strftime('%B %d, %Y')}."
                 )
 
-                feeds = tools.get_correlator_inputs(self.layout, self.correlator)
+                feeds = None
 
             # ... or later than the latest
             elif self.layout > lay_start[-1]:
@@ -282,7 +293,7 @@ class CHIME(telescope.PolarisedTelescope):
                 feeds = layouts[lay_in_use]["inputs"]
 
         else:
-            feeds = None
+            feeds = []
 
         return feeds
 
