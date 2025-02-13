@@ -49,6 +49,9 @@ chp = "ch_pipeline.processing.client:cli"
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"], content-type = "text/markdown"}
 
+[tool.setuptools.package-data]
+"ch_pipeline.core.telescope_files" = ["layouts.pkl"]
+
 [tool.setuptools-git-versioning]
 enabled = true
 
