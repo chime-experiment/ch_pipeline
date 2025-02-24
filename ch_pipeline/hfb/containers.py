@@ -567,3 +567,47 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
     def amplitude(self):
         """The absorption-feature-amplitude dataset."""
         return self.datasets["amplitude"]
+
+
+class HFBSensitivityMask(FreqContainer, TODContainer):
+    """Container for an RFI mask based on HFB data.
+
+    This RFI mask takes advantage of the high-frequency resolution of HFB data.
+    It can also store the fraction of subfrequency channels (out of 128)
+    that detected RFI events.
+
+    """
+
+    _axes = ("beam_ns",)
+
+    _dataset_spec: ClassVar = {
+        "mask": {
+            "axes": ["freq", "beam_ns", "time"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "frac_rfi": {
+            "axes": ["freq", "beam_ns", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def mask(self):
+        """Return the north-south beam-dependent mask."""
+        return self.datasets["mask"]
+
+    @property
+    def frac_rfi(self):
+        """Return the north-south beam-dependent rfi frac dataset."""
+        return self.datasets["frac_rfi"]
+
+    @property
+    def beam_ns(self):
+        """Return the north-south beam index map."""
+        return self.index_map["beam_ns"]
