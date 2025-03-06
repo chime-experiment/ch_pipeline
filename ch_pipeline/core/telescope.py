@@ -5,7 +5,9 @@ configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
 """
 
+import datetime
 import logging
+import pickle
 from functools import cached_property
 from typing import ClassVar
 
@@ -37,6 +39,10 @@ class CHIME(telescope.PolarisedTelescope):
         Restrict to a specific correlator.
     skip_non_chime : boolean
         Ignore non CHIME feeds in the BeamTransfers.
+    read_local_layout : boolean
+        Read in the layout of the CHIME telescope from a file, saved to this
+        repository, rather than attempting to connect and read the layout from
+        the database. Default is True.
     stack_type : string, optional
         Stacking type.
         `redundant`: feeds of same polarization have same beam class (default).
@@ -87,6 +93,7 @@ class CHIME(telescope.PolarisedTelescope):
     layout = config.Property(default=None)
     correlator = config.Property(proptype=str, default=None)
     skip_non_chime = config.Property(proptype=bool, default=False)
+    read_local_layout = config.Property(proptype=bool, default=True)
 
     # Redundancy settings
     stack_type = config.enum(
@@ -138,8 +145,6 @@ class CHIME(telescope.PolarisedTelescope):
     #
 
     def __init__(self, feeds=None):
-        import datetime
-
         from ch_ephem.observers import chime
 
         self._feeds = feeds
@@ -156,13 +161,16 @@ class CHIME(telescope.PolarisedTelescope):
         self._set_beam_normalization()
 
     @classmethod
-    def from_layout(cls, layout, correlator=None, skip=False):
+    def from_layout(cls, layout, read_local_layout=True, correlator=None, skip=False):
         """Create a CHIME/Pathfinder telescope description for the specified layout.
 
         Parameters
         ----------
         layout : integer or datetime
             Layout id number (corresponding to one in database), or datetime
+        read_local_layout: boolean, optional
+            Read the feed layout from a file saved to this repository, rather
+            than connecting to the database. Default is True.
         correlator : string, optional
             Name of the specific correlator. Needed to return a unique config
             in some cases.
@@ -178,13 +186,18 @@ class CHIME(telescope.PolarisedTelescope):
 
         tel.layout = layout
         tel.correlator = correlator
+        tel.read_local_layout = read_local_layout
         tel.skip_non_chime = skip
         tel._load_layout()
 
         return tel
 
     def _load_layout(self):
-        """Load the CHIME/Pathfinder layout from the database.
+        """Load the CHIME/Pathfinder layout.
+
+        Will use a routine to read in a layout from a file saved
+        to this repository if `read_local_layout` is set to True.
+        Otherwise, will attempt to query the layout database.
 
         Generally this routine shouldn't be called directly. Use
         :method:`CHIME.from_layout` or configure from a YAML file.
@@ -192,8 +205,15 @@ class CHIME(telescope.PolarisedTelescope):
         if self.layout is None:
             raise Exception("Layout attributes not set.")
 
-        # Fetch feed layout from database
-        feeds = tools.get_correlator_inputs(self.layout, self.correlator)
+        if self.read_local_layout:
+            # If we're reading locally, use the pickled layouts file
+            feeds = self._read_local_layout()
+        else:
+            feeds = None
+
+        # If not, or if the file I/O failed, fetch feed layout from database
+        if feeds is None:
+            feeds = tools.get_correlator_inputs(self.layout, self.correlator)
 
         if mpiutil.size > 1:
             feeds = mpiutil.world.bcast(feeds, root=0)
@@ -203,13 +223,92 @@ class CHIME(telescope.PolarisedTelescope):
 
         self._feeds = feeds
 
+    def _read_local_layout(self):
+        """Load the telescope layout from a file saved to this repository.
+
+        If the file I/O fails, or if a layout from before the earliest recorded
+        date is requested, this method returns `None`, triggering a fallback
+        database query. As with :method:`CHIME._load_layout`, this routine
+        should not be called directly.
+        """
+        # Do I/O, and resolve the layout, only on rank 0
+        if mpiutil.rank == 0:
+
+            # Get the path of the layout file
+            from importlib.resources import files
+
+            from . import telescope_files
+
+            layout_path = files(telescope_files).joinpath("layouts.pkl")
+
+            try:
+                with layout_path.open("rb") as layout_f:
+                    layouts = pickle.load(layout_f)
+
+            except OSError as e:
+                logger.warning(
+                    f"Failed to load local layout: {e}. Will try to "
+                    "load from the database."
+                )
+                return None
+
+            # Load layout start and end times in arrays for comparisons
+            lay_start = np.array([lay["start"] for lay in layouts])
+            lay_end = np.array([lay["end"] for lay in layouts])
+
+            # Handle edge cases, i.e. where requested layout is earlier
+            # than the earliest saved layout...
+            if self.layout < lay_start[0]:
+                logger.info(
+                    "You have requested a layout from before the earliest "
+                    "recorded layout. Will attempt to query the "
+                    "database. To avoid this behavior, select a layout "
+                    f"after {lay_start[0].strftime('%B %d, %Y')}."
+                )
+
+                feeds = None
+
+            # ... or later than the latest
+            elif self.layout > lay_start[-1]:
+                logger.warning(
+                    "You have requested the latest locally recorded layout, "
+                    f"from {lay_start[-1].strftime('%B %d, %Y')}. There is "
+                    "no guarantee this is the latest layout available from "
+                    "the database. Attempt a database connection if you are "
+                    "certain you need the latest available layout."
+                )
+
+                feeds = layouts[-1]["inputs"]
+
+            # If not, find which layout was in use at the requested time
+            else:
+
+                # The last 'end' element is None, change it to today
+                lay_end[-1] = datetime.datetime.today()
+
+                lay_in_use = np.where(
+                    (self.layout >= lay_start) & (self.layout <= lay_end)
+                )[0][0]
+
+                feeds = layouts[lay_in_use]["inputs"]
+
+        else:
+            feeds = []
+
+        return feeds
+
     def _finalise_config(self):
         # Override base method to implement automatic loading of layout when
         # configuring from YAML.
 
-        if self.layout is not None:
-            logger.debug("Loading layout: %s", str(self.layout))
-            self._load_layout()
+        if self.layout is None:
+            logger.warning(
+                "You have not set the layout attribute of the telescope "
+                "in your config file. The layout will be set to today."
+            )
+            self.layout = datetime.datetime.today()
+        logger.debug("Loading layout: %s", str(self.layout))
+        self._load_layout()
 
         # Set the overall normalization of the beam
         self._set_beam_normalization()
