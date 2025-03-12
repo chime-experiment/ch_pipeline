@@ -14,7 +14,7 @@ import subprocess as sp
 import tempfile
 import warnings
 from pathlib import Path
-from typing import ClassVar, Optional, Union
+from typing import ClassVar
 
 import yaml
 
@@ -237,7 +237,7 @@ class ProcessingType:
 
         return cls(new_rev, create=True)
 
-    def queued(self, user: Optional[str] = None) -> tuple[list, list]:
+    def queued(self, user: str | None = None) -> tuple[list, list]:
         """Get the queued and running jobs of this type.
 
         Parameters
@@ -362,7 +362,7 @@ class ProcessingType:
         self,
         max: int = 10,
         submit: bool = True,
-        user: Optional[str] = None,
+        user: str | None = None,
         priority_only: bool = False,
         check_failed: bool = False,
     ):
@@ -398,16 +398,16 @@ class ProcessingType:
                     f"{traceback.format_exc()}"
                 )
 
-    def _generate_hook(self, user: Optional[str] = None, **kwargs) -> list:
+    def _generate_hook(self, user: str | None = None, **kwargs) -> list:
         """Override to add custom behaviour when jobs are queued."""
         return self.status(user=user)["not_yet_submitted"]
 
-    def update_files(self, user: Optional[str] = None):
+    def update_files(self, user: str | None = None):
         """Overwrite to implement functionality to update required files."""
         pass
 
     def failed(
-        self, user: Optional[str] = None, time_sort: bool = False
+        self, user: str | None = None, time_sort: bool = False
     ) -> dict[str, list]:
         """Categorize failed jobs.
 
@@ -454,7 +454,7 @@ class ProcessingType:
         return classify_failed(self.workdir_path, failed_tags, patterns)
 
     def status(
-        self, user: Optional[str] = None, time_sort: bool = False
+        self, user: str | None = None, time_sort: bool = False
     ) -> dict[str, list]:
         """Find the status of existing jobs.
 
@@ -598,7 +598,7 @@ def queue_job(script, submit=True):
 
 
 def classify_failed(
-    dir: Union[Path, str], tags: list, patterns: dict = {}
+    dir: Path | str, tags: list, patterns: dict = {}
 ) -> dict[str, list]:
     """Analyze the cause of crashed jobs.
 
@@ -659,7 +659,7 @@ def classify_failed(
     return failed
 
 
-def slurm_jobs(user: Optional[str] = None) -> list:
+def slurm_jobs(user: str | None = None) -> list:
     """Get the jobs of the given user.
 
     Parameters
@@ -735,7 +735,7 @@ def slurm_jobs(user: Optional[str] = None) -> list:
     return entries
 
 
-def slurm_fairshare(account: str, user: Optional[str] = None) -> tuple[str, str]:
+def slurm_fairshare(account: str, user: str | None = None) -> tuple[str, str]:
     """Get the LevelFS for the current user and account.
 
     Parameters

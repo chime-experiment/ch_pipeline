@@ -1,7 +1,7 @@
 """HFB containers."""
 
 from functools import cached_property
-from typing import ClassVar, Union
+from typing import ClassVar
 
 import numpy as np
 from caput import memh5, tod
@@ -163,7 +163,7 @@ class HFBReader(tod.Reader):
     _freq_sel = None
 
     @property
-    def freq_sel(self) -> Union[int, list, slice]:
+    def freq_sel(self) -> int | list | slice:
         """Get the current frequency selection.
 
         Returns
@@ -174,7 +174,7 @@ class HFBReader(tod.Reader):
         return self._freq_sel
 
     @freq_sel.setter
-    def freq_sel(self, value: Union[int, list, slice]):
+    def freq_sel(self, value: int | list | slice):
         """Set a frequency selection.
 
         Parameters

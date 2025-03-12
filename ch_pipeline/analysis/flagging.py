@@ -5,8 +5,6 @@ data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
 
-from typing import Union
-
 import caput.time as ctime
 import numpy as np
 import scipy.constants
@@ -74,7 +72,7 @@ class RFIFilter(task.SingleTask):
     threshold_mad = config.Property(proptype=float, default=6.0)
     use_draco_container = config.Property(proptype=bool, default=False)
 
-    def process(self, data) -> Union[containers.RFIMask, dcontainers.RFIMask]:
+    def process(self, data) -> containers.RFIMask | dcontainers.RFIMask:
         """Create a mask by identifying outliers in the autocorrelation data.
 
         This mask can be used to zero out frequencies and time samples that are
