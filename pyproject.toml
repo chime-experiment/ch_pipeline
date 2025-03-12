@@ -13,7 +13,7 @@ authors = [
   {name = "The CHIME Collaboration", email = "dvw@phas.ubc.ca"}
 ]
 description = "CHIME Pipeline"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dynamic = ["readme", "version"]
 license = {file = "LICENSE"}
 dependencies = [
@@ -96,4 +96,4 @@ exclude = [
     "*/__init__.py",
 ]
 
-target-version = "py39"
+target-version = "py310"
