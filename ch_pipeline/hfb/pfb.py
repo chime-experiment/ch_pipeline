@@ -1,6 +1,6 @@
 """PFB related tools."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import scipy.linalg as la

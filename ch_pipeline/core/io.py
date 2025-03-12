@@ -84,7 +84,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
         files : list
             list of correlator data file paths
         """
-        if not isinstance(files, (list, tuple)):
+        if not isinstance(files, list | tuple):
             raise RuntimeError("Argument must be list of files.")
 
         self.files = files
@@ -233,7 +233,7 @@ class LoadDataFiles(task.SingleTask):
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
 
-        if not isinstance(files, (list, tuple)):
+        if not isinstance(files, list | tuple):
             raise ValueError("Argument must be list of files.")
 
         self.files = files

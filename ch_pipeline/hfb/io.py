@@ -433,7 +433,7 @@ class LoadFiles(LoadFilesFromParams):
                 fgroup = {"files": flist[0], "time_range": flist[1]}
             elif isinstance(flist, list):
                 fgroup = {"files": flist, "time_range": (None, None)}
-            elif isinstance(flist, (str, Path)):
+            elif isinstance(flist, str | Path):
                 fgroup = {"files": [flist], "time_range": (None, None)}
             else:
                 raise ValueError(

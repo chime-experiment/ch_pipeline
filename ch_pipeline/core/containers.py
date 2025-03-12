@@ -29,7 +29,7 @@ Tasks
 # ruff: noqa: D102
 
 import posixpath
-from typing import ClassVar, Optional, Union
+from typing import ClassVar
 
 import numpy as np
 from caput import memh5
@@ -1002,9 +1002,9 @@ class RawContainer(TODContainer):
     @classmethod
     def from_acq_h5(
         cls,
-        acq_files: Union[str, list[str]],
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
+        acq_files: str | list[str],
+        start: int | None = None,
+        stop: int | None = None,
         **kwargs,
     ) -> "RawContainer":
         """Load from an HDF5 file on disk.
