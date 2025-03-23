@@ -918,10 +918,10 @@ class CHIMEExternalBeam(CHIME):
             ]
 
             complex_beam = np.all(
-                [np.issubclass_(hpbt, np.complexfloating) for hpbt in hpb_types]
+                [issubclass(hpbt, np.complexfloating) for hpbt in hpb_types]
             )
         else:
-            complex_beam = np.issubclass_(
+            complex_beam = issubclass(
                 self._primary_beam.beam.dtype.type, np.complexfloating
             )
 
