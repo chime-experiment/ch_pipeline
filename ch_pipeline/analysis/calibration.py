@@ -630,7 +630,7 @@ class EigenCalibration(task.SingleTask):
         ttrans = chime.transit_times(source_obj.skyfield, data.time[0])[0]
         csd = int(np.floor(chime.unix_to_lsd(ttrans)))
 
-        src_ra, src_dec = coord.object_coords(
+        src_ra, src_dec = chime.object_coords(
             source_obj.skyfield, date=ttrans, deg=True
         )
 
@@ -998,7 +998,7 @@ class TransitFit(task.SingleTask):
         source_obj = sources.source_dictionary[response.attrs["source_name"]]
         ttrans = response.attrs["transit_time"]
 
-        src_ra, src_dec = coord.object_coords(source_obj, date=ttrans, deg=True)
+        src_ra, src_dec = chime.object_coords(source_obj, date=ttrans, deg=True)
 
         ha = response.ra[:] - src_ra
         ha = ((ha + 180.0) % 360.0) - 180.0
@@ -3786,7 +3786,7 @@ class CorrectTimeOffset(CalibrationCorrection):
         # Determine location of calibrator
         ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
+        ra, dec = chime.object_coords(body, date=ttrans, deg=False)
 
         ha = np.radians(chime.unix_to_lsa(ttrans + time_offset)) - ra
 
@@ -3843,7 +3843,7 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         # Determine location of calibrator
         ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = coord.object_coords(body, date=ttrans, deg=False)
+        ra, dec = chime.object_coords(body, date=ttrans, deg=False)
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.

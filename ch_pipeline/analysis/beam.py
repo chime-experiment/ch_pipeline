@@ -7,7 +7,7 @@ import numpy as np
 from caput import config, mpiarray, mpiutil, tod
 from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S, unix_to_datetime
-from ch_ephem import coord, sources
+from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import holography, tools
 from chimedb.core import connect as connect_database
@@ -184,9 +184,7 @@ class TransitGrouper(task.SingleTask):
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = self.tstreams[0]
-            _, dec = coord.object_coords(
-                self.src, all_t[0], deg=True, obs=self.observer
-            )
+            _, dec = self.observer.object_coords(self.src, all_t[0], deg=True)
             ts.attrs["dec"] = dec
             ts.attrs["source_name"] = self.source
             ts.attrs["transit_time"] = self.cur_transit
@@ -307,9 +305,9 @@ class TransitRegridder(Regridder):
         vis_data = data.vis[:].view(np.ndarray)
 
         # Get apparent source RA, including precession effects
-        ra, _ = coord.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
+        ra, _ = self.observer.object_coords(self.src, data.time[0], deg=True)
         # Get catalogue RA for reference
-        ra_icrs, _ = coord.object_coords(self.src, deg=True, obs=self.observer)
+        ra_icrs, _ = self.observer.object_coords(self.src, deg=True)
 
         # Convert input times to hour angle
         lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
