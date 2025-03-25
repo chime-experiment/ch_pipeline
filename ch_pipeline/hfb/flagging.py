@@ -127,8 +127,10 @@ class ApplyHFBMask(task.SingleTask):
 class HFBDirectionalRFIFlagging(task.SingleTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
-    The mask is for each N-S beam positions averaged over every 4 E-W beam positions
+    The mask is for each N-S beam positions averaged over every E-W beam positions
     and for each chime frequency channel averaged over every 128 HFB subfrequencies.
+    This task assumes that the loaded HFBData contains a rectangular selection of beams,
+    i.e., nbeam_ew x nbeam_ns = nbeam.
 
     Attributes
     ----------
@@ -168,9 +170,9 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         """
         # Get the dimensions of the data array
         nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
-        nbeam_ew = 4
-        nbeam_ns = nbeam // nbeam_ew
-        beam_ns = np.arange(nbeam_ns)
+        nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
+        nbeam_ew = len(stream.beam_ew)
+        nbeam_ns = len(stream.beam_ns)
 
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
@@ -190,6 +192,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         # Extract axis arrays
         freq = stream.freq[:]
         time = stream.time[:]
+        beam_ns = stream.beam_ns[:]
 
         # Create container to hold output
         out = HFBDirectionalRFIMask(beam_ns=beam_ns, freq=freq, time=time)
