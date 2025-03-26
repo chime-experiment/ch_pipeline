@@ -170,7 +170,6 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         """
         # Get the dimensions of the data array
         nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
-        nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
         nbeam_ew = len(stream.beam_ew)
         nbeam_ns = len(stream.beam_ns)
 
