@@ -569,7 +569,7 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
         return self.datasets["amplitude"]
 
 
-class HFBSensitivityMask(FreqContainer, TODContainer):
+class HFBDirectionalRFIMask(FreqContainer, TODContainer):
     """Container for an RFI mask based on HFB data.
 
     This RFI mask takes advantage of the high-frequency resolution of HFB data.
