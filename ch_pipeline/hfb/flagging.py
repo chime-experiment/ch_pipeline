@@ -6,7 +6,7 @@ from caput import config, tools
 from draco.core import task
 from draco.core.containers import LocalizedRFIMask
 
-from .containers import HFBRFIMask, HFBSensitivityMask
+from .containers import HFBDirectionalRFIMask, HFBRFIMask
 
 
 class HFBRadiometerRFIFlagging(task.SingleTask):
@@ -40,38 +40,19 @@ class HFBRadiometerRFIFlagging(task.SingleTask):
             with the task `ApplyHFBMask` to mask contaminated
             frequencies, subfrequencies and time samples.
         """
-        # Extract data and weight arrays, averaging over beams
-        data = np.mean(stream.hfb[:], axis=2)
-        weight = np.mean(stream.weight[:], axis=2)
-
-        # Number of samples per data point in the HFB data:
-        # n_samp = delta_nu * delta_t * (1 - frac_lost), where
-        # delta_nu is the frequency resolution (390.625 kHz / 128),
-        # delta_t the integration time (~10.066 s), and
-        # frac_lost is the fraction of integration that was lost upstream
-        freq_width = stream._data["index_map/freq/width"][0] * 1e6
-        nsubfreq = len(stream._data["index_map/subfreq"])
-        delta_nu = freq_width / nsubfreq
-        delta_t = np.median(np.diff(stream._data["index_map/time/ctime"]))
-        frac_lost = stream["flags/frac_lost"][0]
-        n_samp = delta_nu * delta_t * (1.0 - frac_lost)
-
-        # Ideal radiometer equation
-        radiometer = data**2 * tools.invert_no_zero(n_samp)
-
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
-        sensitivity_metric = 2.0 * tools.invert_no_zero(radiometer * weight)
+        sensitivities = sensitivity_metric(stream=stream, average_beams=True)
 
         # Boolean mask indicating data that are contaminated by RFI
-        mask = sensitivity_metric > self.threshold
+        mask = sensitivities > self.threshold
 
         # Create container to hold output
         out = HFBRFIMask(axes_from=stream, attrs_from=stream)
 
         if self.keep_sens:
             out.add_dataset("sens")
-            out.sens[:] = sensitivity_metric
+            out.sens[:] = sensitivities
 
         # Save mask to output container
         out.mask[:] = mask
@@ -143,11 +124,13 @@ class ApplyHFBMask(task.SingleTask):
         return stream
 
 
-class HFBSensitivityFlagging(task.SingleTask):
+class HFBDirectionalRFIFlagging(task.SingleTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
-    The mask is for each N-S beam positions averaged over every 4 E-W beam positions
+    The mask is for each N-S beam positions averaged over every E-W beam positions
     and for each chime frequency channel averaged over every 128 HFB subfrequencies.
+    This task assumes that the loaded HFBData contains a rectangular selection of beams,
+    i.e., nbeam_ew x nbeam_ns = nbeam.
 
     Attributes
     ----------
@@ -179,60 +162,39 @@ class HFBSensitivityFlagging(task.SingleTask):
 
         Returns
         -------
-        out : containers.HFBSensitivityMask
+        out : containers.HFBDirectionalRFIMask
             Boolean mask that can be converted to a draco container `LocalizedRFIMask`
             with the task `HFBMaskConversion` to mask contaminated
             frequencies, beam/el, and time samples.
 
         """
-        # Extract data and weight arrays
-        data = stream.hfb[:].view(np.ndarray)
-        weight = stream.weight[:].view(np.ndarray)
-        freq = stream.freq[:]
-        time = stream.time[:]
-
-        # Number of samples per data point in the HFB data:
-        # n_samp = delta_nu * delta_t * (1 - frac_lost), where
-        # delta_nu is the frequency resolution (390.625 kHz / 128),
-        # delta_t the integration time (~10.066 s), and
-        # frac_lost is the fraction of integration that was lost upstream
-        nfreq, nsubfreq, nbeam, ntime = data.shape
-        freq_width = stream.index_map["freq"]["width"][0] * 1e6
-        delta_nu = freq_width / nsubfreq
-        delta_t = np.median(np.diff(time))
-        nbeam_ew = 4
-        nbeam_ns = nbeam // nbeam_ew
-        beam_ns = np.arange(nbeam_ns)
-
-        # frac_lost is not distributed, so we need to cut out the frequencies
-        # that are local for the stream
-        ax = list(stream.hfb.attrs["axis"]).index("freq")
-        nfreq_local = stream.hfb.local_shape[ax]
-        sf = stream.hfb.local_offset[ax]
-        ef = sf + nfreq_local
-        frac_lost = stream["flags/frac_lost"][sf:ef]
-        n_samp = delta_nu * delta_t * (1.0 - frac_lost)
-
-        # Ideal radiometer equation
-        radiometer = data**2 * tools.invert_no_zero(n_samp)[:, None, None, :]
+        # Get the dimensions of the data array
+        nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
+        nbeam_ew = len(stream.beam_ew)
+        nbeam_ns = len(stream.beam_ns)
 
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
-        sensitivity_metric = 2.0 * tools.invert_no_zero(radiometer * weight)
+        sensitivities = sensitivity_metric(stream=stream, average_beams=False)
 
         # Averaging over E-W beams
-        sensitivity_metric = sensitivity_metric.reshape(
+        sensitivities = sensitivities.reshape(
             nfreq, nsubfreq, nbeam_ew, nbeam_ns, ntime
         )
-        sensitivity_metric = np.mean(sensitivity_metric, axis=2)
+        sensitivities = np.mean(sensitivities, axis=2)
 
         # Detecting RFI
-        count = sensitivity_metric > 1.0 + self.threshold * self.std
+        count = sensitivities > 1.0 + self.threshold * self.std
         count = np.sum(count, axis=1)
         mask = count > self.threshold_subfreq
 
+        # Extract axis arrays
+        freq = stream.freq[:]
+        time = stream.time[:]
+        beam_ns = stream.beam_ns[:]
+
         # Create container to hold output
-        out = HFBSensitivityMask(beam_ns=beam_ns, freq=freq, time=time)
+        out = HFBDirectionalRFIMask(beam_ns=beam_ns, freq=freq, time=time)
 
         # Save mask to output container
         out.mask[:] = mask
@@ -269,7 +231,7 @@ class HFBMaskConversion(task.SingleTask):
 
         Parameters
         ----------
-        rfimask : containers.HFBSensitivityMask
+        rfimask : containers.HFBDirectionalRFIMask
             RFI mask whose axes are freq, beam_ns, and time.
 
         Returns
@@ -367,3 +329,66 @@ class HFBMaskConversion(task.SingleTask):
 
         # Return output container
         return out
+
+
+def sensitivity_metric(stream, average_beams):
+    """Compute the sensitivity metric for the given HFB data.
+
+    This function calculates sensitivity values for each CHIME frequency,
+    HFB subfrequency, beam ID, and time sample in the provided HFB data.
+
+    Parameters
+    ----------
+    stream : HFBData
+        HFB Data to compute sensitivity metric.
+    average_beams : bool
+        If True, average the data and weights across all beams before computing
+        the sensitivity metric, resulting in a shape of [freq, subfreq, time].
+        If False, compute the sensitivity per beam, resulting in
+        [freq, subfreq, beam, time].
+
+    Returns
+    -------
+    sensitivity metric : np.ndarray
+        An array of computed sensitivity values with shape:
+        - [freq, subfreq, time] if average_beams is True
+        - [freq, subfreq, beam, time] if average_beams is False
+    """
+    # Extract the data and weight arrays
+    data = stream.hfb[:].view(np.ndarray)
+    weight = stream.weight[:].view(np.ndarray)
+
+    if average_beams:
+        data = np.mean(data, axis=2)
+        weight = np.mean(weight, axis=2)
+
+    # delta_nu is the frequency resolution of HFB data (390.625 kHz / 128)
+    freq_width = stream.index_map["freq"]["width"][0] * 1e6
+    nsubfreq = data.shape[1]
+    delta_nu = freq_width / nsubfreq
+
+    # delta_t is the integration time (~10.066 s)
+    delta_t = np.median(np.diff(stream.time[:]))
+
+    # frac_lost is the fraction of integration that was lost upstream,
+    # but it is not distributed, so we need to cut out the frequencies
+    # that are local for the stream
+    ax = list(stream.hfb.attrs["axis"]).index("freq")
+    nfreq_local = stream.hfb.local_shape[ax]
+    sf = stream.hfb.local_offset[ax]
+    ef = sf + nfreq_local
+    frac_lost = stream["flags/frac_lost"][sf:ef]
+
+    # Number of samples per data point in the HFB data
+    n_samp = delta_nu * delta_t * (1.0 - frac_lost)
+
+    if average_beams:
+        inv_n_samp = tools.invert_no_zero(n_samp)[:, None, :]
+    else:
+        inv_n_samp = tools.invert_no_zero(n_samp)[:, None, None, :]
+
+    # The ideal radiometer equation
+    radiometer = data**2 * inv_n_samp
+
+    # Compute and return the sensitivity metric
+    return 2.0 * tools.invert_no_zero(radiometer * weight)
