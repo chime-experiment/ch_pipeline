@@ -99,6 +99,7 @@ authors:
 - given-names: "Adam"
   family-names: "Lanman"
   affiliation: "MIT"
+  orcid: "https://orcid.org/0000-0003-2116-3573"
 
 - given-names: "Rick"
   family-names: "Smegal"
