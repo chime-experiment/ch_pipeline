@@ -129,3 +129,8 @@ authors:
 - given-names: "Alex"
   family-names: "Reda"
   affiliation: "Yale University"
+
+- given-names: "Yukari"
+  family-names: "Uchibori"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0009-0003-4114-1301"
