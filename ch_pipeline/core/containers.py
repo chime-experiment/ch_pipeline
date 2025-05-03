@@ -41,6 +41,7 @@ from draco.core.containers import (
     StaticGainData,
     TimeStream,
     TODContainer,
+    SpectroscopicCatalog
 )
 from draco.core.task import MPILoggedTask
 
@@ -976,6 +977,21 @@ class Photometry(ContainerBase):
     @property
     def source(self):
         return self.index_map["source"]
+
+
+class SpectralLineCatalog(SpectroscopicCatalog):
+    """A container for spectral line sources."""
+
+    _table_spec: ClassVar = {
+        "flux": {
+            "columns": [["line_depth", np.float64], ["continuum", np.float64]],
+            "axis": "object_id",
+        },
+        "significance": {
+            "columns": [["signal_to_noise", np.float64], ["npixels", int]],
+            "axis": "object_id",
+        },
+    }
 
 
 class RawContainer(TODContainer):
