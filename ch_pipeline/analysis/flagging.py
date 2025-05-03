@@ -18,6 +18,7 @@ from draco.analysis import flagging as dflagging
 from draco.analysis.ringmapmaker import find_grid_indices
 from draco.core import containers as dcontainers
 from draco.core import io, task
+from scipy.spatial import KDTree
 
 from ..core import containers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
@@ -2841,7 +2842,206 @@ def search_grid(xeval, window, x, wrap=False):
     return xlb, xub
 
 
-class MaskSourcePixelsFromCatalog(task.SingleTask):
+class CatalogBase(task.SingleTask):
+    """Shared methods for catalog-based masking and tapering."""
+
+    def setup(self, manager, catalog, horizon=None):
+        """Save the telescope instance and the catalog of bright sources.
+
+        Parameters
+        ----------
+        manager : io.TelescopeConvertible
+            Telescope/manager used to determine the location of bright sources.
+        catalog : subclass of SourceCatalog
+            Catalog containing bright sources to mask.
+        horizon : HorizonLimit
+            Altitude of the horizon as a function of azimuth.
+        """
+        # Save the telescope and horizon
+        self.telescope = io.get_telescope(manager)
+        self.latitude = np.radians(self.telescope.latitude)
+
+        self.horizon = horizon
+
+        # Save the minimum north-south separation
+        xind, yind, min_xsep, min_ysep = find_grid_indices(self.telescope.baselines)
+        self.min_ysep = min_ysep
+        self.max_ysep = min_ysep * np.max(np.abs(yind))
+
+        # Save the catalog
+        self.catalog = catalog
+        self.has_redshift = "redshift" in self.catalog
+
+    def get_source_freq(self):
+        """Compute the 21 cm frequency corresponding to each source's redshift.
+
+        Redshift values and their uncertainties taken from `self.catalog["redshift"]`.
+
+        Returns
+        -------
+        src_freq : np.ndarray[nsource,]
+            Rest-frame frequency in MHz of 21 cm emission or absorption
+            for each source, computed as freq_21 / (1 + z), where freq_21 is
+            the rest-frame frequency of the 21 cm line.
+        src_freq_err : np.ndarray[nsource,]
+            Uncertainty in source frequency in MHz, propagated from redshift errors.
+        """
+        from cora.util import units
+
+        z = self.catalog["redshift"]["z"][:]
+        zerr = self.catalog["redshift"]["z_error"][:]
+
+        src_freq = units.nu21 / (1.0 + z)
+        src_freq_err = src_freq * zerr / (1.0 + z)
+
+        return src_freq, src_freq_err
+
+    def get_z_limit(self, x, y):
+        """Calculate the z coordinate of the horizon.
+
+        Parameters
+        ----------
+        x : np.ndarray[ncoord,]
+            Telescope-x coordinate of sources.
+        y : np.ndarray[ncoord,]
+            Telescope-y coordinate of sources.
+
+        Returns
+        -------
+        zlim : np.ndarray[ncoord,]
+            Telescope-z coordinate cooresponding to the horizon
+            at the azimuthal angle given by x and y.
+        """
+        if self.horizon is not None:
+            az = np.degrees(np.arctan2(x, y))
+            min_alt = self.horizon.get_horizon_limit(az)
+            return np.sin(np.radians(min_alt))
+
+        return 0.0
+
+
+class SourcePixelsMixin:
+    """Mixin providing coordinates of the transit of sources in a map."""
+
+    def get_source_coordinates(self, data):
+        """Determine the coordinates of bright sources in a beamformed dataset.
+
+        Parameters
+        ----------
+        data : RingMap or HybridVisStream
+            Beamformed dataset to be flagged. Must have a "ra" axis and
+            an "el" axis.
+
+        Returns
+        -------
+        ind : np.ndarray[nsource,]
+            Index of the source in the catalog.
+        src_ra : np.ndarray[nsource,]
+            Right ascension of the sources in the catalog.
+        src_dec : np.ndarray[nsource,]
+            Declination of the sources in the catalog.
+        src_y : np.ndarray[nsource,]
+            Telescope-y coordinate of the sources in the catalog
+            at transit.
+        """
+        from draco.analysis.beamform import icrs_to_cirs
+
+        # Determine the coordinates of the sources in the current epoch
+        if "lsd" in data.attrs:
+            lsd = data.attrs["lsd"]
+        elif "csd" in data.attrs:
+            lsd = data.attrs["csd"]
+        else:
+            lsd = None
+
+        src_ra, src_dec = (
+            self.catalog["position"]["ra"][:],
+            self.catalog["position"]["dec"][:],
+        )
+        if lsd is not None:
+            epoch = np.atleast_1d(self.telescope.lsd_to_unix(lsd))
+            coords = [icrs_to_cirs(src_ra, src_dec, ep) for ep in epoch]
+            src_ra = np.mean([coord[0] for coord in coords], axis=0)
+            src_dec = np.mean([coord[1] for coord in coords], axis=0)
+
+        src_ind = np.arange(src_ra.size, dtype=int)
+
+        # Calculate source telescope y coordinate,
+        # given by sin(za) at transit.
+        src_y = np.sin(np.radians(src_dec) - self.latitude)
+
+        return src_ind, src_ra, src_dec, src_y
+
+
+class SourceTracksMixin(SourcePixelsMixin):
+    """Mixin providing coordinates of the tracks sources take through a map.
+
+    Attributes
+    ----------
+    max_ha : float
+        Do not consider sources beyond this hour angle in degrees.
+    upsample : int
+        Upsample the tracks this factor relative to the native resolution
+        of the maps in RA.  This will result in a smoother mask or taper.
+    """
+
+    max_ha = config.Property(proptype=float)
+    upsample = config.Property(proptype=int)
+
+    def get_source_coordinates(self, data):
+        """Determine the coordinates of bright source tracks in a beamformed dataset.
+
+        Parameters
+        ----------
+        data : RingMap or HybridVisStream
+            Beamformed dataset to be flagged. Must have a "ra" axis and
+            an "el" axis.
+
+        Returns
+        -------
+        ind : np.ndarray[ncoord,]
+            Index of the source in the catalog for each coordinate
+            in the flattened array.
+        ra : np.ndarray[ncoord,]
+            Right ascension of the U-shaped tracks of sources
+            in the catalog.  Flattened into a 1-d array.
+        dec : np.ndarray[ncoord,]
+            Declination of the sources in the catalog.  This is
+            replicated nra times for each source and flattened
+            into a 1-d array.
+        y : np.ndarray[ncoord,]
+            Telescope-y coordinate of the U-shaped tracks of
+            sources in the catalog.  Flattened into a 1-d array.
+        """
+        src_ind, src_ra, src_dec, src_y = super().get_source_coordinates(data)
+
+        ra = data.ra
+        if self.upsample is not None and self.upsample > 1:
+            ra = np.linspace(
+                ra[0],
+                ra[-1] + (ra[1] - ra[0]),
+                num=ra.size * self.upsample,
+                endpoint=False,
+            )
+
+        ha = np.radians(ra[np.newaxis, :] - src_ra[:, np.newaxis])
+        ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
+
+        x, y, z = interferometry.sph_to_ground(
+            ha, self.latitude, np.radians(src_dec[:, np.newaxis])
+        )
+
+        zlim = self.get_z_limit(x, y)
+        flag = z > zlim
+        if self.max_ha is not None:
+            flag &= np.abs(ha) <= np.radians(self.max_ha)
+
+        valid = np.nonzero(flag)
+
+        return src_ind[valid[0]], data.ra[valid[1]], src_dec[valid[0]], y[valid]
+
+
+class MaskFromCatalogBase(CatalogBase):
     """Mask regions of a map near bright point sources.
 
     Attributes
@@ -2852,12 +3052,17 @@ class MaskSourcePixelsFromCatalog(task.SingleTask):
     common_freq : bool
         Ensure the (non-aliased) mask is frequency independent by
         constructing the windows using the minimum frequency.
-    nsigma_ra : bool
+    nsigma_ra : float
         Width of the window to mask in the RA direction specified in
         number of sigma of the primary beam.
-    nsigma_dec : bool
+    nsigma_dec : float
         Width of the window to mask in the dec direction specified
         in number of sigma of the synthesized beam.
+    nsigma_freq : float
+        Width of the window to mask in the freq direction specified
+        in the number of sigma given by the catalog redshift error.
+        Only relevant if the catalog provided during setup is a
+        SpectroscopicCatalog.
     """
 
     mask_alias = config.Property(proptype=bool, default=False)
@@ -2865,28 +3070,7 @@ class MaskSourcePixelsFromCatalog(task.SingleTask):
 
     nsigma_ra = config.Property(proptype=float, default=3.0)
     nsigma_dec = config.Property(proptype=float, default=3.0)
-
-    def setup(self, manager, catalog):
-        """Save the telescope instance and the catalog of bright sources.
-
-        Parameters
-        ----------
-        manager : io.TelescopeConvertible
-            Telescope/manager used to determine the location of bright sources.
-        catalog : containers.SourceCatalog
-            Catalog containing bright sources to mask.
-        """
-        # Save the telescope
-        self.telescope = io.get_telescope(manager)
-        self.latitude = np.radians(self.telescope.latitude)
-
-        # Save the minimum north-south separation
-        xind, yind, min_xsep, min_ysep = find_grid_indices(self.telescope.baselines)
-        self.min_ysep = min_ysep
-        self.max_ysep = min_ysep * np.max(np.abs(yind))
-
-        # Save the catalog
-        self.catalog = catalog
+    nsigma_freq = config.Property(proptype=float, default=3.0)
 
     def process(self, data):
         """Generate a mask that excludes pixels near transit of bright point sources.
@@ -2924,9 +3108,12 @@ class MaskSourcePixelsFromCatalog(task.SingleTask):
         mask = out.mask[:].local_array
 
         # Determine the coordinates of the sources in the current epoch
-        src_ra, src_dec, src_y = self.get_source_coordinates(data)
+        src_ind, src_ra, src_dec, src_y = self.get_source_coordinates(data)
 
         nsource = src_ra.size
+
+        if self.has_redshift:
+            src_freq, src_freq_err = self.get_source_freq()
 
         # Get aliased coordinates as well
         if self.mask_alias:
@@ -2969,6 +3156,11 @@ class MaskSourcePixelsFromCatalog(task.SingleTask):
         # Loop over sources
         for ii in np.ndindex(nfreq, nsource):
 
+            if self.has_redshift:
+                freq_diff = (freq[ii[0]] - src_freq[ii[1]]) / src_freq_err[ii[1]]
+                if abs(freq_diff) > self.nsigma_freq:
+                    continue
+
             if xupper[ii] >= xlower[ii]:
                 xslice = [slice(xlower[ii], xupper[ii])]
             else:
@@ -2985,54 +3177,21 @@ class MaskSourcePixelsFromCatalog(task.SingleTask):
         # Return the output container with the source mask
         return out
 
-    def get_source_coordinates(self, data):
-        """Determine the coordinates of bright sources in a beamformed dataset.
 
-        Parameters
-        ----------
-        data : RingMap or HybridVisStream
-            Beamformed dataset to be flagged. Must have a "ra" axis and
-            an "el" axis.
-
-        Returns
-        -------
-        src_ra : np.ndarray[nsource,]
-            Right ascension of the sources in the catalog.
-        src_dec : np.ndarray[nsource,]
-            Declination of the sources in the catalog.
-        src_y : np.ndarray[nsource,]
-            Telescope-y coordinate of the sources in the catalog
-            at transit.
-        """
-        from draco.analysis.beamform import icrs_to_cirs
-
-        # Determine the coordinates of the sources in the current epoch
-        if "lsd" in data.attrs:
-            lsd = data.attrs["lsd"]
-        elif "csd" in data.attrs:
-            lsd = data.attrs["csd"]
-        else:
-            lsd = None
-
-        src_ra, src_dec = (
-            self.catalog["position"]["ra"][:],
-            self.catalog["position"]["dec"][:],
-        )
-        if lsd is not None:
-            epoch = np.atleast_1d(self.telescope.lsd_to_unix(lsd))
-            coords = [icrs_to_cirs(src_ra, src_dec, ep) for ep in epoch]
-            src_ra = np.mean([coord[0] for coord in coords], axis=0)
-            src_dec = np.mean([coord[1] for coord in coords], axis=0)
-
-        # Calculate source telescope y coordinate,
-        # given by sin(za) at transit.
-        src_y = np.sin(np.radians(src_dec) - self.latitude)
-
-        return src_ra, src_dec, src_y
+class MaskSourcePixelsFromCatalog(SourcePixelsMixin, MaskFromCatalogBase):
+    """Mask regions of a map near bright point sources."""
 
 
-class MaskSourceTracksFromCatalog(MaskSourcePixelsFromCatalog):
-    """Mask regions of a map near the U-shaped tracks of bright point sources.
+class MaskSourceTracksFromCatalog(SourceTracksMixin, MaskFromCatalogBase):
+    """Mask regions of a map near the U-shaped tracks of bright point sources."""
+
+
+MaskBrightSourcePixels = MaskSourcePixelsFromCatalog
+MaskBrightSourceTracks = MaskSourceTracksFromCatalog
+
+
+class TaperFromCatalogBase(CatalogBase):
+    """Taper regions of a map near bright point sources.
 
     Attributes
     ----------
@@ -3042,26 +3201,37 @@ class MaskSourceTracksFromCatalog(MaskSourcePixelsFromCatalog):
     common_freq : bool
         Ensure the (non-aliased) mask is frequency independent by
         constructing the windows using the minimum frequency.
-    nsigma_ra : bool
+    nsigma_ra : float
         Width of the window to mask in the RA direction specified in
         number of sigma of the primary beam.
-    nsigma_dec : bool
+    nsigma_dec : float
         Width of the window to mask in the dec direction specified
         in number of sigma of the synthesized beam.
-    max_ha : float
-        Mask sources out to this hour angle in degrees.
+    nsigma_freq : float
+        Width of the window to mask in the freq direction specified
+        in the number of sigma given by the catalog redshift error.
+        Only relevant if the catalog provided during setup has
+        redshift information
+    spatial_taper : float
+        Extent over which the taper transitions from 0 to 1 in
+        units of normalized spatial coordinates.
+    spectral_taper : float
+        Extent over which the taper transitions from 0 to 1 in
+        the normalized spectral coordinates.
     """
 
     mask_alias = config.Property(proptype=bool, default=False)
     common_freq = config.Property(proptype=bool, default=False)
 
-    nsigma_ra = config.Property(proptype=float, default=1.0)
+    nsigma_ra = config.Property(proptype=float, default=3.0)
     nsigma_dec = config.Property(proptype=float, default=3.0)
+    nsigma_freq = config.Property(proptype=float, default=3.0)
 
-    max_ha = config.Property(proptype=float)
+    spatial_taper = config.Property(proptype=float, default=1.0)
+    spectral_taper = config.Property(proptype=float, default=0.0)
 
-    def get_source_coordinates(self, data):
-        """Determine the coordinates of bright source tracks in a beamformed dataset.
+    def process(self, data):
+        """Generate a mask that excludes pixels near transit of bright point sources.
 
         Parameters
         ----------
@@ -3071,37 +3241,140 @@ class MaskSourceTracksFromCatalog(MaskSourcePixelsFromCatalog):
 
         Returns
         -------
-        ra : np.ndarray[ncoord,]
-            Right ascension of the U-shaped tracks of sources
-            in the catalog.  Flattened into a 1-d array.
-        dec : np.ndarray[ncoord,]
-            Declination of the sources in the catalog.  This is
-            replicated nra times for each source and flattened
-            into a 1-d array.
-        y : np.ndarray[ncoord,]
-            Telescope-y coordinate of the U-shaped tracks of
-            sources in the catalog.  Flattened into a 1-d array.
+        out : RingMapMask
+            Boolean mask with True indicating that a pixel is near
+            a bright source.
         """
-        src_ra, src_dec, src_y = super().get_source_coordinates(data)
+        # Distribute over frequencies
+        data.redistribute("freq")
 
-        ha = np.radians(data.ra[np.newaxis, :] - src_ra[:, np.newaxis])
-        ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
+        min_freq = np.min(data.freq)
+        freq = data.freq[data.data[:].local_bounds]
+        nfreq = freq.size
 
-        x, y, z = interferometry.sph_to_ground(
-            ha, self.latitude, np.radians(src_dec[:, np.newaxis])
+        # Create output container
+        out = dcontainers.RingMapTaper(
+            axes_from=data,
+            attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
+        )
+        out.redistribute("freq")
+
+        taper = out.taper[:].local_array
+        taper[:] = 1.0
+
+        # Determine the coordinates of the sources in the current epoch
+        src_ind, src_ra, src_dec, src_y = self.get_source_coordinates(data)
+
+        nsource = np.unique(src_ind).size
+
+        src_bnd = np.concatenate(
+            ([0], np.flatnonzero(np.diff(src_ind) > 0) + 1, [src_ind.size])
         )
 
-        flag = z > 0.0
-        if self.max_ha is not None:
-            flag &= np.abs(ha) <= np.radians(self.max_ha)
+        if self.has_redshift:
+            src_freq, src_freq_err = self.get_source_freq()
+            window_freq = self.nsigma_freq * src_freq_err
 
-        valid = np.nonzero(flag)
+        # Get aliased coordinates as well
+        if self.mask_alias:
+            b = scipy.constants.c / (freq[:, np.newaxis] * 1e6 * self.min_ysep)
+            src_yalias = src_y + (1.0 - 2.0 * (src_y > 0.0)) * b  # nfreq, nsource
 
-        return data.ra[valid[1]], src_dec[valid[0]], y[valid]
+        # Get the size of the window
+        nu = np.full((nfreq, 1), min_freq) if self.common_freq else freq[:, np.newaxis]
+        wavelength = scipy.constants.c / (nu * 1e6)
+
+        ## In the sin(za) direction, we use the synthesized beam.
+        ## 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme.
+        sigma_y = 0.85 * wavelength / (self.max_ysep * 2.35482)
+        window_y = self.nsigma_dec * sigma_y
+
+        ## In the RA direction, we use the primary beam width.
+        sigma_x = cal_utils.guess_fwhm(
+            nu,
+            pol="X",
+            dec=np.radians(src_dec),
+            sigma=True,
+            voltage=False,
+            seconds=False,
+        )
+        window_x = self.nsigma_ra * sigma_x
+
+        # Get the map grid in RA and telescope y
+        x = data.ra
+        y = data.index_map["el"]
+
+        wrap_x = ((x[-1] + (x[1] - x[0])) % 360.0) == x[0]
+
+        xg, yg = np.meshgrid(x, y, indexing="ij")
+
+        # Create a function for applying a cosine taper.
+        def _cosine_taper(d, taper_width):
+            """Cosine taper function."""
+            d_clipped = np.clip(d - 1.0, 0.0, taper_width)
+            return 0.5 * (
+                1 + np.cos(np.pi * d_clipped * tools.invert_no_zero(taper_width))
+            )
+
+        # Loop over sources
+        for ff, ss in np.ndindex(nfreq, nsource):
+
+            if self.has_redshift:
+                freq_diff = abs((freq[ff] - src_freq[ss]) / window_freq[ss])
+                if freq_diff > (1.0 + self.spectral_taper):
+                    continue
+                freq_factor = _cosine_taper(freq_diff, self.spectral_taper)
+            else:
+                freq_factor = 1.0
+
+            this_src = slice(src_bnd[ss], src_bnd[ss + 1])
+
+            win_x = window_x[ff, src_bnd[ss]]
+            win_y = window_y[ff, 0]
+
+            track_x = src_ra[this_src] / win_x
+            track_y = src_y[this_src] / win_y
+
+            if wrap_x:
+                track_x = np.concatenate(
+                    (track_x, track_x + 360.0 / win_x, track_x - 360.0 / win_x)
+                )
+                track_y = np.concatenate((track_y, track_y, track_y))
+
+            if self.mask_alias:
+                track_yalias = src_yalias[this_src] / win_y
+                if wrap_x:
+                    track_yalias = np.concatenate(
+                        (track_yalias, track_yalias, track_yalias)
+                    )
+
+                track_x = np.concatentate((track_x, track_x))
+                track_y = np.concatentate((track_y, track_yalias))
+
+            track_points = np.column_stack((track_x, track_y))
+
+            grid_points = np.stack((xg / win_x, yg / win_y), axis=-1)
+
+            tree = KDTree(track_points)
+
+            distances, _ = tree.query(grid_points)
+
+            taper[:, ff] *= 1.0 - freq_factor * _cosine_taper(
+                distances, self.spatial_taper
+            )
+
+        # Return the output container with the source mask
+        return out
 
 
-MaskBrightSourcePixels = MaskSourcePixelsFromCatalog
-MaskBrightSourceTracks = MaskSourceTracksFromCatalog
+class TaperSourcePixelsFromCatalog(SourcePixelsMixin, TaperFromCatalogBase):
+    """Taper regions of a map near bright point sources."""
+
+
+class TaperSourceTracksFromCatalog(SourceTracksMixin, TaperFromCatalogBase):
+    """Taper regions of a map near the U-shaped tracks of bright point sources."""
 
 
 class MaskAliasedMap(task.SingleTask):
