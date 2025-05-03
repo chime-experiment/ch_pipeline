@@ -153,6 +153,7 @@ class CHIME(telescope.PolarisedTelescope):
         self.latitude = chime.latitude
         self.longitude = chime.longitude
         self.altitude = chime.altitude
+        self.skyfield = chime.skyfield
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
