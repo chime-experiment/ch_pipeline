@@ -3313,10 +3313,12 @@ class TaperFromCatalogBase(CatalogBase):
         # Create a function for applying a cosine taper.
         def _cosine_taper(d, taper_width):
             """Cosine taper function."""
-            d_clipped = np.clip(d - 1.0, 0.0, taper_width)
-            return 0.5 * (
-                1 + np.cos(np.pi * d_clipped * tools.invert_no_zero(taper_width))
-            )
+            if taper_width > 0.0:
+                d_clipped = np.clip(d - 1.0, 0.0, taper_width)
+                return 0.5 * (1.0 + np.cos(np.pi * d_clipped / taper_width))
+
+            # If taper_width is zero, use a hard cutoff.
+            return (d <= 1.0).astype(float)
 
         # Loop over sources
         for ff, ss in np.ndindex(nfreq, nsource):
