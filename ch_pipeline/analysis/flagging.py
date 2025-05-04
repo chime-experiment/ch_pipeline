@@ -3038,7 +3038,7 @@ class SourceTracksMixin(SourcePixelsMixin):
 
         valid = np.nonzero(flag)
 
-        return src_ind[valid[0]], data.ra[valid[1]], src_dec[valid[0]], y[valid]
+        return src_ind[valid[0]], ra[valid[1]], src_dec[valid[0]], y[valid]
 
 
 class MaskFromCatalogBase(CatalogBase):
