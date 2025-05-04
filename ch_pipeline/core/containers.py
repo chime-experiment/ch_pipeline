@@ -38,10 +38,10 @@ from draco.core.containers import (
     ContainerBase,
     FormedBeam,
     FreqContainer,
+    SpectroscopicCatalog,
     StaticGainData,
     TimeStream,
     TODContainer,
-    SpectroscopicCatalog
 )
 from draco.core.task import MPILoggedTask
 
