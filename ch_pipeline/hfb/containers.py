@@ -6,19 +6,15 @@ from typing import ClassVar
 import numpy as np
 from caput import memh5, tod
 from ch_util import andata
-from draco.core.containers import DataWeightContainer, SiderealContainer, TODContainer
+from draco.core.containers import (
+    COMPRESSION,
+    COMPRESSION_OPTS,
+    DataWeightContainer,
+    SiderealContainer,
+    TODContainer,
+)
 
 from ..core.containers import FreqContainer, RawContainer
-
-# Try to import bitshuffle to set the default compression options
-try:
-    import bitshuffle.h5
-
-    COMPRESSION = bitshuffle.h5.H5FILTER
-    COMPRESSION_OPTS = (0, bitshuffle.h5.H5_COMPRESS_LZ4)
-except ImportError:
-    COMPRESSION = None
-    COMPRESSION_OPTS = None
 
 
 class HFBContainer(DataWeightContainer):
