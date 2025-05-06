@@ -10,6 +10,16 @@ from draco.core.containers import DataWeightContainer, SiderealContainer, TODCon
 
 from ..core.containers import FreqContainer, RawContainer
 
+# Try to import bitshuffle to set the default compression options
+try:
+    import bitshuffle.h5
+
+    COMPRESSION = bitshuffle.h5.H5FILTER
+    COMPRESSION_OPTS = (0, bitshuffle.h5.H5_COMPRESS_LZ4)
+except ImportError:
+    COMPRESSION = None
+    COMPRESSION_OPTS = None
+
 
 class HFBContainer(DataWeightContainer):
     """A base class for all HFB containers.
@@ -594,6 +604,10 @@ class HFBDirectionalRFIMask(FreqContainer, TODContainer):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 512),
+            "truncate": True,
         },
     }
 
