@@ -4,18 +4,20 @@ import json
 from os import listdir, path
 
 import numpy as np
-from caput import config, mpiarray, mpiutil, tod
-from caput.pipeline import PipelineRuntimeError
-from caput.time import STELLAR_S, unix_to_datetime
+from caput import config, mpiarray
+from caput.algorithms import invert_no_zero
+from caput.astro.time import STELLAR_S, unix_to_datetime
+from caput.containers import ContainerPrototype, tod
+from caput.pipeline import exceptions, tasklib
+from caput.util import mpitools
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import holography, tools
 from chimedb.core import connect as connect_database
 from draco.analysis.transform import Regridder
-from draco.core import io, task
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
+from draco.core import io
+from draco.core.containers import SiderealStream, TimeStream, TrackBeam
 from draco.util import regrid
-from draco.util.tools import invert_no_zero
 from scipy import constants
 
 from ..core.containers import TransitFitParams
@@ -26,7 +28,7 @@ SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
 CHIME_CYL_W = 22.0  # m
 
 
-class TransitGrouper(task.SingleTask):
+class TransitGrouper(tasklib.base.ContainerTask):
     """Group transits from a sequence of TimeStream objects.
 
     Attributes
@@ -77,12 +79,12 @@ class TransitGrouper(task.SingleTask):
         # Get list of holography observations
         # Only allowed to query database from rank0
         db_runs = None
-        if mpiutil.rank0:
+        if mpitools.rank0:
             connect_database()
             db_runs = list(get_holography_obs(self.db_source))
             db_runs = [(int(r.id), (r.start_time, r.finish_time)) for r in db_runs]
-        self.db_runs = mpiutil.bcast(db_runs, root=0)
-        mpiutil.barrier()
+        self.db_runs = mpitools.bcast(db_runs, root=0)
+        mpitools.barrier()
 
     def process(self, tstream):
         """Take in a timestream and accumulate, group into whole transits.
@@ -323,8 +325,8 @@ class TransitRegridder(Regridder):
             self.log.error(str(e))
             success = 0
         # Check other ranks have completed
-        success = mpiutil.allreduce(success)
-        if success != mpiutil.size:
+        success = mpitools.allreduce(success)
+        if success != mpitools.size:
             self.log.warning("Regridding failed. Skipping transit.")
             return None
 
@@ -354,7 +356,7 @@ class TransitRegridder(Regridder):
         return new_data
 
 
-class EdgeFlagger(task.SingleTask):
+class EdgeFlagger(tasklib.base.ContainerTask):
     """Flag the edges of the transit.
 
     Parameters
@@ -406,7 +408,7 @@ class EdgeFlagger(task.SingleTask):
         return track
 
 
-class TransitResampler(task.SingleTask):
+class TransitResampler(tasklib.base.ContainerTask):
     """Resample the beam at specific RAs.
 
     Attributes
@@ -514,7 +516,7 @@ class TransitResampler(task.SingleTask):
         return y, w
 
 
-class MakeHolographyBeam(task.SingleTask):
+class MakeHolographyBeam(tasklib.base.ContainerTask):
     """Repackage a holography transit into a beam container.
 
     The visibilities will be grouped according to their respective 26 m
@@ -551,7 +553,7 @@ class MakeHolographyBeam(task.SingleTask):
         if len(input_26m) != 2:
             msg = "Did not find exactly two 26m inputs in the data."
             self.log.error(msg)
-            raise PipelineRuntimeError(msg)
+            raise exceptions.PipelineRuntimeError(msg)
 
         # Separate products by 26 m inputs
         prod_groups = []
@@ -570,7 +572,7 @@ class MakeHolographyBeam(task.SingleTask):
                 f"({prod_groups[0].shape[0]:d}, {prod_groups[1].shape[0]:d}) != {inputs.shape[0]:d}"
             )
             self.log.error(msg)
-            raise PipelineRuntimeError(msg)
+            raise exceptions.PipelineRuntimeError(msg)
 
         # Sort based on the id in the layout database
         corr_id = np.array([inp.id for inp in inputmap])
@@ -637,7 +639,7 @@ class MakeHolographyBeam(task.SingleTask):
                 "Products do not separate exclusively into co- and cross-polar groups."
             )
             self.log.error(msg)
-            raise PipelineRuntimeError(msg)
+            raise exceptions.PipelineRuntimeError(msg)
 
         # Make new index map
         ra = data.attrs["cirs_ra"]
@@ -648,7 +650,7 @@ class MakeHolographyBeam(task.SingleTask):
                 "declination of holography source."
             )
             self.log.error(msg)
-            raise PipelineRuntimeError(msg)
+            raise exceptions.PipelineRuntimeError(msg)
         theta = np.ones_like(phi) * data.attrs["dec"]
         pol = np.array(["co", "cross"], dtype="S5")
 
@@ -678,7 +680,7 @@ class MakeHolographyBeam(task.SingleTask):
         return track
 
 
-class ConstructStackedBeam(task.SingleTask):
+class ConstructStackedBeam(tasklib.base.ContainerTask):
     """Construct the effective beam for stacked baselines.
 
     Parameters
@@ -966,7 +968,7 @@ class HolographyTransitFit(TransitFit):
         return fit
 
 
-class ApplyHolographyGains(task.SingleTask):
+class ApplyHolographyGains(tasklib.base.ContainerTask):
     """Apply gains to a holography transit.
 
     Attributes
@@ -1018,7 +1020,7 @@ class ApplyHolographyGains(task.SingleTask):
         return track
 
 
-class TransitStacker(task.SingleTask):
+class TransitStacker(tasklib.base.ContainerTask):
     """Stack a number of transits together.
 
     The weights will be inverted and stacked as variances. The variance
@@ -1160,8 +1162,8 @@ class TransitStacker(task.SingleTask):
         return self.stack
 
 
-class FilterHolographyProcessed(task.MPILoggedTask):
-    """Filter holography transit DataIntervals produced by `io.QueryDatabase`.
+class FilterHolographyProcessed(tasklib.base.MPILoggedTask):
+    """Filter holography transit DataIntervals produced by `dataquery.QueryDatabase`.
 
     Excludes DataIntervals which are already processed.
 
@@ -1195,7 +1197,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
             for fname in processed_files:
                 if not path.splitext(fname)[1] == ".h5":
                     continue
-                with ContainerBase.from_file(
+                with ContainerPrototype.from_file(
                     fname, ondisk=True, distributed=False, mode="r"
                 ) as fh:
                     obs_id = fh.attrs.get("observation_id", None)
@@ -1205,10 +1207,10 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
         # Query database for observations of this source
         hol_obs = None
-        if mpiutil.rank0:
+        if mpitools.rank0:
             hol_obs = list(get_holography_obs(self.source))
-        self.hol_obs = mpiutil.bcast(hol_obs, root=0)
-        mpiutil.barrier()
+        self.hol_obs = mpitools.bcast(hol_obs, root=0)
+        mpitools.barrier()
 
     def next(self, intervals):
         """Filter input files to exclude those already processed.

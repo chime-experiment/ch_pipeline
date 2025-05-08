@@ -16,19 +16,21 @@ import gc
 from collections import Counter
 from typing import ClassVar
 
-import caput.time as ctime
+import caput.astro.time as ctime
 import numpy as np
-from caput import config, pipeline, tod
-from caput.weighted_median import weighted_median
+from caput import config
+from caput.algorithms.median import weighted_median
+from caput.containers import tod
+from caput.pipeline import exceptions, tasklib
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, tools
 from draco.analysis import sidereal
-from draco.core import containers, task
+from draco.core import containers
 from mpi4py import MPI
 
 
-class LoadTimeStreamSidereal(task.SingleTask):
+class LoadTimeStreamSidereal(tasklib.base.ContainerTask):
     """Load data in sidereal days.
 
     This task takes an input list of data, and loads in a sidereal day at a
@@ -117,7 +119,7 @@ class LoadTimeStreamSidereal(task.SingleTask):
             The timestream of each sidereal day.
         """
         if len(self.filemap) == 0:
-            raise pipeline.PipelineStopIteration
+            raise exceptions.PipelineStopIteration
 
         # Extract filelist for this CSD
         csd, fmap = self.filemap.pop(0)
@@ -262,7 +264,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         sidereal.SiderealRegridder.setup(self, observer)
 
 
-class SiderealMean(task.SingleTask):
+class SiderealMean(tasklib.base.ContainerTask):
     """Calculate the weighted mean(median) over time.
 
     Parameters
@@ -319,7 +321,7 @@ class SiderealMean(task.SingleTask):
 
     def setup(self):
         """Determine which sources will be masked, if any."""
-        from ch_util import fluxcat
+        import fluxcat
 
         self._name_of_statistic = "median" if self.median else "mean"
 
@@ -328,7 +330,7 @@ class SiderealMean(task.SingleTask):
             for src, body in sources.source_dictionary.items():
                 if src in fluxcat.FluxCatalog:
                     if (
-                        fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
+                        fluxcat.FluxCatalog[src].predict_flux(fluxcat.core.FREQ_NOMINAL)
                         > self.flux_threshold
                     ) and (body.dec.degrees > self.dec_threshold):
                         self.log.info(
@@ -495,7 +497,7 @@ class SiderealMean(task.SingleTask):
         return mustream
 
 
-class ChangeSiderealMean(task.SingleTask):
+class ChangeSiderealMean(tasklib.base.ContainerTask):
     """Subtract or add an overall offset (over time) to each visibility.
 
     Parameters

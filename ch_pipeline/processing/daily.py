@@ -13,13 +13,13 @@ import math
 from datetime import datetime
 from typing import ClassVar
 
-import caput.time as ctime
+import caput.astro.time as ctime
 import chimedb.core as db
 import chimedb.data_index as di
 import chimedb.dataflag as df
 import numpy as np
 import peewee as pw
-from caput.tools import unique_ordered
+from caput.util.arraytools import unique_ordered
 from ch_ephem.observers import chime
 
 from ch_pipeline.processing import base
@@ -1130,7 +1130,7 @@ def expand_csd_range(start, end, step=1):
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
-    form that `caput.time.ensure_unix` understands.
+    form that `caput.astro.time.ensure_unix` understands.
 
     Parameters
     ----------
