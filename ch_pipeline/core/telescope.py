@@ -13,11 +13,14 @@ from typing import ClassVar
 
 import healpy
 import numpy as np
-from caput import config, misc, mpiutil
+from caput import config
+from caput.astro.coordinates import spherical
+from caput.containers import ContainerPrototype
+from caput.pipeline import tasklib
+from caput.util import importtools, mpitools
 from ch_util import tools
-from cora.util import coord, hputil
-from draco.core import task
-from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
+from cora.util import hputil
+from draco.core.containers import GridBeam, HEALPixBeam
 from drift.core import telescope
 from drift.telescope import cylbeam
 from scipy.interpolate import RectBivariateSpline
@@ -132,13 +135,13 @@ class CHIME(telescope.PolarisedTelescope):
     # XXX CHECK: Should CHIME be using the Pathfinder antenna spacing?
     cylinder_spacing = tools.PF_SPACE
 
-    _exwidth: ClassVar[float] = [0.7]
+    _exwidth: ClassVar[list[float]] = [0.7]
     _eywidth = _exwidth
 
-    _hxwidth: ClassVar[float] = [1.2]
+    _hxwidth: ClassVar[list[float]] = [1.2]
     _hywidth = _hxwidth
 
-    _pickle_keys: ClassVar[str] = ["_feeds"]
+    _pickle_keys: ClassVar[list[str]] = ["_feeds"]
 
     #
     # === Initialisation routines ===
@@ -216,8 +219,8 @@ class CHIME(telescope.PolarisedTelescope):
         if feeds is None:
             feeds = tools.get_correlator_inputs(self.layout, self.correlator)
 
-        if mpiutil.size > 1:
-            feeds = mpiutil.world.bcast(feeds, root=0)
+        if mpitools.size > 1:
+            feeds = mpitools.world.bcast(feeds, root=0)
 
         if self.skip_non_chime:
             raise Exception("Not supported.")
@@ -233,7 +236,7 @@ class CHIME(telescope.PolarisedTelescope):
         should not be called directly.
         """
         # Do I/O, and resolve the layout, only on rank 0
-        if mpiutil.rank == 0:
+        if mpitools.rank == 0:
 
             # Get the path of the layout file
             from importlib.resources import files
@@ -757,9 +760,9 @@ class CHIMEParameterizedBeam(CHIME):
     This speeds up evaluation of the beam model.
     """
 
-    SIGMA_EW: ClassVar[float] = [14.87857614, 9.95746878]
+    SIGMA_EW: ClassVar[list[float]] = [14.87857614, 9.95746878]
 
-    FUNC_NS: ClassVar = [_flat_top_gauss6, _flat_top_gauss3]
+    FUNC_NS: ClassVar[list] = [_flat_top_gauss6, _flat_top_gauss3]
     PARAM_NS = np.array(
         [[9.97981768e-01, 1.29544939e00, 0.0], [9.86421047e-01, 8.10213326e-01, 0.0]]
     )
@@ -886,7 +889,7 @@ class CHIMEExternalBeam(CHIME):
     def _finalise_config(self):
         """Get the beam file object."""
         logger.debug(f"Reading beam model from {self.primary_beam_filename}...")
-        self._primary_beam = ContainerBase.from_file(
+        self._primary_beam = ContainerPrototype.from_file(
             self.primary_beam_filename, mode="r", distributed=False, ondisk=True
         )
 
@@ -1039,11 +1042,11 @@ class CHIMEExternalBeam(CHIME):
 
         # celestial coordinates
         angpos = hputil.ang_positions(self._nside)
-        x_cel = coord.sph_to_cart(angpos).T
+        x_cel = spherical.sph_to_cart(angpos).T
 
         # rotate to telescope coords
         # first align y with N, then polar axis with NCP
-        self._x_tel = cylbeam.rotate_ypr(
+        self._x_tel = spherical.rotate_ypr(
             (1.5 * np.pi, np.radians(90.0 - self.latitude), 0), *x_cel
         )
 
@@ -1058,9 +1061,12 @@ class CHIMEExternalBeam(CHIME):
         # pre-compute polarisation pattern
         # taken from driftscan
         zenith = np.array([np.pi / 2.0 - np.radians(self.latitude), 0.0])
-        that, phat = coord.thetaphi_plane_cart(zenith)
-        xhat, yhat, _ = cylbeam.rotate_ypr(
-            [-self.rotation_angle, 0.0, 0.0], phat, -that, coord.sph_to_cart(zenith)
+        that, phat = spherical.thetaphi_plane_cart(zenith)
+        xhat, yhat, _ = spherical.rotate_ypr(
+            [-self.rotation_angle, 0.0, 0.0],
+            phat,
+            -that,
+            spherical.sph_to_cart(zenith),
         )
 
         self._pvec_x = cylbeam.polpattern(angpos, xhat)
@@ -1129,7 +1135,7 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
     return np.nonzero(match_mask)[0]
 
 
-class MakeTelescope(task.MPILoggedTask):
+class MakeTelescope(tasklib.base.MPILoggedTask):
     r"""A simple task to construct a telescope object.
 
     This removes the need to use driftscan to create a saved beam transfer manager
@@ -1158,6 +1164,6 @@ class MakeTelescope(task.MPILoggedTask):
         if self.telescope_type in _type_map:
             tel_class = _type_map[self.telescope_type]
         else:
-            tel_class = misc.import_class(self.telescope_type)
+            tel_class = importtools.import_class(self.telescope_type)
 
         return tel_class.from_config(self.telescope_config)

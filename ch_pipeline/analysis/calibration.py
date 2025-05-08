@@ -2,15 +2,19 @@
 
 import json
 
-import caput.time as ctime
+import caput.astro.time as ctime
+import fluxcat
 import numpy as np
 import scipy.signal
-from caput import config, memh5, mpiarray, mpiutil, weighted_median
+from caput import config, memdata, mpiarray
+from caput.algorithms.median import moving_weighted_median, weighted_median
+from caput.pipeline import tasklib
+from caput.util import mpitools
 from ch_ephem import coord, sources
 from ch_ephem.observers import chime
-from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
-from draco.core import containers, task
-from draco.util import _fast_tools
+from ch_util import andata, cal_utils, ephemeris, finder, ni_utils, rfi, tools
+from draco.core import containers
+from draco.util import _fast_tools, interferometry
 from mpi4py import MPI
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
@@ -241,7 +245,7 @@ def _contiguous_flag(flag, centre=None):
     return flag
 
 
-class NoiseSourceFold(task.SingleTask):
+class NoiseSourceFold(tasklib.base.ContainerTask):
     """Fold the noise source for synced data.
 
     Attributes
@@ -280,7 +284,7 @@ class NoiseSourceFold(task.SingleTask):
         )
 
 
-class NoiseInjectionCalibration(task.MPILoggedTask):
+class NoiseInjectionCalibration(tasklib.base.MPILoggedTask):
     """Calibration using noise injection.
 
     Attributes
@@ -391,7 +395,7 @@ class NoiseInjectionCalibration(task.MPILoggedTask):
         return cts
 
 
-class GatedNoiseCalibration(task.SingleTask):
+class GatedNoiseCalibration(tasklib.base.ContainerTask):
     """Calibration using noise injection.
 
     Attributes
@@ -469,7 +473,7 @@ class GatedNoiseCalibration(task.SingleTask):
         return gain_data
 
 
-class DetermineSourceTransit(task.SingleTask):
+class DetermineSourceTransit(tasklib.base.ContainerTask):
     """Determine the sources that are transiting within time range covered by container.
 
     Attributes
@@ -540,7 +544,7 @@ class DetermineSourceTransit(task.SingleTask):
         return None
 
 
-class EigenCalibration(task.SingleTask):
+class EigenCalibration(tasklib.base.ContainerTask):
     """Deteremine response of each feed to a point source.
 
     Extract the feed response from the real-time eigendecomposition
@@ -673,7 +677,7 @@ class EigenCalibration(task.SingleTask):
         input_flags = np.zeros(ninput, dtype=bool)
         for ii in range(ninput):
             input_flags[ii] = np.logical_not(
-                mpiutil.allreduce(evec_all_zero[ii], op=MPI.LAND, comm=data.comm)
+                mpitools.allreduce(evec_all_zero[ii], op=MPI.LAND, comm=data.comm)
             )
 
         self.log.info(
@@ -859,7 +863,7 @@ class EigenCalibration(task.SingleTask):
                 # Fringestop
                 lmbda = speed_of_light * 1e-6 / freq[ff]
 
-                resp *= tools.fringestop_phase(
+                resp *= interferometry.fringestop_phase(
                     ha[np.newaxis, :],
                     lat,
                     src_dec,
@@ -886,7 +890,7 @@ class EigenCalibration(task.SingleTask):
         return response
 
 
-class TransitFit(task.SingleTask):
+class TransitFit(tasklib.base.ContainerTask):
     """Fit model to the transit of a point source.
 
     Multiple model choices are available and can be specified through the `model`
@@ -1075,7 +1079,7 @@ class TransitFit(task.SingleTask):
         return fit
 
 
-class GainFromTransitFit(task.SingleTask):
+class GainFromTransitFit(tasklib.base.ContainerTask):
     """Determine gain by evaluating the best-fit model for the point source transit.
 
     Attributes
@@ -1174,7 +1178,7 @@ class GainFromTransitFit(task.SingleTask):
         return out
 
 
-class FlagAmplitude(task.SingleTask):
+class FlagAmplitude(tasklib.base.ContainerTask):
     """Flag feeds and frequencies with outlier gain amplitude.
 
     Attributes
@@ -1298,7 +1302,7 @@ class FlagAmplitude(task.SingleTask):
                 else:
                     full_med_amp_by_pol = None
 
-                mpiutil.gather_local(
+                mpitools.gather_local(
                     full_med_amp_by_pol,
                     med_amp_by_pol,
                     (sfreq,),
@@ -1335,7 +1339,7 @@ class FlagAmplitude(task.SingleTask):
         ) > self.threshold_good_freq
 
         good_freq = list(sfreq + np.flatnonzero(flag_freq))
-        good_freq = np.array(mpiutil.allreduce(good_freq, op=MPI.SUM, comm=gain.comm))
+        good_freq = np.array(mpitools.allreduce(good_freq, op=MPI.SUM, comm=gain.comm))
 
         flag &= flag_freq[:, np.newaxis]
 
@@ -1360,7 +1364,9 @@ class FlagAmplitude(task.SingleTask):
         flag_input = fraction_good > self.threshold_good_input
 
         good_input = list(flag.local_offset[1] + np.flatnonzero(flag_input))
-        good_input = np.array(mpiutil.allreduce(good_input, op=MPI.SUM, comm=gain.comm))
+        good_input = np.array(
+            mpitools.allreduce(good_input, op=MPI.SUM, comm=gain.comm)
+        )
 
         flag[:] &= flag_input[np.newaxis, :]
 
@@ -1374,7 +1380,7 @@ class FlagAmplitude(task.SingleTask):
         return gain
 
 
-class InterpolateGainOverFrequency(task.SingleTask):
+class InterpolateGainOverFrequency(tasklib.base.ContainerTask):
     """Replace gain at flagged frequencies with interpolated values.
 
     Uses a gaussian process regression to perform the interpolation
@@ -1444,7 +1450,7 @@ class InterpolateGainOverFrequency(task.SingleTask):
         return out
 
 
-class SiderealCalibration(task.SingleTask):
+class SiderealCalibration(tasklib.base.ContainerTask):
     """Use point source as a calibrator for a sidereal stack.
 
     Attributes
@@ -1714,7 +1720,7 @@ def find_contiguous_time_ranges(timestamp, dt=3600.0):
     return list(zip(start, stop))
 
 
-class ThermalCalibration(task.SingleTask):
+class ThermalCalibration(tasklib.base.ContainerTask):
     """Use weather temperature to correct calibration in between point source transits.
 
     Attributes
@@ -1834,7 +1840,7 @@ class ThermalCalibration(task.SingleTask):
 
     def _load_cal_file(self):
         """Load the cal time file."""
-        self.caltime_file = memh5.MemGroup.from_hdf5(self.caltime_path)
+        self.caltime_file = memdata.MemGroup.from_hdf5(self.caltime_path)
         self._file_start = self.caltime_file["tstart"][0]
         self._file_end = self.caltime_file["tend"][-1]
 
@@ -1976,7 +1982,7 @@ class ThermalCalibration(task.SingleTask):
         return wtime, wtemp
 
 
-class ApplyDigitalGain(task.SingleTask):
+class ApplyDigitalGain(tasklib.base.ContainerTask):
     """Multiply calibration gains by the digital gains.
 
     This yields the complex number that was applied
@@ -2067,7 +2073,7 @@ class ApplyDigitalGain(task.SingleTask):
         return gain
 
 
-class InvertGain(task.SingleTask):
+class InvertGain(tasklib.base.ContainerTask):
     """Invert gains."""
 
     def process(self, gain):
@@ -2094,7 +2100,7 @@ class InvertGain(task.SingleTask):
         return gain
 
 
-class BaseCommonMode(task.SingleTask):
+class BaseCommonMode(tasklib.base.ContainerTask):
     """Base class for calculating the common-mode gain."""
 
     use_cylinder = config.Property(proptype=bool, default=True)
@@ -2338,7 +2344,7 @@ class ExpandCommonMode(BaseCommonMode):
         return out
 
 
-class IdentifyNarrowbandFeatures(task.SingleTask):
+class IdentifyNarrowbandFeatures(tasklib.base.ContainerTask):
     """Identify and flag narrowband features in gains.
 
     Attributes
@@ -2436,7 +2442,7 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
         return out
 
 
-class ReconstructGainError(task.SingleTask):
+class ReconstructGainError(tasklib.base.ContainerTask):
     """Estimate the fractional error in the calibration gain.
 
     The "true" gain is estimated by low-pass filtering the
@@ -2853,11 +2859,11 @@ class ReconstructGainError(task.SingleTask):
         w = np.ascontiguousarray(flag, dtype=np.float64)
 
         if self.window is not None:
-            sigma = 1.48625 * weighted_median.moving_weighted_median(
+            sigma = 1.48625 * moving_weighted_median(
                 ady, w, self.window, method="split"
             )
         else:
-            sigma = 1.48625 * weighted_median.weighted_median(ady, w, method="split")
+            sigma = 1.48625 * weighted_median(ady, w, method="split")
 
         # Calculate the signal to noise
         s2n = ady * tools.invert_no_zero(sigma)
@@ -3025,7 +3031,7 @@ class ReconstructGainError(task.SingleTask):
         return scipy.signal.filtfilt(coeff, [1.0], gain.astype(np.complex128), axis=0)
 
 
-class CorrectGainError(task.SingleTask):
+class CorrectGainError(tasklib.base.ContainerTask):
     """Correct stacked visibilities for errors in the gains applied in real-time.
 
     This correction is imperfect because the redundant baselines are not actually
@@ -3221,7 +3227,7 @@ class CorrectGainError(task.SingleTask):
         return data
 
 
-class CollapseGainError(task.SingleTask):
+class CollapseGainError(tasklib.base.ContainerTask):
     """Average gain errors over all pairs of feeds."""
 
     def process(self, gain):
@@ -3286,7 +3292,7 @@ class CollapseGainError(task.SingleTask):
         return out
 
 
-class EstimateNarrowbandGainError(task.SingleTask):
+class EstimateNarrowbandGainError(tasklib.base.ContainerTask):
     """Estimate error in gains due to narrowband features.
 
     Attributes
@@ -3364,7 +3370,7 @@ class EstimateNarrowbandGainError(task.SingleTask):
         return out
 
 
-class ConcatenateGains(task.SingleTask):
+class ConcatenateGains(tasklib.base.ContainerTask):
     """Repackage a list of StaticGainData/GainData into a single GainData container."""
 
     def process(self, gains):
@@ -3421,7 +3427,7 @@ class ConcatenateGains(task.SingleTask):
         return out
 
 
-class FlagNarrowbandGainError(task.SingleTask):
+class FlagNarrowbandGainError(tasklib.base.ContainerTask):
     """Mask frequencies and times where narrowband gain errors were identified.
 
     Attributes
@@ -3606,7 +3612,7 @@ class FlagNarrowbandGainError(task.SingleTask):
         return out
 
 
-class CalibrationCorrection(task.SingleTask):
+class CalibrationCorrection(tasklib.base.ContainerTask):
     """Base class for applying multiplicative corrections based on a DataFlag.
 
     This task is not functional.  It simply defines `setup` and `process`
@@ -3797,9 +3803,9 @@ class CorrectTimeOffset(CalibrationCorrection):
 
         # Calculate and return the phase correction, which is old offset minus new time offset
         # since we previously divided the chimestack data by the response to the calibrator.
-        correction = tools.fringestop_phase(ha, lat, dec, *uv) * tools.invert_no_zero(
-            tools.fringestop_phase(0.0, lat, dec, *uv)
-        )
+        correction = interferometry.fringestop_phase(
+            ha, lat, dec, *uv
+        ) * tools.invert_no_zero(interferometry.fringestop_phase(0.0, lat, dec, *uv))
 
         return correction[:, :, np.newaxis]
 
@@ -3852,9 +3858,11 @@ class CorrectTelescopeRotation(CalibrationCorrection):
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.
-        correction = tools.fringestop_phase(
+        correction = interferometry.fringestop_phase(
             0.0, lat, dec, *old_uv
-        ) * tools.invert_no_zero(tools.fringestop_phase(0.0, lat, dec, *current_uv))
+        ) * tools.invert_no_zero(
+            interferometry.fringestop_phase(0.0, lat, dec, *current_uv)
+        )
 
         return correction[:, :, np.newaxis]
 
