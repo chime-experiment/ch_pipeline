@@ -8,9 +8,9 @@ import caput.time as ctime
 import numpy as np
 from beam_model.formed import FFTFormedActualBeamModel
 from caput import config, pipeline
+from caput.task import io
 from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
-from draco.core import io
 
 from .containers import HFBData, HFBReader
 
@@ -123,7 +123,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
     3. By passing `beam_ew_include` and/or `beam_ns_index` or `beam_ns_range`
        attributes (see documentation in :class:`BeamSelectionsMixin`).
     4. By manually passing indices in the `selections` attribute
-       (see documentation in :class:`draco.core.io.SelectionsMixin`).
+       (see documentation in :class:`caput.task.io.SelectionsMixin`).
     Method 1 takes precedence over method 2. If no relevant attributes are
     passed, all frequencies/beams are read.
     """
@@ -146,7 +146,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         self.observer = chime if observer is None else observer
 
         # Resolve any selections provided through the `selections` attribute
-        # (via `draco.core.io.SelectionsMixin`)
+        # (via `caput.task.io.SelectionsMixin`)
         super().setup()
 
         # Look up source in catalog
@@ -301,7 +301,7 @@ class LoadFilesFromParams(BaseLoadFiles):
     filegroups : list or dict
         A dictionary specifying a file group, or a list of them. In addition to
         the standard components of file groups ('tag' and 'files'; see documentation
-        in :class:`draco.core.io`), the file groups can also have a 'time_range',
+        in :class:`caput.task.io`), the file groups can also have a 'time_range',
         given as a list of two unix timestamps. Example YAML content:
 
     .. code-block:: yaml
@@ -316,7 +316,7 @@ class LoadFilesFromParams(BaseLoadFiles):
             time_range: [1673242310.130873, 1673244110.130873]
     """
 
-    filegroups = config.Property(proptype=io._list_of_filegroups)
+    filegroups = config.Property(proptype=io.list_of_filegroups)
 
     _fgroup_ptr = 0
 

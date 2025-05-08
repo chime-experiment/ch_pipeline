@@ -5,9 +5,9 @@ Tools for making maps from CHIME data.
 
 import numpy as np
 import scipy.constants
-from caput import config
+from caput import config, task
 from ch_ephem.observers import chime
-from draco.core import io, task
+from draco.core import io
 from draco.util import tools
 
 from ..core import containers

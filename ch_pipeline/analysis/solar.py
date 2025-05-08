@@ -11,11 +11,11 @@ import numpy as np
 import pytz
 import scipy.constants
 import skyfield
-from caput import config, tod
+from caput import config, task, tod
 from ch_ephem import coord, sources
 from ch_ephem.observers import chime
 from ch_util import cal_utils, tools
-from draco.core import task
+from draco.util import interferometry
 
 from ..core import containers
 
@@ -504,7 +504,7 @@ class SolarCalibrationN2(task.SingleTask):
                             sha = _correct_phase_wrap(ra[tt_out] - center, deg=True)
 
                             if np.abs(sha) < span:
-                                src_phase = tools.fringestop_phase(
+                                src_phase = interferometry.fringestop_phase(
                                     np.radians(sha),
                                     np.radians(chime.latitude),
                                     src._dec,
@@ -522,7 +522,7 @@ class SolarCalibrationN2(task.SingleTask):
                                     vis[pp] -= asrc * src_phase[pp].conj()
 
                         # Fringestop
-                        vis *= tools.fringestop_phase(
+                        vis *= interferometry.fringestop_phase(
                             sun_pos[tt_out, 0],
                             np.radians(chime.latitude),
                             sun_pos[tt_out, 1],
@@ -759,7 +759,7 @@ class SolarCleanN2(task.SingleTask):
                         v = vis_pos[bb, 1] / wv[ff_local]
 
                         # Determine phase of sun
-                        sunphase = tools.fringestop_phase(
+                        sunphase = interferometry.fringestop_phase(
                             ha, np.radians(chime.latitude), dec, u, v
                         ).conj()
 
@@ -988,7 +988,7 @@ class SolarBeamform(task.SingleTask):
                 vis = np.where(conj_pol, vis.conj(), vis)
 
                 # Calculate the phase that the sun would have using the fringestop routine
-                sun_vis = tools.fringestop_phase(ha[ti], lat, dec[ti], u, v)
+                sun_vis = interferometry.fringestop_phase(ha[ti], lat, dec[ti], u, v)
 
                 # Fringestop to the sun
                 vs = weight * vis * sun_vis
@@ -1141,7 +1141,7 @@ class SolarClean(task.SingleTask):
                 vis = np.where(conj_pol, vis.conj(), vis)
 
                 # Calculate the phase that the sun would have using the fringestop routine
-                sun_phase = tools.fringestop_phase(ha[ti], lat, dec[ti], u, v)
+                sun_phase = interferometry.fringestop_phase(ha[ti], lat, dec[ti], u, v)
 
                 # Fringestop to the sun
                 vs = weight * vis * sun_phase

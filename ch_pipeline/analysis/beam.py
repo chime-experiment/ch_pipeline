@@ -4,18 +4,19 @@ import json
 from os import listdir, path
 
 import numpy as np
-from caput import config, mpiarray, mpiutil, tod
+from caput import config, mpiarray, mpiutil, task, tod
+from caput.containers import ContainerBase
 from caput.pipeline import PipelineRuntimeError
 from caput.time import STELLAR_S, unix_to_datetime
+from caput.tools import invert_no_zero
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import holography, tools
 from chimedb.core import connect as connect_database
 from draco.analysis.transform import Regridder
-from draco.core import io, task
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
+from draco.core import io
+from draco.core.containers import SiderealStream, TimeStream, TrackBeam
 from draco.util import regrid
-from draco.util.tools import invert_no_zero
 from scipy import constants
 
 from ..core.containers import TransitFitParams
@@ -1161,7 +1162,7 @@ class TransitStacker(task.SingleTask):
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
-    """Filter holography transit DataIntervals produced by `io.QueryDatabase`.
+    """Filter holography transit DataIntervals produced by `dataquery.QueryDatabase`.
 
     Excludes DataIntervals which are already processed.
 
