@@ -16,13 +16,14 @@ Use this task together with:
 """
 
 from caput import config
+from caput.pipeline import tasklib
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import tools
-from draco.core import containers, task
+from draco.core import containers
 
 
-class FringeStop(task.SingleTask):
+class FringeStop(tasklib.base.ContainerTask):
     """Fringe stop CHIME data to a given source.
 
     Parameters

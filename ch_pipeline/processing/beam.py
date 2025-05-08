@@ -7,7 +7,7 @@ Classes
 
 from typing import ClassVar
 
-from caput import time as ctime
+from caput.astro import time as ctime
 from ch_util import holography as holo
 from chimedb.core import connect as connect_db
 

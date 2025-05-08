@@ -3,10 +3,10 @@
 import os
 from typing import ClassVar
 
-import caput.time as ctime
 import numpy as np
 from caput import config
-from caput.pipeline import PipelineRuntimeError
+from caput.astro import time as ctime
+from caput.pipeline import exceptions, tasklib
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import timing
@@ -14,10 +14,9 @@ from ch_util import timing
 # For querying DataFlag database
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
-from draco.core import task
 
 
-class ApplyTimingCorrection(task.SingleTask):
+class ApplyTimingCorrection(tasklib.base.ContainerTask):
     """Apply a timing correction to the visibilities.
 
     Only runs on days flagged by needs_timing_correction.
@@ -132,7 +131,7 @@ class ApplyTimingCorrection(task.SingleTask):
                 and timestamp[0] <= flag["finish_time"]
             ):
                 if timestamp[-1] >= flag["finish_time"]:
-                    raise PipelineRuntimeError(
+                    raise exceptions.PipelineRuntimeError(
                         f"Data covering {timestamp[0]} to {timestamp[-1]} partially overlaps "
                         f"needs_timing_correction DataFlag covering {ctime.unix_to_datetime(flag['start_time']).strftime('%Y%m%dT%H%M%SZ')} "
                         f"to {ctime.unix_to_datetime(flag['finish_time']).strftime('%Y%m%dT%H%M%SZ')}."
@@ -208,7 +207,7 @@ class ApplyTimingCorrection(task.SingleTask):
         return tstream
 
 
-class ConstructTimingCorrection(task.SingleTask):
+class ConstructTimingCorrection(tasklib.base.ContainerTask):
     """Generate a timing correction from the cross correlation of noise source inputs.
 
     Parameters

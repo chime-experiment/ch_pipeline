@@ -1,7 +1,8 @@
 """Tasks for simulating timing distribution errors."""
 
 import numpy as np
-from caput import config, mpiarray, mpiutil
+from caput import config, mpiarray
+from caput.util import mpitools
 from draco.synthesis import gain
 
 
@@ -123,7 +124,7 @@ class TimingErrors(gain.BaseGains):
             self.delay_error = self.comm.bcast(delay_error, root=0)
 
             # Split frequencies to processes.
-            lfreq, sfreq, efreq = mpiutil.split_local(nfreq)
+            lfreq, sfreq, efreq = mpitools.split_local(nfreq)
 
             # Create an array to hold all inputs, which are common-mode within
             # a cylinder

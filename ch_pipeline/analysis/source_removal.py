@@ -5,15 +5,18 @@ Tasks for constructing models for bright sources and subtracting them from the d
 
 import json
 
-import caput.time as ctime
+import caput.astro.time as ctime
 import numpy as np
 import scipy.signal
 from caput import config
+from caput.astro.skyfield import skyfield_wrapper
+from caput.pipeline import tasklib
 from ch_ephem.observers import chime
 from ch_ephem.sources import source_dictionary
 from ch_util import tools
-from ch_util.fluxcat import FluxCatalog
-from draco.core import io, task
+from draco.core import io
+from draco.util import interferometry
+from fluxcat import FluxCatalog
 from scipy.constants import c as speed_of_light
 
 from ..core import containers
@@ -160,7 +163,7 @@ def model_extended_sources(
         H = np.polynomial.hermite.hermvander3d(*coords, poly_deg[ss])
 
         # Calculate the fringestop phase
-        phi = tools.fringestop_phase(
+        phi = interferometry.fringestop_phase(
             ha[np.newaxis, np.newaxis, :], lat, dec[np.newaxis, np.newaxis, :], u, v
         ).conj()
 
@@ -239,7 +242,7 @@ def solve_multiple_times(vis, weight, source_model):
     return np.linalg.lstsq(C, np.dot(S.T.conj(), weight * vis), rcond=None)[0]
 
 
-class SolveSources(task.SingleTask):
+class SolveSources(tasklib.base.ContainerTask):
     """Fit source model to the visibilities.
 
     Model consists of the sum of the signal from multiple (possibly extended) sources.
@@ -312,7 +315,7 @@ class SolveSources(task.SingleTask):
             (
                 source_dictionary[src]
                 if src in source_dictionary
-                else ctime.skyfield_wrapper.ephemeris[src]
+                else skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -541,7 +544,7 @@ class SolveSources(task.SingleTask):
         return out
 
 
-class LPFSourceAmplitude(task.SingleTask):
+class LPFSourceAmplitude(tasklib.base.ContainerTask):
     """Apply a 2D low-pass filter in (freq, time) to the measured source amplitude.
 
     Attributes
@@ -623,7 +626,7 @@ class LPFSourceAmplitude(task.SingleTask):
         return model
 
 
-class SubtractSources(task.SingleTask):
+class SubtractSources(tasklib.base.ContainerTask):
     """Subtract a source model from the visibilities."""
 
     def setup(self, tel):
@@ -661,7 +664,7 @@ class SubtractSources(task.SingleTask):
             (
                 source_dictionary[src]
                 if src in source_dictionary
-                else ctime.skyfield_wrapper.ephemeris[src]
+                else skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
@@ -756,7 +759,7 @@ class SubtractSources(task.SingleTask):
         return data
 
 
-class AccumulateBeam(task.SingleTask):
+class AccumulateBeam(tasklib.base.ContainerTask):
     """Accumulate the stacked beam for each source."""
 
     def setup(self):
@@ -798,7 +801,7 @@ class SolveSourcesWithBeam(SolveSources):
             (
                 source_dictionary[src]
                 if src in source_dictionary
-                else ctime.skyfield_wrapper.ephemeris[src]
+                else skyfield_wrapper.ephemeris[src]
             )
             for src in self.sources
         ]
@@ -976,7 +979,7 @@ class SolveSourcesWithBeam(SolveSources):
         return out
 
 
-class SubtractSourcesWithBeam(task.SingleTask):
+class SubtractSourcesWithBeam(tasklib.base.ContainerTask):
     """Subtract a source model from the visibilities."""
 
     def setup(self, tel):
@@ -1020,7 +1023,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
             (
                 source_dictionary[src]
                 if src in source_dictionary
-                else ctime.skyfield_wrapper.ephemeris[src]
+                else skyfield_wrapper.ephemeris[src]
             )
             for src in sources
         ]
