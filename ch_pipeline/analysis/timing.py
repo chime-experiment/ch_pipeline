@@ -5,7 +5,7 @@ from typing import ClassVar
 
 import caput.time as ctime
 import numpy as np
-from caput import config
+from caput import config, task
 from caput.pipeline import PipelineRuntimeError
 from ch_ephem import sources
 from ch_ephem.observers import chime
@@ -14,7 +14,6 @@ from ch_util import timing
 # For querying DataFlag database
 from chimedb import dataflag as df
 from chimedb.core import connect as connect_database
-from draco.core import task
 
 
 class ApplyTimingCorrection(task.SingleTask):

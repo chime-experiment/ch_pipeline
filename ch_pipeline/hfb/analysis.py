@@ -2,10 +2,9 @@
 
 import numpy as np
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
-from caput import config, mpiarray, mpiutil, weighted_median
+from caput import config, mpiarray, mpiutil, task, weighted_median
+from caput.containers import copy_datasets_filter, empty_like
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
-from draco.core import containers as dcontainers
-from draco.core import task
 from draco.util import tools
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
@@ -405,7 +404,7 @@ class HFBDifference(task.SingleTask):
         )
 
         # Create container to hold output
-        out = dcontainers.empty_like(minuend)
+        out = empty_like(minuend)
 
         # Save data and weights to output container
         out.hfb[:] = data
@@ -571,7 +570,7 @@ class HFBStackDays(task.SingleTask):
         # If this is our first sidereal day, then initialize the
         # container that will hold the stack.
         if self.stack is None:
-            self.stack = dcontainers.empty_like(sdata)
+            self.stack = empty_like(sdata)
 
             # Add stack-specific dataset: count of samples, to be used as weight
             # for the uniform weighting case. Initialize this dataset to zero.
@@ -936,7 +935,7 @@ class SelectBeam(BeamSelectionMixin, task.SingleTask):
             New container with a selection of beams.
         """
         # Create new container with subset of beams
-        newstream = dcontainers.empty_like(stream, beam=self.beam_sel)
+        newstream = empty_like(stream, beam=self.beam_sel)
 
         # Make sure all datasets are initialised
         for name in stream.datasets.keys():
@@ -947,7 +946,7 @@ class SelectBeam(BeamSelectionMixin, task.SingleTask):
         selindex = np.flatnonzero(np.isin(stream.beam, self.beam_sel)).tolist()
 
         # Copy over datasets
-        dcontainers.copy_datasets_filter(stream, newstream, "beam", selindex)
+        copy_datasets_filter(stream, newstream, "beam", selindex)
 
         return newstream
 
@@ -1086,7 +1085,7 @@ class HFBDividePFB(task.SingleTask):
             )
 
         # Create container to hold output
-        out = dcontainers.empty_like(stream)
+        out = empty_like(stream)
 
         # Divide data by PFB shape and place in output container
         out.hfb[:] = data / pfb_shape
@@ -1214,7 +1213,7 @@ class HFBDopplerShift(task.SingleTask):
         weight_shifted = weight_shifted[::-1, ...]
 
         # Create container to hold output.
-        out = dcontainers.empty_like(stream)
+        out = empty_like(stream)
 
         out.hfb[:] = data_shifted
         out.weight[:] = weight_shifted
