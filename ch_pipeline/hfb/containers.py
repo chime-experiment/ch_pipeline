@@ -5,11 +5,13 @@ from typing import ClassVar
 
 import numpy as np
 from caput import memh5, tod
-from ch_util import andata
-from draco.core.containers import (
+from caput.containers import (
     COMPRESSION,
     COMPRESSION_OPTS,
     DataWeightContainer,
+)
+from ch_util import andata
+from draco.core.containers import (
     SiderealContainer,
     TODContainer,
 )

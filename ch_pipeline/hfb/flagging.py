@@ -2,8 +2,7 @@
 
 import beam_model.formed as fm
 import numpy as np
-from caput import config, tools
-from draco.core import task
+from caput import config, task, tools
 from draco.core.containers import LocalizedRFIMask
 
 from .containers import HFBDirectionalRFIMask, HFBRFIMask
