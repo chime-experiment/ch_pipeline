@@ -8,7 +8,7 @@ pre-map making flagging on m-modes.
 import caput.time as ctime
 import numpy as np
 import scipy.constants
-from caput import config, interferometry, memh5, mpiarray, mpiutil, pipeline, tod
+from caput import config, interferometry, memh5, mpiarray, mpiutil, pipeline, task, tod
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, cal_utils, data_quality, finder, rfi, tools
@@ -17,7 +17,7 @@ from chimedb.core import connect as connect_database
 from draco.analysis import flagging as dflagging
 from draco.analysis.ringmapmaker import find_grid_indices
 from draco.core import containers as dcontainers
-from draco.core import io, task
+from draco.core import io
 from scipy.spatial import KDTree
 
 from ..core import containers

@@ -8,12 +8,13 @@ import json
 import caput.time as ctime
 import numpy as np
 import scipy.signal
-from caput import config
+from caput import config, task
 from ch_ephem.observers import chime
 from ch_ephem.sources import source_dictionary
 from ch_util import tools
 from ch_util.fluxcat import FluxCatalog
-from draco.core import io, task
+from draco.core import io
+from draco.util import interferometry
 from scipy.constants import c as speed_of_light
 
 from ..core import containers
@@ -160,7 +161,7 @@ def model_extended_sources(
         H = np.polynomial.hermite.hermvander3d(*coords, poly_deg[ss])
 
         # Calculate the fringestop phase
-        phi = tools.fringestop_phase(
+        phi = interferometry.fringestop_phase(
             ha[np.newaxis, np.newaxis, :], lat, dec[np.newaxis, np.newaxis, :], u, v
         ).conj()
 

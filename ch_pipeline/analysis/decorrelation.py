@@ -22,12 +22,12 @@ Use this task together with:
 """
 
 import numpy as np
-from caput import config
+from caput import config, task
+from caput.tools import invert_no_zero
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import tools
-from draco.core import containers, task
-from draco.util.tools import invert_no_zero
+from draco.core import containers
 
 
 class CorrectDecorrelation(task.SingleTask):

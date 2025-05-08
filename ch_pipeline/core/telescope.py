@@ -13,11 +13,11 @@ from typing import ClassVar
 
 import healpy
 import numpy as np
-from caput import config, misc, mpiutil
+from caput import config, misc, mpiutil, task
+from caput.containers import ContainerBase
 from ch_util import tools
 from cora.util import coord, hputil
-from draco.core import task
-from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
+from draco.core.containers import GridBeam, HEALPixBeam
 from drift.core import telescope
 from drift.telescope import cylbeam
 from scipy.interpolate import RectBivariateSpline

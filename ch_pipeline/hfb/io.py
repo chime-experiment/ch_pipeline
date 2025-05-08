@@ -8,9 +8,9 @@ import caput.time as ctime
 import numpy as np
 from beam_model.formed import FFTFormedActualBeamModel
 from caput import config, pipeline
+from caput.task import io
 from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
-from draco.core import io
 
 from .containers import HFBData, HFBReader
 
@@ -316,7 +316,7 @@ class LoadFilesFromParams(BaseLoadFiles):
             time_range: [1673242310.130873, 1673244110.130873]
     """
 
-    filegroups = config.Property(proptype=io._list_of_filegroups)
+    filegroups = config.Property(proptype=io.list_of_filegroups)
 
     _fgroup_ptr = 0
 

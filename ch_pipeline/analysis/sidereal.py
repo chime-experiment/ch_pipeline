@@ -18,13 +18,13 @@ from typing import ClassVar
 
 import caput.time as ctime
 import numpy as np
-from caput import config, pipeline, tod
+from caput import config, pipeline, task, tod
 from caput.weighted_median import weighted_median
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, tools
 from draco.analysis import sidereal
-from draco.core import containers, task
+from draco.core import containers
 from mpi4py import MPI
 
 
