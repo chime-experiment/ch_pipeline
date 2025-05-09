@@ -42,7 +42,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
-from caput import config, mpiutil, pipeline
+from caput import config, mpiutil, pipeline, task
 from caput import time as ctime
 from ch_ephem import sources
 from ch_ephem.observers import chime
@@ -50,7 +50,6 @@ from ch_util import andata, finder, layout, tools
 from chimedb import data_index as di
 from chimedb import dataset as ds
 from chimedb.core import exceptions
-from draco.core import task
 
 from ch_pipeline.core import containers
 

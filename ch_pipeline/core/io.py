@@ -32,14 +32,13 @@ import re
 from typing import ClassVar
 
 import numpy as np
-from caput import config, pipeline
+from caput import config, pipeline, task
 from ch_util import andata
-from draco.core import io, task
 
 from . import containers
 
 
-class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
+class LoadCorrDataFiles(task.SingleTask, task.io.SelectionsMixin):
     """Load CHIME correlator data from a file list passed into the setup routine.
 
     File must be a serialised subclass of :class:`ch_util.andata.CorrData`.
@@ -356,7 +355,7 @@ class LoadGainUpdates(LoadDataFiles):
         return gains
 
 
-class LoadSetupFile(io.BaseLoadFiles):
+class LoadSetupFile(task.io.BaseLoadFiles):
     """Loads a file from disk into a memh5 container during setup.
 
     Attributes
@@ -390,7 +389,7 @@ class LoadSetupFile(io.BaseLoadFiles):
         pass
 
 
-class LoadFileFromTag(io.BaseLoadFiles):
+class LoadFileFromTag(task.io.BaseLoadFiles):
     """Loads a file from disk into a memh5 container.
 
     The suffix of the filename is extracted from the tag of the input container.

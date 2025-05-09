@@ -15,11 +15,11 @@ Use this task together with:
   of the timestream data
 """
 
-from caput import config
+from caput import config, task
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import tools
-from draco.core import containers, task
+from draco.core import containers
 
 
 class FringeStop(task.SingleTask):

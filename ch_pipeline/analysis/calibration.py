@@ -5,12 +5,12 @@ import json
 import caput.time as ctime
 import numpy as np
 import scipy.signal
-from caput import config, memh5, mpiarray, mpiutil, weighted_median
+from caput import config, memh5, mpiarray, mpiutil, task, weighted_median
 from ch_ephem import coord, sources
 from ch_ephem.observers import chime
 from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
-from draco.core import containers, task
-from draco.util import _fast_tools
+from draco.core import containers
+from draco.util import _fast_tools, interferometry
 from mpi4py import MPI
 from scipy import interpolate
 from scipy.constants import c as speed_of_light
@@ -859,7 +859,7 @@ class EigenCalibration(task.SingleTask):
                 # Fringestop
                 lmbda = speed_of_light * 1e-6 / freq[ff]
 
-                resp *= tools.fringestop_phase(
+                resp *= interferometry.fringestop_phase(
                     ha[np.newaxis, :],
                     lat,
                     src_dec,
@@ -3792,9 +3792,9 @@ class CorrectTimeOffset(CalibrationCorrection):
 
         # Calculate and return the phase correction, which is old offset minus new time offset
         # since we previously divided the chimestack data by the response to the calibrator.
-        correction = tools.fringestop_phase(ha, lat, dec, *uv) * tools.invert_no_zero(
-            tools.fringestop_phase(0.0, lat, dec, *uv)
-        )
+        correction = interferometry.fringestop_phase(
+            ha, lat, dec, *uv
+        ) * tools.invert_no_zero(interferometry.fringestop_phase(0.0, lat, dec, *uv))
 
         return correction[:, :, np.newaxis]
 
@@ -3847,9 +3847,11 @@ class CorrectTelescopeRotation(CalibrationCorrection):
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.
-        correction = tools.fringestop_phase(
+        correction = interferometry.fringestop_phase(
             0.0, lat, dec, *old_uv
-        ) * tools.invert_no_zero(tools.fringestop_phase(0.0, lat, dec, *current_uv))
+        ) * tools.invert_no_zero(
+            interferometry.fringestop_phase(0.0, lat, dec, *current_uv)
+        )
 
         return correction[:, :, np.newaxis]
 
