@@ -2893,7 +2893,7 @@ class CatalogBase(task.SingleTask):
 
         if "frequency" in self.catalog:
             src_freq = self.catalog["frequency"]["freq"][:]
-            src_freq_err = self.catalog["frequency"]["freq_err"][:]
+            src_freq_err = self.catalog["frequency"]["freq_error"][:]
 
         else:
             z = self.catalog["redshift"]["z"][:]
