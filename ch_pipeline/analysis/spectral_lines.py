@@ -30,12 +30,21 @@ class FindSpectralLines(task.SingleTask):
         Delay cutoff in microseconds used during the continuum filtering step.
         Defines the resolution in frequency and sets the scale for associating
         outliers into candidate features.
+    linkage_method : {"single"|"complete"|"average"}
+        Defines how the distance between clusters is computed. Options include:
+            "single" :   Minimum distance between any two members.
+                         Can lead to spurious connections.
+            "complete" : Maximum distance between any two members.
+                         May split true clusters.
+            "average" :  Average distance between all pairs of members.
+                         Can blur edges of true clusters.
     nsigma : float
         Maximum allowed clustering distance (in units of normalized coordinate space)
         between outliers to be grouped as a single spectral line.
     """
 
     delay_cutoff = config.Property(proptype=float, default=0.20)
+    linkage_method = config.enum(["single", "complete", "average"], default="single")
     nsigma = config.Property(proptype=float, default=2.0)
 
     def setup(self, manager):
@@ -151,15 +160,29 @@ class FindSpectralLines(task.SingleTask):
         wavelength = scipy.constants.c / (freq_eval * 1e6)
 
         delta = np.zeros((noutlier, 3), dtype=float)
+
+        # In the frequency direction, we estimate the FWHM as the inverse of the
+        # delay cutoff, and divide by 2.35482 to convert this into a Gaussian
+        # sigma equivalent.
         delta[:, 0] = 1.0 / (2.35482 * self.delay_cutoff)
+
+        # In the RA direction, we use the FWHM of the primary beam, converted to sigma.
+        # The beam width is scaled by 1 / cos(dec) to express in degrees of hour angle.
+        # We prefer the primary beam width over the synthesized beam here because CHIME
+        # has significant grating lobes in RA.
         delta[:, 1] = cal_utils.guess_fwhm(freq_eval, pol="X", dec=src_dec, sigma=True)
+
+        # In the sin(za) direction, we use the synthesized beam width.
+        # For natural weighting, 0.85 * wavelength / max_ysep gives the FWHM;
+        # we then divide by 2.35482 to convert this to sigma.
         delta[:, 2] = 0.85 * wavelength / (2.35482 * max_ysep)
 
+        # Normalize the raw coordinates by their respective resolution
         coord = raw_coord / delta
 
         # Compute pairwise distances and cluster
-        dists = pdist(coord)  # pairwise distances in rescaled space
-        linkage_matrix = linkage(dists, method="single")  # or 'complete', 'average'
+        dists = pdist(coord)
+        linkage_matrix = linkage(dists, method=self.linkage_method)
 
         cluster_ids = fcluster(linkage_matrix, t=self.nsigma, criterion="distance")
 
@@ -192,24 +215,21 @@ class FindSpectralLines(task.SingleTask):
                 s2n_values = np.abs(map_values) * np.sqrt(wm[local_ind])
 
                 # Identify the maximum pixel within the local part of this cluster
-                imax = np.argmax(np.abs(map_values))
-                local_max = map_values[imax]
+                imax = np.argmax(s2n_values)
                 local_s2n = s2n_values[imax]
+                local_map = map_values[imax]
                 local_imax = this_rank[imax]
 
             else:
-                local_max = 0.0
                 local_s2n = 0.0
+                local_map = 0.0
                 local_imax = -1
 
             # Take maximum over all ranks
-            local_info = [local_max, local_s2n, local_imax, local_npix]
+            local_info = [local_s2n, local_map, local_imax, local_npix]
             all_info = self.comm.allgather(local_info)
 
-            global_max, global_s2n, global_imax, _ = max(
-                all_info, key=lambda x: np.abs(x[0])
-            )
-
+            global_s2n, global_map, global_imax, _ = max(all_info, key=lambda x: x[0])
             global_npix = np.sum([info[-1] for info in all_info])
 
             # Get the coordinates of the global maximum
@@ -230,7 +250,7 @@ class FindSpectralLines(task.SingleTask):
             out["redshift"]["z"][cc] = units.nu21 / src_freq - 1.0
             out["redshift"]["z_error"][cc] = units.nu21 * dfreq / src_freq**2
             out["flux"]["continuum"][cc] = 0.0
-            out["flux"]["line_depth"][cc] = global_max
+            out["flux"]["line_depth"][cc] = global_map
             out["significance"]["signal_to_noise"][cc] = global_s2n
             out["significance"]["npixels"][cc] = global_npix
 
@@ -240,7 +260,7 @@ class FindSpectralLines(task.SingleTask):
                 f"RA = {src_body.ra._degrees:0.2f} deg, "
                 f"Dec = {src_body.dec._degrees:0.2f} deg, "
                 f"freq = {src_freq:0.2f} MHz, "
-                f"flux = {1000 * global_max:0.1f} mJy, "
+                f"flux = {1000 * global_map:0.1f} mJy, "
                 f"S/N = {global_s2n:0.1f}"
             )
 
