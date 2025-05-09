@@ -2870,12 +2870,15 @@ class CatalogBase(task.SingleTask):
 
         # Save the catalog
         self.catalog = catalog
-        self.has_redshift = "redshift" in self.catalog
+        self.has_redshift = "frequency" in self.catalog or "redshift" in self.catalog
 
     def get_source_freq(self):
-        """Compute the 21 cm frequency corresponding to each source's redshift.
+        """Compute the frequency corresponding to each source's redshift.
 
-        Redshift values and their uncertainties taken from `self.catalog["redshift"]`.
+        Returns `self.catalog["frequency"]` if available.  Otherwise the
+        redshift of the source will be converted to frequency assuming
+        the 21 cm line. Redshift values and their uncertainties taken
+        from `self.catalog["redshift"]`.
 
         Returns
         -------
@@ -2888,11 +2891,16 @@ class CatalogBase(task.SingleTask):
         """
         from cora.util import units
 
-        z = self.catalog["redshift"]["z"][:]
-        zerr = self.catalog["redshift"]["z_error"][:]
+        if "frequency" in self.catalog:
+            src_freq = self.catalog["frequency"]["freq"][:]
+            src_freq_err = self.catalog["frequency"]["freq_err"][:]
 
-        src_freq = units.nu21 / (1.0 + z)
-        src_freq_err = src_freq * zerr / (1.0 + z)
+        else:
+            z = self.catalog["redshift"]["z"][:]
+            zerr = self.catalog["redshift"]["z_error"][:]
+
+            src_freq = units.nu21 / (1.0 + z)
+            src_freq_err = src_freq * zerr / (1.0 + z)
 
         return src_freq, src_freq_err
 
@@ -3124,12 +3132,14 @@ class MaskFromCatalogBase(CatalogBase):
         nu = np.full((nfreq, 1), min_freq) if self.common_freq else freq[:, np.newaxis]
         wavelength = scipy.constants.c / (nu * 1e6)
 
-        ## In the sin(za) direction, we use the synthesized beam.
-        ## 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme.
+        # In the sin(za) direction, we use the synthesized beam.
+        # 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme,
+        # and the factor of 2.35482 converts from FWHM to sigma.
         sigma_y = 0.85 * wavelength / (self.max_ysep * 2.35482)
         window_y = self.nsigma_dec * sigma_y
 
-        ## In the RA direction, we use the primary beam width.
+        # In the RA direction, we use the primary beam width,
+        # because we have significant grating lobes.
         sigma_x = cal_utils.guess_fwhm(
             nu,
             pol="X",
@@ -3286,12 +3296,14 @@ class TaperFromCatalogBase(CatalogBase):
         nu = np.full((nfreq, 1), min_freq) if self.common_freq else freq[:, np.newaxis]
         wavelength = scipy.constants.c / (nu * 1e6)
 
-        ## In the sin(za) direction, we use the synthesized beam.
-        ## 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme.
+        # In the sin(za) direction, we use the synthesized beam.
+        # 0.85 * wavelength / max_ysep gives the FWHM for a natural weighting scheme,
+        # and the factor of 2.35482 converts from FWHM to sigma.
         sigma_y = 0.85 * wavelength / (self.max_ysep * 2.35482)
         window_y = self.nsigma_dec * sigma_y
 
-        ## In the RA direction, we use the primary beam width.
+        # In the RA direction, we use the primary beam width,
+        # because we have significant grating lobes.
         sigma_x = cal_utils.guess_fwhm(
             nu,
             pol="X",
