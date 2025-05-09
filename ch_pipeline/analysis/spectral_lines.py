@@ -225,6 +225,8 @@ class FindSpectralLines(task.SingleTask):
             # Save all results for this source to the output container
             out["position"]["ra"][cc] = src_body.ra._degrees
             out["position"]["dec"][cc] = src_body.dec._degrees
+            out["frequency"]["freq"][cc] = src_freq
+            out["frequency"]["freq_error"][cc] = dfreq
             out["redshift"]["z"][cc] = units.nu21 / src_freq - 1.0
             out["redshift"]["z_error"][cc] = units.nu21 * dfreq / src_freq**2
             out["flux"]["continuum"][cc] = 0.0
