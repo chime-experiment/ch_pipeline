@@ -319,7 +319,7 @@ class SiderealMean(task.SingleTask):
 
     def setup(self):
         """Determine which sources will be masked, if any."""
-        from ch_util import fluxcat
+        import fluxcat
 
         self._name_of_statistic = "median" if self.median else "mean"
 
@@ -328,7 +328,7 @@ class SiderealMean(task.SingleTask):
             for src, body in sources.source_dictionary.items():
                 if src in fluxcat.FluxCatalog:
                     if (
-                        fluxcat.FluxCatalog[src].predict_flux(fluxcat.FREQ_NOMINAL)
+                        fluxcat.FluxCatalog[src].predict_flux(fluxcat.core.FREQ_NOMINAL)
                         > self.flux_threshold
                     ) and (body.dec.degrees > self.dec_threshold):
                         self.log.info(
