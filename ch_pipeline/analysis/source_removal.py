@@ -12,9 +12,9 @@ from caput import config, task
 from ch_ephem.observers import chime
 from ch_ephem.sources import source_dictionary
 from ch_util import tools
-from ch_util.fluxcat import FluxCatalog
 from draco.core import io
 from draco.util import interferometry
+from fluxcat import FluxCatalog
 from scipy.constants import c as speed_of_light
 
 from ..core import containers

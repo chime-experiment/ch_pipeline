@@ -3,12 +3,13 @@
 import json
 
 import caput.time as ctime
+import fluxcat
 import numpy as np
 import scipy.signal
 from caput import config, memh5, mpiarray, mpiutil, task, weighted_median
 from ch_ephem import coord, sources
 from ch_ephem.observers import chime
-from ch_util import andata, cal_utils, ephemeris, finder, fluxcat, ni_utils, rfi, tools
+from ch_util import andata, cal_utils, ephemeris, finder, ni_utils, rfi, tools
 from draco.core import containers
 from draco.util import _fast_tools, interferometry
 from mpi4py import MPI
