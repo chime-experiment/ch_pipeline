@@ -29,10 +29,10 @@ class FindSpectralLines(task.SingleTask):
     delay_cutoff : float
         Delay cutoff in microseconds used during the continuum filtering step.
         Defines the resolution in frequency and sets the scale for associating
-        outliers into candidate features.
+        outliers into candidate features.  Default is 0.20 microseconds.
     linkage_method : {"single"|"complete"|"average"}
         Defines how the distance between clusters is computed. Options include:
-            "single" :   Minimum distance between any two members.
+            "single" :   Minimum distance between any two members. (default)
                          Can lead to spurious connections.
             "complete" : Maximum distance between any two members.
                          May split true clusters.
@@ -40,7 +40,7 @@ class FindSpectralLines(task.SingleTask):
                          Can blur edges of true clusters.
     nsigma : float
         Maximum allowed clustering distance (in units of normalized coordinate space)
-        between outliers to be grouped as a single spectral line.
+        between outliers to be grouped as a single spectral line.  Default is 2.
     """
 
     delay_cutoff = config.Property(proptype=float, default=0.20)
