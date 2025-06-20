@@ -1813,10 +1813,22 @@ class ThermalCalibration(task.SingleTask):
 
         # Compute gain corrections
         self.log.info("Computing gains corrections")
-        g = self._reftime2gain(reftime_result, timestamp, freq[lo : lo + ls])
+        gain.gain[:] = self._reftime2gain(reftime_result, timestamp, freq[lo : lo + ls])
 
-        # Copy data into container
-        gain.gain[:] = g[:]
+        any_nans = np.isnan(gain.gain[:]).allgather().any(axis=0)
+
+        if any_nans.all():
+            raise RuntimeError(
+                "Could not get gains - entire dataset contains NaN values"
+            )
+
+        if any_nans.any():
+            # Initialise the gain weight array
+            gain.add_dataset("weight")
+            gain.weight[:] = 1.0
+            # Mask time samples where any frequency is NaN
+            gain.weight[:, any_nans] = 0.0
+            gain.gain[:, any_nans] = 0.0
 
         return gain
 
