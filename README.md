@@ -1,6 +1,6 @@
-# CHIME Pipeline
+# CHIME Analysis Pipeline
 
-This is the repository for storing the CHIME Pipeline.
+This is the repository for storing the CHIME Analysis Pipeline.
 
 Development should be done along the lines of [Github
 Flow](https://guides.github.com/introduction/flow/). This is the same model we
