@@ -6,7 +6,6 @@ from caput import config, tools
 from draco.analysis.sidereal import _search_nearest
 from draco.core import task
 from draco.core.containers import LocalizedRFIMask
-from mpi4py import MPI
 from scipy.spatial.distance import cdist
 
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
@@ -280,18 +279,11 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
         # Determine local frequency slice for this MPI rank
         freq_ax = list(rfimaskbitmap.subfreq_rfi.attrs["axis"]).index("freq")
         nfreq_local = rfimaskbitmap.subfreq_rfi[:].local_array.shape[freq_ax]
-        max_freq = self.comm.allreduce(nfreq_local, op=MPI.MAX)
         sf = rfimaskbitmap.subfreq_rfi.local_offset[freq_ax]
-        ef = sf + max_freq + 1
+        ef = sf + nfreq_local
 
         # Process each frequency separately since beam-to-el mapping varies with freq
-        for f in range(sf, ef):
-
-            # To avoid issues occurring when the last iteration of frequency-distributed data processing
-            # is pending, particularly to handle the case of an empty slice at the end.
-            i = f
-            if (i - sf) >= nfreq_local:
-                i = sf
+        for i in range(sf, ef):
 
             # Extract mask for this std and threshold
             mask = rfimaskbitmap.get_mask(self.std, self.subfreq_threshold)[
@@ -345,12 +337,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
                 denominator = np.sum(window, axis=-1).reshape(
                     (-1,) + (1,) * (numerator.ndim - 1)
                 )
-                converted = np.divide(
-                    numerator,
-                    denominator,
-                    out=np.zeros_like(numerator),
-                    where=denominator != 0,
-                )
+                converted = numerator * tools.invert_no_zero(denominator)
                 out.frac_rfi[:].local_array[i - sf, el_start:el_end, :] = converted
 
         # Return output container
