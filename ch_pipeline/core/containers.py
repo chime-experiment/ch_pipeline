@@ -38,6 +38,7 @@ from draco.core.containers import (
     ContainerBase,
     FormedBeam,
     FreqContainer,
+    SpectroscopicCatalog,
     StaticGainData,
     TimeStream,
     TODContainer,
@@ -976,6 +977,25 @@ class Photometry(ContainerBase):
     @property
     def source(self):
         return self.index_map["source"]
+
+
+class SpectralLineCatalog(SpectroscopicCatalog):
+    """A container for spectral line sources."""
+
+    _table_spec: ClassVar = {
+        "frequency": {
+            "columns": [["freq", np.float64], ["freq_error", np.float64]],
+            "axis": "object_id",
+        },
+        "flux": {
+            "columns": [["line_depth", np.float64], ["continuum", np.float64]],
+            "axis": "object_id",
+        },
+        "significance": {
+            "columns": [["signal_to_noise", np.float64], ["npixels", int]],
+            "axis": "object_id",
+        },
+    }
 
 
 class RawContainer(TODContainer):
