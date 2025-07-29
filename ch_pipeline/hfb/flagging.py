@@ -3,10 +3,12 @@
 import beam_model.formed as fm
 import numpy as np
 from caput import config, tools
+from draco.analysis.sidereal import _search_nearest
 from draco.core import task
 from draco.core.containers import LocalizedRFIMask
+from scipy.spatial.distance import cdist
 
-from .containers import HFBDirectionalRFIMask, HFBRFIMask
+from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
 
 
 class HFBRadiometerRFIFlagging(task.SingleTask):
@@ -127,33 +129,33 @@ class ApplyHFBMask(task.SingleTask):
 class HFBDirectionalRFIFlagging(task.SingleTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
-    The mask is for each N-S beam positions averaged over every E-W beam positions
-    and for each chime frequency channel averaged over every 128 HFB subfrequencies.
-    This task assumes that the loaded HFBData contains a rectangular selection of beams,
-    i.e., nbeam_ew x nbeam_ns = nbeam.
+    This task detects RFI signals based on deviations from expected radiometer noise
+    in the second East-West beams (beam IDs: 256-512) for multiple values of std.
+    It produces a directional RFI mask container recording the number of HFB subfrequency
+    channels flagged for RFI under each std.
 
     Attributes
     ----------
-    std : float
-        The estimated standard deviation of the Gaussian modeling the distribution
-        of HFB sensitivity values. Default is 0.15.
-    threshold : float
-        This is to detect RFI in HFB sensitivity values. If it exceeds 1 + treshold * std,
-        then it indicates RFI events. Default is 5.
-    threshold_subfreq : int
-        Flag out a CHIME frequency channel if the number of its subfrequency channels detecting
-        RFI is above this value. Default is 1.
-    keep_frac_rfi : bool
-         Save the fraction of subfrequency channels detecting RFI events.
+    beam_ew_id : int
+        The E-W beam index to inspect for RFI detection. Default is 1. (beam IDs: 256-512)
+    std : list of float
+        List of exactly four standard deviation values used as thresholds in RFI detection.
+        Each value corresponds to one of the four 8-bit segments packed into the 32-bit mask.
+        These thresholds are used to compare against the sensitivity metric, and each one
+        produces a separate mask encoding the number of HFB subfrequency channels flagged as RFI.
+        The order of values determines their byte position: the first maps to bits 0-7, the second
+        to 8-15, and so on. Default is [0.25, 0.275, 0.30, 0.325].
+    sigma_threshold : float
+        This is to detect RFI in HFB sensitivity values. If it exceeds
+        1 + treshold * std (or std_avg), then it indicates RFI events. Default is 5.
     """
 
-    std = config.Property(proptype=float, default=0.15)
-    threshold = config.Property(proptype=float, default=5)
-    threshold_subfreq = config.Property(proptype=int, default=1)
-    keep_frac_rfi = config.Property(proptype=bool, default=False)
+    beam_ew_id = config.Property(proptype=int, default=1)
+    std = config.Property(proptype=list, default=[0.25, 0.275, 0.30, 0.325])
+    sigma_threshold = config.Property(proptype=float, default=5)
 
     def process(self, stream):
-        """Produce a RFI mask.
+        """Produce a directional RFI mask from HFB data.
 
         Parameters
         ----------
@@ -162,13 +164,10 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
 
         Returns
         -------
-        out : containers.HFBDirectionalRFIMask
-            Boolean mask that can be converted to a draco container `LocalizedRFIMask`
-            with the task `HFBMaskConversion` to mask contaminated
-            frequencies, beam/el, and time samples.
-
+        out : containers.HFBDirectionalRFIMaskBitmap
+            Container holding the RFI masks across different std values.
         """
-        # Get the dimensions of the data array
+        # Extract HFB data shape so we can reshape sensitivities to separate E-W and N-S beam axes
         nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
         nbeam_ew = len(stream.beam_ew)
         nbeam_ns = len(stream.beam_ns)
@@ -176,156 +175,174 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         # Radiometer noise test: the sensitivity metric would be unity for
         # an ideal radiometer, it would be higher for data with RFI
         sensitivities = sensitivity_metric(stream=stream, average_beams=False)
-
-        # Averaging over E-W beams
         sensitivities = sensitivities.reshape(
             nfreq, nsubfreq, nbeam_ew, nbeam_ns, ntime
+        )[
+            :, :, self.beam_ew_id, :, :
+        ]  # (nfreq, nsubfreq, nbeam_ns, ntime)
+
+        # Create output container with the same axes
+        out = HFBDirectionalRFIMaskBitmap(
+            std_key=self.std,
+            freq=stream.freq[:],
+            beam_ns=stream.beam_ns[:],
+            time=stream.time[:],
         )
-        sensitivities = np.mean(sensitivities, axis=2)
+        out.attrs["bitmap"] = {std: i for i, std in enumerate(self.std[:])}
 
-        # Detecting RFI
-        count = sensitivities > 1.0 + self.threshold * self.std
-        count = np.sum(count, axis=1)
-        mask = count > self.threshold_subfreq
+        # For each std, compute RFI flags and store counts
+        for i in range(len(self.std)):
 
-        # Extract axis arrays
-        freq = stream.freq[:]
-        time = stream.time[:]
-        beam_ns = stream.beam_ns[:]
+            # RFI detection for individual E-W beams
+            flags = sensitivities > 1.0 + self.sigma_threshold * self.std[i]
 
-        # Create container to hold output
-        out = HFBDirectionalRFIMask(beam_ns=beam_ns, freq=freq, time=time)
+            # Summing over subfrequency channels
+            count = np.sum(flags, axis=1)
 
-        # Save mask to output container
-        out.mask[:] = mask
-
-        if self.keep_frac_rfi:
-            out.add_dataset("frac_rfi")
-            out.frac_rfi[:] = count / nsubfreq
+            # Store counts into appropriate directional masks
+            out.set_subfreq_rfi(self.std[i], count)
 
         # Return output container
         return out
 
 
-class HFBMaskConversion(task.SingleTask):
-    """Convert axes from beam_ns to el.
+class RFIMaskHFBRegridderNearest(task.SingleTask):
+    """Convert HFBDirectionalRFIMaskBitmap axis from beam_ns to el.
 
-    Note that before CSD = 3685, the time axes were not synchronized between cosmology and HFB data.
+    This task takes an HFBDirectionalRFIMaskBitmap, selects the RFI mask corresponding
+    to a specific std value used in the detection, then regrids the mask from
+    the beam_ns axis to an el axis.
+
+    Notes
+    -----
+    - Before CSD 3685, the time axes of HFB and cosmology data were not synchronized.
 
     Attributes
     ----------
-    spread_size : int
-        The number of cells to flag before and after a detected true value. This ensures
-        conservative flagging, preventing missed detections due to axis alignment issues.
-        Default is 1.
+    std : float
+        Must match one of the std keys used when the HFBDirectionalRFIMaskBitmap was
+        created. Default is 0.25.
+    subfreq_threshold : int
+        Subfrequency threshold for decoding the bitmap. A sample is flagged if
+        the number of HFB subfrequency channels detecting RFI >= this threshold.
+        Default is 2.
+    keep_frac_rfi : bool
+        Save the fraction of HFB subfrequency channels (Out of 128) detecting RFI
+        that were used to construct the mask, storing this as an additional dataset
+        in the output container. Default is False.
+    spread_factor : float
+        Spreading factor for conservative flagging. Each flagged mask sample is
+        expanded to neighboring target el values within
+        'spread_factor * resolution' of the axis. Default is 1.0.
     npix : int
-        The number of pixels used to cover the full el range from -1 to 1.
-         Defualt is 512.
+        The number of pixels used to cover the full elevation range from -1 to 1.
+        Default is 512.
     """
 
-    spread_size = config.Property(proptype=int, default=1)
+    std = config.Property(proptype=float, default=0.25)
+    subfreq_threshold = config.Property(proptype=int, default=2)
+    keep_frac_rfi = config.Property(proptype=bool, default=False)
+    spread_factor = config.Property(proptype=float, default=1)
     npix = config.Property(proptype=int, default=512)
 
-    def process(self, rfimask):
-        """Produce a RFI mask.
+    def process(self, rfimaskbitmap):
+        """Convert beam_ns axis of an HFBDIrectionalRFIMaskBitmap to el axis.
 
         Parameters
         ----------
-        rfimask : containers.HFBDirectionalRFIMask
-            RFI mask whose axes are freq, beam_ns, and time.
+        rfimaskbitmap : containers.HFBDirectionalRFIMaskBitmap
+            Input RFI mask with axes (freq, beam_ns, time).
 
         Returns
         -------
         out : containers.LocalizedRFIMask
-            Boolean mask that can be converted to a draco container `LocalizedSiderealRFIMask`
-            with the task `SiderealMaskConversion` to mask contaminated
-            frequencies, el, and time/ra samples.
+            Converted mask with axes (freq, el, time).
         """
-        # Extract mask/frac and axes data
-        mask = rfimask.mask[:]
-        freq = rfimask.freq[:]
-        time = rfimask.time[:]
-        beam_ns = rfimask.beam_ns[:]
+        # Ensure data is distributed in frequency
+        rfimaskbitmap.redistribute("freq")
 
-        nfreq, nbeam_ns, ntime = mask.shape
-
-        # Convert beam IDs to el values
+        # Convert beam_ns indices to elevation angles (sin(theta))
         v = fm.FFTFormedBeamModel()
-        angles = v.get_beam_positions(beam_ns, freq)
-        el = np.sin(np.deg2rad(angles.T[1]))
+        angles = v.get_beam_positions(rfimaskbitmap.beam_ns[:], rfimaskbitmap.freq[:])
+        el = np.sin(np.deg2rad(angles.T[1]))  # shape (freq, beam_ns)
 
-        # Find closest el indices
-        full_el = np.linspace(-1, 1, self.npix)
-        el_closest_indices = np.abs(el[:, :, None] - full_el).argmin(axis=2)
+        # Create new elevation axis, restricting to overlapping region with original beams
+        to_ax = np.linspace(-1, 1, self.npix)
+        start = _search_nearest(to_ax, np.min(el))
+        end = _search_nearest(to_ax, np.max(el))
+        valid_range = slice(start, end + 1)
+        new_ax = to_ax[valid_range]
 
-        # Make the new el axis
-        min_index = np.min(el_closest_indices)
-        max_index = np.max(el_closest_indices)
-        new_el = full_el[min_index : max_index + 1]
-        nel = len(new_el)
+        # Create output container with the new axes
+        out = LocalizedRFIMask(
+            freq=rfimaskbitmap.freq[:], el=new_ax, time=rfimaskbitmap.time[:]
+        )
+        if self.keep_frac_rfi:
+            out.add_dataset("frac_rfi")
 
-        ax = list(rfimask.mask.attrs["axis"]).index("freq")
-        nfreq_local = rfimask.mask.local_shape[ax]
-        sf = rfimask.mask.local_offset[ax]
+        # Determine local frequency slice for this MPI rank
+        freq_ax = list(rfimaskbitmap.subfreq_rfi.attrs["axis"]).index("freq")
+        nfreq_local = rfimaskbitmap.subfreq_rfi[:].local_array.shape[freq_ax]
+        sf = rfimaskbitmap.subfreq_rfi.local_offset[freq_ax]
         ef = sf + nfreq_local
 
-        # Generate meshgrid indices for the freq and el axes
-        n0, _, n2 = np.meshgrid(
-            np.arange(nfreq_local) + sf,
-            np.arange(nbeam_ns),
-            np.arange(ntime),
-            indexing="ij",
-        )
-        el_closest_indices = el_closest_indices - np.min(el_closest_indices)
+        # Process each frequency separately since beam-to-el mapping varies with freq
+        for i in range(sf, ef):
 
-        # Generate meshgrid indices for the freq and el axes
-        n0, _, n2 = np.meshgrid(
-            np.arange(nfreq), np.arange(nbeam_ns), np.arange(ntime), indexing="ij"
-        )
-        el_closest_indices = el_closest_indices - np.min(el_closest_indices)
+            # Extract mask for this std and threshold
+            mask = rfimaskbitmap.get_mask(self.std, self.subfreq_threshold)[
+                :
+            ].local_array[i - sf]
 
-        # Broadcast indices along the last axis
-        index_tuple = (n0, el_closest_indices[sf:ef, :, None], n2)
+            # Optionally carry over the number of HFB subrequency channels detecting RFI
+            if self.keep_frac_rfi:
+                frac_rfi = rfimaskbitmap.get_frac_rfi(self.std)[:].local_array[i - sf]
 
-        # Broadcast the mask data
-        mask_adj = np.full((nfreq, nel, ntime), False)
-        mask_adj[index_tuple] = mask
+            # Locate slice in new elevation axis
+            el_start = _search_nearest(new_ax, out.el[0])
+            el_end = _search_nearest(new_ax, out.el[-1]) + 1
 
-        # Falg before and after a given true value for conservative flagging
-        for repeat in range(self.spread_size):
-            mask_adj[:, :-1, :] |= mask_adj[:, 1:, :]
-            mask_adj[:, 1:, :] |= mask_adj[:, :-1, :]
-            mask_adj[:, :-2, :] |= mask_adj[:, 2:, :]
-            mask_adj[:, 2:, :] |= mask_adj[:, :-2, :]
+            # Estimate resolutions to determine mapping strategy
+            from_ax = el[i, :]
+            new_resolution = np.median(np.abs(np.diff(new_ax)))
+            from_resolution = np.median(np.abs(np.diff(from_ax)))
 
-        # Create container to hold output
-        out = LocalizedRFIMask(freq=freq, el=new_el, time=time)
+            # Determine nearest-neighbor indices for mapping
+            if new_resolution < from_resolution:
+                nearest_indices = _search_nearest(from_ax, new_ax)
+            else:
+                nearest_indices = np.arange(len(from_ax))
 
-        # Save the adjusted mask to output container
-        out.mask[:] = mask_adj
+            # Compute pairwise distances between each new axis point and nearest from_ax points
+            dist = cdist(
+                new_ax[:, np.newaxis],
+                from_ax[nearest_indices, np.newaxis],
+                metric="euclidean",
+            )
 
-        # If the input container has the frac_rfi dataset
-        if rfimask.datasets.get("frac_rfi", None) is not None:
-            frac_rfi = rfimask.frac_rfi[:]
-            frac_rfi_adj = np.full((nfreq, nel, ntime), 0.0)
-            frac_rfi_adj[index_tuple] = frac_rfi
+            # Disable spreading if axes align exactly (diagonal distance is zero)
+            if np.all(np.diag(dist) == 0):
+                self.spread_factor = 0
 
-            for repeat in range(self.spread_size):
-                frac_rfi_adj[:, :-1, :] = np.maximum(
-                    frac_rfi_adj[:, :-1, :], frac_rfi_adj[:, 1:, :]
+            # Construct conservative spreading window
+            resolution = np.median(np.abs(np.diff(from_ax)))
+            window = np.abs(dist) <= self.spread_factor * resolution
+
+            # Interpolate the boolean mask
+            converted = np.tensordot(window, mask[nearest_indices], axes=([1], [0])) > 0
+            out.mask[:].local_array[i - sf, el_start:el_end, :] = converted
+
+            # Interpolate the float frac_rfi
+            if self.keep_frac_rfi:
+                window = window.astype(np.float32)
+                numerator = np.tensordot(
+                    window, frac_rfi[nearest_indices], axes=([1], [0])
                 )
-                frac_rfi_adj[:, 1:, :] = np.maximum(
-                    frac_rfi_adj[:, 1:, :], frac_rfi_adj[:, :-1, :]
+                denominator = np.sum(window, axis=-1).reshape(
+                    (-1,) + (1,) * (numerator.ndim - 1)
                 )
-                frac_rfi_adj[:, :-2, :] = np.maximum(
-                    frac_rfi_adj[:, :-2, :], frac_rfi_adj[:, 2:, :]
-                )
-                frac_rfi_adj[:, 2:, :] = np.maximum(
-                    frac_rfi_adj[:, 2:, :], frac_rfi_adj[:, :-2, :]
-                )
-
-            out.add_dataset("frac_rfi")
-            out.frac_rfi[:] = frac_rfi_adj
+                converted = numerator * tools.invert_no_zero(denominator)
+                out.frac_rfi[:].local_array[i - sf, el_start:el_end, :] = converted
 
         # Return output container
         return out
