@@ -603,17 +603,21 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         """Sets up the bitmap attribute in the packed 32-bit representation."""
         super().__init__(*args, **kwargs)
 
-        # If std_key was provided, add it to attrs
+        # If std_key is provided, validat and store mapping for decoding individual 8-bit RFI segments
         if std_key:
             if len(std_key) != 4:
                 raise ValueError(
-                    "Exactly four std values must be provided for packing into 32 bits."
+                    f"Exactly four std values must be provided for packing into 32 bits, but got '{len(std_key)}'."
                 )
         self.attrs["bitmap"] = {std: i for i, std in enumerate(std_key)}
 
     @property
     def bitmap(self):
-        """Return the bitmap."""
+        """Return the bitmap, the std-to-byte-offset mapping used in the packed 32-bit representation.
+
+        The bitmap is a dictionary mapping each std_key value to an integer in [0, 3],
+        indicating which 8-bit segment (out of four) stores the corresponding RFI data.
+        """
         return self.attrs["bitmap"]
 
     @property
@@ -623,6 +627,15 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
 
     @property
     def subfreq_rfi(self):
+        """Return the packed 32-bit unsigned integer subfrequency RFI masks.
+
+        Each 32-bit unsigned integer encodes four independent 8-bit RFI counts, one for each std_key.
+        The lowest-order byte (bits 0-7) corresponds to the first std_key,
+        the next byte (bits 8-15) to the second, and so on, up to bits 24-31.
+
+        Note: On little-endian systems, this byte order matches the memory layout.
+        On big-endian systems, the order in memory will differ, but bit-level encoding remains consistent.
+        """
         """Return the packed 32-bit unsigned integer subfrequency RFI masks."""
         return self.datasets["subfreq_rfi"]
 
@@ -643,23 +656,32 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         )
 
     def get_subfreq_rfi(self, std_key: float) -> np.ndarray:
-        """Extract the 8-bit RFI data for a given beam type."""
+        """Extract the 8-bit RFI data for a given std value."""
+        if not self.attrs["bitmap"]:
+            raise AttributeError(
+                "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
+            )
+
         offset = self.bitmap.get(std_key)
+
         if offset is None:
-            raise ValueError(
+            raise KeyError(
                 f"Invalid std_key '{std_key}'. Must be one of {list(self.bitmap.keys())}."
             )
+
         return ((self.subfreq_rfi[:] >> (8 * offset)) & 0xFF).astype(np.uint8)
 
     def set_subfreq_rfi(self, std_key: float, values: np.ndarray) -> None:
         """Set the 8-bit RFI data for a given beam type."""
         if not self.attrs["bitmap"]:
-            raise ValueError("bitmap is not set yet.")
+            raise AttributeError(
+                "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
+            )
 
         offset = self.bitmap.get(std_key)
 
         if offset is None:
-            raise ValueError(
+            raise KeyError(
                 f"Invalid std_key '{std_key}'. Must be one of {list(self.bitmap.keys())}."
             )
         if np.any((values < 0) | (values > 128)):

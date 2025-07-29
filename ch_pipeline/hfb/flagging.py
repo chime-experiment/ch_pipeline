@@ -139,8 +139,12 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
     beam_ew_id : int
         The E-W beam index to inspect for RFI detection. Default is 1. (beam IDs: 256-512)
     std : list of float
-        List of std values used for the RFI detection thresholds. Each will result in a separate mask.
-        Default is [0.25, 0.275, 0.30, 0.325].
+        List of exactly four standard deviation values used as thresholds in RFI detection.
+        Each value corresponds to one of the four 8-bit segments packed into the 32-bit mask.
+        These thresholds are used to compare against the sensitivity metric, and each one
+        produces a separate mask encoding the number of HFB subfrequency channels flagged as RFI.
+        The order of values determines their byte position: the first maps to bits 0-7, the second
+        to 8-15, and so on. Default is [0.25, 0.275, 0.30, 0.325].
     sigma_threshold : float
         This is to detect RFI in HFB sensitivity values. If it exceeds
         1 + treshold * std (or std_avg), then it indicates RFI events. Default is 5.
@@ -163,7 +167,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         out : containers.HFBDirectionalRFIMaskBitmap
             Container holding the RFI masks across different std values.
         """
-        # Get dimensions from the HFB data
+        # Extract HFB data shape so we can reshape sensitivities to separate E-W and N-S beam axes
         nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
         nbeam_ew = len(stream.beam_ew)
         nbeam_ns = len(stream.beam_ns)
@@ -229,7 +233,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
     spread_factor : float
         Spreading factor for conservative flagging. Each flagged mask sample is
         expanded to neighboring target el values within
-        'spread_factor x resolution' of the axis. Default is 1.0.
+        'spread_factor * resolution' of the axis. Default is 1.0.
     npix : int
         The number of pixels used to cover the full elevation range from -1 to 1.
         Default is 512.
@@ -322,7 +326,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
 
             # Construct conservative spreading window
             resolution = np.median(np.abs(np.diff(from_ax)))
-            window = np.abs(dist) < self.spread_factor * resolution
+            window = np.abs(dist) <= self.spread_factor * resolution
 
             # Interpolate the boolean mask
             converted = np.tensordot(window, mask[nearest_indices], axes=([1], [0])) > 0
