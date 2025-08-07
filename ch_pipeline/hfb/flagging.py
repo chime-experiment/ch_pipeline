@@ -151,7 +151,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
     """
 
     beam_ew_id = config.Property(proptype=int, default=1)
-    std = config.Property(proptype=list, default=[0.25, 0.275, 0.30, 0.325])
+    std = config.Property(proptype=list, default=[0.25, 0.30, 0.35, 0.50])
     sigma_threshold = config.Property(proptype=float, default=5)
 
     def process(self, stream):
@@ -212,10 +212,6 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
     This task takes an HFBDirectionalRFIMaskBitmap, selects the RFI mask corresponding
     to a specific std value used in the detection, then regrids the mask from
     the beam_ns axis to an el axis.
-
-    Notes
-    -----
-    - Before CSD 3685, the time axes of HFB and cosmology data were not synchronized.
 
     Attributes
     ----------

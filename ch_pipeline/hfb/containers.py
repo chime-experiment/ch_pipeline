@@ -662,7 +662,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
                 "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
             )
 
-        offset = self.bitmap.get(std_key)
+        offset = self.bitmap.get(str(std_key))
 
         if offset is None:
             raise KeyError(
@@ -678,7 +678,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
                 "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
             )
 
-        offset = self.bitmap.get(std_key)
+        offset = self.bitmap.get(str(std_key))
 
         if offset is None:
             raise KeyError(
