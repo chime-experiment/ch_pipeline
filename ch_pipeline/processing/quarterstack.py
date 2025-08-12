@@ -27,11 +27,11 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
-  mem: 192000M
+  mem: 768000M
 
   venv: {venv}
   module_path: {modpath}
@@ -333,10 +333,10 @@ class QuarterStackProcessing(base.ProcessingType):
             ),
         },
         # Job params
-        "time": 180,  # How long in minutes?
-        "nodes": 16,  # Number of nodes to use.
-        "ompnum": 6,  # Number of OpenMP threads
-        "pernode": 8,  # Jobs per node
+        "time": 60,  # How long in minutes?
+        "nodes": 3,  # Number of nodes to use.
+        "ompnum": 8,  # Number of OpenMP threads
+        "pernode": 24,  # Jobs per node
     }
 
     default_script = DEFAULT_SCRIPT

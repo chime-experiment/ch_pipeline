@@ -35,11 +35,11 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
-  mem: 192000M
+  mem: 768000M
 
   venv: {venv}
   module_path: {modpath}
@@ -921,10 +921,10 @@ class DailyProcessing(base.ProcessingType):
         "modlist": "chime/python/2024.04",
         "nfreq_delay": 1025,
         # Job params
-        "time": 150,  # How long in minutes?
-        "nodes": 12,  # Number of nodes to use.
-        "ompnum": 4,  # Number of OpenMP threads
-        "pernode": 12,  # Jobs per node
+        "time": 120,  # How long in minutes?
+        "nodes": 4,  # Number of nodes to use.
+        "ompnum": 8,  # Number of OpenMP threads
+        "pernode": 24,  # Jobs per node
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove chimestack files before this CSD
@@ -1119,8 +1119,8 @@ class TestDailyProcessing(DailyProcessing):
             "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
-            "ompnum": 12,  # Number of OpenMP threads
-            "pernode": 4,  # Jobs per node
+            "ompnum": 8,  # Number of OpenMP threads
+            "pernode": 16,  # Jobs per node
         }
     )
 
