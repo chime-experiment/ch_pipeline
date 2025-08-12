@@ -22,7 +22,7 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -154,9 +154,9 @@ class HolographyFringestop(base.ProcessingType):
         "transits_per_run": 10,
         "ha_span": 60.0,
         "num_samples": 720,
-        "nodes": 4,
-        "pernode": 4,
-        "ompnum": 8,
+        "nodes": 1,
+        "pernode": 8,
+        "ompnum": 24,
         "time": "0-4:00:00",
         "timing_corr": "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
         # System modules to use/load
