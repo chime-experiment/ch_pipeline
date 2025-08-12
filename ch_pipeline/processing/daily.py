@@ -92,7 +92,7 @@ pipeline:
         end_csd: {csd[1]:.2f}
         accept_all_global_flags: true
         node_spoof:
-          cedar_online: "/project/rpp-chime/chime/chime_online/"
+          fir_online: "/project/rpp-chime/chime/chime_online/"
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -1353,7 +1353,7 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
         di.ArchiveFileCopy.has_file == "Y",
     )
     # Figure out which files are online
-    online_node = di.StorageNode.get(name="cedar_online", active=True)
+    online_node = di.StorageNode.get(name="fir_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
     files_online = sorted(files_online.tuples(), key=lambda x: x[1])
@@ -1415,7 +1415,7 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
         di.ArchiveFileCopy.has_file == "Y",
     )
     # Figure out which files are online
-    online_node = di.StorageNode.get(name="cedar_online", active=True)
+    online_node = di.StorageNode.get(name="fir_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
     files_online = sorted(files_online.tuples(), key=lambda x: x[1])
@@ -1466,7 +1466,7 @@ def request_offline_csds(csds: list, pad: float = 0):
     """Given a list of csds, request that all required data be copied online.
 
     Request that all data required by the list of CSDS get copied to the
-    cedar_online node.
+    fir_online node.
 
     Parameters
     ----------
@@ -1513,9 +1513,9 @@ def request_offline_csds(csds: list, pad: float = 0):
 
     db.connect(read_write=True)
 
-    target_node = di.StorageGroup.get(name="cedar_online")
-    offline_node = di.StorageNode.get(name="cedar_nearline")
-    smallfile_node = di.StorageNode.get(name="cedar_smallfile")
+    target_node = di.StorageGroup.get(name="fir_online")
+    offline_node = di.StorageNode.get(name="fir_nearline")
+    smallfile_node = di.StorageNode.get(name="fir_smallfile")
 
     nrequests = 0
 
@@ -1537,7 +1537,7 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
 
     Check the files required by `csds_remove` and check against those used
     by `csds_keep`. Any files which are _only_ used by csds in `csds_remove`
-    are removed from the `cedar_online` node, provided that a copy exists
+    are removed from the `fir_online` node, provided that a copy exists
     elsewhere.
 
     Parameters
@@ -1561,7 +1561,7 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     remove_files = get_filenames_used_by_csds(csds_remove, files, pad)
     remove_files = [file for file in remove_files if file not in keep_files]
 
-    online_node = di.StorageNode.get(name="cedar_online")
+    online_node = di.StorageNode.get(name="fir_online")
     # Establish a read-write database connection
     db.connect(read_write=True)
     # Request that these files be removed from the online node
