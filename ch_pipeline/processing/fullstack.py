@@ -20,11 +20,11 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
-  mem: 192000M
+  mem: 768000M
 
   venv: {venv}
 
@@ -316,9 +316,9 @@ class FullStackProcessing(base.ProcessingType):
         "modlist": "chime/python/2025.03",
         # Job params
         "time": 60,  # Time in minutes
-        "nodes": 12,  # Number of nodes to use
-        "ompnum": 4,  # Number of OpenMP threads
-        "pernode": 12,  # Jobs per node
+        "nodes": 3,  # Number of nodes to use
+        "ompnum": 8,  # Number of OpenMP threads
+        "pernode": 24,  # Jobs per node
     }
 
     default_script = DEFAULT_SCRIPT
