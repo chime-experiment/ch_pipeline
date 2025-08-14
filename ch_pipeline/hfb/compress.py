@@ -29,10 +29,12 @@ class CompressHFBWeights(task.SingleTask):
     def setup(self):
         """Set up compression function."""
 
-        self._compress_fn = {
+        compress_fn_map = {
             "svd": self._compress_svd,
             "sum": self._compress_sum,
-        }.get(self.method, None)
+        }
+
+        self._compress_fn = compress_fn_map[self.method]
 
     def process(self, stream):
         """Create compressed HFB data from raw HFB data.
