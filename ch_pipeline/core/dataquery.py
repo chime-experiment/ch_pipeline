@@ -195,7 +195,7 @@ class QueryDatabase(task.MPILoggedTask):
 
     exclude_data_flag_types = config.Property(proptype=list, default=[])
 
-    hfb_compression = config.Property(proptye=bool, default=None)
+    hfb_compression = config.Property(proptype=bool, default=None)
 
     def setup(self):
         """Query the database and fetch the files.
