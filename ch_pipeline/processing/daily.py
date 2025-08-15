@@ -305,8 +305,7 @@ pipeline:
       out: tstream_day_rfi2
 
     # Fully remove any frequencies which are mostly flagged. A threshold
-    # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data,
-    # but has a noticeably positive effect on high-delay noise
+    # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data
     - type: draco.analysis.flagging.MaskFreq
       in: tstream_day_rfi2
       out: freq_mask
@@ -368,12 +367,14 @@ pipeline:
       out: tstream_day_rfi3
 
     # Regrid the data onto a regular grid in sidereal time
-    - type: draco.analysis.sidereal.SiderealRebinner
+    - type: draco.analysis.sidereal.SiderealRegridderGP
       requires: manager
       in: tstream_day_rfi3
       out: sstream
       params:
         samples: 4096
+        mask_cutoff: 1.7
+        kernel_width: 5
 
     # Precision truncate the sidereal stream data
     - type: draco.core.io.Truncate
@@ -401,27 +402,10 @@ pipeline:
         output_name: "sstream_{{tag}}.zarr.zip"
         remove: true
 
-    # Load the stack used to calculate a binning gradient correction.
-    # This is the same dataset used in blending, but we don't want to
-    # keep it in memory while making ringmaps
-    - type: draco.core.io.LoadBasicCont
-      out: sstack_grad_fix
-      params:
-        files:
-          - "{blend_stack_file}"
-        selections:
-          freq_range: [{freq[0]:d}, {freq[1]:d}]
-
-    # Apply a gradient correction to the rebinned sidereal stream
-    - type: draco.analysis.sidereal.RebinGradientCorrection
-      requires: sstack_grad_fix
-      in: sstream
-      out: sstream_grad_fix
-
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: ringmap
       params:
         single_beam: true
@@ -461,7 +445,7 @@ pipeline:
     # cross talk and emphasis point sources
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: ringmap_int
       params:
         single_beam: true
@@ -504,7 +488,7 @@ pipeline:
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: sstream_inter
       params:
         share: vis
@@ -565,14 +549,14 @@ pipeline:
 
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
-      in: sstream_grad_fix
+      in: sstream
       out: sstream_mask1
 
     - type: ch_pipeline.analysis.flagging.MaskMoon
       in: sstream_mask1
       out: sstream_mask2
 
-    # Remove ranges of time known to be bad that may effect the delay power
+    # Remove ranges of time known to be bad that may affect the delay power
     # spectrum estimate
     - type: ch_pipeline.analysis.flagging.DataFlagger
       in: sstream_mask2
