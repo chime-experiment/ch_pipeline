@@ -393,11 +393,6 @@ pipeline:
       in: sstream_trunc
       out: sstream_trunc_handle
       params:
-        compression:
-          vis:
-            chunks: [32, 512, 512]
-          vis_weight:
-            chunks: [32, 512, 512]
         save: true
         output_name: "sstream_{{tag}}.zarr.zip"
         remove: true
@@ -430,13 +425,6 @@ pipeline:
       in: ringmap_trunc
       out: ringmap_trunc_handle
       params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_{{tag}}.zarr.zip"
         remove: true
@@ -472,13 +460,6 @@ pipeline:
       in: ringmap_int_trunc
       out: ringmap_int_trunc_handle
       params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_{{tag}}.zarr.zip"
         remove: true
@@ -718,13 +699,6 @@ pipeline:
       in: ringmap_int_hpf_sel_trunc
       out: ringmap_int_hpf_sel_trunc_handle
       params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
         remove: true
@@ -746,11 +720,6 @@ pipeline:
           - el
         dataset: map
         weighting: weighted
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
 
@@ -763,11 +732,6 @@ pipeline:
           - freq
         dataset: map
         weighting: weighted
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
         save: true
         output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
 
