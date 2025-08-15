@@ -923,10 +923,20 @@ class DailyProcessing(base.ProcessingType):
 
     @property
     def _config_tags(self) -> list:
-        """Return all tags desired from the config."""
-        return unique_ordered(
+        """Return all tags listed in the revision config.
+
+        Order is preserved, except priority CSDS are placed
+        at the start of the list.
+        """
+        csds = unique_ordered(
             csd for i in self._intervals for csd in expand_csd_range(*i)
         )
+
+        if self._num_recent_days > 0:
+            priority = get_recent_csds(csds, self._num_recent_days)
+            csds = priority + [csd for csd in csds if csd not in priority]
+
+        return csds
 
     def runnable_tags(self, require_online=False) -> list:
         """Return all runnable tags, whether or not the data is available."""
@@ -978,12 +988,7 @@ class DailyProcessing(base.ProcessingType):
                 *rev_stats["failed"],
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
-            # Prioritize recent days to ensure that data is available
-            today = np.floor(chime.get_current_lsd()).astype(int)
-            priority = [
-                tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
-            ]
-            all_tags = priority + [tag for tag in all_tags if tag not in priority]
+
             # Search the next 20 tags and request any that we may want to be brought online.
             online_request_tags = sorted(
                 [int(tag) for tag in all_tags[:20] if tag not in upcoming]
@@ -1032,16 +1037,10 @@ class DailyProcessing(base.ProcessingType):
         today = chime.get_current_lsd()
         to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
 
-        # Prioritize some number of recent days
-        today = np.floor(today).astype(int)
-        priority = [
-            csd for csd in to_run if (today - int(csd)) <= self._num_recent_days
-        ]
-
         if priority_only:
-            return priority
+            to_run = get_recent_csds(to_run, self._num_recent_days)
 
-        return priority + [csd for csd in to_run if csd not in priority]
+        return to_run
 
 
 class TestDailyProcessing(DailyProcessing):
@@ -1618,3 +1617,23 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
         flagged_days[key] = sorted(set(val))
 
     return flagged_days
+
+
+def get_recent_csds(csds: list, ndays: int) -> list:
+    """Return CSDs from the last `ndays` chime sidereal days.
+
+    Parameters
+    ----------
+    csds
+        List of integer csds
+    ndays
+        Number of days to look back
+
+    Returns
+    -------
+    recent
+        CSDs in the past `ndays` sidereal days
+    """
+    today = np.floor(chime.get_current_lsd()).astype(int)
+
+    return [csd for csd in csds if (today - int(csd)) <= ndays]
