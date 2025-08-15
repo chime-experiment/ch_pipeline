@@ -870,13 +870,16 @@ class DailyProcessing(base.ProcessingType):
             "timing_correction_edge",
             "no_weather_data",
             "corrupted_file",
+            "globalflag",
+            "bad_calibration_acquisition_restart",
+            "acjump",
         ],
-        # Maximum fraction of day flagged to exclude
+        # Fraction of day flagged to exclude
         "frac_flagged": 0.8,
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Minimum data coverage in order to process a day
-        "required_coverage": 0.3,
+        "data_coverage": 0.3,
         # Weather files are usuall only produced once per day, so
         # full coverage should generally be required
         "weather_coverage": 1.0,
@@ -952,7 +955,7 @@ class DailyProcessing(base.ProcessingType):
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
         self._padding = self._revparams.get("padding", 0)
-        self._min_coverage = self._revparams.get("required_coverage", 0.0)
+        self._data_coverage = self._revparams.get("data_coverage", 0.0)
         self._weather_coverage = self._revparams.get("weather_coverage", 1.0)
         self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
         self._include_offline_files = self._revparams.get(
@@ -986,7 +989,7 @@ class DailyProcessing(base.ProcessingType):
         runnable = available_csds(
             sorted(csds),
             self._padding,
-            self._min_coverage,
+            self._data_coverage,
             self._weather_coverage,
             require_online=require_online,
         )
@@ -1202,7 +1205,7 @@ def files_in_timespan(start, end, file_times):
 def available_csds(
     csds: list,
     pad: float = 0.0,
-    required_coverage: float = 0.0,
+    data_coverage: float = 0.0,
     weather_coverage: float = 1.0,
     require_online: bool = False,
 ) -> set:
@@ -1215,10 +1218,10 @@ def available_csds(
     pad
       fraction of a day to pad on either end. This data should also be available
       in order for a day to be considered available
-    required_coverage
+    data_coverage
       What fraction of the day must exist in order to be considered available.
       This *includes* the padding fraction, so values greater than 1 are
-      permitted. For example, if `pad=0.2`, setting `required_coverage=1.4`
+      permitted. For example, if `pad=0.2`, setting `data_coverage=1.4`
       would indicate that all the data must be available.
       Even if all files are online, if the data coverage is less than this
       fraction, the day shouldn't be processed.
@@ -1294,7 +1297,7 @@ def available_csds(
 
         return available
 
-    corr_available = _available(corr_online, corr_that_exist, required_coverage)
+    corr_available = _available(corr_online, corr_that_exist, data_coverage)
     weather_available = _available(weather_online, weather_that_exist, weather_coverage)
 
     return corr_available & weather_available
