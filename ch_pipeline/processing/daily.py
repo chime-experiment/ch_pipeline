@@ -125,10 +125,19 @@ pipeline:
       params:
         channel_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # Mask out any weights that are abnormally large or small, since these are likely
+    # numerical issues and represent bad data
+    - type: draco.analysis.flagging.SanitizeWeights
+      in: tstream_orig
+      out: tstream_sanitized
+      params:
+        max_thresh: 1e30
+        min_thresh: 1e-30
+
     # Correct the timing distribution errors
     - type: ch_pipeline.analysis.timing.ApplyTimingCorrection
       requires: tcorrlist
-      in: tstream_orig
+      in: tstream_sanitized
       out: tstream_corr
       params:
         use_input_flags: true
@@ -154,27 +163,29 @@ pipeline:
       in: [tstream_rot, inputmap]
       out: tstream
 
+    # Identify samples where autocorrelations are negative, corresponding
+    # to bad data
+    - type: draco.analysis.flagging.NegativeAutosMask
+      in: tstream
+      out: negative_auto_mask
+
+    # Apply the negative auto mask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream, negative_auto_mask]
+      out: tstream_neg_auto
+
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream
+      in: tstream_neg_auto
       out: sensitivity
       params:
         exclude_intracyl: true
 
-    # Mask out any weights that are abnormally large or small, since these are likely
-    # numerical issues and represent bad data
-    - type: draco.analysis.flagging.SanitizeWeights
-      in: tstream
-      out: tstream_sanitized
-      params:
-        max_thresh: 1e30
-        min_thresh: 1e-30
-
     # Identify individual baselines with much lower weights than expected
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: full_bad_baseline_mask
       params:
         average_type: "median"
@@ -190,14 +201,14 @@ pipeline:
 
     # Load the frequency map that was active when this data was collected
     - type: ch_pipeline.core.dataquery.QueryFrequencyMap
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: freqmap
       params:
         cache: false
 
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      in: [tstream_sanitized, inputmap, freqmap]
+      in: [tstream_neg_auto, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
@@ -206,7 +217,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: tstream_col
       params:
         weight: "natural"
@@ -586,7 +597,7 @@ pipeline:
 
     - type: draco.analysis.flagging.BlendStack
       requires: sstack
-      in: sstream_mask3
+      in: sstream_mask3 
       out: sstream_blend1
       params:
         frac: 1e-4
