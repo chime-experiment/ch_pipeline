@@ -625,41 +625,30 @@ pipeline:
       in: [sstream_blend3, factmask]
       out: sstream_blend4
 
-    # Estimate the delay power spectrum of the data using the NRML
-    # estimator. This is a good diagnostic of instrument performance
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
+    # Get Stokes I visibilities for the delay transform
+    - type: draco.analysis.transform.StokesIVis
       requires: manager
       in: sstream_blend4
+      out: sstream_stokesI
+
+    # Estimate the delay power spectrum of the data using the NRML
+    # estimator. This is a good diagnostic of instrument performance.
+    # Increase weights by a factor of 100 so that we're estimating
+    # the combined spectrum of the signal and noise
+    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+      in: sstream_stokesI
       params:
-        freq_frac: 0.01
-        time_frac: 0.01
+        dataset: "vis"
+        sample_axis: "ra"
         remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 100
-        maxpost: true
+        nsamp: 150
         maxpost_tol: 1.0e-4
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
-
-    # Use the gibbs estimator to produce a non-converged backup. This
-    # estimator is slower to converge, but was used in the past, so
-    # this will provide a good comparison with older data
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
-      requires: manager
-      in: sstream_blend4
-      params:
-        freq_frac: 0.01
-        time_frac: 0.01
-        remove_mean: true
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
-        nsamp: 40
-        maxpost: false
-        complex_timedomain: true
-        save: true
-        output_name: "delayspectrum_gibbs_{{tag}}.h5"
 
     # Apply delay filter to stream
     - type: draco.analysis.delay.DelayFilter
@@ -671,20 +660,26 @@ pipeline:
         za_cut: 1.0
         window: true
 
-    # Estimate the delay power spectrum of the data after applying
-    # the delay filter
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
+    # Get Stokes I visibilities for the delay transform
+    # from the high-pass filtered data
+    - type: draco.analysis.transform.StokesIVis
       requires: manager
       in: sstream_dfilter
+      out: sstream_dfilter_stokesI
+
+    # Estimate the delay power spectrum of the data after applying
+    # the delay filter
+    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+      in: sstream_stokesI
       params:
-        freq_frac: 0.01
-        time_frac: 0.01
+        dataset: "vis"
+        sample_axis: "ra"
         remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 100
-        maxpost: true
+        nsamp: 150
         maxpost_tol: 1.0e-4
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
