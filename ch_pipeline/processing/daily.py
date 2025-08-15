@@ -575,14 +575,6 @@ pipeline:
           - decorrelated_cylinder
           - globalflag
 
-    # Find and flag periods of rainfall over 1mm
-    - type: ch_pipeline.analysis.flagging.FlagRainfall
-      in: sstream_mask3
-      out: sstream_mask4
-      params:
-        accumulation_time: 30.0
-        threshold: 1.0
-
     # Load the stack that we will blend into the daily data
     - type: draco.core.io.LoadBasicCont
       out: sstack
@@ -594,7 +586,7 @@ pipeline:
 
     - type: draco.analysis.flagging.BlendStack
       requires: sstack
-      in: sstream_mask4
+      in: sstream_mask3
       out: sstream_blend1
       params:
         frac: 1e-4
