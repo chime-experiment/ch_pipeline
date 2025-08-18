@@ -14,6 +14,38 @@ from draco.util import tools
 from .containers import HFBData, HFBCompressed
 
 
+class CompressHFBWeightsSum(task.SingleTask):
+    """Compress weight dataset of HFB data using the sum method."""
+
+    def process(self, stream):
+        """Create compressed HFB data from raw HFB data.
+
+        Parameters
+        ----------
+        stream : HFBData
+            Container with HFB data and weights.
+
+        Returns
+        -------
+        out : HFBCompressed
+            Container with HFB data and compressed weights.
+        """
+
+        # Read original weights
+        weight = stream.weight[:]
+
+        # Create container to hold output
+        out = HFBCompressed(copy_from=stream)
+
+        # Compute compressed weights
+        out.weight_subf[:] = weight.sum(axis=2)
+        out.weight_beam[:] = weight.sum(axis=1)
+        out.weight_norm[:] = tools.invert_no_zero(weight.sum(axis=(1, 2)))
+
+        # Return output container
+        return out
+
+
 class CompressHFBWeights(task.SingleTask):
     """Compress weight dataset of HFB data.
 
