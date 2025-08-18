@@ -1,17 +1,12 @@
 """HFB tasks for compressing files."""
 
-from typing import Tuple
-
 import numpy as np
-
 import scipy.linalg as la
-
 from caput import config
-
 from draco.core import task
 from draco.util import tools
 
-from .containers import HFBData, HFBCompressed
+from .containers import HFBCompressed, HFBData
 
 
 class CompressHFBWeightsSum(task.SingleTask):
@@ -30,7 +25,6 @@ class CompressHFBWeightsSum(task.SingleTask):
         out : HFBCompressed
             Container with HFB data and compressed weights.
         """
-
         # Read original weights
         weight = stream.weight[:]
 
@@ -51,7 +45,6 @@ class CompressHFBWeights(task.SingleTask):
 
     Attributes
     ----------
-
     method : str, optional
         Method of compression. Either "svd" or "sum". Default is "sum".
     """
@@ -60,7 +53,6 @@ class CompressHFBWeights(task.SingleTask):
 
     def setup(self):
         """Set up compression function."""
-
         compress_fn_map = {
             "svd": self._compress_svd,
             "sum": self._compress_sum,
@@ -81,7 +73,6 @@ class CompressHFBWeights(task.SingleTask):
         out : HFBCompressed
             Container with HFB data and compressed weights.
         """
-
         # Read the sizes of the axes
         nfreq, nsubf, nbeam, ntime = stream.weight.shape
 
@@ -115,8 +106,7 @@ class CompressHFBWeights(task.SingleTask):
         # Return output container
         return out
 
-    def _compress_svd(self, array: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
-
+    def _compress_svd(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
         # Do the Singular Value Decomposition (SVD)
         u, s, vh = la.svd(array, full_matrices=False)
 
@@ -128,8 +118,7 @@ class CompressHFBWeights(task.SingleTask):
 
         return rows, cols, norm
 
-    def _compress_sum(self, array: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
-
+    def _compress_sum(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
         # Take the sum over the rows of the input array, over its columns, and
         # over the entire array, taking the reciprocal
         rows = array.sum(axis=1)
@@ -142,7 +131,8 @@ class CompressHFBWeights(task.SingleTask):
 class UnpackHFBWeights(task.SingleTask):
     """Unpack compressed weight dataset of HFB data.
 
-    The reconstructed weights are a rank-1 approximation of the original."""
+    The reconstructed weights are a rank-1 approximation of the original.
+    """
 
     def process(self, stream):
         """Create full HFB data by unpacking compressed weights.
