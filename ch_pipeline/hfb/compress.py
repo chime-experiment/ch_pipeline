@@ -28,13 +28,21 @@ class CompressHFBWeightsSum(task.SingleTask):
         # Read original weights
         weight = stream.weight[:]
 
+        # Compute compressed weights:
+        # Create weights indexed per subfrequency by summing over beam axis
+        weight_subf = weight.sum(axis=2)
+        # Create weights indexed per beam by summing over subfrequency axis
+        weight_beam = weight.sum(axis=1)
+        # Create normalization by summing over both beam and subfrequency axes and inverting
+        weight_norm = tools.invert_no_zero(weight_subf.sum(axis=1))
+
         # Create container to hold output
         out = HFBCompressed(copy_from=stream)
 
-        # Compute compressed weights
-        out.weight_subf[:] = weight.sum(axis=2)
-        out.weight_beam[:] = weight.sum(axis=1)
-        out.weight_norm[:] = tools.invert_no_zero(weight.sum(axis=(1, 2)))
+        # Store compressed weights
+        out.weight_subf[:] = weight_subf
+        out.weight_beam[:] = weight_beam
+        out.weight_norm[:] = weight_norm
 
         # Return output container
         return out
