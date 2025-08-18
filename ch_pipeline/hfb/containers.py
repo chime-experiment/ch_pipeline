@@ -93,6 +93,10 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 1024, 512),
+            "truncate": True,
         },
         "weight_subf": {
             "axes": ["freq", "subfreq", "time"],
@@ -100,6 +104,10 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 512),
+            "truncate": True,
         },
         "weight_beam": {
             "axes": ["freq", "beam", "time"],
@@ -107,6 +115,10 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 1024, 512),
+            "truncate": True,
         },
         "weight_norm": {
             "axes": ["freq", "time"],
@@ -114,6 +126,10 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 512),
+            "truncate": True,
         },
         "flags/dataset_id": {
             "axes": ["freq", "time"],
@@ -132,6 +148,10 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "dtype": np.uint16,
             "initialise": False,
             "distributed": True,
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 1024, 512),
+            "truncate": True,
         },
     }
 
@@ -169,6 +189,10 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 1024, 512),
+            "truncate": True,
         },
         "flags/hfb_weight": {
             "axes": ["freq", "subfreq", "beam", "time"],
@@ -176,6 +200,10 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 1024, 512),
+            "truncate": True,
         },
         "flags/dataset_id": {
             "axes": ["freq", "time"],
@@ -194,6 +222,10 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "dtype": np.uint16,
             "initialise": False,
             "distributed": True,
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (64, 128, 1024, 512),
+            "truncate": True,
         },
     }
 
