@@ -17,6 +17,11 @@ from draco.core.containers import (
 
 from ..core.containers import FreqContainer, RawContainer
 
+CHUNK_FREQ = 16
+CHUNK_SUBF = 128
+CHUNK_BEAM = 16
+CHUNK_TIME = 256
+
 
 class HFBContainer(DataWeightContainer):
     """A base class for all HFB containers.
@@ -96,7 +101,7 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (8, 128, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
         "weight_subf": {
@@ -107,7 +112,7 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (64, 128, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_TIME),
             "truncate": True,
         },
         "weight_beam": {
@@ -118,7 +123,7 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (64, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
         "weight_norm": {
@@ -129,7 +134,7 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (64, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_TIME),
             "truncate": True,
         },
         "flags/dataset_id": {
@@ -151,7 +156,7 @@ class HFBCompressed(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed": True,
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (16, 128, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
     }
@@ -192,7 +197,7 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (8, 128, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
         "flags/hfb_weight": {
@@ -203,7 +208,7 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed_axis": "freq",
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (8, 128, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
         "flags/dataset_id": {
@@ -225,7 +230,7 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
             "distributed": True,
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
-            "chunks": (16, 128, 1024, 512),
+            "chunks": (CHUNK_FREQ, CHUNK_SUBF, CHUNK_BEAM, CHUNK_TIME),
             "truncate": True,
         },
     }
