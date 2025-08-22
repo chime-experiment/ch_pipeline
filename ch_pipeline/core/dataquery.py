@@ -153,6 +153,9 @@ class QueryDatabase(task.MPILoggedTask):
         Reject time intervals that overlap with DataFlags of these types.
     return_intervals : bool (default: False)
         Return the full interval from the Finder. Otherwise only a list of file names.
+    hfb_compression : bool (default: None)
+        If True or False, select only compressed/uncompressed HFB files.  Setting this
+        to either value will also implicitly limit the search to the absorber data.
     """
 
     return_intervals = config.Property(proptype=bool, default=False)
@@ -191,6 +194,8 @@ class QueryDatabase(task.MPILoggedTask):
     accept_all_global_flags = config.Property(proptype=bool, default=False)
 
     exclude_data_flag_types = config.Property(proptype=list, default=[])
+
+    hfb_compression = config.Property(proptype=bool, default=None)
 
     def setup(self):
         """Query the database and fetch the files.
@@ -291,6 +296,9 @@ class QueryDatabase(task.MPILoggedTask):
 
             if len(self.exclude_data_flag_types) > 0:
                 f.exclude_data_flag_type(self.exclude_data_flag_types)
+
+            if self.hfb_compression is True or self.hfb_compression is False:
+                f.only_hfb(compression=self.hfb_compression)
 
             results = f.get_results()
             if not self.return_intervals:
