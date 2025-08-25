@@ -2491,7 +2491,7 @@ def load_rainfall(start_time, end_time, node_spoof=_DEFAULT_NODE_SPOOF):
         Unix times denoting beginning and end of time range.
     node_spoof : dictionary
         Host and directory for finding weather data.
-        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}
+        Default: {'fir_online': '/project/rpp-chime/chime/chime_online/'}
 
     Returns
     -------
@@ -2541,7 +2541,7 @@ def compute_cumulative_rainfall(
         Default: 30.
     node_spoof : dictionary
         Host and directory for finding weather data.
-        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}.
+        Default: {'fir_online': '/project/rpp-chime/chime/chime_online/'}.
 
     Returns
     -------
@@ -2612,7 +2612,7 @@ class FlagRainfall(task.SingleTask):
         Rainfall threshold (in mm) for flagging. Default: 1.0.
     node_spoof : dictionary
         Host and directory for finding weather data.
-        Default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'}.
+        Default: {'fir_online': '/project/rpp-chime/chime/chime_online/'}.
     """
 
     accumulation_time = config.Property(proptype=float, default=30.0)

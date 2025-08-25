@@ -1724,7 +1724,7 @@ class ThermalCalibration(task.SingleTask):
     caltime_path : string
         Full path to file describing the calibration times.
     node_spoof : dictionary
-        (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
+        (default: {'fir_online': '/project/rpp-chime/chime/chime_online/'} )
         host and directory in which to find data.
     """
 
