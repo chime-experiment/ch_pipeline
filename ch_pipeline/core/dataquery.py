@@ -54,7 +54,7 @@ from draco.core import task
 
 from ch_pipeline.core import containers
 
-_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-chime/chime/chime_online/"}
+_DEFAULT_NODE_SPOOF = {"fir_online": "/project/rpp-chime/chime/chime_online/"}
 
 
 def _force_list(val) -> list:
@@ -105,7 +105,7 @@ class QueryDatabase(task.MPILoggedTask):
     Attributes
     ----------
     node_spoof : dictionary
-        (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
+        (default: {'fir_online': '/project/rpp-chime/chime/chime_online/'} )
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
