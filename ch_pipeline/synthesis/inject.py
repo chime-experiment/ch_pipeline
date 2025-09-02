@@ -1,6 +1,5 @@
 """Tasks for injecting source catalogs into visibility data."""
 
-import itertools
 import os
 
 import numpy as np
