@@ -1,46 +1,17 @@
-"""
-==============================================================
-Catalog injection tasks (:mod:`~ch_pipeline.synthesis.inject`)
-==============================================================
+"""Tasks for injecting source catalogs into visibility data."""
 
-.. currentmodule:: ch_pipeline.synthesis.inject
-
-Tasks for injecting source catalogs into visibility data.
-
-Tasks
-=====
-
-.. autosummary::
-    :toctree: generated/
-
-    FluxCatalog
-    FluxCatalogWithBeam
-    FluxCatalogWithBeamExternal
-    SpectroscopicCatalog
-    SpectroscopicCatalogWithBeam
-    SpectroscopicCatalogWithBeamExternal
-
-Task Base Classes
------------------
-.. autosummary::
-    :toctree: generated/
-
-    BaseInject
-
-"""
-import os
 import itertools
+import os
 
 import numpy as np
-import scipy.stats
 import scipy.interpolate
-
-from cora.util import units
+import scipy.stats
 from caput import config, interferometry
-from draco.util import tools
-from draco.core import task, io
-from draco.analysis.beamform import icrs_to_cirs
 from ch_util import fluxcat
+from cora.util import units
+from draco.analysis.beamform import icrs_to_cirs
+from draco.core import io, task
+from draco.util import tools
 
 from ..core import containers
 
@@ -93,9 +64,7 @@ class BaseInject(task.SingleTask):
         self.latitude = np.deg2rad(self.telescope.latitude)
 
         self.transits = [0.0, np.pi] if self.anti_podal else [0.0]
-        self.log.info(
-            "Injecting at the following hour angles:  %s" % str(self.transits)
-        )
+        self.log.info(f"Injecting at the following hour angles:  {self.transits}")
 
         # Polarizations.
         if self.polarization == "full":
@@ -207,14 +176,12 @@ class BaseInject(task.SingleTask):
 
         # Print some info
         self.log.info(
-            "Evaluating %d sources in frequency range [%0.2f MHz, %0.2f MHz]."
-            % (self.nsource, min_freq, max_freq)
+            f"Evaluating {self.nsource} sources in frequency range "
+            f"[{min_freq:0.2f} MHz, {max_freq:0.2f} MHz]."
         )
 
-        self.log.info(
-            "Processing %s baselines."
-            % str({key: len(val) for key, val in pol_index.items()})
-        )
+        baseline_count = {key: len(val) for key, val in pol_index.items()}
+        self.log.info(f"Processing {baseline_count} baselines.")
 
         # Create array to hold sky model
         vis = np.zeros((nfreq, nbaseline, nra), dtype=np.complex128)
@@ -224,7 +191,7 @@ class BaseInject(task.SingleTask):
 
             # Print message indicating how far along we are
             if ss % 1000 == 0:
-                self.log.info("Adding source %d of %d." % (ss, self.nsource))
+                self.log.info(f"Adding source {ss} of {self.nsource}.")
 
             # Determine the frequencies that have to be processed
             fslc = self._get_freq_slice(ss)
@@ -284,7 +251,6 @@ class BaseInject(task.SingleTask):
         amp : np.ndarray[nfreq,]
             Amplitude of the source at the requested frequencies.
         """
-
         return np.ones(freq.size, dtype=np.float32)
 
     @property
@@ -317,7 +283,6 @@ class BaseInject(task.SingleTask):
         group : list of slices
             List of slices into the RA/time axis.
         """
-
         groups = []
 
         alt = np.arcsin(
@@ -360,7 +325,6 @@ class BaseInject(task.SingleTask):
         slc : slice
             Slice into the frequency axis.
         """
-
         return slice(None)
 
 
@@ -398,7 +362,6 @@ class FluxCatalog(BaseInject):
         manager : ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
         """
-
         super().setup(manager)
 
         # Delete all previously loaded catalogs
@@ -435,7 +398,6 @@ class FluxCatalog(BaseInject):
         amp : np.ndarray[nfreq,]
             Flux of the source in Jy at the requested frequencies.
         """
-
         return fluxcat.FluxCatalog[self.sources[source_index]].predict_flux(
             freq["centre"]
         )
@@ -465,8 +427,8 @@ class FluxCatalog(BaseInject):
         )
 
         self.log.info(
-            "There are %d sources between declination [%d, %d] with S(600) > %0.3f."
-            % (ikeep.size, self.min_dec, self.max_dec, min_flux)
+            f"There are {ikeep.size} sources between declination "
+            f"[{self.min_dec:0.2f}, {self.max_dec:0.2f}] with S > {min_flux:0.3f}."
         )
 
         self.sources = [sources[ik] for ik in ikeep]
@@ -513,7 +475,6 @@ class SpectroscopicCatalog(BaseInject):
         catalog : SpectroscopicCatalog
             Catalog of sources with redshift information.
         """
-
         super().setup(manager)
 
         # Save the catalog as attribute
@@ -529,8 +490,8 @@ class SpectroscopicCatalog(BaseInject):
 
         # Print some info
         self.log.info(
-            "21cm amplitude set to %0.1e Jy.  Scale set to %0.2f MHz."
-            % (self.amplitude, self.scale)
+            f"21cm amplitude set to {self.amplitude:0.1e} Jy.  "
+            f"Scale set to {self.scale:0.2f} MHz."
         )
 
     def _ampfunc(self, source_index, freq):
@@ -548,7 +509,6 @@ class SpectroscopicCatalog(BaseInject):
         amp : np.ndarray[nfreq,]
             Amplitude of the source at the requested frequencies.
         """
-
         sfreq = self.sfreq[source_index]
 
         fedge_lower = freq["centre"] - 0.5 * freq["width"]
@@ -569,13 +529,11 @@ class SpectroscopicCatalog(BaseInject):
         adlower = np.abs(dlower / self.scale)
         adupper = np.abs(dupper / self.scale)
 
-        amp = (self.amplitude / self.scale) * np.where(
+        return (self.amplitude / self.scale) * np.where(
             (dlower < 0.0) & (dupper > 0.0),
             2.0 - np.exp(-adlower) - np.exp(-adupper),
             np.abs(np.exp(-adlower) - np.exp(-adupper)),
         )
-
-        return amp
 
     def _process_catalog(self):
         """Process the spectroscopic catalog.
@@ -585,7 +543,6 @@ class SpectroscopicCatalog(BaseInject):
         also perturbs redshifts (if requested) and determines what frequency
         bins should be processed for each source.
         """
-
         catalog = self.catalog
 
         # Convert redshift to radio frequency of the redshifted 21cm line
@@ -664,7 +621,6 @@ class SpectroscopicCatalog(BaseInject):
         slc : slice
             Slice into the frequency axis.
         """
-
         return slice(
             self.lower_freq_bin[source_index], self.upper_freq_bin[source_index] + 1
         )
@@ -685,7 +641,6 @@ class Beam(BaseInject):
         manager : ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
         """
-
         super().setup(manager)
         self.map_pol_feed = {
             pstr: list(self.telescope.polarisation).index(pstr) for pstr in ["X", "Y"]
@@ -712,7 +667,6 @@ class Beam(BaseInject):
             The primary beam as a function of frequency and hour angle
             at the sources declination for the requested polarisation.
         """
-
         index_freq = np.array(
             [np.argmin(np.abs(nu - self.telescope.frequencies)) for nu in freq]
         )
@@ -754,7 +708,6 @@ class BeamExternal(BaseInject):
         beam : GridBeam`
             Model for the primary beam.
         """
-
         super().setup(manager)
         self._initialize_beam(beam)
 
@@ -772,7 +725,6 @@ class BeamExternal(BaseInject):
             Container holding the model for the primary beam.
             Currently only accepts GridBeam type containers.
         """
-
         if isinstance(beam, containers.GridBeam):
             self._initialize_grid_beam(beam)
             self._beamfunc = self._grid_beam
@@ -782,7 +734,6 @@ class BeamExternal(BaseInject):
 
     def _initialize_beam_with_data(self):
         """Check that the beam and visibility data have the same local frequencies."""
-
         freq = self.freq_local["centre"]
 
         if (freq.size != self._beam_freq.size) or np.any(freq != self._beam_freq):
@@ -800,7 +751,6 @@ class BeamExternal(BaseInject):
             contains the "baseline averaged" beam, which will be applied to
             all baselines of a given polarisation.
         """
-
         # Make sure the beam is in celestial coordinates
         if gbeam.coords != "celestial":
             raise RuntimeError(
@@ -878,7 +828,6 @@ class BeamExternal(BaseInject):
             The primary beam as a function of frequency and hour angle
             at the sources declination for the requested polarisation.
         """
-
         podal = np.abs(ha) <= (0.5 * np.pi)
 
         ha = np.where(podal, ha, ((ha + 2.0 * np.pi) % (2.0 * np.pi)) - np.pi)
