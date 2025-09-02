@@ -1,30 +1,25 @@
-"""Tasks for beam measurement processing"""
+"""Tasks for beam measurement processing."""
+
 import json
-import yaml
-from os import path, listdir
+from os import listdir, path
 
 import numpy as np
+from caput import config, mpiarray, mpiutil, tod
+from caput.pipeline import PipelineRuntimeError
+from caput.time import STELLAR_S, unix_to_datetime
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import holography, tools
+from chimedb.core import connect as connect_database
+from draco.analysis.transform import Regridder
+from draco.core import io, task
+from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
+from draco.util import regrid
+from draco.util.tools import invert_no_zero
 from scipy import constants
 
-from caput import config, tod, mpiarray, mpiutil
-from caput.pipeline import PipelineRuntimeError
-from caput.time import STELLAR_S
-
-from ch_util import ephemeris as ephem
-from ch_util import tools, layout, holography
-from chimedb import data_index as di
-from chimedb.core import connect as connect_database
-
-
-from draco.core import task, io
-from draco.util import regrid
-from draco.analysis.transform import Regridder
-from draco.core.containers import ContainerBase, SiderealStream, TimeStream, TrackBeam
-from draco.util.tools import invert_no_zero
-
 from ..core.containers import TransitFitParams
-from .calibration import TransitFit, GainFromTransitFit
-
+from .calibration import TransitFit
 
 SIDEREAL_DAY_SEC = STELLAR_S * 24 * 3600
 SPEED_LIGHT = float(constants.c) / 1e6  # 10^6 m / s
@@ -41,7 +36,7 @@ class TransitGrouper(task.SingleTask):
     min_span: float
         Minimum span (deg) of a transit to accept.
     source: str
-        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+        Name of the transiting source. (Must match what is used in `ch_ephem.sources`.)
     db_source: str
         Name of the transiting source as listed in holography database.
         This is a hack until a better solution is implemented.
@@ -63,18 +58,18 @@ class TransitGrouper(task.SingleTask):
         Raises
         ------
         `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
+            If config value ``source`` doesn't match any in `ch_ephem.sources`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
         try:
-            self.src = ephem.source_dictionary[self.source]
-        except KeyError:
+            self.src = sources.source_dictionary[self.source]
+        except KeyError as e:
             msg = (
-                "Could not find source {} in catalogue. "
-                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+                f"Could not find source '{self.source}' in "
+                "`ch_ephem.sources.source_dictionary`."
             )
             self.log.error(msg)
-            raise config.CaputConfigError(msg)
+            raise config.CaputConfigError(msg) from e
         self.cur_transit = None
         self.tstreams = []
         self.last_time = 0
@@ -95,13 +90,13 @@ class TransitGrouper(task.SingleTask):
         Parameters
         ----------
         tstream : TimeStream
+            timestream data container
 
         Returns
         -------
         ts : TimeStream
             Timestream with containing transits of specified length.
         """
-
         # Redistribute if needed
         tstream.redistribute("freq")
 
@@ -122,9 +117,7 @@ class TransitGrouper(task.SingleTask):
             tr_time = self.observer.transit_times(self.src, tstream.time[0])
             if len(tr_time) != 1:
                 raise ValueError(
-                    "Didn't find exactly one transit time. Found {:d}.".format(
-                        len(tr_time)
-                    )
+                    f"Didn't find exactly one transit time. Found {len(tr_time):d}."
                 )
             self.cur_transit = tr_time[0]
             self._transit_bounds()
@@ -159,21 +152,18 @@ class TransitGrouper(task.SingleTask):
         """
         for dname in ["evec", "eval", "erms"]:
             if dname in ts.datasets.keys():
-                self.log.debug("Stripping dataset {}".format(dname))
+                self.log.debug(f"Stripping dataset {dname}")
                 del ts[dname]
         self.tstreams.append(ts)
 
     def _finalize_transit(self):
         """Concatenate grouped time streams for the currrent transit."""
-
         # Find where transit starts and ends
         if len(self.tstreams) == 0 or self.cur_transit is None:
             self.log.info("Did not find any transits.")
             return None
         self.log.debug(
-            "Finalising transit for {}...".format(
-                ephem.unix_to_datetime(self.cur_transit)
-            )
+            f"Finalising transit for {unix_to_datetime(self.cur_transit)}..."
         )
         all_t = np.concatenate([ts.time for ts in self.tstreams])
         start_ind = int(np.argmin(np.abs(all_t - self.start_t)))
@@ -185,8 +175,7 @@ class TransitGrouper(task.SingleTask):
         dt = self.tstreams[0].time[1] - self.tstreams[0].time[0]
         if dt <= 0:
             self.log.warning(
-                "Time steps are not positive definite: dt={:.3f}".format(dt)
-                + " Skipping."
+                f"Time steps are not positive definite: dt={dt:.3f}" + " Skipping."
             )
             ts = None
         if stop_ind - start_ind > int(self.min_span / 360.0 * SIDEREAL_DAY_SEC / dt):
@@ -195,9 +184,7 @@ class TransitGrouper(task.SingleTask):
                 ts = tod.concatenate(self.tstreams, start=start_ind, stop=stop_ind)
             else:
                 ts = self.tstreams[0]
-            _, dec = ephem.object_coords(
-                self.src, all_t[0], deg=True, obs=self.observer
-            )
+            _, dec = self.observer.object_coords(self.src, all_t[0], deg=True)
             ts.attrs["dec"] = dec
             ts.attrs["source_name"] = self.source
             ts.attrs["transit_time"] = self.cur_transit
@@ -205,7 +192,7 @@ class TransitGrouper(task.SingleTask):
             ts.attrs["tag"] = "{}_{:0>4d}_{}".format(
                 self.source,
                 self.obs_id,
-                ephem.unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
+                unix_to_datetime(self.cur_transit).strftime("%Y%m%dT%H%M%S"),
             )
             ts.attrs["archivefiles"] = filenames
         else:
@@ -221,8 +208,8 @@ class TransitGrouper(task.SingleTask):
         """Find the start and end times of this transit.
 
         Compares the desired HA span to the start and end times of the observation
-        recorded in the database. Also gets the observation ID."""
-
+        recorded in the database. Also gets the observation ID.
+        """
         # subtract half a day from start time to ensure we don't get following day
         self.start_t = self.cur_transit - self.ha_span / 360.0 / 2.0 * SIDEREAL_DAY_SEC
         self.end_t = self.cur_transit + self.ha_span / 360.0 / 2.0 * SIDEREAL_DAY_SEC
@@ -235,9 +222,7 @@ class TransitGrouper(task.SingleTask):
         ]
         if len(this_run) == 0:
             self.log.warning(
-                "Could not find source transit in holography database for {}.".format(
-                    ephem.unix_to_datetime(self.cur_transit)
-                )
+                f"Could not find source transit in holography database for {unix_to_datetime(self.cur_transit)}."
             )
             # skip this file
             self.cur_transit = None
@@ -261,7 +246,7 @@ class TransitRegridder(Regridder):
     snr_cov: float
         Ratio of signal covariance to noise covariance (used for Wiener filter).
     source: str
-        Name of the transiting source. (Must match what is used in `ch_util.ephemeris`.)
+        Name of the transiting source. (Must match what is used in `ch_ephem.sources`.)
     """
 
     samples = config.Property(proptype=int, default=1024)
@@ -281,20 +266,20 @@ class TransitRegridder(Regridder):
         Raises
         ------
         `caput.config.CaputConfigError`
-            If config value ``source`` doesn't match any in `ch_util.ephemeris`.
+            If config value ``source`` doesn't match any in `ch_ephem.sources`.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
         # Setup bounds for interpolation grid
         self.start = -self.ha_span / 2
         self.end = self.ha_span / 2
 
         try:
-            self.src = ephem.source_dictionary[self.source]
+            self.src = sources.source_dictionary[self.source]
         except KeyError:
             msg = (
-                "Could not find source {} in catalogue. "
-                "Must use same spelling as in `ch_util.ephemeris`.".format(self.source)
+                f"Could not find source '{self.source}' in "
+                "`ch_ephem.sources.source_dictionary`."
             )
             self.log.error(msg)
             raise config.CaputConfigError(msg)
@@ -312,7 +297,6 @@ class TransitRegridder(Regridder):
         new_data : SiderealStream
             The regridded data centered on the source RA.
         """
-
         # Redistribute if needed
         data.redistribute("freq")
 
@@ -321,9 +305,9 @@ class TransitRegridder(Regridder):
         vis_data = data.vis[:].view(np.ndarray)
 
         # Get apparent source RA, including precession effects
-        ra, _ = ephem.object_coords(self.src, data.time[0], deg=True, obs=self.observer)
+        ra, _ = self.observer.object_coords(self.src, data.time[0], deg=True)
         # Get catalogue RA for reference
-        ra_icrs, _ = ephem.object_coords(self.src, deg=True, obs=self.observer)
+        ra_icrs, _ = self.observer.object_coords(self.src, deg=True)
 
         # Convert input times to hour angle
         lha = unwrap_lha(self.observer.unix_to_lsa(data.time), ra)
@@ -407,12 +391,10 @@ class EdgeFlagger(task.SingleTask):
         weight = track["weight"][:].view(np.ndarray)
 
         for ind in np.ndindex(*weight.shape[:-1]):
-
             flag = np.flatnonzero(weight[ind] > 0.0)
 
             if flag.size > 0:
-
-                imin, imax = np.percentile(flag, [0, 100]).astype(np.int)
+                imin, imax = np.percentile(flag, [0, 100]).astype(np.int64)
                 imax = imax + 1
 
                 if self.num_begin:
@@ -443,7 +425,7 @@ class TransitResampler(task.SingleTask):
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
-        self.observer = ephem.chime if observer is None else observer
+        self.observer = chime if observer is None else observer
 
     def process(self, beam, data):
         """Resample the measured beam at arbitrary RA by convolving with a Lanczos kernel.
@@ -524,7 +506,6 @@ class TransitResampler(task.SingleTask):
         return new_beam
 
     def _resample(self, xgrid, ygrid, wgrid, x):
-
         lza = regrid.lanczos_forward_matrix(xgrid, x, a=self.lanczos_width).T
 
         y = np.matmul(ygrid, lza)
@@ -559,7 +540,6 @@ class MakeHolographyBeam(task.SingleTask):
         track : TrackBeam
             The transit in a beam container.
         """
-
         # redistribute if needed
         data.redistribute("freq")
 
@@ -587,8 +567,8 @@ class MakeHolographyBeam(task.SingleTask):
         ):
             msg = (
                 "Products do not separate into two groups with the length of the input map. "
-                "({:d}, {:d}) != {:d}"
-            ).format(prod_groups[0].shape[0], prod_groups[1].shape[0], inputs.shape[0])
+                f"({prod_groups[0].shape[0]:d}, {prod_groups[1].shape[0]:d}) != {inputs.shape[0]:d}"
+            )
             self.log.error(msg)
             raise PipelineRuntimeError(msg)
 
@@ -623,9 +603,11 @@ class MakeHolographyBeam(task.SingleTask):
         conj_cox = [pg.copy() for pg in conj]
         input_pol = np.array(
             [
-                ipt.pol
-                if (tools.is_array(ipt) or tools.is_holographic(ipt))
-                else inputmap[input_26m[0]].pol
+                (
+                    ipt.pol
+                    if (tools.is_array(ipt) or tools.is_holographic(ipt))
+                    else inputmap[input_26m[0]].pol
+                )
                 for ipt in inputmap
             ]
         )
@@ -715,11 +697,12 @@ class ConstructStackedBeam(task.SingleTask):
         Parameters
         ----------
         tel : TransitTelescope
+            telescope object to use
         """
         self.telescope = io.get_telescope(tel)
 
     def process(self, beam, data):
-        """Stack
+        """Stack.
 
         Parameters
         ----------
@@ -760,7 +743,7 @@ class ConstructStackedBeam(task.SingleTask):
             attrs_from=beam,
             distributed=True,
             comm=data.comm,
-            **output_kwargs
+            **output_kwargs,
         )
 
         stacked_beam.vis[:] = 0.0
@@ -795,7 +778,6 @@ class ConstructStackedBeam(task.SingleTask):
 
         # Construct stack
         for pp, (ss, conj) in enumerate(reverse_stack):
-
             aa, bb = prod[pp]
             if conj:
                 aa, bb = bb, aa
@@ -836,9 +818,7 @@ class ConstructStackedBeam(task.SingleTask):
 
     @staticmethod
     def _resolve_pol(pol1, pol2, pol_axis):
-
         if "co" in pol_axis:
-
             if pol1 == pol2:
                 ipol = pol_axis.index("co")
             else:
@@ -846,16 +826,14 @@ class ConstructStackedBeam(task.SingleTask):
 
             return ipol, ipol
 
+        if pol1 == pol2:
+            ipol1 = pol_axis.index(pol1)
+            ipol2 = pol_axis.index(pol2)
         else:
+            ipol1 = pol_axis.index(pol2)
+            ipol2 = pol_axis.index(pol1)
 
-            if pol1 == pol2:
-                ipol1 = pol_axis.index(pol1)
-                ipol2 = pol_axis.index(pol2)
-            else:
-                ipol1 = pol_axis.index(pol2)
-                ipol2 = pol_axis.index(pol1)
-
-            return ipol1, ipol2
+        return ipol1, ipol2
 
 
 class HolographyTransitFit(TransitFit):
@@ -926,9 +904,11 @@ class HolographyTransitFit(TransitFit):
         else:
             this_pol = np.array(
                 [
-                    pol_axis.index("S")
-                    if not ((ii // 256) % 2)
-                    else pol_axis.index("E")
+                    (
+                        pol_axis.index("S")
+                        if not ((ii // 256) % 2)
+                        else pol_axis.index("E")
+                    )
                     for ii in range(ninput)
                 ]
             )
@@ -987,7 +967,7 @@ class HolographyTransitFit(TransitFit):
 
 
 class ApplyHolographyGains(task.SingleTask):
-    """Apply gains to a holography transit
+    """Apply gains to a holography transit.
 
     Attributes
     ----------
@@ -998,11 +978,11 @@ class ApplyHolographyGains(task.SingleTask):
     overwrite = config.Property(proptype=bool, default=False)
 
     def process(self, track_in, gain):
-        """Apply gain
+        """Apply gain.
 
         Parameters
         ----------
-        track: draco.core.containers.TrackBeam
+        track_in: draco.core.containers.TrackBeam
             Holography track to apply gains to. Will apply gains to
             track['beam'], expecting axes to be freq, pol, input, ha
         gain: np.array
@@ -1013,7 +993,6 @@ class ApplyHolographyGains(task.SingleTask):
         track: draco.core.containers.TrackBeam
             Holography track with gains applied.
         """
-
         if self.overwrite:
             track = track_in
         else:
@@ -1057,7 +1036,6 @@ class TransitStacker(task.SingleTask):
 
     def setup(self):
         """Initialise internal variables."""
-
         self.stack = None
         self.variance = None
         self.pseudo_variance = None
@@ -1071,8 +1049,7 @@ class TransitStacker(task.SingleTask):
         transit: draco.core.containers.TrackBeam
             A holography transit.
         """
-
-        self.log.info("Weight is %s" % self.weight)
+        self.log.info(f"Weight is {self.weight}")
 
         if self.stack is None:
             self.log.info("Initializing transit stack.")
@@ -1084,7 +1061,7 @@ class TransitStacker(task.SingleTask):
             self.stack.add_dataset("nsample")
             self.stack.redistribute("freq")
 
-            self.log.info("Adding %s to stack." % transit.attrs["tag"])
+            self.log.info(f"Adding {transit.attrs['tag']} to stack.")
 
             # Copy over relevant attributes
             self.stack.attrs["filename"] = [transit.attrs["tag"]]
@@ -1098,7 +1075,7 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs["cirs_ra"] = transit.attrs["cirs_ra"]
 
             # Copy data for first transit
-            flag = (transit.weight[:] > 0.0).astype(np.int)
+            flag = (transit.weight[:] > 0.0).astype(np.int64)
             if self.weight == "inverse_variance":
                 coeff = transit.weight[:]
             else:
@@ -1106,7 +1083,7 @@ class TransitStacker(task.SingleTask):
 
             self.stack.beam[:] = coeff * transit.beam[:]
             self.stack.weight[:] = (coeff**2) * invert_no_zero(transit.weight[:])
-            self.stack.nsample[:] = flag.astype(np.int)
+            self.stack.nsample[:] = flag.astype(np.int64)
 
             self.variance = coeff * np.abs(transit.beam[:]) ** 2
             self.pseudo_variance = coeff * transit.beam[:] ** 2
@@ -1115,14 +1092,12 @@ class TransitStacker(task.SingleTask):
         else:
             if list(transit.beam.shape) != list(self.stack.beam.shape):
                 self.log.error(
-                    "Transit has different shape than stack: {}, {}".format(
-                        transit.beam.shape, self.stack.beam.shape
-                    )
-                    + " Skipping."
+                    f"Transit has different shape than stack: {transit.beam.shape}, {self.stack.beam.shape}. "
+                    "Skipping."
                 )
-                return None
+                return
 
-            self.log.info("Adding %s to stack." % transit.attrs["tag"])
+            self.log.info(f"Adding {transit.attrs['tag']} to stack.")
 
             self.stack.attrs["filename"].append(transit.attrs["tag"])
             self.stack.attrs["observation_id"].append(transit.attrs["observation_id"])
@@ -1130,7 +1105,7 @@ class TransitStacker(task.SingleTask):
             self.stack.attrs["archivefiles"] += list(transit.attrs["archivefiles"])
 
             # Accumulate transit data
-            flag = (transit.weight[:] > 0.0).astype(np.int)
+            flag = (transit.weight[:] > 0.0).astype(np.int64)
             if self.weight == "inverse_variance":
                 coeff = transit.weight[:]
             else:
@@ -1144,7 +1119,7 @@ class TransitStacker(task.SingleTask):
             self.pseudo_variance += coeff * transit.beam[:] ** 2
             self.norm += coeff
 
-        return None
+        return
 
     def process_finish(self):
         """Normalise the stack and return the result.
@@ -1178,16 +1153,17 @@ class TransitStacker(task.SingleTask):
         time_range = np.percentile(self.stack.attrs["transit_time"], [0, 100])
         self.stack.attrs["tag"] = "{}_{}_to_{}".format(
             self.stack.attrs["source_name"],
-            ephem.unix_to_datetime(time_range[0]).strftime("%Y%m%dT%H%M%S"),
-            ephem.unix_to_datetime(time_range[1]).strftime("%Y%m%dT%H%M%S"),
+            unix_to_datetime(time_range[0]).strftime("%Y%m%dT%H%M%S"),
+            unix_to_datetime(time_range[1]).strftime("%Y%m%dT%H%M%S"),
         )
 
         return self.stack
 
 
 class FilterHolographyProcessed(task.MPILoggedTask):
-    """Filter holography transit DataIntervals produced by `io.QueryDatabase`
-    to exclude those already processed.
+    """Filter holography transit DataIntervals produced by `io.QueryDatabase`.
+
+    Excludes DataIntervals which are already processed.
 
     Attributes
     ----------
@@ -1204,13 +1180,10 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
     def setup(self):
         """Get a list of existing processed files."""
-
         # Find processed transit files
         self.proc_transits = []
         for processed_dir in self.processed_dir:
-            self.log.debug(
-                "Looking for processed transits in {}...".format(processed_dir)
-            )
+            self.log.debug(f"Looking for processed transits in {processed_dir}...")
             # Expand path
             processed_dir = path.expanduser(processed_dir)
             processed_dir = path.expandvars(processed_dir)
@@ -1228,7 +1201,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
                     obs_id = fh.attrs.get("observation_id", None)
                     if obs_id is not None:
                         self.proc_transits.append(obs_id)
-        self.log.debug("Found {:d} processed transits.".format(len(self.proc_transits)))
+        self.log.debug(f"Found {len(self.proc_transits):d} processed transits.")
 
         # Query database for observations of this source
         hol_obs = None
@@ -1250,8 +1223,7 @@ class FilterHolographyProcessed(task.MPILoggedTask):
         files: list of str
             List of files to be processed.
         """
-
-        self.log.info("Starting next for task %s" % self.__class__.__name__)
+        self.log.info(f"Starting next for task {self.__class__.__name__}")
 
         self.comm.Barrier()
 
@@ -1269,20 +1241,16 @@ class FilterHolographyProcessed(task.MPILoggedTask):
 
             if len(this_obs) == 0:
                 self.log.warning(
-                    "Could not find source transit in holography database for {}.".format(
-                        ephem.unix_to_datetime(start)
-                    )
+                    f"Could not find source transit in holography database for {unix_to_datetime(start)}."
                 )
             elif this_obs[0].id in self.proc_transits:
                 self.log.warning(
-                    "Already processed transit for {}. Skipping.".format(
-                        ephem.unix_to_datetime(start)
-                    )
+                    f"Already processed transit for {unix_to_datetime(start)}. Skipping."
                 )
             else:
                 files += fi[0]
 
-        self.log.info("Leaving next for task %s" % self.__class__.__name__)
+        self.log.info(f"Leaving next for task {self.__class__.__name__}")
         return files
 
 
@@ -1308,15 +1276,14 @@ def unwrap_lha(lsa, src_ra):
     lsa += start_lsa
     # subtract source RA
     return np.where(
-        np.abs(lsa - src_ra) < np.abs(lsa - src_ra + 360.0),
+        np.abs(lsa - src_ra) < np.abs(lsa - (src_ra + 360.0)),
         lsa - src_ra,
-        lsa - src_ra + 360.0,
+        lsa - src_ra - 360.0,
     )
 
 
 def get_holography_obs(src):
-    """Query database for list of all holography observations for the given
-    source.
+    """Query database for list of all holography observations for the given source.
 
     Parameters
     ----------
@@ -1330,7 +1297,7 @@ def get_holography_obs(src):
     """
     connect_database()
     db_src = holography.HolographySource.get(holography.HolographySource.name == src)
-    db_obs = holography.HolographyObservation.select().where(
+
+    return holography.HolographyObservation.select().where(
         holography.HolographyObservation.source == db_src
     )
-    return db_obs

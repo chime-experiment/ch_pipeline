@@ -1,14 +1,22 @@
+"""Chime Quarterstack processing type.
+
+Stacks the daily data within quarters.
+
+Classes
+=======
+- :py:class:`QuarterStackProcessing`
+"""
+
 import re
+from typing import ClassVar
 
 import numpy as np
-
 from caput import time as ctime
-from ch_util import ephemeris
+from ch_ephem.observers import chime
 from chimedb import core
 from chimedb import dataflag as df
 
 from . import base, daily
-
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -26,6 +34,8 @@ cluster:
   mem: 192000M
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 
 days: &days
 {days}
@@ -54,7 +64,6 @@ pipeline:
     - mpi4py
 
   tasks:
-    - type: ch_pipeline.core.containers.MonkeyPatchContainers
 
     - type: draco.core.task.SetMPILogging
       params:
@@ -95,8 +104,59 @@ pipeline:
           - snow
           - decorrelated_cylinder
 
-    - type: ch_pipeline.analysis.sidereal.SiderealMean
+    # Load gain errors as a function of time
+    - type: ch_pipeline.core.io.LoadSetupFile
+      out: gain_err
+      params:
+        filename: {gain_err_file}
+        distributed: true
+        selections:
+          freq_range: [{freq[0]:d}, {freq[1]:d}]
+
+    # Apply a mask that removes frequencies and times that suffer from gain errors
+    - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
+      requires: gain_err
       in: sstream_mask3
+      out: mask_gain_err
+      params:
+        transition: 600.0
+        threshold: 1.0e-3
+        ignore_input_flags: Yes
+        save: false
+
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_mask3, mask_gain_err]
+      out: sstream_mask4
+
+    # Flag out low weight samples to remove transient RFI artifacts at the edges of
+    # flagged regions
+    - type: draco.analysis.flagging.ThresholdVisWeightBaseline
+      requires: manager
+      in: sstream_mask4
+      out: full_tvwb_mask
+      params:
+        relative_threshold: 0.5
+        ignore_absolute_threshold: -1
+        average_type: "mean"
+        pols_to_flag: "all"
+
+    # Apply the tvwb mask. This will modify the data inplace.
+    - type: draco.analysis.flagging.ApplyBaselineMask
+      in: [sstream_mask4, full_tvwb_mask]
+      out: sstream_mask5
+
+    - type: draco.analysis.flagging.RFIMask
+      in: sstream_mask5
+      out: rfi_mask
+      params:
+          stack_ind: 66
+
+    - type: draco.analysis.flagging.ApplyRFIMask
+      in: [sstream_mask5, rfi_mask]
+      out: sstream_mask6
+
+    - type: ch_pipeline.analysis.sidereal.SiderealMean
+      in: sstream_mask6
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -105,28 +165,73 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask3, med]
-      out: sstream_mask4
+      in: [sstream_mask6, med]
+      out: sstream_mask7
 
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask4
+      in: sstream_mask7
       out: sstack_stack
       params:
-        save: true
         tag: {tag}
-        output_name: "sstack.h5"
 
-    - type: ch_pipeline.analysis.mapmaker.RingMapMaker
-      requires: manager
+    # Precision truncate the sidereal stack data
+    - type: draco.core.io.Truncate
       in: sstack_stack
+      out: sstack_trunc
+      params:
+        dataset:
+          vis:
+            weight_dataset: vis_weight
+            variance_increase: 1.0e-4
+          vis_weight: 1.0e-6
+        compression:
+          vis:
+            chunks: [16, 512, 512]
+          vis_weight:
+            chunks: [16, 512, 512]
+
+    # Save the sstack out to a zarr zip file
+    - type: draco.core.io.SaveZarrZip
+      in: sstack_trunc
+      out: zip_handle
+      params:
+        output_name: "sstack.zarr.zip"
+
+    - type: draco.analysis.ringmapmaker.RingMapMaker
+      requires: manager
+      in: sstack_trunc
+      out: ringmap
       params:
         single_beam: true
         weight: "natural"
         exclude_intracyl: false
         include_auto: false
-        save: true
-        output_name: "ringmap.h5"
         npix: 1024
+
+    # Precision truncate the chunked normal ringmap
+    - type: draco.core.io.Truncate
+      in: ringmap
+      out: ringmap_trunc
+      params:
+        dataset:
+          map:
+            weight_dataset: weight
+            variance_increase: 1.0e-4
+          weight: 1.0e-6
+        compression:
+          map:
+            chunks: [1, 1, 16, 512, 512]
+          weight:
+            chunks: [1, 16, 512, 512]
+          dirty_beam:
+            chunks: [1, 1, 16, 512, 512]
+
+    # Save the ringmap out to a ZarrZip file
+    - type: draco.core.io.SaveZarrZip
+      in: ringmap_trunc
+      out: zip_handle
+      params:
+        output_name: "ringmap.zarr.zip"
 
     # Estimate the delay spectrum
     - type: draco.analysis.delay.DelaySpectrumEstimator
@@ -134,10 +239,15 @@ pipeline:
       in: sstack_stack
       params:
         freq_zero: 800.0
-        nfreq: 1025
+        complex_timedomain: true
+        nfreq: {nfreq_delay}
         nsamp: 40
         save: true
         output_name: "dspec.h5"
+
+    # Wait for the Zipping to finish
+    - type: draco.core.io.WaitZarrZip
+      in: zip_handle
 """
 
 
@@ -146,8 +256,8 @@ class QuarterStackProcessing(base.ProcessingType):
 
     This uses opinions in the dataflag database `chimedb.dataflag` to determine which
     days are good and bad for each revision of the daily processing. It will then
-    take the each good day (taking from the latest revision if multiple revisions
-    contain a good version), and then perform the stacking.
+    take each good day (taking from the latest revision if multiple revisions contain
+    a good version), and then perform the stacking.
 
     Implementation
     --------------
@@ -169,15 +279,26 @@ class QuarterStackProcessing(base.ProcessingType):
     tag_pattern = r"(?P<year>\d{4})q(?P<quarter>[1-4])p(?P<partition>\d)"
 
     # Parameters of the job processing
-    default_params = {
+    default_params: ClassVar = {
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
-        "daily_revisions": ["rev_02"],
-        "daily_root": "/project/rpp-krs/chime/chime_processed/",
+        "daily_revisions": ["rev_07"],
+        # Usually the opinions are queried for each revision, this dictionary allows
+        # that to be overridden. Each `data_rev: opinion_rev` pair means that the
+        # opinions used to select days for `data_rev` will instead be taken from
+        # `opinion_rev`.
+        "opinion_overrides": {
+            "rev_03": "rev_02",
+        },
+        "daily_root": "/project/rpp-chime/chime/chime_processed/",
         # Frequencies to process
         "freq": [0, 1024],
+        "nfreq_delay": 1025,
         # The beam transfers to use (need to have the same freq range as above)
-        "product_path": "/project/rpp-krs/chime/bt_empty/chime_4cyl_allfreq/",
+        "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
+        # System modules to use/load
+        "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
+        "modlist": "chime/python/2022.06",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
@@ -187,6 +308,29 @@ class QuarterStackProcessing(base.ProcessingType):
             "q2": [240, 255],
             "q3": [315, 330],
             "q4": [45, 60],
+        },
+        "gain_error_file": {
+            2018: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20180905_20191231_gain_inverted_error_input_flagged.h5"
+            ),
+            2019: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20180905_20191231_gain_inverted_error_input_flagged.h5"
+            ),
+            2020: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+            ),
+            # Update these below when they become available
+            2021: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20210101_20211231_gain_inverted_error_input_flagged.h5"
+            ),
+            2022: (
+                "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
+                "20200101_20201231_gain_inverted_error_input_flagged.h5"
+            ),
         },
         # Job params
         "time": 180,  # How long in minutes?
@@ -203,17 +347,17 @@ class QuarterStackProcessing(base.ProcessingType):
         This tries to determine which days are good and bad, and partitions the
         available good days into the individual stacks.
         """
-
         days = {}
 
         core.connect()
 
+        opinion_overrides = self.default_params.get("opinion_overrides", {})
+
         # Go over each revision and construct the set of LSDs we should stack, and save
         # the path to each.
-        # NOTE: later entries is `daily_revisions` will override LSDs found in earlier
+        # NOTE: later entries in `daily_revisions` will override LSDs found in earlier
         # revisions.
         for rev in self.default_params["daily_revisions"]:
-
             daily_path = (
                 self.root_path
                 if self.default_params["daily_root"] is None
@@ -221,8 +365,12 @@ class QuarterStackProcessing(base.ProcessingType):
             )
             daily_rev = daily.DailyProcessing(rev, root_path=daily_path)
 
+            # Get the revision used to determine the opinions, by default this is the
+            # revision, but it can be overriden
+            opinion_rev = opinion_overrides.get(rev, rev)
+
             # Get all the bad days in this revision
-            revision = df.DataRevision.get(name=rev)
+            revision = df.DataRevision.get(name=opinion_rev)
             query = (
                 df.DataFlagOpinion.select(df.DataFlagOpinion.lsd)
                 .distinct()
@@ -245,22 +393,27 @@ class QuarterStackProcessing(base.ProcessingType):
             good_days = [x[0] for x in query.tuples()]
 
             for d in daily_rev.ls():
+                try:
+                    lsd = int(d)
+                except ValueError as e:
+                    raise RuntimeError(
+                        f'Could not parse string tag "{d}" into a valid LSD'
+                    ) from e
 
                 # Filter out known bad days here
-                if (int(d) in bad_days) or (int(d) not in good_days):
+                if (lsd in bad_days) or (lsd not in good_days):
                     continue
 
                 # Insert the day and path into the dict, this will replace the entries
                 # from prior revisions
                 path = daily_rev.base_path / d
-                lsd = int(d)
                 days[lsd] = path
 
         lsds = sorted(days)
 
         # Map each LSD into the quarter it belongs in and find which quarters we have
         # data for
-        dates = ctime.unix_to_datetime(ephemeris.csd_to_unix(np.array(lsds)))
+        dates = ctime.unix_to_datetime(chime.lsd_to_unix(np.array(lsds)))
         yq = np.array([f"{d.year}q{(d.month - 1) // 3 + 1}" for d in dates])
         quarters = np.unique(yq)
 
@@ -271,10 +424,9 @@ class QuarterStackProcessing(base.ProcessingType):
         # For each quarter divide the LSDs it contains into a number of partitions to
         # give jack knifes
         for quarter in quarters:
-
             lsds_in_quarter = sorted(np.array(lsds)[yq == quarter])
 
-            # Skip quarters with two few days in them
+            # Skip quarters with too few days in them
             if len(lsds_in_quarter) < self.default_params["min_days"] * npart:
                 continue
 
@@ -294,7 +446,6 @@ class QuarterStackProcessing(base.ProcessingType):
 
         This includes any that currently exist or are in the job queue.
         """
-
         return list(self._revparams["stacks"].keys())
 
     def _finalise_jobparams(self, tag, jobparams):
@@ -304,26 +455,31 @@ class QuarterStackProcessing(base.ProcessingType):
         process and insert it as a string into the YAML. It would be nice to find a
         better way to do this.
         """
-
         days = self._revparams["stacks"][tag]
         paths = self._revparams["days"]
 
         # TODO: find a better way to do this. Some kind of configuration language
         # (Jsonnet/YTT/...) seems like it would be a better idea here
         day_list_str = "\n" + "\n".join(
-            [f"- {paths[day]}/sstream_lsd_{day}.h5" for day in days]
+            [f"- {paths[day]}/sstream_lsd_{day}.zarr.zip" for day in days]
         )
 
-        quarter = self._parse_tag(tag)[1]
+        year, quarter, _ = self._parse_tag(tag)
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
+        gain_err_file = self._revparams["gain_error_file"][year]
 
-        jobparams.update({"days": day_list_str, "ra_range": ra_range})
+        jobparams.update(
+            {
+                "days": day_list_str,
+                "ra_range": ra_range,
+                "gain_err_file": gain_err_file,
+            }
+        )
 
         return jobparams
 
     def _parse_tag(self, tag):
         """Extract the year, quarter and partition from the tag."""
-
         mo = re.match(self.tag_pattern, tag)
 
         if not mo:

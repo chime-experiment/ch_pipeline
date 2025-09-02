@@ -31,15 +31,24 @@ authors:
   affiliation: "McGill University"
   orcid: "https://orcid.org/0000-0003-2631-6217"
 
-- given-names: "Mateus"
-  family-names: "Fandino"
-  affiliation: "Thompson Rivers University"
-  orcid: "https://orcid.org/0000-0002-6899-1176"
+- given-names: "Liam"
+  family-names: "Gray"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0003-3986-954X"
+
+- given-names: "Rik"
+  family-names: "van Lieshout"
+  affiliation: "ASTRON"
 
 - given-names: "Donald V."
   family-names: "Wiebe"
   affiliation: "University of British Columbia"
-  orcid: "https://orcid.org/0000-0003-2631-6217"
+  orcid: "https://orcid.org/0000-0002-6669-3159"
+
+- given-names: "Mateus"
+  family-names: "Fandino"
+  affiliation: "Thompson Rivers University"
+  orcid: "https://orcid.org/0000-0002-6899-1176"
 
 - given-names: "Rick"
   family-names: "Nitsche"
@@ -47,7 +56,7 @@ authors:
 
 - given-names: "Tristan"
   family-names: "Pinsonneault-Marotte"
-  affiliation: "University of British Columbia"
+  affiliation: "Stanford University"
   orcid: "https://orcid.org/0000-0002-9516-3245"
 
 - given-names: "Alex S."
@@ -57,12 +66,18 @@ authors:
 
 - given-names: "Juan Mena"
   family-names: "Parra"
-  affiliation: "MIT"
+  affiliation: "University of Toronto"
   orcid: "https://orcid.org/0000-0002-0772-9326"
 
 - given-names: "Carolin"
   family-names: "Höfer"
-  affiliation: "University of British Columbia"
+  affiliation: "University of Groningen"
+  orcid: "https://orcid.org/0000-0003-4887-8114"
+
+- given-names: "Meiling"
+  family-names: "Deng"
+  affiliation: "Dominion Radio Astrophysical Observatory"
+  orcid: "https://orcid.org/0000-0001-8123-7322"
 
 - given-names: "Anja"
   family-names: "Boskovic"
@@ -72,18 +87,28 @@ authors:
   family-names: "Davis"
   affiliation: "University of British Columbia"
 
+- given-names: "Arash"
+  family-names: "Mirhosseini"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0000-0002-2626-5985"
+
 - given-names: "Davor"
   family-names: "Cubranic"
   affiliation: "University of British Columbia"
 
-- given-names: "Liam"
-  family-names: "Gray"
-  affiliation: "University of British Columbia"
-  orcid: "https://orcid.org/0000-0003-3986-954X"
+- given-names: "Adam"
+  family-names: "Lanman"
+  affiliation: "MIT"
+  orcid: "https://orcid.org/0000-0003-2116-3573"
 
 - given-names: "Rick"
   family-names: "Smegal"
   affiliation: "University of British Columbia"
+
+- given-names: "Simon"
+  family-names: "Foreman"
+  affiliation: "Arizona State University"
+  orcid: "https://orcid.org/0000-0002-0190-2271"
 
 - given-names: "Philippe"
   family-names: "Berger"
@@ -93,16 +118,19 @@ authors:
   family-names: "Leung"
   affiliation: "MIT"
 
-- given-names: "Meiling"
-  family-names: "Deng"
-  affiliation: "Dominion Radio Astrophysical Observatory"
-  orcid: "https://orcid.org/0000-0001-8123-7322"
-
-- given-names: "Simon"
-  family-names: "Foreman"
-  affiliation: "Arizona State University"
-  orcid: "https://orcid.org/0000-0002-0190-2271"
-
 - given-names: "James S."
   family-names: "Willis"
   affiliation: "University of Toronto"
+
+- given-names: "Aaron"
+  family-names: "Pearlman"
+  affiliation: "McGill University"
+
+- given-names: "Alex"
+  family-names: "Reda"
+  affiliation: "Yale University"
+
+- given-names: "Yukari"
+  family-names: "Uchibori"
+  affiliation: "University of British Columbia"
+  orcid: "https://orcid.org/0009-0003-4114-1301"

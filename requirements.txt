@@ -1,6 +1,0 @@
-cython
-caput @ git+https://github.com/radiocosmology/caput.git
-ch_util @ git+https://github.com/chime-experiment/ch_util.git
-cora @ git+https://github.com/radiocosmology/cora.git
-driftscan @ git+https://github.com/radiocosmology/driftscan.git
-draco @ git+https://github.com/radiocosmology/draco.git

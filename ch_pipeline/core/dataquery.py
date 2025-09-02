@@ -1,5 +1,4 @@
-"""
-Dataset Specification
+"""Dataset Specification.
 
 Lookup information from the database about the data, particularly which files
 are contained in a specific dataset (defined by a `run` global flag) and what
@@ -38,25 +37,63 @@ in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:
                     end:    2014-07-31 00:00:00
 """
 
+from __future__ import annotations
+
 import os
 
-from caput import mpiutil, config, pipeline
-from draco.core import task
+import numpy as np
+from caput import config, mpiutil, pipeline
+from caput import time as ctime
+from ch_ephem import sources
+from ch_ephem.observers import chime
+from ch_util import andata, finder, layout, tools
 from chimedb import data_index as di
-from ch_util import tools, ephemeris, finder, layout
+from chimedb import dataset as ds
+from chimedb.core import exceptions
+from draco.core import task
 
+from ch_pipeline.core import containers
 
-_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-krs/chime/chime_online/"}
+_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-chime/chime/chime_online/"}
 
 
 def _force_list(val) -> list:
     """Ensure configuration property is a list."""
     if val is None:
         return []
-    elif hasattr(val, "__iter__") and not isinstance(val, str):
+
+    if hasattr(val, "__iter__") and not isinstance(val, str):
         return list(val)
-    else:
-        return [val]
+
+    return [val]
+
+
+class ConnectDatabase(task.MPILoggedTask):
+    """Establish an initial connection to the chimedb database.
+
+    This is useful when running pipelines on machines with poor
+    network I/O.
+
+    Attributes
+    ----------
+    timeout : int
+        Connection timeout in seconds
+    ntries : int
+        Number of times to retry if connection fails
+    """
+
+    timeout = config.Property(proptype=int, default=5)
+    ntries = config.Property(proptype=int, default=5)
+
+    def setup(self):
+        """Establish a database connection."""
+        import chimedb.core
+
+        # Set the os connection timeout variable
+        os.environ["CHIMEDB_CONNECT_TIMEOUT"] = str(self.timeout)
+
+        # Try to establish a connection
+        chimedb.core.connect(ntries=self.ntries)
 
 
 class QueryDatabase(task.MPILoggedTask):
@@ -86,6 +123,8 @@ class QueryDatabase(task.MPILoggedTask):
         holography source to include. If None, do not include holography data.
     exclude_daytime : bool (default: False)
         exclude daytime data
+    exclude_nighttime : bool (default: False)
+        exclude nighttime data
     exclude_sun : bool (default: False)
         exclude data around Sun
     exclude_sun_time_delta : float (default: None)
@@ -114,6 +153,9 @@ class QueryDatabase(task.MPILoggedTask):
         Reject time intervals that overlap with DataFlags of these types.
     return_intervals : bool (default: False)
         Return the full interval from the Finder. Otherwise only a list of file names.
+    hfb_compression : bool (default: None)
+        If True or False, select only compressed/uncompressed HFB files.  Setting this
+        to either value will also implicitly limit the search to the absorber data.
     """
 
     return_intervals = config.Property(proptype=bool, default=False)
@@ -132,6 +174,7 @@ class QueryDatabase(task.MPILoggedTask):
     end_csd = config.Property(proptype=float, default=None)
 
     exclude_daytime = config.Property(proptype=bool, default=False)
+    exclude_nighttime = config.Property(proptype=bool, default=False)
 
     exclude_sun = config.Property(proptype=bool, default=False)
     exclude_sun_time_delta = config.Property(proptype=float, default=None)
@@ -152,8 +195,10 @@ class QueryDatabase(task.MPILoggedTask):
 
     exclude_data_flag_types = config.Property(proptype=list, default=[])
 
+    hfb_compression = config.Property(proptype=bool, default=None)
+
     def setup(self):
-        """Query the database and fetch the files
+        """Query the database and fetch the files.
 
         Returns
         -------
@@ -164,7 +209,6 @@ class QueryDatabase(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-
             if self.run_name:
                 return self.QueryRun()
 
@@ -184,9 +228,9 @@ class QueryDatabase(task.MPILoggedTask):
             if self.start_time:
                 st, et = self.start_time, self.end_time
             elif self.start_csd:
-                st = ephemeris.csd_to_unix(self.start_csd)
+                st = chime.lsd_to_unix(self.start_csd)
                 et = (
-                    ephemeris.csd_to_unix(self.end_csd)
+                    chime.lsd_to_unix(self.end_csd)
                     if self.end_csd is not None
                     else None
                 )
@@ -208,6 +252,9 @@ class QueryDatabase(task.MPILoggedTask):
             if self.exclude_daytime:
                 f.exclude_daytime()
 
+            if self.exclude_nighttime:
+                f.exclude_nighttime()
+
             if self.exclude_sun:
                 f.exclude_sun(
                     time_delta=self.exclude_sun_time_delta,
@@ -225,9 +272,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.include_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.include_transits(bdy, time_delta=tdelta)
 
@@ -242,9 +287,7 @@ class QueryDatabase(task.MPILoggedTask):
                 for ss, src in enumerate(self.exclude_transits):
                     tdelta = time_delta[ss % ntime_delta] if ntime_delta > 0 else None
                     bdy = (
-                        ephemeris.source_dictionary[src]
-                        if isinstance(src, str)
-                        else src
+                        sources.source_dictionary[src] if isinstance(src, str) else src
                     )
                     f.exclude_transits(bdy, time_delta=tdelta)
 
@@ -253,6 +296,9 @@ class QueryDatabase(task.MPILoggedTask):
 
             if len(self.exclude_data_flag_types) > 0:
                 f.exclude_data_flag_type(self.exclude_data_flag_types)
+
+            if self.hfb_compression is True or self.hfb_compression is False:
+                f.only_hfb(compression=self.hfb_compression)
 
             results = f.get_results()
             if not self.return_intervals:
@@ -303,7 +349,6 @@ class QueryRun(task.MPILoggedTask):
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         if mpiutil.rank0:
-
             layout.connect_database()
 
             cat_run = (
@@ -326,10 +371,11 @@ class QueryRun(task.MPILoggedTask):
             )
 
             if run_query.count() == 0:
-                raise RuntimeError("Run %s not found in database" % self.run_name)
-            elif run_query.count() > 1:
+                raise RuntimeError(f"Run {self.run_name} not found in database")
+
+            if run_query.count() > 1:
                 raise RuntimeError(
-                    "Multiple global flags found in database for run %s" % self.run_name
+                    f"Multiple global flags found in database for run {self.run_name}"
                 )
 
             run = run_query.get()
@@ -400,7 +446,6 @@ class QueryDataspecFile(task.MPILoggedTask):
         files : list
             List of files to load
         """
-
         import yaml
 
         # Set to default datasets file
@@ -411,7 +456,7 @@ class QueryDataspecFile(task.MPILoggedTask):
         if not os.path.exists(self.dataset_file):
             raise Exception("Dataset file not found.")
 
-        with open(self.dataset_file, "r") as f:
+        with open(self.dataset_file) as f:
             dconf = yaml.safe_load(f)
 
         if "datasets" not in dconf:
@@ -421,15 +466,15 @@ class QueryDataspecFile(task.MPILoggedTask):
 
         # Find the correct dataset
         dspec = None
-        for ds in dsets:
-            if ds["name"] == self.dataset_name:
-                dspec = ds
+        for ds_ in dsets:
+            if ds_["name"] == self.dataset_name:
+                dspec = ds_
                 break
 
         # Raise exception if it's not found
         if dspec is None:
             raise Exception(
-                "Dataset %s not found in %s." % (self.dataset_name, self.dataset_file)
+                f"Dataset {self.dataset_name} not found in {self.dataset_file}."
             )
 
         if ("instrument" not in dspec) or ("timerange" not in dspec):
@@ -439,9 +484,7 @@ class QueryDataspecFile(task.MPILoggedTask):
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
-
-        return files
+        return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
 class QueryDataspec(task.MPILoggedTask):
@@ -469,16 +512,13 @@ class QueryDataspec(task.MPILoggedTask):
         files : list
             List of files to load
         """
-
         dspec = {"instrument": self.instrument, "timerange": self.timerange}
 
         # Add archive root if exists
         if self.node_spoof is not None:
             dspec["node_spoof"] = self.node_spoof
 
-        files = files_from_spec(dspec, node_spoof=self.node_spoof)
-
-        return files
+        return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
 class QueryAcquisitions(task.MPILoggedTask):
@@ -524,18 +564,20 @@ class QueryAcquisitions(task.MPILoggedTask):
         def _choose_group_size(n, m, accept):
             if (n % m) < accept:
                 return m
+
             l, u = m - 1, m + 1
+
             while ((n % l) > accept) and ((n % u) > accept):
                 l, u = l - 1, u + 1
+
             if (n % l) < (n % u):
                 return l
-            else:
-                return u
+
+            return u
 
         # Query the database on rank=0 only, and broadcast to everywhere else
         files = None
         if self.comm.rank == 0:
-
             layout.connect_database()
 
             fi = finder.Finder(node_spoof=self.node_spoof)
@@ -547,7 +589,6 @@ class QueryAcquisitions(task.MPILoggedTask):
 
             files = []
             for aa, acq in enumerate(fi.acqs):
-
                 acq_results = fi.get_results_acq(aa)
 
                 filelist = [ff for acqr in acq_results for ff in acqr[0]]
@@ -591,14 +632,11 @@ class QueryAcquisitions(task.MPILoggedTask):
         if len(self.files) == 0:
             raise pipeline.PipelineStopIteration
 
-        files = self.files.pop(0)
-
-        return files
+        return self.files.pop(0)
 
 
 class QueryInputs(task.MPILoggedTask):
-    """From a dataspec describing the data create a list of objects describing
-    the inputs in the files.
+    """From a dataspec describing the data create a list of objects describing the inputs in the files.
 
     Attributes
     ----------
@@ -625,7 +663,6 @@ class QueryInputs(task.MPILoggedTask):
         inputs : list of :class:`CorrInput`
             A list of describing the inputs as they are in the file.
         """
-
         # Fetch from the cache if we can
         if self.cache and self._cached_inputs:
             self.log.debug("Using cached inputs.")
@@ -634,9 +671,8 @@ class QueryInputs(task.MPILoggedTask):
         inputs = None
 
         if mpiutil.rank0:
-
             # Get the datetime of the middle of the file
-            time = ephemeris.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
+            time = ctime.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
 
             inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
@@ -654,25 +690,142 @@ class QueryInputs(task.MPILoggedTask):
         return inputs
 
 
+class QueryFrequencyMap(task.MPILoggedTask):
+    """Get the CHIME frequency map that was active when this data was collected.
+
+    Attributes
+    ----------
+    cache : bool
+        Only query for the inputs for the first container received. For all
+        subsequent files just return the initial set of inputs. This can help
+        minimise the number of potentially fragile database operations.
+    """
+
+    cache = config.Property(proptype=bool, default=False)
+
+    _cached_inputs = None
+
+    def next(
+        self, ts: andata.CorrData | containers.CHIMETimeStream
+    ) -> containers.FrequencyMapSingle:
+        """Generate an input description from the timestream passed in.
+
+        Parameters
+        ----------
+        ts
+            Timestream container.
+
+        Returns
+        -------
+        freq_map
+            Frequency slot map container
+        """
+        from peewee import DoesNotExist
+
+        # Fetch from the cache if we can
+        if self.cache and self._cached_inputs:
+            self.log.debug("Using cached inputs.")
+            return self._cached_inputs
+
+        stream_id = None
+        stream = None
+
+        try:
+            dsid_flag = ts.dataset_id[:].gather(rank=0)
+        except KeyError:
+            dsid_flag = None
+
+        if self.comm.rank == 0 and dsid_flag is not None:
+            layout.connect_database()
+            # Get only unique dataset ids to reduce number of lookups. Ignore
+            # the null dataset at the 0th index
+            unique_dataset_ids = np.unique(dsid_flag[:])[1:]
+
+            if len(unique_dataset_ids) != 0:
+                fmaps = {}
+                # Get the frequency map for each unique dataset id. They should all
+                # have the same frequency map - otherwise, raise an error
+                for dsid in unique_dataset_ids:
+                    _missing_ds_flag = False
+                    try:
+                        dataset = ds.Dataset.from_id(str(dsid))
+                    except DoesNotExist:
+                        # This dataset id does not exist in the database. If none of the
+                        # dataset ids are found, throw an exception
+                        _missing_ds_flag = True
+                        continue
+
+                    try:
+                        state = dataset.closest_ancestor_of_type(
+                            "f_engine_frequency_map"
+                        ).state
+                        fmaps[state.id] = state.data
+                    except exceptions.NotFoundError:
+                        # No frequency map found for this dataset id, so the default
+                        # is used. Provide an entry so we can still check how many
+                        # frequency maps were found
+                        fmaps["default"] = 1
+
+                if _missing_ds_flag and not fmaps:
+                    raise exceptions.NotFoundError(
+                        "None of the available dataset_ids exist in the chime database."
+                    )
+
+                if len(fmaps.keys()) > 1:
+                    raise ValueError("Multiple frequency maps found for this dataset.")
+
+                if "default" not in fmaps:
+                    # Extract the stream_id and frequency map
+                    fmap_dict = next(iter(fmaps.values()))["fmap"]
+
+                    stream_id = np.fromiter(fmap_dict.keys(), dtype=np.int64)
+                    fmap = np.array(list(fmap_dict.values()), dtype=np.int64)
+                    stream = tools.order_frequency_map_stream(fmap, stream_id)
+
+        # Broadcast to all ranks
+        stream_id = self.comm.bcast(stream_id, root=0)
+        stream = self.comm.bcast(stream, root=0)
+
+        # Check to see if we found a frequency map. If not, get the default mapping
+        if stream is None or stream_id is None:
+            stream, stream_id = tools.get_default_frequency_map_stream()
+            self.log.info("No frequency map found. Using default.")
+
+        # Set the frequency array for all 1024 frequencies, starting at 800 MHz
+        # The frequency map is only properly defined when all frequencies are used
+        freq = np.linspace(800, 400, 1024, endpoint=False)
+        cont = containers.FrequencyMapSingle(copy_from=ts, freq=freq)
+
+        cont.stream[:] = stream
+        cont.stream_id[:] = stream_id
+
+        # Save into the cache for the next iteration
+        if self.cache:
+            self.log.debug("Caching input.")
+            self._cached_inputs = cont
+
+        return cont
+
+
 def finder_from_spec(spec, node_spoof=None):
     """Get a `Finder` object from the dataspec.
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
+    node_spoof : dict or None
+        Host and directory in which to find data.
 
     Returns
     -------
     fi : ch_util.finder.Finder
     """
-
     instrument = spec["instrument"]
     timerange = spec["timerange"]
 
     fi = None
     if mpiutil.rank0:
-
         # Get instrument
         inst_obj = (
             di.ArchiveInst.select().where(di.ArchiveInst.name == instrument).get()
@@ -711,8 +864,10 @@ def files_from_spec(spec, node_spoof=None):
 
     Parameters
     ----------
-    dspec : dict
+    spec : dict
         Dataspec dictionary.
+    node_spoof : dict or None
+        Host and directory in which to find data.
 
     Returns
     -------
@@ -723,7 +878,6 @@ def files_from_spec(spec, node_spoof=None):
     files = None
 
     if mpiutil.rank0:
-
         # Get the finder object
         fi = finder_from_spec(spec, node_spoof)
 
@@ -732,6 +886,4 @@ def files_from_spec(spec, node_spoof=None):
         files = [fname for result in results for fname in result[0]]
         files.sort()
 
-    files = mpiutil.world.bcast(files, root=0)
-
-    return files
+    return mpiutil.world.bcast(files, root=0)

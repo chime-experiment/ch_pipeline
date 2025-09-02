@@ -1,29 +1,26 @@
-"""
-Pathfinder/CHIME Telescope Model
+"""Pathfinder/CHIME Telescope Model.
 
 A model for both CHIME and Pathfinder telescopes. This attempts to query the
 configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of
 the feeds and their positions.
 """
 
+import datetime
 import logging
+import pickle
+from functools import cached_property
+from typing import ClassVar
 
-import numpy as np
-import h5py
 import healpy
-from scipy.interpolate import RectBivariateSpline
-
-from caput import config, mpiutil
-
+import numpy as np
+from caput import config, misc, mpiutil
+from ch_util import tools
 from cora.util import coord, hputil
-
+from draco.core import task
+from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
 from drift.core import telescope
 from drift.telescope import cylbeam
-
-from draco.core.containers import ContainerBase, GridBeam, HEALPixBeam
-
-from ch_util import ephemeris, tools
-from caput.cache import cached_property
+from scipy.interpolate import RectBivariateSpline
 
 # Get the logger for the module
 logger = logging.getLogger(__name__)
@@ -42,6 +39,10 @@ class CHIME(telescope.PolarisedTelescope):
         Restrict to a specific correlator.
     skip_non_chime : boolean
         Ignore non CHIME feeds in the BeamTransfers.
+    read_local_layout : boolean
+        Read in the layout of the CHIME telescope from a file, saved to this
+        repository, rather than attempting to connect and read the layout from
+        the database. Default is True.
     stack_type : string, optional
         Stacking type.
         `redundant`: feeds of same polarization have same beam class (default).
@@ -92,6 +93,7 @@ class CHIME(telescope.PolarisedTelescope):
     layout = config.Property(default=None)
     correlator = config.Property(proptype=str, default=None)
     skip_non_chime = config.Property(proptype=bool, default=False)
+    read_local_layout = config.Property(proptype=bool, default=True)
 
     # Redundancy settings
     stack_type = config.enum(
@@ -127,29 +129,31 @@ class CHIME(telescope.PolarisedTelescope):
 
     # Fix base properties
     cylinder_width = 20.0
-    cylinder_spacing = tools._PF_SPACE
+    # XXX CHECK: Should CHIME be using the Pathfinder antenna spacing?
+    cylinder_spacing = tools.PF_SPACE
 
-    _exwidth = [0.7]
+    _exwidth: ClassVar[float] = [0.7]
     _eywidth = _exwidth
 
-    _hxwidth = [1.2]
+    _hxwidth: ClassVar[float] = [1.2]
     _hywidth = _hxwidth
 
-    _pickle_keys = ["_feeds"]
+    _pickle_keys: ClassVar[str] = ["_feeds"]
 
     #
     # === Initialisation routines ===
     #
 
     def __init__(self, feeds=None):
-        import datetime
+        from ch_ephem.observers import chime
 
         self._feeds = feeds
 
         # Set location properties
-        self.latitude = ephemeris.CHIMELATITUDE
-        self.longitude = ephemeris.CHIMELONGITUDE
-        self.altitude = ephemeris.CHIMEALTITUDE
+        self.latitude = chime.latitude
+        self.longitude = chime.longitude
+        self.altitude = chime.altitude
+        self.skyfield = chime.skyfield
 
         # Set the LSD start epoch (i.e. CHIME/Pathfinder first light)
         self.lsd_start_day = datetime.datetime(2013, 11, 15)
@@ -158,13 +162,16 @@ class CHIME(telescope.PolarisedTelescope):
         self._set_beam_normalization()
 
     @classmethod
-    def from_layout(cls, layout, correlator=None, skip=False):
+    def from_layout(cls, layout, read_local_layout=True, correlator=None, skip=False):
         """Create a CHIME/Pathfinder telescope description for the specified layout.
 
         Parameters
         ----------
         layout : integer or datetime
             Layout id number (corresponding to one in database), or datetime
+        read_local_layout: boolean, optional
+            Read the feed layout from a file saved to this repository, rather
+            than connecting to the database. Default is True.
         correlator : string, optional
             Name of the specific correlator. Needed to return a unique config
             in some cases.
@@ -176,18 +183,22 @@ class CHIME(telescope.PolarisedTelescope):
         -------
         tel : CHIME
         """
-
         tel = cls()
 
         tel.layout = layout
         tel.correlator = correlator
+        tel.read_local_layout = read_local_layout
         tel.skip_non_chime = skip
         tel._load_layout()
 
         return tel
 
     def _load_layout(self):
-        """Load the CHIME/Pathfinder layout from the database.
+        """Load the CHIME/Pathfinder layout.
+
+        Will use a routine to read in a layout from a file saved
+        to this repository if `read_local_layout` is set to True.
+        Otherwise, will attempt to query the layout database.
 
         Generally this routine shouldn't be called directly. Use
         :method:`CHIME.from_layout` or configure from a YAML file.
@@ -195,8 +206,15 @@ class CHIME(telescope.PolarisedTelescope):
         if self.layout is None:
             raise Exception("Layout attributes not set.")
 
-        # Fetch feed layout from database
-        feeds = tools.get_correlator_inputs(self.layout, self.correlator)
+        if self.read_local_layout:
+            # If we're reading locally, use the pickled layouts file
+            feeds = self._read_local_layout()
+        else:
+            feeds = None
+
+        # If not, or if the file I/O failed, fetch feed layout from database
+        if feeds is None:
+            feeds = tools.get_correlator_inputs(self.layout, self.correlator)
 
         if mpiutil.size > 1:
             feeds = mpiutil.world.bcast(feeds, root=0)
@@ -206,13 +224,92 @@ class CHIME(telescope.PolarisedTelescope):
 
         self._feeds = feeds
 
+    def _read_local_layout(self):
+        """Load the telescope layout from a file saved to this repository.
+
+        If the file I/O fails, or if a layout from before the earliest recorded
+        date is requested, this method returns `None`, triggering a fallback
+        database query. As with :method:`CHIME._load_layout`, this routine
+        should not be called directly.
+        """
+        # Do I/O, and resolve the layout, only on rank 0
+        if mpiutil.rank == 0:
+
+            # Get the path of the layout file
+            from importlib.resources import files
+
+            from . import telescope_files
+
+            layout_path = files(telescope_files).joinpath("layouts.pkl")
+
+            try:
+                with layout_path.open("rb") as layout_f:
+                    layouts = pickle.load(layout_f)
+
+            except OSError as e:
+                logger.warning(
+                    f"Failed to load local layout: {e}. Will try to "
+                    "load from the database."
+                )
+                return None
+
+            # Load layout start and end times in arrays for comparisons
+            lay_start = np.array([lay["start"] for lay in layouts])
+            lay_end = np.array([lay["end"] for lay in layouts])
+
+            # Handle edge cases, i.e. where requested layout is earlier
+            # than the earliest saved layout...
+            if self.layout < lay_start[0]:
+                logger.info(
+                    "You have requested a layout from before the earliest "
+                    "recorded layout. Will attempt to query the "
+                    "database. To avoid this behavior, select a layout "
+                    f"after {lay_start[0].strftime('%B %d, %Y')}."
+                )
+
+                feeds = None
+
+            # ... or later than the latest
+            elif self.layout > lay_start[-1]:
+                logger.warning(
+                    "You have requested the latest locally recorded layout, "
+                    f"from {lay_start[-1].strftime('%B %d, %Y')}. There is "
+                    "no guarantee this is the latest layout available from "
+                    "the database. Attempt a database connection if you are "
+                    "certain you need the latest available layout."
+                )
+
+                feeds = layouts[-1]["inputs"]
+
+            # If not, find which layout was in use at the requested time
+            else:
+
+                # The last 'end' element is None, change it to today
+                lay_end[-1] = datetime.datetime.today()
+
+                lay_in_use = np.where(
+                    (self.layout >= lay_start) & (self.layout <= lay_end)
+                )[0][0]
+
+                feeds = layouts[lay_in_use]["inputs"]
+
+        else:
+            feeds = []
+
+        return feeds
+
     def _finalise_config(self):
         # Override base method to implement automatic loading of layout when
         # configuring from YAML.
 
-        if self.layout is not None:
-            logger.debug("Loading layout: %s", str(self.layout))
-            self._load_layout()
+        if self.layout is None:
+            logger.warning(
+                "You have not set the layout attribute of the telescope "
+                "in your config file. The layout will be set to today."
+            )
+            self.layout = datetime.datetime.today()
+        logger.debug("Loading layout: %s", str(self.layout))
+        self._load_layout()
 
         # Set the overall normalization of the beam
         self._set_beam_normalization()
@@ -225,51 +322,53 @@ class CHIME(telescope.PolarisedTelescope):
     @cached_property
     def fwhm_ex(self):
         """Full width half max of the E-plane antenna beam for X polarization."""
-
         return np.polyval(np.array(self._exwidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     @cached_property
     def fwhm_hx(self):
         """Full width half max of the H-plane antenna beam for X polarization."""
-
         return np.polyval(np.array(self._hxwidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     @cached_property
     def fwhm_ey(self):
         """Full width half max of the E-plane antenna beam for Y polarization."""
-
         return np.polyval(np.array(self._eywidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     @cached_property
     def fwhm_hy(self):
         """Full width half max of the H-plane antenna beam for Y polarization."""
-
         return np.polyval(np.array(self._hywidth) * 2.0 * np.pi / 3.0, self.frequencies)
 
     # Set the approximate uv feed sizes
     @property
     def u_width(self):
+        """The approximate physical width (in the u-direction) of the telescope."""
         return self.cylinder_width
 
     # v-width property override
     @property
     def v_width(self):
+        """The approximate physical length (in the v-direction) of the telescope."""
         return 1.0
 
     # Set non-zero rotation angle for pathfinder and chime
     @property
     def rotation_angle(self):
+        """Rotation from north towards west, in degrees."""
         if self.correlator == "pathfinder":
-            return tools._PF_ROT
-        elif self.correlator == "chime":
-            return tools._CHIME_ROT
-        else:
-            return 0.0
+            from ch_ephem.observers import pathfinder
+
+            return pathfinder.rotation
+
+        if self.correlator == "chime":
+            from ch_ephem.observers import chime
+
+            return chime.rotation
+
+        return 0.0
 
     def calculate_frequencies(self):
-        """Override default version to give support for specifying by frequency
-        channel number.
-        """
+        """Override default version support specifying by frequency channel number."""
         if self.use_pathfinder_freq:
             # Use pathfinder channelization of 1024 bins between 400 and 800 MHz.
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
@@ -304,7 +403,6 @@ class CHIME(telescope.PolarisedTelescope):
     @property
     def feeds(self):
         """Return a description of the feeds as a list of :class:`tools.CorrInput` instances."""
-
         if self.input_sel is None:
             feeds = self._feeds
         else:
@@ -314,8 +412,9 @@ class CHIME(telescope.PolarisedTelescope):
 
     @property
     def input_index(self):
-        """An index_map describing the inputs known to the telescope. Useful
-        for generating synthetic datasets.
+        """An index_map describing the inputs known to the telescope.
+
+        Useful for generating synthetic datasets.
         """
         # Extract lists of channel ID and serial numbers
         channels, feed_sn = list(
@@ -342,7 +441,6 @@ class CHIME(telescope.PolarisedTelescope):
             The positions in the telescope plane of the receivers. Packed as
             [[u1, v1], [u2, v2], ...].
         """
-
         if self._pos is None:
             # Fetch cylinder relative positions
             pos = tools.get_feed_positions(self.feeds)
@@ -353,7 +451,7 @@ class CHIME(telescope.PolarisedTelescope):
 
         return self._pos
 
-    @property
+    @cached_property
     def beamclass(self):
         """Beam class definition for the CHIME/Pathfinder.
 
@@ -380,24 +478,24 @@ class CHIME(telescope.PolarisedTelescope):
 
                 if redundant_cyl:
                     return 2 * f.cyl + pol
-                else:
-                    return pol
+
+                return pol
+
             return -1
 
         if self.stack_type == "redundant":
             return np.array([_feedclass(f) for f in self.feeds])
-        elif self.stack_type == "redundant_cyl":
-            return np.array([_feedclass(f, redundant_cyl=True) for f in self.feeds])
-        else:
-            beamclass = [
-                fi if tools.is_array(feed) else -1 for fi, feed in enumerate(self.feeds)
-            ]
-            return np.array(beamclass)
 
-    @property
+        if self.stack_type == "redundant_cyl":
+            return np.array([_feedclass(f, redundant_cyl=True) for f in self.feeds])
+
+        return np.array(
+            [fi if tools.is_array(feed) else -1 for fi, feed in enumerate(self.feeds)]
+        )
+
+    @cached_property
     def polarisation(self):
-        """
-        Polarisation map.
+        """Polarisation map.
 
         Returns
         -------
@@ -409,11 +507,11 @@ class CHIME(telescope.PolarisedTelescope):
             if tools.is_array(f):
                 if tools.is_array_x(f):  # feed is X polarisation
                     return "X"
-                else:  # feed is Y polarisation
-                    return "Y"
+                # feed is Y polarisation
+                return "Y"
             return "N"
 
-        return np.asarray([_pol(f) for f in self.feeds], dtype=np.str)
+        return np.asarray([_pol(f) for f in self.feeds], dtype=str)
 
     #
     # === Setup the primary beams ===
@@ -488,7 +586,7 @@ class CHIME(telescope.PolarisedTelescope):
             )
         else:
             raise RuntimeError(
-                "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
+                f"Given polarisation (feed.pol={feed_obj.pol}) not supported."
             )
 
         # Normalize the beam
@@ -540,7 +638,7 @@ class CHIME(telescope.PolarisedTelescope):
         # # Reimplemented to make sure entries we always pick the upper
         # # triangle (and do not reorder to make EW baselines)
         if self.stack_type != "unique":
-            super(CHIME, self)._make_ew()
+            super()._make_ew()
 
     def _unique_baselines(self):
         # Reimplement unique baselines in order to mask out either according to total
@@ -602,11 +700,9 @@ class CHIME(telescope.PolarisedTelescope):
         provided in the dec_normalized config parameter.  If this config parameter
         is set to None, then there is no additional normalization applied.
         """
-
         self._beam_normalization = None
 
         if self.dec_normalized is not None:
-
             angpos = np.array(
                 [(0.5 * np.pi - np.radians(self.dec_normalized)), 0.0]
             ).reshape(1, -1)
@@ -616,14 +712,12 @@ class CHIME(telescope.PolarisedTelescope):
             beam_lookup = {}
 
             for fe, feed in enumerate(self.feeds):
-
                 if not tools.is_array(feed):
                     continue
 
                 beamclass = self.beamclass[fe]
 
                 if beamclass not in beam_lookup:
-
                     beam_lookup[beamclass] = np.ones((self.nfreq, 2), dtype=np.float64)
                     for fr in range(self.nfreq):
                         beam_lookup[beamclass][fr] = self.beam(fe, fr, angpos)[0]
@@ -636,7 +730,6 @@ class CHIME(telescope.PolarisedTelescope):
 
     def _skip_baseline(self, bl_ind):
         """Override to skip baselines based on which polarisation pair they are."""
-
         # Pull in baseline skip choice from parent class
         skip_bl = super()._skip_baseline(bl_ind)
 
@@ -664,9 +757,9 @@ class CHIMEParameterizedBeam(CHIME):
     This speeds up evaluation of the beam model.
     """
 
-    SIGMA_EW = [14.87857614, 9.95746878]
+    SIGMA_EW: ClassVar[float] = [14.87857614, 9.95746878]
 
-    FUNC_NS = [_flat_top_gauss6, _flat_top_gauss3]
+    FUNC_NS: ClassVar = [_flat_top_gauss6, _flat_top_gauss3]
     PARAM_NS = np.array(
         [[9.97981768e-01, 1.29544939e00, 0.0], [9.86421047e-01, 8.10213326e-01, 0.0]]
     )
@@ -700,7 +793,6 @@ class CHIMEParameterizedBeam(CHIME):
         beam : np.ndarray[nposition, 2]
             Amplitude vector of beam at each position on the sky.
         """
-
         feed_obj = self.feeds[feed]
 
         # Check that feed exists and is a CHIME cylinder antenna
@@ -726,7 +818,7 @@ class CHIMEParameterizedBeam(CHIME):
             pol = 1
         else:
             raise RuntimeError(
-                "Given polarisation (feed.pol=%s) not supported." % feed_obj.pol
+                f"Given polarisation (feed.pol={feed_obj.pol}) not supported."
             )
 
         beam = np.zeros((angpos.shape[0], 2), dtype=np.float64)
@@ -793,13 +885,13 @@ class CHIMEExternalBeam(CHIME):
 
     def _finalise_config(self):
         """Get the beam file object."""
-
-        logger.debug("Reading beam model from {}...".format(self.primary_beam_filename))
+        logger.debug(f"Reading beam model from {self.primary_beam_filename}...")
         self._primary_beam = ContainerBase.from_file(
             self.primary_beam_filename, mode="r", distributed=False, ondisk=True
         )
 
         self._is_grid_beam = isinstance(self._primary_beam, GridBeam)
+        self._is_healpix_beam = isinstance(self._primary_beam, HEALPixBeam)
 
         # cache axes
         self._beam_freq = self._primary_beam.freq[:]
@@ -820,9 +912,20 @@ class CHIMEExternalBeam(CHIME):
         if len(self._primary_beam.input) > 1:
             raise ValueError("Per-feed beam model not supported for now.")
 
-        complex_beam = np.issubclass_(
-            self._primary_beam.beam.dtype.type, np.complexfloating
-        )
+        # If a HEALPixBeam, must check types of theta and phi fields
+        if self._is_healpix_beam:
+            hpb_types = [
+                v[0].type for v in self._primary_beam.beam.dtype.fields.values()
+            ]
+
+            complex_beam = np.all(
+                [issubclass(hpbt, np.complexfloating) for hpbt in hpb_types]
+            )
+        else:
+            complex_beam = issubclass(
+                self._primary_beam.beam.dtype.type, np.complexfloating
+            )
+
         self._output_dtype = (
             np.complex128 if complex_beam and not self.force_real_beam else np.float64
         )
@@ -884,7 +987,6 @@ class CHIMEExternalBeam(CHIME):
 
             # Check resolution and resample to a better resolution if needed
             if nside != self._beam_nside:
-
                 if nside > self._beam_nside:
                     logger.warning(
                         f"Requested nside={nside} higher than that of "
@@ -892,10 +994,7 @@ class CHIMEExternalBeam(CHIME):
                     )
 
                 logger.debug(
-                    "Resampling external beam from nside {:d} to {:d}".format(
-                        self._beam_nside,
-                        nside,
-                    )
+                    f"Resampling external beam from nside {self._beam_nside:d} to {nside:d}"
                 )
                 beam_map_new = np.zeros((len(freq_sel), npix), dtype=beam_map.dtype)
                 beam_map_new["Et"] = healpy.ud_grade(beam_map["Et"], nside)
@@ -908,7 +1007,7 @@ class CHIMEExternalBeam(CHIME):
         # do nothing if the array is already real
         def _conv_real(x):
             if self.force_real_beam:
-                x = x.real
+                return x.real
             return x
 
         if len(freq_sel) == 1:
@@ -1002,8 +1101,7 @@ class CHIMEExternalBeam(CHIME):
 
 
 def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
-    """Find nearest neighbor frequencies. Assumes map frequencies
-    are uniformly spaced.
+    """Find nearest neighbor frequencies. Assumes map frequencies are uniformly spaced.
 
     Parameters
     ----------
@@ -1021,7 +1119,6 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
     freq_ind : list of neighboring map frequencies matched to tel_freq.
 
     """
-
     diff_freq = abs(map_freq - tel_freq[freq_id])
     if single:
         return np.array([np.argmin(diff_freq)])
@@ -1029,6 +1126,38 @@ def _nearest_freq(tel_freq, map_freq, freq_id, single=False):
     map_freq_width = abs(map_freq[1] - map_freq[0])
     match_mask = diff_freq < map_freq_width
 
-    freq_ind = np.nonzero(match_mask)[0]
+    return np.nonzero(match_mask)[0]
 
-    return freq_ind
+
+class MakeTelescope(task.MPILoggedTask):
+    r"""A simple task to construct a telescope object.
+
+    This removes the need to use driftscan to create a saved beam transfer manager
+    solely for running pipelines that only need the telescope object.
+
+    Attributes
+    ----------
+    telescope_type : str
+        The type of telescope object to create. Generally this must be a fully qualified
+        Python class name, however, \"chime\" (default) can be used to create a
+        `ch_pipeline.core.telescope.CHIME` instance.
+    telescope_config : dict
+        Configuration passed straight to the telescope class via it's `from_config`
+        method.
+    """
+
+    telescope_type = config.Property(proptype=str, default="chime")
+    telescope_config = config.Property(proptype=dict)
+
+    def setup(self) -> telescope.TransitTelescope:
+        """Create and return the telescope object."""
+        _type_map = {
+            "chime": CHIME,
+        }
+
+        if self.telescope_type in _type_map:
+            tel_class = _type_map[self.telescope_type]
+        else:
+            tel_class = misc.import_class(self.telescope_type)
+
+        return tel_class.from_config(self.telescope_config)

@@ -1,15 +1,23 @@
-import re
-import yaml
+"""Base class for a pipeline processing type.
+
+The base class is inherited by specific pipeline processing types and handles
+most steps in setting up and running the processing type.
+
+Classes
+=======
+- :py:class:`ProcessingType`
+"""
+
 import os
+import re
 import subprocess as sp
 import tempfile
+import warnings
+from datetime import datetime
+from pathlib import Path
+from typing import ClassVar
 
-# TODO: Python 3 workaround
-try:
-    from pathlib import Path
-except ImportError:
-    from pathlib2 import Path
-
+import yaml
 
 DEFAULT_SCRIPT = """
 cluster:
@@ -19,15 +27,18 @@ cluster:
   temp_directory: {tempdir}
 
   venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
 """
 
+DEFAULT_ROOT = "/project/rpp-chime/chime/chime_processed/"
 
 DESC_HEAD = """# Revision `{}` of type `{}`
 Please describe the purpose/changes of this revision here.
 """
 
 
-class ProcessingType(object):
+class ProcessingType:
     """Baseclass for a pipeline processing type.
 
     Parameters
@@ -44,11 +55,11 @@ class ProcessingType(object):
     root_path = None
 
     # Defined in sub-classses
-    default_params = {}
+    default_params: ClassVar = {}
     default_script = DEFAULT_SCRIPT
+    daemon_config: ClassVar = {}
 
     def __init__(self, revision, create=False, root_path=None):
-
         self.revision = revision
 
         if root_path:
@@ -63,7 +74,6 @@ class ProcessingType(object):
 
     def _create(self):
         """Save default parameters and pipeline config for this revision."""
-
         # Subclass hook
         self._create_hook()
 
@@ -98,7 +108,6 @@ class ProcessingType(object):
 
     def _load(self):
         """Load default parameters and pipeline config for this revision."""
-
         # Load config from file
         with (self.revconfig_path).open() as fc:
             self._revparams = yaml.safe_load(fc)
@@ -119,7 +128,6 @@ class ProcessingType(object):
 
     def job_script(self, tag):
         """The slurm job script to queue up."""
-
         jobparams = dict(self._revparams)
         jobparams.update(
             {
@@ -133,9 +141,7 @@ class ProcessingType(object):
         jobparams = self._finalise_jobparams(tag, jobparams)
 
         if not (self.venv_path / "bin/activate").exists():
-            raise ValueError(
-                "Couldn't find a virtualenv script in {}.".format(self.venv_path)
-            )
+            raise ValueError(f"Couldn't find a virtualenv script in {self.venv_path}.")
         jobparams.update({"venv": self.venv_path})
 
         return self._jobconfig.format(**jobparams)
@@ -144,58 +150,71 @@ class ProcessingType(object):
         """Implement to edit job params based on the given tag before they are submitted."""
         return jobparams
 
-    def ls(self):
+    def ls(self, time_sort: bool = False) -> list:
         """Find all matching data.
+
+        Parameters
+        ----------
+        time_sort
+            true if tags should be sorted by time (newest first)
 
         Returns
         -------
-        tags : list
+        tags
             Return the tags of all outputs found.
         """
-
         base = self.base_path
 
         if not base.exists():
-            raise ValueError("Base path %s does not exist." % base)
+            raise ValueError(f"Base path {base} does not exist.")
 
-        file_regex = re.compile("^%s$" % self.tag_pattern)
+        file_regex = re.compile(f"^{self.tag_pattern}$")
 
-        entries = [path.name for path in base.glob("*") if file_regex.match(path.name)]
+        entries = [path for path in base.glob("*") if file_regex.match(path.name)]
 
-        return sorted(entries)
+        if time_sort:
+            # Return the entries reverse sorted by time
+            tags, times = zip(
+                *[
+                    (path.name, (path / "job/STATUS").stat().st_mtime)
+                    for path in entries
+                ]
+            )
+            return [x for _, x in sorted(zip(times, tags), reverse=True)]
+
+        return sorted([path.name for path in entries])
 
     @classmethod
-    def ls_type(cls, existing=True):
+    def ls_type(cls, existing: bool = True) -> list:
         """List all processing types found.
 
         Parameters
         ----------
-        existing : bool, optional
+        existing
             Only return types that have existing data.
 
         Returns
         -------
-        type_names : list
+        type_names
+            list of processing types found
         """
-
         type_names = [t.type_name for t in all_subclasses(cls)]
 
         if existing:
             base = Path(cls.root_path)
             return sorted([t.name for t in base.glob("*") if t.name in type_names])
-        else:
-            return type_names
+
+        return type_names
 
     @classmethod
-    def ls_rev(cls):
+    def ls_rev(cls) -> list:
         """List all existing revisions of this type.
 
         Returns
         -------
-        rev : list
+        rev
             List of revision names
         """
-
         base = Path(cls.root_path) / cls.type_name
 
         # Revisions are labelled by a two digit code
@@ -207,12 +226,11 @@ class ProcessingType(object):
     @classmethod
     def create_rev(cls):
         """Create a new revision of this type."""
-
         revisions = cls.ls_rev()
 
         if revisions:
             last_rev = revisions[-1].split("_")[-1]
-            new_rev = "rev_%02i" % (int(last_rev) + 1)
+            new_rev = f"rev_{int(last_rev) + 1:02d}"
         else:
             new_rev = "rev_00"
 
@@ -220,48 +238,50 @@ class ProcessingType(object):
 
         return cls(new_rev, create=True)
 
-    def queued(self):
+    def queued(self, user: str | None = None) -> tuple[list, list]:
         """Get the queued and running jobs of this type.
+
+        Parameters
+        ----------
+        user
+            user to find running jobs for. If not provided, this
+            will default to the current user
 
         Returns
         -------
-        waiting : list
+        waiting
             List of jobs that are waiting to run.
-        running : list
+        running
             List of running jobs.
         """
-
-        job_regex = re.compile("^%s$" % self.job_name(self.tag_pattern))
+        job_regex = re.compile(f"^{self.job_name(self.tag_pattern)}$")
 
         # Find matching jobs
-        jobs = [job for job in slurm_jobs() if job_regex.match(job["NAME"])]
+        jobs = [job for job in slurm_jobs(user=user) if job_regex.match(job["NAME"])]
 
         running = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "R"]
         waiting = [job["NAME"].split("/")[-1] for job in jobs if job["ST"] == "PD"]
 
         return waiting, running
 
-    def job_name(self, tag):
+    def job_name(self, tag: str) -> str:
         """The job name used to run the tag.
 
         Parameters
         ----------
-        tag : str
+        tag
             Tag for the job.
 
         Returns
         -------
-        jobname : str
+        jobname
         """
-        return "chp/%s/%s/%s" % (self.type_name, self.revision, tag)
+        return f"chp/{self.type_name}/{self.revision}/{tag}"
 
     @property
     def base_path(self):
         """Base path for this processed data type."""
-
-        base_path = Path(self.root_path) / self.type_name / self.revision
-
-        return base_path
+        return Path(self.root_path) / self.type_name / self.revision
 
     @property
     def workdir_path(self):
@@ -295,7 +315,7 @@ class ProcessingType(object):
 
         return venv_path
 
-    def available(self):
+    def available(self) -> list:
         """Return the list of tags that we can generate given current data.
 
         This can (and should) include tags that have already been processed
@@ -304,19 +324,22 @@ class ProcessingType(object):
 
         Returns
         -------
-        tags : list of strings
+        tags
             A list of all the tags that could be generated.
         """
         tags = self._available_tags()
 
         # Filter out entries that already exist in the working directory
         working_tags = [path.name for path in self.workdir_path.glob("*")]
-        tags = [tag for tag in tags if tag not in working_tags]
+        return [tag for tag in tags if tag not in working_tags]
 
-        return tags
-
-    def _available_tags(self):
+    def _available_tags(self) -> list:
         """Return the list of tags available for processing."""
+        return []
+
+    @property
+    def _config_tags(self) -> list:
+        """Return the list of tags requested by the config."""
         return []
 
     @classmethod
@@ -328,93 +351,229 @@ class ProcessingType(object):
         pt : cls
             An instance of the processing type for the latest revision.
         """
-
         rev = cls.ls_rev()
 
         if not rev:
-            raise RuntimeError("No revisions of type %s exist." % cls.type_name)
+            raise RuntimeError(f"No revisions of type {cls.type_name} exist.")
 
         # Create instance and set the revision
         return cls(rev[-1])
 
-    def generate(self, max=10, submit=True):
+    def generate(
+        self,
+        max: int = 10,
+        submit: bool = True,
+        user: str | None = None,
+        priority_only: bool = False,
+        check_failed: bool = False,
+    ):
         """Queue up jobs that are available to run.
 
         Parameters
         ----------
-        max : int, optional
+        max
             The maximum number of jobs to submit at once.
-        submit : bool, optional
+        submit
             Submit the jobs to the queue.
+        user
+            user to find running jobs for. If not provided, this
+            will default to the current user
+        priority_only
+            If true, only submit priority jobs
+        check_failed
+            If true, check for a specific set of failures and include those
+            jobs in the queue list
         """
-
-        to_run = self.pending()[:max]
+        to_run = self._generate_hook(
+            user=user, priority_only=priority_only, check_failed=check_failed
+        )[:max]
 
         for tag in to_run:
-            queue_job(self.job_script(tag), submit=submit)
+            try:
+                queue_job(self.job_script(tag), submit=submit)
+            except Exception:  # noqa: BLE001
+                import traceback
 
-    def pending(self):
-        """Jobs available to run."""
+                warnings.warn(
+                    f"Exception occured while queuing tag [{tag}].\n"
+                    f"{traceback.format_exc()}"
+                )
 
-        waiting, running = self.queued()
-        not_pending = set(self.ls()) | set(waiting) | set(running)
-        pending = [job for job in self.available() if job not in not_pending]
+        # Check if any duplicate jobs have been submitted and cancel them
+        check_duplicates(user=user, cancel=True)
 
-        return pending
+    def _generate_hook(self, user: str | None = None, **kwargs) -> list:
+        """Override to add custom behaviour when jobs are queued."""
+        return self.status(user=user)["not_yet_submitted"]
 
-    def crashed(self) -> list:
-        """Find all jobs which have crashed.
+    def update_files(self, user: str | None = None):
+        """Overwrite to implement functionality to update required files."""
+        pass
+
+    def failed(
+        self, user: str | None = None, time_sort: bool = False
+    ) -> dict[str, list]:
+        """Categorize failed jobs.
+
+        Parameters
+        ----------
+        user
+            user to find running jobs for. If not provided, this
+            will default to the current user
+        time_sort
+            true if tags should be sorted by time (newest first)
 
         Returns
         -------
-        crashed : list
-            Return the tags of all failed jobs.
+        crashed
+            tags associated with each category
         """
-        base = self.base_path
-        working_path = base / "working"
-        crashed_path = base / "crashed"
-
-        if not base.exists():
-            raise ValueError("Base path %s does not exist." % base)
-
-        file_regex = re.compile("^%s$" % self.tag_pattern)
-
-        # Get all tags in working directory
-        working_tags = {
-            path.name for path in working_path.glob("*") if file_regex.match(path.name)
+        # Get a set of all tags to check for cause of failure
+        failed_tags = self.status(user, time_sort)["failed"]
+        # Regex patterns associated with common sources of failure
+        # Keys can be inserted in order of priority/specificity
+        # as of Python 3.7+, as dicts will preserve insertion order.
+        # This could be buggy on versions of python below 3.7, as the
+        # broad 'unknown' key could match before a more specfic one
+        patterns = {
+            # Find crashes due to unwanted NaN/Inf values
+            "nan_or_inf": [
+                re.compile(r"ValueError(.*?)infs(.*?)NaNs"),
+            ],
+            # Find out of memory errors
+            "out_of_memory": [re.compile(r"numpy.core._exceptions._ArrayMemoryError")],
+            # Error connecting to chimedb database
+            "chimedb_error": [re.compile(r"chimedb.core.exceptions.ConnectionError")],
+            # Find crashes due to job timeout
+            "time_limit": [
+                re.compile(r"slurmstepd: error:(.*?)CANCELLED(.*?)TIME LIMIT"),
+            ],
+            "mpi_error": [
+                re.compile(r"draco.core.misc.CheckMPIEnvironment: MPI test failed")
+            ],
+            # Match anything else
+            "unknown": [re.compile(r"(.*?)")],
         }
-        # Get finished, waiting, and running jobs
-        finished_tags = self.ls()
-        waiting_tags, running_tags = self.queued()
+        # Return all tags which match the listed patterns
+        return classify_failed(self.workdir_path, failed_tags, patterns)
+
+    def status(
+        self, user: str | None = None, time_sort: bool = False
+    ) -> dict[str, list]:
+        """Find the status of existing jobs.
+
+        This duplicates some other methods for individual status values, but
+        reduces repeated method (and slurm) calls.
+
+        Parameters
+        ----------
+        user
+            user to find running jobs for. If not provided, this
+            will default to the current user
+        time_sort
+            true if tags should be sorted by time (newest first)
+
+        Returns
+        -------
+        status
+            A dict of statuses: available, not_available, not_yet_submitted, pending,
+            running, successful, failed. The value for each status key is a list of tags
+            with that status.
+        """
+        file_regex = re.compile(f"^{self.tag_pattern}$")
+
+        # Get available, finished, pending, and running jobs
+        available_tags = self.available()
+        finished_tags = self.ls(time_sort)
+        pending_tags, running_tags = self.queued(user)
+
+        # Get all tag paths in working directory
+        working_tags = [
+            path for path in self.workdir_path.glob("*") if file_regex.match(path.name)
+        ]
+        # Get the tags for each path in the working directory
+        working_tags_set = {path.name for path in working_tags}
+
+        # Get jobs which have not yet been submitted
+        submitted_tags = set(finished_tags) | set(pending_tags) | set(running_tags)
+        not_submitted_tags = [
+            job for job in available_tags if job not in submitted_tags
+        ]
         # Any tag in the working directory that is not running or
         # waiting should be considered as crashed. Also consider
         # finished tags to catch edge case where a tag is in the
         # process of being moved.
-        crashed_tags = working_tags.difference(
-            waiting_tags + running_tags + finished_tags
+        crashed_tags = working_tags_set.difference(
+            pending_tags + running_tags + finished_tags
         )
-        # This directory can contain job directories that have
-        # previously crash. They may be re-run without being
-        # removed, so we have to check to include only the
-        # tags that do not exist elsewhere
-        if crashed_path.exists():
+        # This is a workaround for an extra directory manually
+        # created in some revision. It contains job directories
+        # that have previously crashed. These jobs may be re-run
+        # without being removed, so we have to check to include
+        # only the tags that do not exist elsewhere.
+        if (self.base_path / "crashed").exists():
             # Recursively search the crashed directory. Must
             # be recursive as there can sometims be sub-folders
-            _crashed_dir = {x[0].split(os.path.sep)[-1] for x in os.walk(crashed_path)}
-            crashed_dir = {x for x in _crashed_dir if file_regex.match(x)}
+            crashed_dir = [
+                path
+                for path in (self.base_path / "crashed").rglob("*")
+                if file_regex.match(path.name)
+            ]
+            crashed_dir_tags = {path.name for path in crashed_dir}
             # Get tags in crashed folder that are not also found completed or running
-            unique_crashed_dir = crashed_dir.difference(
-                set(working_tags) | set(finished_tags)
+            unique_crashed_dir = crashed_dir_tags.difference(
+                set(working_tags_set) | set(finished_tags)
             )
+
+            if time_sort:
+                # Append any extra tag paths that need to be time sorted
+                working_tags += [
+                    path
+                    for path in crashed_dir
+                    if path.name in unique_crashed_dir - crashed_tags
+                ]
+
             # take union of these sets in place
             crashed_tags |= unique_crashed_dir
 
-        # This will cast to a sorted list
-        return sorted(crashed_tags)
+        if time_sort:
+            # Get the tag and associated completed time
+            # There's always a chance that a failed job won't have a STATUS file,
+            # in which case we assume that it failed at the time of creation
+            tags, times = [], []
+            for path in working_tags:
+                if path.name not in crashed_tags:
+                    continue
+                tags.append(path.name)
+                try:
+                    # Stat the last time the STATUS was updated, which should
+                    # correspond to the time of failure
+                    times.append((path / "job/STATUS").stat().st_mtime)
+                except FileNotFoundError:
+                    # Stat the time that this job was created
+                    times.append((path / "job/config.yaml").stat().st_mtime)
+
+            # Get the tags sorted by completion time
+            crashed_tags = [x for _, x in sorted(zip(times, tags), reverse=True)]
+        else:
+            crashed_tags = sorted(crashed_tags)
+
+        # Return a dict of all status values
+        return {
+            "available": available_tags,
+            "not_available": [
+                tag for tag in self._config_tags if str(tag) not in available_tags
+            ],
+            "not_yet_submitted": not_submitted_tags,
+            "pending": pending_tags,
+            "running": running_tags,
+            "successful": finished_tags,
+            "failed": crashed_tags,
+        }
 
 
 def find_venv():
-    """Get the path of the current virtual environment
+    """Get the path of the current virtual environment.
 
     Returns
     -------
@@ -428,7 +587,6 @@ def find_venv():
 
 def queue_job(script, submit=True):
     """Queue a pipeline script given as a string."""
-
     import os
 
     with tempfile.NamedTemporaryFile("w+") as fh:
@@ -437,23 +595,85 @@ def queue_job(script, submit=True):
 
         # TODO: do this in a better way
         if submit:
-            cmd = "caput-pipeline queue %s"
+            cmd = "caput-pipeline queue --overwrite failed %s"
         else:
             cmd = "caput-pipeline queue --nosubmit %s"
         os.system(cmd % fh.name)
 
 
-def slurm_jobs(user=None):
+def classify_failed(
+    dir: Path | str, tags: list, patterns: dict = {}
+) -> dict[str, list]:
+    """Analyze the cause of crashed jobs.
+
+    Parameters
+    ----------
+    dir
+        directory to find tags
+    tags
+        tags to check
+    patterns
+        dictionary of patterns to check for. Keys are expected
+        categories and values are lists of regex patterns to
+        check for.
+
+    Returns
+    -------
+    crashed
+        tags associated with each pattern. Any unmatched tags are
+        added with the key "other"
+    """
+    failed = {k: [] for k in list(patterns.keys())}
+
+    for tag in tags:
+        fpath = Path(dir) / tag / "job"
+        # Look at the job file first, but also check any slurm-generated
+        # output files
+        files = [fpath / "jobout.log", *fpath.glob("slurm*")]
+
+        tail = "\n"
+
+        for file in files:
+            if not file.is_file():
+                continue
+            # Get the end of the file. Assume an average of 100 characters
+            # per line.
+            with open(file, "rb") as f:
+                try:
+                    f.seek(-300 * 100, os.SEEK_END)
+                except OSError:
+                    # Assume that this is just a small file, so read
+                    # the entire thing
+                    pass
+
+                try:
+                    tail += f.read().decode() + "\n"
+                except OSError:
+                    # There was an issue reading the file, so just assume
+                    # that there's nothing there and classify this tag accordingly
+                    pass
+
+        # See if any of the patterns that we are looking for
+        # exist in the stdout
+        for key, regex_patterns in patterns.items():
+            if any(bool(re.search(p, tail)) for p in regex_patterns):
+                failed[key].append(tag)
+                break
+
+    return failed
+
+
+def slurm_jobs(user: str | None = None) -> list:
     """Get the jobs of the given user.
 
     Parameters
     ----------
-    user : str, optional
+    user
         User to fetch the slurm jobs of. If not set, use the current user.
 
     Returns
     -------
-    jobs : list
+    jobs
         List of dictionaries giving the jobs state.
     """
     if user is None:
@@ -473,8 +693,6 @@ def slurm_jobs(user=None):
         proc_stdout, proc_stderr = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError:
-        import warnings
-
         warnings.warn('Failure running "squeue".')
         return []
 
@@ -521,22 +739,122 @@ def slurm_jobs(user=None):
     return entries
 
 
-def slurm_fairshare(account, user=None):
+def check_duplicates(user: str | None = None, cancel: bool = False):
+    """Return a list of job IDs corresponding to duplicate jobs.
+
+    Parameters
+    ----------
+    user
+        The user account to check
+    cancel
+        If True, cancel duplicate jobs. If any jobs are running, the most
+        most recently started job is kept. Otherwise, the most recently queued
+        job is kept. The most recent job is kept rather than the oldest to avoid
+        cases where a file has been modified by the newer job.
+
+    Returns
+    -------
+    duplicates
+        List of JOBIDs corresponding to duplicate pipeline jobs. If `cancel` is
+        True, these jobs will be cancelled.
+    """
+    jobs = slurm_jobs(user=user)
+
+    names = {}
+    duplicates = []
+
+    for job in jobs:
+        name = job["NAME"]
+        id = job["JOBID"]
+        status = job["ST"]
+        runtime = job["TIME_LEFT"]
+        subtime = job["SUBMIT_TIME"]
+
+        existing = names.get(name)
+
+        if existing is None:
+            # First time we've seen this job name
+            names[name] = (id, status, runtime, subtime)
+            continue
+
+        if existing[1] == "R":
+            # Both jobs are running. Keep the one that
+            # started most recently
+            if status == "R":
+                # Compare time left
+                h, m, s = existing[2].split(":")
+                rte = int(h) * 3600 + int(m) * 60 + int(s)
+                h, m, s = runtime.split(":")
+                rtn = int(h) * 3600 + int(m) * 60 + int(s)
+
+                if rte > rtn:
+                    # Existing job has been running for longer.
+                    # Keep the newer job
+                    duplicates.append(existing[0])
+                    names[name] = (id, status, runtime, subtime)
+                else:
+                    duplicates.append(id)
+            # The existing job is running but this one isn't.
+            # Keep the existing job
+            else:
+                duplicates.append(id)
+        else:
+            # This job is running but the existing one isn't
+            # Cancel the existing one
+            if status == "R":
+                # Keep this job and cancel the existing one
+                duplicates.append(existing[0])
+                names[name] = (id, status, runtime, subtime)
+            # Both jobs are queued but not running, so keep the
+            # more recently queued job
+            else:
+                # Compare submit time
+                fmt = "%Y-%m-%dT%H:%M:%S"
+                ste = datetime.strptime(existing[3], fmt).timestamp()
+                stn = datetime.strptime(subtime, fmt).timestamp()
+
+                if ste > stn:
+                    # Existing job has been queued for longer
+                    duplicates.append(existing[0])
+                    names[name] = (id, status, runtime, subtime)
+                else:
+                    duplicates.append(id)
+
+    if cancel:
+        # Try to cancel these jobs
+        try:
+            process = sp.Popen(
+                ["scancel", *duplicates],
+                stdout=sp.PIPE,
+                stderr=sp.PIPE,
+                shell=False,
+                universal_newlines=True,
+            )
+            _, _ = process.communicate()
+        except OSError:
+            import traceback
+
+            warnings.warn(f"Failure running 'scancel':\n{traceback.format_exc()}")
+
+    return duplicates
+
+
+def slurm_fairshare(account: str, user: str | None = None) -> tuple[str, str]:
     """Get the LevelFS for the current user and account.
 
     Parameters
     ----------
-    account : str
+    account
         The account to check.
-    user : str, optional
+    user
         The user on the account to check for.
 
     Returns
     -------
-    account_fs : str
+    account_fs
         The LevelFS for the whole account, i.e. the priority relative to all other
         accounts on the cluster.
-    user_fs : str
+    user_fs
         The LevelFS for the user, i.e. the priority compared to all other users on
         the account.
     """
@@ -570,7 +888,6 @@ def slurm_fairshare(account, user=None):
 
 def all_subclasses(cls):
     """Recursively find all subclasses of cls."""
-
     subclasses = []
 
     stack = [cls]

@@ -1,4 +1,4 @@
-"""Parallel data containers
+"""Parallel data containers.
 
 Containers for holding various types of CHIME specific analysis data in a
 distributed fashion. The module `draco.core.containers` contains general data
@@ -6,6 +6,7 @@ containers which are imported into this module.
 
 Containers
 ==========
+- :py:class:`FrequencyMap`
 - :py:class:`RFIMask`
 - :py:class:`CorrInputMask`
 - :py:class:`CorrInputTest`
@@ -22,35 +23,135 @@ Tasks
 =====
 - :py:class:`MonkeyPatchContainers`
 """
+
+# Ignore missing docstrings in container @property methods.
+# These are generally just convenience methods for datasets
+# ruff: noqa: D102
+
 import posixpath
-from typing import List, Optional, Union
-from draco.core.task import MPILoggedTask
+from typing import ClassVar
 
 import numpy as np
-
-from caput import memh5, tod
+from caput import memh5
 from ch_util import andata
-
 from draco.core.containers import (
     ContainerBase,
-    StaticGainData,
-    TODContainer,
+    FormedBeam,
     FreqContainer,
+    SpectroscopicCatalog,
+    StaticGainData,
     TimeStream,
+    TODContainer,
 )
+from draco.core.task import MPILoggedTask
+
+
+class FrequencyMapSingle(FreqContainer):
+    """Map between frequency bin and FPGA [crate, slot, link].
+
+    This container holds a map between the frequency bins and stream ids.
+    A stream id is encoded based on the shuffle, crate, slot, and link values
+    as follows:
+
+    stream_id = shuffle*2**12 + crate*2**8 + slot*2**4 + link
+
+    The value of shuffle is always 3.
+    """
+
+    _axes = ("level",)
+
+    _dataset_spec: ClassVar = {
+        "stream": {
+            "axes": ["freq", "level"],
+            "dtype": np.int32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "stream_id": {
+            "axes": ["freq"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    def __init__(self, *args, **kwargs):
+        if "level" not in kwargs:
+            kwargs["level"] = np.array(["shuffle", "crate", "slot", "link"], dtype=str)
+
+        super().__init__(*args, **kwargs)
+
+    @property
+    def shuffle(self):
+        return self.stream[:, 0]
+
+    @property
+    def crate(self):
+        return self.stream[:, 1]
+
+    @property
+    def slot(self):
+        return self.stream[:, 2]
+
+    @property
+    def link(self):
+        return self.stream[:, 3]
+
+    @property
+    def stream(self):
+        return self.datasets["stream"]
+
+    @property
+    def stream_id(self):
+        return self.datasets["stream_id"]
+
+    @property
+    def level(self):
+        return self.index_map["level"]
+
+
+class FrequencyMap(FreqContainer, TODContainer):
+    """Map between frequency bin and FPGA stream (GPU node) as a function of time."""
+
+    _axes = ("level",)
+
+    _dataset_spec: ClassVar = {
+        "stream": {
+            "axes": ["time", "freq", "level"],
+            "dtype": int,
+            "initialise": True,
+            "distributed": False,
+        },
+        "node": {
+            "axes": ["time", "freq"],
+            "dtype": "<U5",
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def level(self):
+        return self.index_map["level"]
+
+    @property
+    def stream(self):
+        return self.datasets["stream"]
+
+    @property
+    def node(self):
+        return self.datasets["node"]
 
 
 class RFIMask(ContainerBase):
-    """Container for holding a mask that indicates
-    data that is free of RFI events.
-    """
+    """Container for holding a mask that indicates data that is free of RFI events."""
 
     _axes = ("freq", "input", "time")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "mask": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -89,10 +190,10 @@ class CorrInputMask(ContainerBase):
 
     _axes = ("input",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -112,29 +213,28 @@ class CorrInputTest(ContainerBase):
 
     _axes = ("freq", "input", "test")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "passed_test": {
             "axes": ["freq", "input", "test"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": False,
         },
     }
 
     def __init__(self, *args, **kwargs):
-
         if "test" not in kwargs:
             kwargs["test"] = np.array(
                 ["is_chime", "not_known_bad", "digital_gain", "radiometer", "sky_fit"]
             )
 
-        super(CorrInputTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -162,51 +262,50 @@ class CorrInputMonitor(ContainerBase):
 
     _axes = ("freq", "input", "coord")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "input_mask": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "input_powered": {
             "axes": ["input"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_mask": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "freq_powered": {
             "axes": ["freq"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },
         "position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
         "expected_position": {
             "axes": ["input", "coord"],
-            "dtype": np.float,
+            "dtype": float,
             "initialise": False,
             "distributed": False,
         },
     }
 
     def __init__(self, *args, **kwargs):
-
         if "coord" not in kwargs:
             kwargs["coord"] = np.array(["east_west", "north_south"])
 
-        super(CorrInputMonitor, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def input_mask(self):
@@ -246,16 +345,14 @@ class CorrInputMonitor(ContainerBase):
 
 
 class SiderealDayFlag(ContainerBase):
-    """Container for holding flag that indicates
-    good chime sidereal days.
-    """
+    """Container for holding flag that indicates good chime sidereal days."""
 
     _axes = ("csd",)
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "csd_flag": {
             "axes": ["csd"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         }
@@ -275,7 +372,7 @@ class TransitFitParams(ContainerBase):
 
     _axes = ("freq", "input", "param", "component")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "parameter": {
             "axes": ["freq", "input", "param"],
             "dtype": np.float32,
@@ -299,7 +396,7 @@ class TransitFitParams(ContainerBase):
         },
         "ndof": {
             "axes": ["freq", "input", "component"],
-            "dtype": np.int,
+            "dtype": int,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -358,7 +455,7 @@ class PointSourceTransit(StaticGainData):
         "param_cov2",
     )
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "gain": {
             "axes": ["freq", "input"],
             "dtype": np.complex128,
@@ -403,7 +500,7 @@ class PointSourceTransit(StaticGainData):
         },
         "flag": {
             "axes": ["freq", "input", "ra"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
@@ -425,7 +522,6 @@ class PointSourceTransit(StaticGainData):
     }
 
     def __init__(self, *args, **kwargs):
-
         kwargs["param"] = np.array(
             ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
         )
@@ -436,7 +532,7 @@ class PointSourceTransit(StaticGainData):
             ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
         )
 
-        super(PointSourceTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def gain(self):
@@ -504,7 +600,7 @@ class SourceModel(FreqContainer):
 
     _axes = ("pol", "time", "param", "source")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "amplitude": {
             "axes": ["freq", "pol", "time", "source"],
             "dtype": np.complex64,
@@ -546,38 +642,64 @@ class SourceModel(FreqContainer):
 class SunTransit(ContainerBase):
     """Parallel container for holding the results of a fit to a point source transit."""
 
-    _axes = ("freq", "input", "time", "pol_x", "pol_y", "coord", "param")
+    _axes = (
+        "freq",
+        "input",
+        "time",
+        "pol",
+        "eigen",
+        "good_input1",
+        "good_input2",
+        "udegree",
+        "vdegree",
+        "coord",
+        "param",
+    )
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "coord": {
             "axes": ["time", "coord"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": False,
         },
-        "evalue_x": {
-            "axes": ["freq", "pol_x", "time"],
+        "evalue1": {
+            "axes": ["freq", "good_input1", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "evalue_y": {
-            "axes": ["freq", "pol_y", "time"],
+        "evalue2": {
+            "axes": ["freq", "good_input2", "time"],
             "dtype": np.float64,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
             "dtype": np.complex128,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
         },
         "response_error": {
-            "axes": ["freq", "input", "time"],
+            "axes": ["freq", "input", "time", "eigen"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "coeff": {
+            "axes": ["freq", "pol", "time", "udegree", "vdegree"],
+            "dtype": np.complex128,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "is_sun": {
+            "axes": ["freq", "pol", "time"],
             "dtype": np.float64,
             "initialise": True,
             "distributed": True,
@@ -585,7 +707,7 @@ class SunTransit(ContainerBase):
         },
         "flag": {
             "axes": ["freq", "input", "time"],
-            "dtype": np.bool,
+            "dtype": bool,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -607,25 +729,42 @@ class SunTransit(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
         kwargs["param"] = np.array(
-            ["peak_amplitude", "centroid", "fwhm", "phase_intercept", "phase_slope"]
+            [
+                "peak_amplitude",
+                "centroid",
+                "fwhm",
+                "phase_intercept",
+                "phase_slope",
+                "phase_quad",
+                "phase_cube",
+                "phase_quart",
+                "phase_quint",
+            ]
         )
         kwargs["coord"] = np.array(["ha", "dec", "alt", "az"])
 
-        super(SunTransit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def coord(self):
         return self.datasets["coord"]
 
     @property
+    def evalue1(self):
+        return self.datasets["evalue1"]
+
+    @property
+    def evalue2(self):
+        return self.datasets["evalue2"]
+
+    @property
     def evalue_x(self):
-        return self.datasets["evalue_x"]
+        return self.datasets["evalue1"]
 
     @property
     def evalue_y(self):
-        return self.datasets["evalue_y"]
+        return self.datasets["evalue2"]
 
     @property
     def response(self):
@@ -634,6 +773,14 @@ class SunTransit(ContainerBase):
     @property
     def response_error(self):
         return self.datasets["response_error"]
+
+    @property
+    def coeff(self):
+        return self.datasets["coeff"]
+
+    @property
+    def is_sun(self):
+        return self.datasets["is_sun"]
 
     @property
     def flag(self):
@@ -684,6 +831,27 @@ class SunTransit(ContainerBase):
         return self.datasets["coord"][:, ind]
 
 
+class FormedBeamTime(FormedBeam, TODContainer):
+    """Container for formed beams with a time axis."""
+
+    _dataset_spec: ClassVar = {
+        "beam": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.complex128,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "weight": {
+            "axes": ["object_id", "pol", "freq", "time"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+
 class RingMap(ContainerBase):
     """Container for holding multifrequency ring maps.
 
@@ -701,7 +869,7 @@ class RingMap(ContainerBase):
 
     _axes = ("freq", "pol", "ra", "beam", "el")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "map": {
             "axes": ["beam", "pol", "freq", "ra", "el"],
             "dtype": np.float64,
@@ -726,8 +894,7 @@ class RingMap(ContainerBase):
     }
 
     def __init__(self, *args, **kwargs):
-
-        super(RingMap, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def freq(self):
@@ -763,7 +930,7 @@ class Photometry(ContainerBase):
 
     _axes = ("freq", "pol", "param", "source")
 
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "parameter": {
             "axes": ["freq", "pol", "param", "source"],
             "dtype": np.float64,
@@ -812,6 +979,25 @@ class Photometry(ContainerBase):
         return self.index_map["source"]
 
 
+class SpectralLineCatalog(SpectroscopicCatalog):
+    """A container for spectral line sources."""
+
+    _table_spec: ClassVar = {
+        "frequency": {
+            "columns": [["freq", np.float64], ["freq_error", np.float64]],
+            "axis": "object_id",
+        },
+        "flux": {
+            "columns": [["line_depth", np.float64], ["continuum", np.float64]],
+            "axis": "object_id",
+        },
+        "significance": {
+            "columns": [["signal_to_noise", np.float64], ["npixels", int]],
+            "axis": "object_id",
+        },
+    }
+
+
 class RawContainer(TODContainer):
     """Base class for using raw CHIME data via the draco containers API.
 
@@ -819,11 +1005,10 @@ class RawContainer(TODContainer):
     flags group.
     """
 
-    _allowed_groups = ["flags"]
+    _allowed_groups: ClassVar[str] = ["flags"]
 
     def group_name_allowed(self, name: str) -> bool:
         """Allow access to the flags group."""
-
         # Strip leading and trailing "/"
         name = name.strip("/")
 
@@ -831,16 +1016,15 @@ class RawContainer(TODContainer):
 
     def dataset_name_allowed(self, name: str) -> bool:
         """Allow access to datasets under both / and /flags."""
-
         parent_name, name = posixpath.split(name)
         return parent_name == "/" or self.group_name_allowed(parent_name)
 
     @classmethod
     def from_acq_h5(
         cls,
-        acq_files: Union[str, List[str]],
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
+        acq_files: str | list[str],
+        start: int | None = None,
+        stop: int | None = None,
         **kwargs,
     ) -> "RawContainer":
         """Load from an HDF5 file on disk.
@@ -861,13 +1045,14 @@ class RawContainer(TODContainer):
             Path or glob to files (or list of).
         start, stop
             Indices into the full set of files to select.
+        **kwargs
+            Additional keyword arguments to pass to `from_file`
 
         Returns
         -------
         cont
             A single container instance.
         """
-
         if start is None and stop is None:
             pass
         elif start is not None and stop is not None:
@@ -880,57 +1065,6 @@ class RawContainer(TODContainer):
         return cls.from_file(acq_files, **kwargs)
 
 
-class HFBData(RawContainer, FreqContainer):
-    """A container for HFB data.
-
-    This attempts to wrap the HFB archive format.
-
-    .. note:: This does not yet support distributed loading of HDF5 archive
-       files.
-    """
-
-    _axes = ("subfreq", "beam")
-
-    _dataset_spec = {
-        "hfb": {
-            "axes": ["freq", "subfreq", "beam", "time"],
-            "dtype": np.float32,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "flags/hfb_weight": {
-            "axes": ["freq", "subfreq", "beam", "time"],
-            "dtype": np.float32,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "flags/dataset_id": {
-            "axes": ["freq", "time"],
-            "dtype": "U32",
-            "initialise": True,
-            "distributed": False,
-        },
-        "flags/frac_lost": {
-            "axes": ["freq", "time"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": False,
-        },
-    }
-
-    @property
-    def hfb(self) -> memh5.MemDataset:
-        """The main hfb dataset."""
-        return self.datasets["hfb"]
-
-    @property
-    def weight(self) -> memh5.MemDataset:
-        """The inverse variance weight dataset."""
-        return self.datasets["flags/hfb_weight"]
-
-
 class CHIMETimeStream(TimeStream, RawContainer):
     """A container for CHIME visibility data.
 
@@ -939,10 +1073,10 @@ class CHIMETimeStream(TimeStream, RawContainer):
     """
 
     # Add in the extra datasets contained within the CHIME corrdata time streams
-    _dataset_spec = {
+    _dataset_spec: ClassVar = {
         "flags/dataset_id": {
             "axes": ["freq", "time"],
-            "dtype": "U32",
+            "dtype": "S32",
             "initialise": False,
             "distributed": True,
         },
@@ -987,12 +1121,33 @@ class CHIMETimeStream(TimeStream, RawContainer):
             storage["input_flags"] = storage["flags"].pop("inputs")
             storage["input_flags"]._name = "/input_flags"
 
+        # Remove any datasets/flags which shouldn't be present in this container.
+        # If any other dataset is needed, then a CorrData container should be used
+        # or a new dataset_spec entry should be added to this container. At present,
+        # this should only affect the "frac_rfi" flag.
+        contains = set(newdata.datasets) | {
+            "flags/" + name for name in newdata["flags"]
+        }
+
+        for name in contains:
+            if name not in newdata.dataset_spec:
+                del newdata[name]
+                continue
+
         return newdata
 
     @property
     def frac_lost(self):
         """Get the input flags dataset."""
-        return self.datasets["flags/frac_lost"]
+        return self["flags/frac_lost"]
+
+    @property
+    def dataset_id(self):
+        """Get the dataset_id dataset in Unicode."""
+        dsid = memh5.ensure_unicode(self["flags/dataset_id"][:])
+        dsid.flags.writeable = False
+
+        return dsid
 
     @property
     def flags(self):
@@ -1001,101 +1156,13 @@ class CHIMETimeStream(TimeStream, RawContainer):
 
         # Alias the groups back in for maximum compatibility with CHIME Andata
         # based code
-        flags_group["vis_weight"] = self["vis_weight"]
-        flags_group["input_flags"] = self["input_flags"]
+        if "vis_weight" in self:
+            flags_group["vis_weight"] = self["vis_weight"]
+
+        if "input_flags" in self:
+            flags_group["input_flags"] = self["input_flags"]
 
         return flags_group
-
-
-class HFBReader(tod.Reader):
-    """A reader for HFB type data."""
-
-    data_class = HFBData
-
-    _freq_sel = None
-
-    @property
-    def freq_sel(self) -> Union[int, list, slice]:
-        """Get the current frequency selection.
-
-        Returns
-        -------
-        freq_sel
-            A frequency selection.
-        """
-
-        return self._freq_sel
-
-    @freq_sel.setter
-    def freq_sel(self, value: Union[int, list, slice]):
-        """Set a frequency selection.
-
-        Parameters
-        ----------
-        value
-            Any type accepted by h5py is valid.
-        """
-        self._freq_sel = andata._ensure_1D_selection(value)
-
-    _beam_sel = None
-
-    @property
-    def beam_sel(self):
-        """Get the current beam selection.
-
-        Returns
-        -------
-        beam_sel
-            The current beam selection.
-        """
-
-        return self._beam_sel
-
-    @beam_sel.setter
-    def beam_sel(self, value):
-        """Set a beam selection.
-
-        Parameters
-        ----------
-        value
-            Any type accepted by h5py is valid.
-        """
-        self._beam_sel = andata._ensure_1D_selection(value)
-
-    def read(self, out_group=None):
-        """Read the selected data.
-
-        Parameters
-        ----------
-        out_group : `h5py.Group`, hdf5 filename or `memh5.Group`
-            Underlying hdf5 like container that will store the data for the
-            BaseData instance.
-
-        Returns
-        -------
-        data : :class:`TOData`
-            Data read from :attr:`~Reader.files` based on the selections made
-            by user.
-
-        """
-        kwargs = {}
-
-        if self._freq_sel is not None:
-            kwargs["freq_sel"] = self._freq_sel
-
-        if self._beam_sel is not None:
-            kwargs["beam_sel"] = self._beam_sel
-
-        kwargs["ondisk"] = False
-
-        return self.data_class.from_mult_files(
-            self.files,
-            data_group=out_group,
-            start=self.time_sel[0],
-            stop=self.time_sel[1],
-            datasets=self.dataset_sel,
-            **kwargs,
-        )
 
 
 def make_empty_corrdata(
@@ -1133,7 +1200,6 @@ def make_empty_corrdata(
     -------
     data : andata.CorrData
     """
-
     # Setup frequency axis
     if freq is None:
         if axes_from is not None and "freq" in axes_from.index_map:
@@ -1265,13 +1331,13 @@ class MonkeyPatchContainers(MPILoggedTask):
     """
 
     def __init__(self):
-
         super().__init__()
 
         self.log.warning("Deprecated. Try and stop using this monkey patching scheme.")
 
-        import ch_pipeline.core.containers as ccontainers
         import draco.core.containers as dcontainers
+
+        import ch_pipeline.core.containers as ccontainers
 
         # Replace the routine for making an empty timestream. This needs to be replaced
         # in both draco and ch_pipeline because of the ways the imports work
@@ -1309,7 +1375,6 @@ class MonkeyPatchContainers(MPILoggedTask):
             newobj : container.ContainerBase or CorrData
                 New data container.
             """
-
             from ch_util import andata
 
             self.log.warning(
@@ -1320,8 +1385,8 @@ class MonkeyPatchContainers(MPILoggedTask):
                 return dcontainers.empty_timestream(
                     axes_from=obj, attrs_from=obj, **kwargs
                 )
-            else:
-                return _make_empty_like(obj, **kwargs)
+
+            return _make_empty_like(obj, **kwargs)
 
         # Replace the empty_like routine
         dcontainers.empty_like = empty_like_patch

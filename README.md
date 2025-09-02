@@ -1,6 +1,6 @@
-# CHIME Pipeline
+# CHIME Analysis Pipeline
 
-This is the repository for storing the CHIME Pipeline.
+This is the repository for storing the CHIME Analysis Pipeline.
 
 Development should be done along the lines of [Github
 Flow](https://guides.github.com/introduction/flow/). This is the same model we
@@ -9,7 +9,7 @@ use for `ch_util`.
 Important notes:
 
  - *Don't* develop directly in master, use a feature branch for any change, and merge back into *master* promptly. Merging should be done by filing a Pull Request.
- - *Do* install the `virtualenv` with `./mkvenv.sh`
+ - *Do* install the `virtualenv` with `mkchimeenv`, located [here](https://github.com/chime-experiment/mkchimeenv).
 
 ## Development Guidelines
 
@@ -48,31 +48,52 @@ Please don't use long lived, person specific branches e.g. `richard-dev`.
 
 ### Dependencies
 
-Dependencies should be installable python packages. This means that they must
-have a `setup.py` script in their root directory, and should be installable
-using `python setup.py install`. They are kept track of in a `requirements.txt`
-file. This file can contain references to exact versions of dependencies, using
-both version tags, and commit hashes. An example `requirements.txt` file is
-given below:
+Dependencies should be python packages installable with `pip`.  The list of
+dependencies is kept in the `pyproject.toml` file.  This dependency list can
+contain references to exact versions of dependencies, using both version tags,
+and commit hashes. An example dependency list that you might find in
+`pyproject.toml` is given below:
+
+```toml
+dependencies = [
+    "caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d",
+    "ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util",
+    "cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0",
+    "driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0"
+]
 ```
-caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d
-ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util
-cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0
-driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0
-```
+
 Here, the first two requirements specify an exact git hash, whereas the second two use git tags as a shorthand.
 
 These dependencies can be installed using:
 ```bash
-$ pip install -r requirements.txt
+pip install .
 ```
-This is automatically done by the `mkvenv.sh` script.
+This is automatically done by the `mkchimeenv` script.
+
+Additional, optional dependencies can also be specified in `pyproject.toml`, in the
+`[project.optional-dependencies]` section.  Each list of optional dependencies needs a tag
+and should be specified using syntax similar to this:
+
+```toml
+[project.optional-dependencies]
+my_tag = [
+    "my_optional_dependency",
+    "another_optional_dependency"
+]
+```
+
+These optional dependencies may be installed with pip by using the tag, e.g.:
+```bash
+pip install .[my_tag]
+```
 
 ### Virtualenv
 
-The script `mkvenv.sh` will automatically install a
+The script `mkchimeenv`, located [here](https://github.com/chime-experiment/mkchimeenv), will automatically install a
 [virtualenv](http://www.virtualenv.org/) containing all the pipeline
 dependencies from the `requirements.txt` file. This gives a fresh, self-contained installation of the pipeline to work with. Before use, you should activate it using:
 ```bash
-$ source venv/bin/activate
+$ source VENV_NAME/venv/bin/activate
 ```
+where `VENV_NAME` was the name you specified when invoking `mkchimeenv`.

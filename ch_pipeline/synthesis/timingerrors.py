@@ -1,8 +1,6 @@
 """Tasks for simulating timing distribution errors."""
 
-
 import numpy as np
-
 from caput import config, mpiarray, mpiutil
 from draco.synthesis import gain
 
@@ -44,6 +42,7 @@ class TimingErrors(gain.BaseGains):
         Specify the periods of the sinusoids for each cylinder. Needs to be specified
         when simulating `sinusoidal` `common_mode_cyl` timing errors.
     """
+
     ndays = config.Property(proptype=float, default=733)
     corr_length_delay = config.Property(proptype=float, default=3600)
     sigma_delay = config.Property(proptype=float, default=1e-12)
@@ -191,3 +190,12 @@ class TimingErrors(gain.BaseGains):
         self._prev_time = time
 
         return gain_phase
+
+
+class SiderealTimingErrors(TimingErrors, gain.SiderealGains):
+    """Generate sidereal timing errors gains on a sidereal grid.
+
+    See the documentation for `TimingErrors` and `SiderealGains` for more detail.
+    """
+
+    pass

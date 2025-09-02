@@ -1,0 +1,108 @@
+# Example of a config file that runs the MaskDecorrelatedCylinder task.
+# Processed 4 chimestack files from March 2020 where a decorrelated cylinder
+# is known to have occured.  Outputs an RFIMask that can be applied to the
+# visibility data.
+cluster:
+    directory:          $SCRATCH/decorrelated_cylinder/202003/
+    venv:               my_venv
+
+    ## Cluster configuration (ignored unless on a cluster)
+    name:               decorr_cyl              # Jobname
+    nodes:              4                       # Number of nodes to run on
+    time:               30                      # Time to run for (in minutes)
+    ompnum:             1                       # Number of OpenMP threads
+    pernode:            32
+    mem:                128000M
+    system:            'cedar'
+    account:           'rpp-krs'
+
+# Pipeline task configuration
+pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - cora
+    - draco
+    - drift
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
+  tasks:
+
+    - type: draco.core.task.SetMPILogging
+      params:
+        level_rank0: INFO
+        level_all: ERROR
+
+    # Load product manager for sidereal grouping
+    - type: draco.core.io.LoadProductManager
+      out: manager
+      params:
+        product_directory: "/project/rpp-krs/chime/beam_transfers/chime_4cyl_585-800_I_XX-YY_psbeam"
+
+    # Load the frequency map
+    - type: ch_pipeline.core.io.LoadSetupFile
+      out: freqmap
+      params:
+          filename: "/project/rpp-chime/chime/chime_processed/freq_map/20180902_20220927_freq_map.h5"
+          distributed: false
+
+    # Load files where a decorrelation occured
+    - type: draco.core.io.FindFiles
+      out: filelist
+      params:
+          files:  ['/project/rpp-krs/chime/chime_online/20200319T203535Z_chimestack_corr/00244307_0000.h5',
+                   '/project/rpp-krs/chime/chime_online/20200319T203535Z_chimestack_corr/00249397_0000.h5',
+                   '/project/rpp-krs/chime/chime_online/20200319T203535Z_chimestack_corr/00254486_0000.h5',
+                   '/project/rpp-krs/chime/chime_online/20200319T203535Z_chimestack_corr/00341008_0000.h5']
+
+    - type: ch_pipeline.core.io.LoadCorrDataFiles
+      requires: filelist
+      out: tstream
+
+     # Get the telescope layout that was active when this data file was recorded
+    - type: ch_pipeline.core.dataquery.QueryInputs
+      in: tstream
+      out: inputmap
+      params:
+          cache: true
+
+     # Generate mask
+    - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
+      requires: freqmap
+      in: [tstream, inputmap]
+      out: mask
+      params:
+          threshold: 5.0
+          max_frac_freq: 0.1
+
+    # Concatenate together all the masks
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: mask
+      out: mask_day
+      params:
+          save: true
+          output_name: "decorrelated_cylinder_mask_{tag}.h5"
+
+    # Expand the mask along the time axis
+    - type: ch_pipeline.analysis.flagging.ExpandMask
+      in: mask_day
+      out: mask_day_exp
+      params:
+          nexpand: 6
+          in_place: true
+          save: true
+          output_name: "decorrelated_cylinder_mask_expanded_{tag}.h5"

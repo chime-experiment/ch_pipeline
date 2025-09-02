@@ -1,5 +1,4 @@
-"""
-Tasks for IO
+"""Tasks for IO.
 
 Tasks for calculating IO. Notably a task which will write out the parallel
 MPIDataset classes.
@@ -27,23 +26,20 @@ Several tasks accept groups of files as arguments. These are specified in the YA
         files: ['file1.h5', 'file2.h5']
 """
 
-
-import re
-import os.path
 import gc
+import os.path
+import re
+from typing import ClassVar
+
 import numpy as np
-
-from caput import pipeline
-from caput import config
-
+from caput import config, pipeline
 from ch_util import andata
-
-from draco.core import task, io
+from draco.core import io, task
 
 from . import containers
 
 
-class LoadCorrDataFiles(task.SingleTask):
+class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
     """Load CHIME correlator data from a file list passed into the setup routine.
 
     File must be a serialised subclass of :class:`ch_util.andata.CorrData`.
@@ -66,7 +62,7 @@ class LoadCorrDataFiles(task.SingleTask):
         to True.
     """
 
-    files = None
+    files: list[str] = None
 
     _file_ptr = 0
 
@@ -80,33 +76,38 @@ class LoadCorrDataFiles(task.SingleTask):
 
     use_draco_container = config.Property(proptype=bool, default=True)
 
-    def setup(self, files):
+    def setup(self, files: list[str]):
         """Set the list of files to load.
 
         Parameters
         ----------
         files : list
+            list of correlator data file paths
         """
-        if not isinstance(files, (list, tuple)):
+        if not isinstance(files, list | tuple):
             raise RuntimeError("Argument must be list of files.")
 
         self.files = files
 
+        self._sel = self._resolve_sel()
+
         # Set up frequency selection.
         if self.freq_physical:
             basefreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
-            self.freq_sel = sorted(
-                set([np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical])
+            freq_sel = sorted(
+                {np.argmin(np.abs(basefreq - freq)) for freq in self.freq_physical}
             )
 
         elif self.channel_range and (len(self.channel_range) <= 3):
-            self.freq_sel = slice(*self.channel_range)
+            freq_sel = slice(*self.channel_range)
 
         elif self.channel_index:
-            self.freq_sel = self.channel_index
+            freq_sel = self.channel_index
 
         else:
-            self.freq_sel = slice(None)
+            freq_sel = slice(None)
+
+        self._sel["freq_sel"] = freq_sel
 
     def process(self):
         """Load in each sidereal day.
@@ -117,7 +118,6 @@ class LoadCorrDataFiles(task.SingleTask):
             The timestream file. Return type depends on the value of
             `use_draco_container`.
         """
-
         if len(self.files) == self._file_ptr:
             raise pipeline.PipelineStopIteration
 
@@ -130,19 +130,19 @@ class LoadCorrDataFiles(task.SingleTask):
 
         # Set up product selection
         # NOTE: this probably doesn't work with stacked data
-        prod_sel = None
         if self.only_autos:
             rd = andata.CorrReader(file_)
-            prod_sel = np.array(
+            self._sel["prod_sel"] = np.array(
                 [ii for (ii, pp) in enumerate(rd.prod) if pp[0] == pp[1]]
             )
 
         # Load file
-        if (
-            isinstance(self.freq_sel, slice)
-            and (prod_sel is None)
-            and (self.datasets is None)
-        ):
+        fast_sel = all(
+            (sel is None or (axis == "freq_sel" and isinstance(sel, slice)))
+            for axis, sel in self._sel.items()
+        )
+
+        if fast_sel and (self.datasets is None):
             self.log.info(
                 "Reading file %i of %i. (%s) [fast io]",
                 self._file_ptr,
@@ -150,7 +150,9 @@ class LoadCorrDataFiles(task.SingleTask):
                 file_,
             )
             ts = andata.CorrData.from_acq_h5_fast(
-                file_, freq_sel=self.freq_sel, comm=self.comm
+                file_,
+                comm=self.comm,
+                **self._sel,
             )
         else:
             self.log.info(
@@ -164,8 +166,7 @@ class LoadCorrDataFiles(task.SingleTask):
                 datasets=self.datasets,
                 distributed=True,
                 comm=self.comm,
-                freq_sel=self.freq_sel,
-                prod_sel=prod_sel,
+                **self._sel,
             )
 
         # Store file name
@@ -173,7 +174,7 @@ class LoadCorrDataFiles(task.SingleTask):
 
         # Use a simple incrementing string as the tag
         if "tag" not in ts.attrs:
-            tag = "file%03i" % self._file_ptr
+            tag = f"file{self._file_ptr:03d}"
             ts.attrs["tag"] = tag
 
         # Add a weight dataset if needed
@@ -211,7 +212,7 @@ class LoadDataFiles(task.SingleTask):
 
     acqtype = config.Property(proptype=str, default="weather")
 
-    _acqtype_reader = {
+    _acqtype_reader: ClassVar = {
         "hk": andata.HKReader,
         "hkp": andata.HKPReader,
         "weather": andata.WeatherReader,
@@ -227,31 +228,36 @@ class LoadDataFiles(task.SingleTask):
         Parameters
         ----------
         files : list
+            list of chime data file paths to load, EXCLUDING correlator data
         """
         if self.acqtype not in self._acqtype_reader:
             raise ValueError(f'Specified acqtype "{self.acqtype}" is not supported.')
 
-        if not isinstance(files, (list, tuple)):
+        if not isinstance(files, list | tuple):
             raise ValueError("Argument must be list of files.")
 
         self.files = files
 
     def process(self):
-        """Load in each sidereal day.
+        """Load and return the next available file.
+
+        Raises a PipelineStopIteration if there are no more files to load.
 
         Returns
         -------
-        ts : andata.CorrData
-            The timestream of each sidereal day.
+        data : subclass of andata.BaseData
         """
+        return self._load_next_file()
 
-        if len(self.files) == self._file_ptr:
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+        if self._file_ptr == len(self.files):
             raise pipeline.PipelineStopIteration
 
         # Collect garbage to remove any prior data objects
         gc.collect()
 
-        # Fetch and remove the first item in the list
+        # Fetch and remove the next item in the list
         file_ = self.files[self._file_ptr]
         self._file_ptr += 1
 
@@ -259,10 +265,95 @@ class LoadDataFiles(task.SingleTask):
         rd = self._acqtype_reader[self.acqtype](file_)
 
         self.log.info(f"Reading file {self._file_ptr} of {len(self.files)}. ({file_})")
-        ts = rd.read()
 
-        # Return timestream
-        return ts
+        return rd.read()
+
+
+class LoadGainUpdates(LoadDataFiles):
+    """Iterate over gain updates.
+
+    Attributes
+    ----------
+    acqtype: {"gain"|"digitalgain"}
+        Type of acquisition.
+    keep_transition: bool
+        If this is True, then gain updates that were transitional
+        in nature -- i.e., they executed a smooth transition to
+        new gains -- will be loaded. By default, transitional
+        gain updates are ignored.
+    """
+
+    gains = None
+
+    acqtype = config.enum(["gain", "digitalgain"], default="gain")
+    keep_transition = config.Property(proptype=bool, default=False)
+
+    def process(self):
+        """Load the next available gain update.
+
+        Returns
+        -------
+        out: StaticGainUpdate
+            The next gain update, packaged into a pipeline container.
+        """
+        # If there are no gains available, then load the next file.
+        if self.gains is None:
+            self.gains = self._load_next_file()
+
+        # Make sure we are not dealing with a transitional gain update
+        if not self.keep_transition:
+            while "transition" in self.gains.update_id[self._time_ptr].decode():
+                self._time_ptr += 1
+
+                if self._time_ptr == self.gains.ntime:
+                    self.gains = self._load_next_file()
+
+        # Create output container
+        out = containers.StaticGainData(
+            axes_from=self.gains,
+            attrs_from=self.gains,
+            distributed=True,
+            comm=self.comm,
+        )
+
+        out.add_dataset("weight")
+        out.redistribute("freq")
+
+        # Save the update_time and update_id as attributes
+        out.attrs["time"] = self.gains.time[self._time_ptr]
+        out.attrs["update_id"] = self.gains.update_id[self._time_ptr].decode()
+        out.attrs["tag"] = out.attrs["update_id"]
+
+        # Find the local frequencies
+        sfreq = out.gain.local_offset[0]
+        efreq = sfreq + out.gain.local_shape[0]
+
+        fsel = slice(sfreq, efreq)
+
+        # Transfer over the gains and weights for the local frequencies
+        out.gain[:] = self.gains.gain[self._time_ptr][fsel]
+
+        if "weight" in self.gains:
+            out.weight[:] = self.gains.weight[self._time_ptr][fsel]
+        else:
+            out.weight[:] = 1.0
+
+        # Increment the time pointer
+        self._time_ptr += 1
+
+        # Determine if we need to load a new file on the next iteration
+        if self._time_ptr == self.gains.ntime:
+            self.gains = None
+
+        # Output the static gain container
+        return out
+
+    def _load_next_file(self):
+        """Load the next available file into memory."""
+        gains = super()._load_next_file()
+        self._time_ptr = 0
+
+        return gains
 
 
 class LoadSetupFile(io.BaseLoadFiles):
@@ -295,6 +386,7 @@ class LoadSetupFile(io.BaseLoadFiles):
         return cont
 
     def process(self):
+        """Override parent process method to do nothing."""
         pass
 
 
@@ -328,7 +420,6 @@ class LoadFileFromTag(io.BaseLoadFiles):
         # If we are returning the same file for every iteration,
         # then load that file now.
         if self.only_prefix:
-
             filename = self.prefix
 
             split_ext = os.path.splitext(filename)
@@ -339,7 +430,6 @@ class LoadFileFromTag(io.BaseLoadFiles):
             self.outcont = self._load_file(filename)
 
         else:
-
             self.prefix = os.path.splitext(self.prefix)[0]
 
     def process(self, incont):
@@ -348,13 +438,13 @@ class LoadFileFromTag(io.BaseLoadFiles):
         Parameters
         ----------
         incont : subclass of `memh5.BasicCont`
+            get the `tag` attribute from this container
 
         Returns
         -------
         outcont : subclass of `memh5.BasicCont`
         """
         if not self.only_prefix:
-
             filename = self.prefix + incont.attrs["tag"] + ".h5"
 
             # Load file into outcont attribute
@@ -384,8 +474,9 @@ class FilterExisting(task.MPILoggedTask):
     min_files_in_csd = config.Property(proptype=int, default=6)
 
     def __init__(self):
+        super().__init__()
 
-        super(FilterExisting, self).__init__()
+        from caput import mpiutil
 
         self.csd_list = []
         self.corr_files = {}
@@ -402,9 +493,9 @@ class FilterExisting(task.MPILoggedTask):
                         self.csd_list.append(int(mo.group(1)))
 
             # Search the database to get the start and end times of all correlation files
+            from ch_ephem.observers import chime
             from chimedb import data_index as di
             from chimedb.core import connect
-            from ch_util import ephemeris
 
             connect()
             query = (
@@ -420,12 +511,11 @@ class FilterExisting(task.MPILoggedTask):
             )
 
             for acq, fname, start, finish in query.tuples():
-
                 if start is None or finish is None:
                     continue
 
-                start_csd = ephemeris.csd(start)
-                finish_csd = ephemeris.csd(finish)
+                start_csd = chime.unix_to_lsd(start)
+                finish_csd = chime.unix_to_lsd(finish)
 
                 name = os.path.join(acq, fname)
                 self.corr_files[name] = (start_csd, finish_csd)
@@ -438,11 +528,9 @@ class FilterExisting(task.MPILoggedTask):
 
     def next(self, files):
         """Filter the incoming file lists."""
-
         csd_list = {}
 
         for path in files:
-
             acq, fname = path.split("/")[-2:]
             name = os.path.join(acq, fname)
 
@@ -452,7 +540,7 @@ class FilterExisting(task.MPILoggedTask):
                 continue
 
             # Figure out which CSD the file starts and ends on
-            start, end = [int(t) for t in self.corr_files[name]]
+            start, end = (int(t) for t in self.corr_files[name])
 
             # Add this file to the set of files for the relevant days
             csd_list.setdefault(start, set()).add(path)
@@ -461,7 +549,6 @@ class FilterExisting(task.MPILoggedTask):
         new_files = set()
 
         for csd, csd_files in sorted(csd_list.items()):
-
             if csd in self.csd_list:
                 self.log.debug("Skipping existing CSD=%i, files: %s", csd, csd_files)
                 continue
@@ -481,4 +568,4 @@ class FilterExisting(task.MPILoggedTask):
             "Input list %i files, after filtering %i files.", len(files), len(new_files)
         )
 
-        return sorted(list(new_files))
+        return sorted(new_files)
