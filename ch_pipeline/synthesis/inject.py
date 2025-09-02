@@ -200,7 +200,7 @@ class BaseInject(task.SingleTask):
             amp = self._ampfunc(ss, freq[fslc])[:, np.newaxis, np.newaxis]
 
             # Determine the hour angle
-            ha = _correct_phase_wrap(ra - sra)
+            ha = tools.correct_phase_wrap(ra - sra)
 
             # Split the ra axis into contiguous groups
             groups = self._get_ha_slice(ha, min_freq, sdec)
@@ -294,7 +294,7 @@ class BaseInject(task.SingleTask):
         # Loop over the podal and anti-podal transit
         for hac in self.transits:
 
-            dha = _correct_phase_wrap(ha - hac)
+            dha = tools.correct_phase_wrap(ha - hac)
 
             if self.nsigma > 0.0:
                 # Split the ra axis into contiguous groups
@@ -302,7 +302,7 @@ class BaseInject(task.SingleTask):
                 nearby = np.flatnonzero(
                     above_horizon & (np.abs(dha) < (self.nsigma * sigma))
                 )
-                groups += _find_contiguous_slices(nearby)
+                groups += tools.find_contiguous_slices(nearby)
 
             else:
                 # Find the nearest ra bin
@@ -910,15 +910,3 @@ def _get_baseline_info(data, telescope):
     baseline_pol = np.core.defchararray.add(input_pol[aa], input_pol[bb])
 
     return baseline_dist, baseline_pol
-
-
-def _correct_phase_wrap(phi):
-    return ((phi + np.pi) % (2.0 * np.pi)) - np.pi
-
-
-def _find_contiguous_slices(index):
-    slices = []
-    for w, z in itertools.groupby(index, lambda x, y=itertools.count(): next(y) - x):
-        grouped = list(z)
-        slices.append(slice(grouped[0], grouped[-1] + 1))
-    return slices
