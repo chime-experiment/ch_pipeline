@@ -145,6 +145,28 @@ class RFIFilter(task.SingleTask):
         return out
 
 
+class RFIStaticVisMask(dflagging.RFIStaticVisMask):
+    """CHIME version of RFIStaticVisMask.
+
+    Includes an accurate daytime flag.
+    """
+
+    def _day_flag_hook(self, times):
+        """Ignores times during the day.
+
+        Parameters
+        ----------
+        times : np.ndarray[float]
+            Array of timestamps.
+
+        Returns
+        -------
+        mask : np.ndarray[float]
+            Mask array. True will mask out a time sample.
+        """
+        return ~daytime_flag(times)
+
+
 class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
     """CHIME version of RFIMaskChisqHighDelay.
 
