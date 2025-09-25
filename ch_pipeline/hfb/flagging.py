@@ -2,10 +2,10 @@
 
 import beam_model.formed as fm
 import numpy as np
-from caput import config, tools
+from caput import config, mpiarray, tools
 from draco.analysis.sidereal import _search_nearest
 from draco.core import task
-from draco.core.containers import LocalizedRFIMask
+from draco.core.containers import LocalizedRFIMask, RFIMask
 from scipy.spatial.distance import cdist
 
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
@@ -130,29 +130,29 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
     This task detects RFI signals based on deviations from expected radiometer noise
-    in the second East-West beams (beam IDs: 256-512) for multiple values of std.
+    in the second East-West beams (beam IDs: 256-512) for multiple values of significance.
     It produces a directional RFI mask container recording the number of HFB subfrequency
-    channels flagged for RFI under each std.
+    channels flagged for RFI under each significance.
 
     Attributes
     ----------
     beam_ew_id : int
         The E-W beam index to inspect for RFI detection. Default is 1. (beam IDs: 256-512)
-    std : list of float
-        List of exactly four standard deviation values used as thresholds in RFI detection.
+    sigma : list of int
+        List of exactly four significance values used as thresholds in RFI detection.
         Each value corresponds to one of the four 8-bit segments packed into the 32-bit mask.
         These thresholds are used to compare against the sensitivity metric, and each one
         produces a separate mask encoding the number of HFB subfrequency channels flagged as RFI.
         The order of values determines their byte position: the first maps to bits 0-7, the second
-        to 8-15, and so on. Default is [0.25, 0.275, 0.30, 0.325].
-    sigma_threshold : float
+        to 8-15, and so on. Default is [4, 5, 6, 10].
+    std : float
         This is to detect RFI in HFB sensitivity values. If it exceeds
-        1 + treshold * std (or std_avg), then it indicates RFI events. Default is 5.
+        1 + sigma * std, then it indicates RFI events. Default is 0.25.
     """
 
     beam_ew_id = config.Property(proptype=int, default=1)
-    std = config.Property(proptype=list, default=[0.25, 0.30, 0.35, 0.50])
-    sigma_threshold = config.Property(proptype=float, default=5)
+    sigma = config.Property(proptype=list, default=[4, 5, 6, 10])
+    std = config.Property(proptype=float, default=0.25)
 
     def process(self, stream):
         """Produce a directional RFI mask from HFB data.
@@ -165,7 +165,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         Returns
         -------
         out : containers.HFBDirectionalRFIMaskBitmap
-            Container holding the RFI masks across different std values.
+            Container holding the RFI masks across different significance values.
         """
         # Extract HFB data shape so we can reshape sensitivities to separate E-W and N-S beam axes
         nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
@@ -188,19 +188,19 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
             beam_ns=stream.beam_ns[:],
             time=stream.time[:],
         )
-        out.attrs["bitmap"] = {std: i for i, std in enumerate(self.std[:])}
+        out.attrs["bitmap"] = {std: i for i, std in enumerate(self.sigma[:])}
 
-        # For each std, compute RFI flags and store counts
-        for i in range(len(self.std)):
+        # For each significance, compute RFI flags and store counts
+        for i in range(len(self.sigma)):
 
             # RFI detection for individual E-W beams
-            flags = sensitivities > 1.0 + self.sigma_threshold * self.std[i]
+            flags = sensitivities > 1.0 + self.std * self.sigma[i]
 
             # Summing over subfrequency channels
             count = np.sum(flags, axis=1)
 
             # Store counts into appropriate directional masks
-            out.set_subfreq_rfi(self.std[i], count)
+            out.set_subfreq_rfi(self.sigma[i], count)
 
         # Return output container
         return out
@@ -210,14 +210,15 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
     """Convert HFBDirectionalRFIMaskBitmap axis from beam_ns to el.
 
     This task takes an HFBDirectionalRFIMaskBitmap, selects the RFI mask corresponding
-    to a specific std value used in the detection, then regrids the mask from
-    the beam_ns axis to an el axis.
+    to a specified significance value used in the detection and subfrequency threshold,
+    then regrids the mask from the beam_ns axis to an el axis.
 
     Attributes
     ----------
-    std : float
-        Must match one of the std keys used when the HFBDirectionalRFIMaskBitmap was
-        created. Default is 0.25.
+    sigma : int
+        Specify the value of significance used in RFI detection to create a RFI mask.
+        Must match one of the sigma keys used when the HFBDirectionalRFIMaskBitmap was
+        created. Default is 5.
     subfreq_threshold : int
         Subfrequency threshold for decoding the bitmap. A sample is flagged if
         the number of HFB subfrequency channels detecting RFI >= this threshold.
@@ -235,7 +236,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
         Default is 512.
     """
 
-    std = config.Property(proptype=float, default=0.25)
+    sigma = config.Property(proptype=int, default=5)
     subfreq_threshold = config.Property(proptype=int, default=2)
     keep_frac_rfi = config.Property(proptype=bool, default=False)
     spread_factor = config.Property(proptype=float, default=1)
@@ -286,13 +287,13 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
         for i in range(sf, ef):
 
             # Extract mask for this std and threshold
-            mask = rfimaskbitmap.get_mask(self.std, self.subfreq_threshold)[
+            mask = rfimaskbitmap.get_mask(self.sigma, self.subfreq_threshold)[
                 :
             ].local_array[i - sf]
 
             # Optionally carry over the number of HFB subrequency channels detecting RFI
             if self.keep_frac_rfi:
-                frac_rfi = rfimaskbitmap.get_frac_rfi(self.std)[:].local_array[i - sf]
+                frac_rfi = rfimaskbitmap.get_frac_rfi(self.sigma)[:].local_array[i - sf]
 
             # Locate slice in new elevation axis
             el_start = _search_nearest(new_ax, out.el[0])
@@ -342,6 +343,66 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
 
         # Return output container
         return out
+
+
+class RFIMaskReduceBeamNS(task.SingleTask):
+    """Create RFIMask from HFBDirectionalRFIMaskBitmap.
+
+    This task takes an HFBDirectionalRFIMaskBitmap)freq, beam_ns, time), selects the RFI mask corresponding to a specified significance value used in the detection and subfrequency threshold, then reduce the 'beam_ns' axis to create a RFIMask container (freq, time).
+
+    Attributes
+    ----------
+    sigma : int
+        Specify the value of significance used in RFI detection to create a RFI mask.
+        Must match one of the sigma keys used when the HFBDirectionalRFIMaskBitmap was
+        created. Default is 5.
+    subfreq_threshold : int
+        Subfrequency threshold for decoding the bitmap. A sample is flagged if
+        the number of HFB subfrequency channels detecting RFI >= this threshold.
+        Default is 2.
+    beam_ns_threshold : int
+        This number determines the minimum number of detected RFI events along the beam_ns axis required for a data point
+        to be included in the reduced mask. Default is 1.
+    """
+
+    sigma = config.Property(proptype=int, default=5)
+    subfreq_threshold = config.Property(proptype=int, default=2)
+    beam_ns_threshold = config.Property(proptype=int, default=1)
+
+    def process(self, rfimaskbitmap):
+        """Produce a RFI mask.
+
+        Parameters
+        ----------
+        rfimaskbitmap : containers.HFBDirectionalRFIMaskBitmap
+            beam_ns-specific RFI mask with axes (freq, beam_ns, time).
+
+        Returns
+        -------
+        out : draco.containers.RFIMask(freq, time)
+            Non beam_ns-specific RFI mask with axes (freq, time).
+
+        """
+        # Extract mask/frac and axes data
+        mask = rfimaskbitmap.get_mask(self.sigma, self.subfreq_threshold)[:]
+        beam_ns_axis = list(rfimaskbitmap.subfreq_rfi.attrs["axis"]).index("beam_ns")
+        freq = rfimaskbitmap.freq[:]
+        time = rfimaskbitmap.time[:]
+
+        # Apply reduction condition
+        reduced_mask = np.sum(mask, axis=beam_ns_axis) >= self.beam_ns_threshold
+
+        # Create an output container
+        output = RFIMask(freq=freq, time=time)
+
+        # The output RFI mask is not frequency distributed
+        arr = reduced_mask
+        arrdist = mpiarray.MPIArray.wrap(arr, axis=0)
+        final_mask = arrdist.allgather()
+        output.mask[:] = final_mask
+
+        # Return output container
+        return output
 
 
 def sensitivity_metric(stream, average_beams):
