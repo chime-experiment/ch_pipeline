@@ -1059,7 +1059,7 @@ class CHIMEExternalBeam(CHIME):
         # taken from driftscan
         zenith = np.array([np.pi / 2.0 - np.radians(self.latitude), 0.0])
         that, phat = coord.thetaphi_plane_cart(zenith)
-        xhat, yhat, zhat = cylbeam.rotate_ypr(
+        xhat, yhat, _ = cylbeam.rotate_ypr(
             [-self.rotation_angle, 0.0, 0.0], phat, -that, coord.sph_to_cart(zenith)
         )
 
@@ -1068,7 +1068,7 @@ class CHIMEExternalBeam(CHIME):
 
     def _interpolate_gridbeam(self, f_sel, p_ind):
         x, y = self._x_grid, self._y_grid
-        x_t, y_t, z_t = self._x_tel
+        x_t, y_t, _ = self._x_tel
         mask = self._pix_mask
 
         # interpolation routine requires increasing axes
