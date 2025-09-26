@@ -145,7 +145,7 @@ class RFIFilter(task.SingleTask):
         return out
 
 
-class RFIStokesIMask(dflagging.RFIStokesIMask):
+class RFINarrowbandVisMask(dflagging.RFINarrowbandVisMask):
     """CHIME version of RFIFourierMask.
 
     This has a static mask for the local environment and will use the MAD
