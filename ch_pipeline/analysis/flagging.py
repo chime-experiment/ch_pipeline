@@ -2004,7 +2004,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         bpol = np.core.defchararray.add(pol[index_a], pol[index_b])
 
         # Find the grid indices
-        xind, yind, dx, dy = find_grid_indices(bdist)
+        xind, yind = find_grid_indices(bdist)[:2]
 
         # Only use the co-polar, 1-cylinder separation visibilities for this analysis
         ico = np.flatnonzero((pol[index_a] == pol[index_b]) & (np.abs(xind) == 1))
@@ -2017,7 +2017,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         idd[:, 1] = yind[ico]
 
         # Find the unique pol/baselines and the inverse map
-        uidd, index = np.unique(idd, return_inverse=True, axis=0)
+        index = np.unique(idd, return_inverse=True, axis=0)[1]
 
         isort = np.argsort(index)
 
@@ -2825,7 +2825,7 @@ def search_grid(xeval, window, x, wrap=False):
         The index into the grid the defines the upper bound of each region.
         Each region can be selected with slice(xlb, xub).
     """
-    min_x, max_x = np.percentile(x, [0, 100])
+    min_x = np.percentile(x, [0, 100])[0]
     dx = np.median(np.abs(np.diff(x)))
     nx = x.size
 
@@ -2864,7 +2864,7 @@ class CatalogBase(task.SingleTask):
         self.horizon = horizon
 
         # Save the minimum north-south separation
-        xind, yind, min_xsep, min_ysep = find_grid_indices(self.telescope.baselines)
+        _, yind, _, min_ysep = find_grid_indices(self.telescope.baselines)
         self.min_ysep = min_ysep
         self.max_ysep = min_ysep * np.max(np.abs(yind))
 
@@ -3021,7 +3021,7 @@ class SourceTracksMixin(SourcePixelsMixin):
             Telescope-y coordinate of the U-shaped tracks of
             sources in the catalog.  Flattened into a 1-d array.
         """
-        src_ind, src_ra, src_dec, src_y = super().get_source_coordinates(data)
+        src_ind, src_ra, src_dec, _ = super().get_source_coordinates(data)
 
         ra = data.ra
         if self.upsample is not None and self.upsample > 1:
@@ -3116,7 +3116,7 @@ class MaskFromCatalogBase(CatalogBase):
         mask = out.mask[:].local_array
 
         # Determine the coordinates of the sources in the current epoch
-        src_ind, src_ra, src_dec, src_y = self.get_source_coordinates(data)
+        _, src_ra, src_dec, src_y = self.get_source_coordinates(data)
 
         nsource = src_ra.size
 
@@ -3415,7 +3415,7 @@ class MaskAliasedMap(task.SingleTask):
         """
         # Determine the layout of the visibilities on the grid.
         telescope = io.get_telescope(manager)
-        xind, yind, min_xsep, min_ysep = find_grid_indices(telescope.baselines)
+        min_ysep = find_grid_indices(telescope.baselines)[-1]
 
         # Save the minimum north-south separation
         self.min_ysep = min_ysep

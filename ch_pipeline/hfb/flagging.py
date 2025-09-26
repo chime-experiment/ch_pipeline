@@ -168,7 +168,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
             Container holding the RFI masks across different std values.
         """
         # Extract HFB data shape so we can reshape sensitivities to separate E-W and N-S beam axes
-        nfreq, nsubfreq, nbeam, ntime = stream.hfb[:].shape
+        nfreq, nsubfreq, _, ntime = stream.hfb[:].shape
         nbeam_ew = len(stream.beam_ew)
         nbeam_ns = len(stream.beam_ns)
 

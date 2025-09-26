@@ -607,7 +607,7 @@ class EigenCalibration(task.SingleTask):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, neigen, ninput, ntime = data.datasets["evec"].local_shape
+        nfreq, neigen, ninput, _ = data.datasets["evec"].local_shape
 
         # Find the local frequencies
         freq = data.freq[data.vis[:].local_bounds]
@@ -989,7 +989,7 @@ class TransitFit(task.SingleTask):
         response.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, ninput, nra = response.vis.local_shape
+        nfreq, ninput, _ = response.vis.local_shape
 
         # Find the local frequencies
         freq = response.freq[response.vis[:].local_bounds]
@@ -1112,8 +1112,6 @@ class GainFromTransitFit(task.SingleTask):
 
         # Distribute over frequency
         fit.redistribute("freq")
-
-        nfreq, ninput, _ = fit.parameter.local_shape
 
         # Import the function for evaluating the model and keyword arguments
         ModelClass = locate(fit.attrs["model_class"])
@@ -2386,7 +2384,7 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
 
         oweight = out.weight[:].local_array
 
-        nfreq, ninput = amp.shape
+        ninput = amp.shape[1]
 
         # Flag RFI
         rfi_flag = ~rfi.frequency_mask(freq)
@@ -2402,7 +2400,7 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
 
             # Generate the mask
             try:
-                amp_hpf, flag_hpf, rsigma_hpf = rfi.iterative_hpf_masking(
+                flag_hpf = rfi.iterative_hpf_masking(
                     freq,
                     amp[:, ii],
                     flag=flag[:, ii],
@@ -2412,7 +2410,7 @@ class IdentifyNarrowbandFeatures(task.SingleTask):
                     threshold=self.threshold,
                     nperiter=self.nperiter,
                     niter=self.niter,
-                )
+                )[1]
             except np.linalg.LinAlgError as exc:
                 self.log.warning(
                     f"Failed to create delay filter for input {ii} (of {ninput}): {exc}"
@@ -2557,7 +2555,7 @@ class ReconstructGainError(task.SingleTask):
         g = gain.gain[:].local_array
         w = gain.weight[:].local_array
 
-        nfreq, ninput, ntime = g.shape
+        nfreq, _, ntime = g.shape
 
         freq = self._get_freq(gain.freq)
 
@@ -3242,8 +3240,6 @@ class CollapseGainError(task.SingleTask):
         w = gain.weight[:].local_array
         v = tools.invert_no_zero(w)
 
-        nfreq, ninput = g.shape
-
         # Identify flagged data
         gflag = w > 0.0
 
@@ -3491,7 +3487,7 @@ class FlagNarrowbandGainError(task.SingleTask):
             out = containers.RFIMask(axes_from=data, attrs_from=data)
 
         # Determine dimensions
-        nfreq, ninput, nupdate = self.frac_error.shape
+        nfreq = self.frac_error.shape[0]
         nlsd, ntime = timestamp.shape
 
         ftimestamp = timestamp.flatten()
@@ -3686,9 +3682,6 @@ class CalibrationCorrection(task.SingleTask):
         # We are covered by the flags, so set up for correction
         sstream.redistribute("freq")
 
-        # Determine local dimensions
-        nfreq, nstack, ntime = sstream.vis.local_shape
-
         # Find the local frequencies
         freq = sstream.freq[sstream.vis[:].local_bounds]
 
@@ -3843,7 +3836,7 @@ class CorrectTelescopeRotation(CalibrationCorrection):
         # Determine location of calibrator
         ttrans = chime.transit_times(body, timestamp[0] - 24.0 * 3600.0)[0]
 
-        ra, dec = chime.object_coords(body, date=ttrans, deg=False)
+        _, dec = chime.object_coords(body, date=ttrans, deg=False)
 
         # Calculate and return the phase correction, which is old positions minus new positions
         # since we previously divided the chimestack data by the response to the calibrator.

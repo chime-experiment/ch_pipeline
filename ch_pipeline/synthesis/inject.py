@@ -868,7 +868,7 @@ class SpectroscopicCatalogWithBeamExternal(BeamExternal, SpectroscopicCatalog):
 
 def _get_baseline_info(data, telescope):
     # Determine stack axis
-    stack_new, stack_flag = tools.redefine_stack_index_map(
+    stack_new, _ = tools.redefine_stack_index_map(
         telescope, data.input, data.prod, data.stack, data.reverse_map["stack"]
     )
 
