@@ -222,12 +222,6 @@ pipeline:
       params:
         weight: "natural"
 
-    # Concatenate together all the days timestream information
-    - type: draco.analysis.sidereal.SiderealGrouper
-      requires: manager
-      in: tstream_col
-      out: tstream_day
-
     # Concatenate together all the days sensitivity information and output it
     # for validation
     - type: draco.analysis.sidereal.SiderealGrouper
@@ -263,10 +257,30 @@ pipeline:
         save: true
         output_name: "decorrelated_cylinder_mask_expanded_{{tag}}.h5"
 
+    # Concatenate together all the days timestream information
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: tstream_col
+      out: tstream_day
+
+    # Calculate the thermal gain correction
+    - type: ch_pipeline.analysis.calibration.ThermalCalibration
+      in: tstream_day
+      out: thermal_gain
+      params:
+        caltime_path: "{caltimes_file}"
+
+    # Apply the thermal correction
+    - type: draco.core.misc.ApplyGain
+      in: [tstream_day, thermal_gain]
+      out: tstream_thermal_corrected
+      params:
+        inverse: false
+
     # Apply the mask from the bad baselines. This will modify the data in
     # place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day, bad_baseline_mask_day]
+      in: [tstream_thermal_corrected, bad_baseline_mask_day]
       out: tstream_bbm
 
     # Apply the mask from the decorrelated cylinders. This will modify the data
@@ -283,31 +297,44 @@ pipeline:
         save: true
         output_name: "rfi_mask_sensitivity_{{tag}}.h5"
 
-    # Calculate a RFI mask from Stokes I visibilities
-    - type: ch_pipeline.analysis.flagging.RFIStokesIMask
+    # Calculate a RFI mask targeting transient scattered emission
+    - type: draco.analysis.flagging.RFITransientVisMask
       requires: manager
       in: tstream_dcm
-      out: [rfimask_stokesi, _]
+      out: rfimask_transient
       params:
         save: true
-        output_name:
-          - "rfi_mask_stokesi_{{tag}}.h5"
-          - "lowpass_power_2cyl_{{tag}}.h5"
+        output_name: "rfi_mask_transient_{{tag}}.h5"
 
     # Apply the StokesI RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_dcm, rfimask_stokesi]
+      in: [tstream_dcm, rfimask_transient]
       out: tstream_day_rfi
+
+    # Estimate a static frequency mask from the visibilities
+    - type: ch_pipeline.analysis.flagging.RFIStaticVisMask
+      requires: [manager, manager, manager]
+      in: tstream_day_rfi
+      out: rfimask_static
+      params:
+        include_2d: false
+        save: true
+        output_name: "rfi_mask_static_{{tag}}.h5"
+
+    # Apply the static RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream_day_rfi, rfimask_static]
+      out: tstream_day_rfi2
 
     # Apply the Sensitivity RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi, rfimask_sensitivity]
-      out: tstream_day_rfi2
+      in: [tstream_day_rfi2, rfimask_sensitivity]
+      out: tstream_day_rfi3
 
     # Fully remove any frequencies which are mostly flagged. A threshold
     # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data
     - type: draco.analysis.flagging.MaskFreq
-      in: tstream_day_rfi2
+      in: tstream_day_rfi3
       out: freq_mask
       params:
         freq_frac: 0.3
@@ -316,37 +343,18 @@ pipeline:
 
     # Apply the frequency mask
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi2, freq_mask]
-      out: tstream_day_freq_cut
+      in: [tstream_day_rfi3, freq_mask]
+      out: tstream_day_rfi4
 
-    # Calculate the thermal gain correction
-    - type: ch_pipeline.analysis.calibration.ThermalCalibration
-      in: tstream_day_freq_cut
-      out: thermal_gain
-      params:
-        caltime_path: "{caltimes_file}"
-
-    # Apply the thermal correction
-    - type: draco.core.misc.ApplyGain
-      in: [tstream_day_freq_cut, thermal_gain]
-      out: tstream_thermal_corrected
-      params:
-        inverse: false
-
-    # Smooth the noise estimates which suffer from sample variance
-    - type: draco.analysis.flagging.SmoothVisWeight
-      in: tstream_thermal_corrected
-      out: tstream_day_smoothweight
-
-    # Apply an aggressive delay filter and
-    # check consistency of data with noise at high delay.
+    # Apply an aggressive delay filter and check consistency of
+    # data with noise at high delay.
     - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
       requires: manager
-      in: tstream_day_smoothweight
+      in: tstream_day_rfi4
       out: chisq_day_filtered
       params:
         tauw: 0.400
-        single_mask: false
+        single_mask: true
         atten_threshold: 0.0
         reduce_baseline: true
         mask_short: 20.0
@@ -363,18 +371,36 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_smoothweight, rfimask_chisq]
-      out: tstream_day_rfi3
+      in: [tstream_day_rfi4, rfimask_chisq]
+      out: tstream_day_rfi5
+
+    # Smooth the noise estimates which suffer from sample variance
+    - type: draco.analysis.flagging.SmoothVisWeight
+      in: tstream_day_rfi5
+      out: tstream_day_smoothweight
 
     # Regrid the data onto a regular grid in sidereal time
     - type: draco.analysis.sidereal.SiderealRegridderGP
       requires: manager
-      in: tstream_day_rfi3
+      in: tstream_day_smoothweight
       out: sstream
       params:
         samples: 4096
         mask_cutoff: 1.7
         kernel_width: 5
+
+    # Check the chi-squared metric post-gridding 
+    - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
+      requires: manager
+      in: sstream
+      params:
+        tauw: 0.400
+        single_mask: true
+        atten_threshold: 0.0
+        reduce_baseline: true
+        mask_short: 20.0
+        save: true
+        output_name: "chisq_sidereal_grid_{{tag}}.h5"
 
     # Precision truncate the sidereal stream data
     - type: draco.core.io.Truncate
@@ -384,18 +410,10 @@ pipeline:
         dataset:
           vis:
             weight_dataset: vis_weight
-            variance_increase: 1.0e-3
+            variance_increase: 1.0e-4
           vis_weight: 1.0e-5
-
-    # Save the truncated sidereal stream to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: sstream_trunc
-      out: sstream_trunc_handle
-      params:
-        save: true
-        output_name: "sstream_{{tag}}.zarr.zip"
-        remove: true
+          save: true
+          output_name: "sstream_{{tag}}.h5"
 
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
@@ -418,16 +436,8 @@ pipeline:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
-
-    # Save the truncated ringmap to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_trunc
-      out: ringmap_trunc_handle
-      params:
         save: true
-        output_name: "ringmap_{{tag}}.zarr.zip"
-        remove: true
+        output_name: "ringmap_{{tag}}.h5"
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
@@ -453,16 +463,8 @@ pipeline:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
-
-    # Save the truncated intercylinder ringmap to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_int_trunc
-      out: ringmap_int_trunc_handle
-      params:
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.zarr.zip"
-        remove: true
+        output_name: "ringmap_intercyl_{{tag}}.h5"
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
@@ -555,8 +557,7 @@ pipeline:
     - type: draco.core.io.LoadBasicCont
       out: sstack
       params:
-        files:
-            - "{blend_stack_file}"
+        files: "{blend_stack_file}"
         selections:
             freq_range: [{freq[0]:d}, {freq[1]:d}]
 
@@ -651,7 +652,7 @@ pipeline:
     # Estimate the delay power spectrum of the data after applying
     # the delay filter
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
-      in: sstream_stokesI
+      in: sstream_dfilter_stokesI
       params:
         dataset: "vis"
         sample_axis: "ra"
@@ -682,25 +683,7 @@ pipeline:
       out: ringmap_int_hpf_sel
       params:
         channel_index: {val_freq}
-
-    # Precision truncate and write out the chunked filtered ringmap.
-    # Don't truncate the map itself, to preserve low-amplitude pixels.
-    - type: draco.core.io.Truncate
-      in: ringmap_int_hpf_sel
-      out: ringmap_int_hpf_sel_trunc
-      params:
-        dataset:
-          map: No
-          weight: 1.0e-5
-
-    # Save the truncated filtered intercylinder ringmap to a .zarr file and
-    # start a background task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_int_hpf_sel_trunc
-      out: ringmap_int_hpf_sel_trunc_handle
-      params:
-        save: true
-        output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
+        output_name: "ringmap_intercyl_hpf_{{tag}}.h5"
         remove: true
 
     # Downselect the ringmap to keep only the XX and YY pols
@@ -720,6 +703,7 @@ pipeline:
           - el
         dataset: map
         weighting: weighted
+        compression: false
         save: true
         output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
 
@@ -732,23 +716,9 @@ pipeline:
           - freq
         dataset: map
         weighting: weighted
+        compression: false
         save: true
         output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
-
-    # Wait for all the zarr zipping tasks to complete
-    # Wait for the sstream last since it will likely take the
-    # longest to complete
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_int_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_int_hpf_sel_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: sstream_trunc_handle
 """
 
 
