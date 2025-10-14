@@ -189,7 +189,7 @@ def solve_single_time(vis, weight, source_model):
     coeff : np.ndarray[ntime, nparam]
         Best-fit coefficients of the model for each time.
     """
-    nbaseline, ntime, nparam = source_model.shape
+    _, ntime, nparam = source_model.shape
 
     coeff = np.zeros((ntime, nparam), dtype=np.complex64)
 
@@ -225,7 +225,7 @@ def solve_multiple_times(vis, weight, source_model):
     coeff : np.ndarray[nparam,]
         Best-fit coefficients of the model.
     """
-    nbaseline, ntime, nparam = source_model.shape
+    nparam = source_model.shape[-1]
 
     weight = weight.flatten()
     vis = vis.flatten()
@@ -364,7 +364,7 @@ class SolveSources(task.SingleTask):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq = data.vis.local_shape[0]
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -385,12 +385,12 @@ class SolveSources(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
             data.reverse_map["stack"],
-        )
+        )[0]
 
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
@@ -671,7 +671,7 @@ class SubtractSources(task.SingleTask):
         model.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq = data.vis.local_shape[0]
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -690,12 +690,12 @@ class SubtractSources(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
             data.reverse_map["stack"],
-        )
+        )[0]
 
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
@@ -733,10 +733,9 @@ class SubtractSources(task.SingleTask):
 
             for ff, nu in enumerate(freq):
                 # Calculate source model
-                source_model, sedge = model_extended_sources(
+                source_model = model_extended_sources(
                     nu, dist_pol, timestamp, bodies, **source_model_kwargs
-                )
-                source_model = source_model[0]
+                )[0][0]
 
                 # Sum over coefficients of source model
                 if coeff is not None:
@@ -842,7 +841,7 @@ class SolveSourcesWithBeam(SolveSources):
         data.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq = data.vis.local_shape[0]
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -863,12 +862,12 @@ class SolveSourcesWithBeam(SolveSources):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
             data.reverse_map["stack"],
-        )
+        )[0]
 
         prod_new = data.index_map["prod"][stack_new["prod"]]
 
@@ -1031,7 +1030,7 @@ class SubtractSourcesWithBeam(task.SingleTask):
         model.redistribute("freq")
 
         # Determine local dimensions
-        nfreq, nstack, ntime = data.vis.local_shape
+        nfreq = data.vis.local_shape[0]
 
         # Find the local frequencies
         sfreq = data.vis.local_offset[0]
@@ -1050,12 +1049,12 @@ class SubtractSourcesWithBeam(task.SingleTask):
             raise RuntimeError("Unable to extract time from input container.")
 
         # Redefine stack axis so that it only contains chime antennas
-        stack_new, stack_flag = tools.redefine_stack_index_map(
+        stack_new = tools.redefine_stack_index_map(
             self.inputmap,
             data.index_map["prod"],
             data.index_map["stack"],
             data.reverse_map["stack"],
-        )
+        )[0]
 
         prod_new = data.index_map["prod"][stack_new["prod"]]
 

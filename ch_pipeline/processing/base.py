@@ -690,7 +690,7 @@ def slurm_jobs(user: str | None = None) -> list:
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError:
         warnings.warn('Failure running "squeue".')
@@ -872,7 +872,7 @@ def slurm_fairshare(account: str, user: str | None = None) -> tuple[str, str]:
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError as e:
         raise RuntimeError('Failure running "sshare".') from e

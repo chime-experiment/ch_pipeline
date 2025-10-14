@@ -58,7 +58,7 @@ class FindSpectralLines(task.SingleTask):
         self.tel = io.get_telescope(manager)
 
         # Save the minimum north-south separation
-        xind, yind, min_xsep, min_ysep = find_grid_indices(self.tel.baselines)
+        _, yind, min_xsep, min_ysep = find_grid_indices(self.tel.baselines)
         self.min_xsep = min_xsep
         self.max_ysep = min_ysep * np.max(np.abs(yind))
 
