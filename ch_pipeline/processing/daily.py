@@ -125,10 +125,19 @@ pipeline:
       params:
         channel_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # Mask out any weights that are abnormally large or small, since these are likely
+    # numerical issues and represent bad data
+    - type: draco.analysis.flagging.SanitizeWeights
+      in: tstream_orig
+      out: tstream_sanitized
+      params:
+        max_thresh: 1e30
+        min_thresh: 1e-30
+
     # Correct the timing distribution errors
     - type: ch_pipeline.analysis.timing.ApplyTimingCorrection
       requires: tcorrlist
-      in: tstream_orig
+      in: tstream_sanitized
       out: tstream_corr
       params:
         use_input_flags: true
@@ -154,27 +163,29 @@ pipeline:
       in: [tstream_rot, inputmap]
       out: tstream
 
+    # Identify samples where autocorrelations are negative, corresponding
+    # to bad data
+    - type: draco.analysis.flagging.NegativeAutosMask
+      in: tstream
+      out: negative_auto_mask
+
+    # Apply the negative auto mask
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream, negative_auto_mask]
+      out: tstream_neg_auto
+
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream
+      in: tstream_neg_auto
       out: sensitivity
       params:
         exclude_intracyl: true
 
-    # Mask out any weights that are abnormally large or small, since these are likely
-    # numerical issues and represent bad data
-    - type: draco.analysis.flagging.SanitizeWeights
-      in: tstream
-      out: tstream_sanitized
-      params:
-        max_thresh: 1e30
-        min_thresh: 1e-30
-
     # Identify individual baselines with much lower weights than expected
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: full_bad_baseline_mask
       params:
         average_type: "median"
@@ -190,14 +201,14 @@ pipeline:
 
     # Load the frequency map that was active when this data was collected
     - type: ch_pipeline.core.dataquery.QueryFrequencyMap
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: freqmap
       params:
         cache: false
 
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      in: [tstream_sanitized, inputmap, freqmap]
+      in: [tstream_neg_auto, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
@@ -206,16 +217,10 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_sanitized
+      in: tstream_neg_auto
       out: tstream_col
       params:
         weight: "natural"
-
-    # Concatenate together all the days timestream information
-    - type: draco.analysis.sidereal.SiderealGrouper
-      requires: manager
-      in: tstream_col
-      out: tstream_day
 
     # Concatenate together all the days sensitivity information and output it
     # for validation
@@ -252,10 +257,30 @@ pipeline:
         save: true
         output_name: "decorrelated_cylinder_mask_expanded_{{tag}}.h5"
 
+    # Concatenate together all the days timestream information
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: tstream_col
+      out: tstream_day
+
+    # Calculate the thermal gain correction
+    - type: ch_pipeline.analysis.calibration.ThermalCalibration
+      in: tstream_day
+      out: thermal_gain
+      params:
+        caltime_path: "{caltimes_file}"
+
+    # Apply the thermal correction
+    - type: draco.core.misc.ApplyGain
+      in: [tstream_day, thermal_gain]
+      out: tstream_thermal_corrected
+      params:
+        inverse: false
+
     # Apply the mask from the bad baselines. This will modify the data in
     # place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day, bad_baseline_mask_day]
+      in: [tstream_thermal_corrected, bad_baseline_mask_day]
       out: tstream_bbm
 
     # Apply the mask from the decorrelated cylinders. This will modify the data
@@ -272,32 +297,44 @@ pipeline:
         save: true
         output_name: "rfi_mask_sensitivity_{{tag}}.h5"
 
-    # Calculate a RFI mask from Stokes I visibilities
-    - type: ch_pipeline.analysis.flagging.RFIStokesIMask
+    # Calculate a RFI mask targeting transient scattered emission
+    - type: draco.analysis.flagging.RFITransientVisMask
       requires: manager
       in: tstream_dcm
-      out: [rfimask_stokesi, _]
+      out: rfimask_transient
       params:
         save: true
-        output_name:
-          - "rfi_mask_stokesi_{{tag}}.h5"
-          - "lowpass_power_2cyl_{{tag}}.h5"
+        output_name: "rfi_mask_transient_{{tag}}.h5"
 
     # Apply the StokesI RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_dcm, rfimask_stokesi]
+      in: [tstream_dcm, rfimask_transient]
       out: tstream_day_rfi
+
+    # Estimate a static frequency mask from the visibilities
+    - type: ch_pipeline.analysis.flagging.RFIStaticVisMask
+      requires: [manager, manager, manager]
+      in: tstream_day_rfi
+      out: rfimask_static
+      params:
+        include_2d: false
+        save: true
+        output_name: "rfi_mask_static_{{tag}}.h5"
+
+    # Apply the static RFI mask. This will modify the data in place.
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      in: [tstream_day_rfi, rfimask_static]
+      out: tstream_day_rfi2
 
     # Apply the Sensitivity RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi, rfimask_sensitivity]
-      out: tstream_day_rfi2
+      in: [tstream_day_rfi2, rfimask_sensitivity]
+      out: tstream_day_rfi3
 
     # Fully remove any frequencies which are mostly flagged. A threshold
-    # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data,
-    # but has a noticeably positive effect on high-delay noise
+    # of 0.3 (30%) generally only removes ~0.4-0.8% of additional data
     - type: draco.analysis.flagging.MaskFreq
-      in: tstream_day_rfi2
+      in: tstream_day_rfi3
       out: freq_mask
       params:
         freq_frac: 0.3
@@ -306,37 +343,18 @@ pipeline:
 
     # Apply the frequency mask
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi2, freq_mask]
-      out: tstream_day_freq_cut
+      in: [tstream_day_rfi3, freq_mask]
+      out: tstream_day_rfi4
 
-    # Calculate the thermal gain correction
-    - type: ch_pipeline.analysis.calibration.ThermalCalibration
-      in: tstream_day_freq_cut
-      out: thermal_gain
-      params:
-        caltime_path: "{caltimes_file}"
-
-    # Apply the thermal correction
-    - type: draco.core.misc.ApplyGain
-      in: [tstream_day_freq_cut, thermal_gain]
-      out: tstream_thermal_corrected
-      params:
-        inverse: false
-
-    # Smooth the noise estimates which suffer from sample variance
-    - type: draco.analysis.flagging.SmoothVisWeight
-      in: tstream_thermal_corrected
-      out: tstream_day_smoothweight
-
-    # Apply an aggressive delay filter and
-    # check consistency of data with noise at high delay.
+    # Apply an aggressive delay filter and check consistency of
+    # data with noise at high delay.
     - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
       requires: manager
-      in: tstream_day_smoothweight
+      in: tstream_day_rfi4
       out: chisq_day_filtered
       params:
         tauw: 0.400
-        single_mask: false
+        single_mask: true
         atten_threshold: 0.0
         reduce_baseline: true
         mask_short: 20.0
@@ -353,16 +371,36 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_smoothweight, rfimask_chisq]
-      out: tstream_day_rfi3
+      in: [tstream_day_rfi4, rfimask_chisq]
+      out: tstream_day_rfi5
+
+    # Smooth the noise estimates which suffer from sample variance
+    - type: draco.analysis.flagging.SmoothVisWeight
+      in: tstream_day_rfi5
+      out: tstream_day_smoothweight
 
     # Regrid the data onto a regular grid in sidereal time
-    - type: draco.analysis.sidereal.SiderealRebinner
+    - type: draco.analysis.sidereal.SiderealRegridderGP
       requires: manager
-      in: tstream_day_rfi3
+      in: tstream_day_smoothweight
       out: sstream
       params:
         samples: 4096
+        mask_cutoff: 1.7
+        kernel_width: 5
+
+    # Check the chi-squared metric post-gridding 
+    - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
+      requires: manager
+      in: sstream
+      params:
+        tauw: 0.400
+        single_mask: true
+        atten_threshold: 0.0
+        reduce_baseline: true
+        mask_short: 20.0
+        save: true
+        output_name: "chisq_sidereal_grid_{{tag}}.h5"
 
     # Precision truncate the sidereal stream data
     - type: draco.core.io.Truncate
@@ -372,45 +410,15 @@ pipeline:
         dataset:
           vis:
             weight_dataset: vis_weight
-            variance_increase: 1.0e-3
+            variance_increase: 1.0e-4
           vis_weight: 1.0e-5
-
-    # Save the truncated sidereal stream to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: sstream_trunc
-      out: sstream_trunc_handle
-      params:
-        compression:
-          vis:
-            chunks: [32, 512, 512]
-          vis_weight:
-            chunks: [32, 512, 512]
-        save: true
-        output_name: "sstream_{{tag}}.zarr.zip"
-        remove: true
-
-    # Load the stack used to calculate a binning gradient correction.
-    # This is the same dataset used in blending, but we don't want to
-    # keep it in memory while making ringmaps
-    - type: draco.core.io.LoadBasicCont
-      out: sstack_grad_fix
-      params:
-        files:
-          - "{blend_stack_file}"
-        selections:
-          freq_range: [{freq[0]:d}, {freq[1]:d}]
-
-    # Apply a gradient correction to the rebinned sidereal stream
-    - type: draco.analysis.sidereal.RebinGradientCorrection
-      requires: sstack_grad_fix
-      in: sstream
-      out: sstream_grad_fix
+          save: true
+          output_name: "sstream_{{tag}}.h5"
 
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: ringmap
       params:
         single_beam: true
@@ -428,29 +436,14 @@ pipeline:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
-
-    # Save the truncated ringmap to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_trunc
-      out: ringmap_trunc_handle
-      params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_{{tag}}.zarr.zip"
-        remove: true
+        output_name: "ringmap_{{tag}}.h5"
 
     # Make a map from the inter cylinder baselines. This is less sensitive to
     # cross talk and emphasis point sources
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: ringmap_int
       params:
         single_beam: true
@@ -470,30 +463,15 @@ pipeline:
             weight_dataset: weight
             variance_increase: 1.0e-3
           weight: 1.0e-5
-
-    # Save the truncated intercylinder ringmap to a .zarr file and start a background
-    # task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_int_trunc
-      out: ringmap_int_trunc_handle
-      params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
         save: true
-        output_name: "ringmap_intercyl_{{tag}}.zarr.zip"
-        remove: true
+        output_name: "ringmap_intercyl_{{tag}}.h5"
 
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream_grad_fix
+      in: sstream
       out: sstream_inter
       params:
         share: vis
@@ -554,14 +532,14 @@ pipeline:
 
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
-      in: sstream_grad_fix
+      in: sstream
       out: sstream_mask1
 
     - type: ch_pipeline.analysis.flagging.MaskMoon
       in: sstream_mask1
       out: sstream_mask2
 
-    # Remove ranges of time known to be bad that may effect the delay power
+    # Remove ranges of time known to be bad that may affect the delay power
     # spectrum estimate
     - type: ch_pipeline.analysis.flagging.DataFlagger
       in: sstream_mask2
@@ -575,26 +553,17 @@ pipeline:
           - decorrelated_cylinder
           - globalflag
 
-    # Find and flag periods of rainfall over 1mm
-    - type: ch_pipeline.analysis.flagging.FlagRainfall
-      in: sstream_mask3
-      out: sstream_mask4
-      params:
-        accumulation_time: 30.0
-        threshold: 1.0
-
     # Load the stack that we will blend into the daily data
     - type: draco.core.io.LoadBasicCont
       out: sstack
       params:
-        files:
-            - "{blend_stack_file}"
+        files: "{blend_stack_file}"
         selections:
             freq_range: [{freq[0]:d}, {freq[1]:d}]
 
     - type: draco.analysis.flagging.BlendStack
       requires: sstack
-      in: sstream_mask4
+      in: sstream_mask3 
       out: sstream_blend1
       params:
         frac: 1e-4
@@ -638,41 +607,30 @@ pipeline:
       in: [sstream_blend3, factmask]
       out: sstream_blend4
 
-    # Estimate the delay power spectrum of the data using the NRML
-    # estimator. This is a good diagnostic of instrument performance
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
+    # Get Stokes I visibilities for the delay transform
+    - type: draco.analysis.transform.StokesIVis
       requires: manager
       in: sstream_blend4
+      out: sstream_stokesI
+
+    # Estimate the delay power spectrum of the data using the NRML
+    # estimator. This is a good diagnostic of instrument performance.
+    # Increase weights by a factor of 100 so that we're estimating
+    # the combined spectrum of the signal and noise
+    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+      in: sstream_stokesI
       params:
-        freq_frac: 0.01
-        time_frac: 0.01
+        dataset: "vis"
+        sample_axis: "ra"
         remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 100
-        maxpost: true
+        nsamp: 150
         maxpost_tol: 1.0e-4
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
-
-    # Use the gibbs estimator to produce a non-converged backup. This
-    # estimator is slower to converge, but was used in the past, so
-    # this will provide a good comparison with older data
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
-      requires: manager
-      in: sstream_blend4
-      params:
-        freq_frac: 0.01
-        time_frac: 0.01
-        remove_mean: true
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
-        nsamp: 40
-        maxpost: false
-        complex_timedomain: true
-        save: true
-        output_name: "delayspectrum_gibbs_{{tag}}.h5"
 
     # Apply delay filter to stream
     - type: draco.analysis.delay.DelayFilter
@@ -684,20 +642,26 @@ pipeline:
         za_cut: 1.0
         window: true
 
-    # Estimate the delay power spectrum of the data after applying
-    # the delay filter
-    - type: draco.analysis.delay.DelayPowerSpectrumStokesIEstimator
+    # Get Stokes I visibilities for the delay transform
+    # from the high-pass filtered data
+    - type: draco.analysis.transform.StokesIVis
       requires: manager
       in: sstream_dfilter
+      out: sstream_dfilter_stokesI
+
+    # Estimate the delay power spectrum of the data after applying
+    # the delay filter
+    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+      in: sstream_dfilter_stokesI
       params:
-        freq_frac: 0.01
-        time_frac: 0.01
+        dataset: "vis"
+        sample_axis: "ra"
         remove_mean: true
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 100
-        maxpost: true
+        nsamp: 150
         maxpost_tol: 1.0e-4
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf_{{tag}}.h5"
@@ -719,32 +683,7 @@ pipeline:
       out: ringmap_int_hpf_sel
       params:
         channel_index: {val_freq}
-
-    # Precision truncate and write out the chunked filtered ringmap.
-    # Don't truncate the map itself, to preserve low-amplitude pixels.
-    - type: draco.core.io.Truncate
-      in: ringmap_int_hpf_sel
-      out: ringmap_int_hpf_sel_trunc
-      params:
-        dataset:
-          map: No
-          weight: 1.0e-5
-
-    # Save the truncated filtered intercylinder ringmap to a .zarr file and
-    # start a background task to zip it
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_int_hpf_sel_trunc
-      out: ringmap_int_hpf_sel_trunc_handle
-      params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 512]
-        save: true
-        output_name: "ringmap_intercyl_hpf_{{tag}}.zarr.zip"
+        output_name: "ringmap_intercyl_hpf_{{tag}}.h5"
         remove: true
 
     # Downselect the ringmap to keep only the XX and YY pols
@@ -764,11 +703,7 @@ pipeline:
           - el
         dataset: map
         weighting: weighted
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
+        compression: false
         save: true
         output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
 
@@ -781,28 +716,9 @@ pipeline:
           - freq
         dataset: map
         weighting: weighted
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 512]
-          weight:
-            chunks: [1, 32, 512, 512]
+        compression: false
         save: true
         output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
-
-    # Wait for all the zarr zipping tasks to complete
-    # Wait for the sstream last since it will likely take the
-    # longest to complete
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_int_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_int_hpf_sel_trunc_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: sstream_trunc_handle
 """
 
 
@@ -870,13 +786,16 @@ class DailyProcessing(base.ProcessingType):
             "timing_correction_edge",
             "no_weather_data",
             "corrupted_file",
+            "globalflag",
+            "bad_calibration_acquisition_restart",
+            "acjump",
         ],
-        # Maximum fraction of day flagged to exclude
+        # Fraction of day flagged to exclude
         "frac_flagged": 0.8,
         # Amount of padding each side of sidereal day to load
         "padding": 0.02,
         # Minimum data coverage in order to process a day
-        "required_coverage": 0.3,
+        "data_coverage": 0.3,
         # Weather files are usuall only produced once per day, so
         # full coverage should generally be required
         "weather_coverage": 1.0,
@@ -918,10 +837,10 @@ class DailyProcessing(base.ProcessingType):
         ),
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2024.04",
+        "modlist": "chime/python/2025.08",
         "nfreq_delay": 1025,
         # Job params
-        "time": 120,  # How long in minutes?
+        "time": 80,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
@@ -952,7 +871,7 @@ class DailyProcessing(base.ProcessingType):
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
         self._padding = self._revparams.get("padding", 0)
-        self._min_coverage = self._revparams.get("required_coverage", 0.0)
+        self._data_coverage = self._revparams.get("data_coverage", 0.0)
         self._weather_coverage = self._revparams.get("weather_coverage", 1.0)
         self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
         self._include_offline_files = self._revparams.get(
@@ -974,10 +893,20 @@ class DailyProcessing(base.ProcessingType):
 
     @property
     def _config_tags(self) -> list:
-        """Return all tags desired from the config."""
-        return unique_ordered(
+        """Return all tags listed in the revision config.
+
+        Order is preserved, except priority CSDS are placed
+        at the start of the list.
+        """
+        csds = unique_ordered(
             csd for i in self._intervals for csd in expand_csd_range(*i)
         )
+
+        if self._num_recent_days > 0:
+            priority = get_recent_csds(csds, self._num_recent_days)
+            csds = priority + [csd for csd in csds if csd not in priority]
+
+        return csds
 
     def runnable_tags(self, require_online=False) -> list:
         """Return all runnable tags, whether or not the data is available."""
@@ -986,7 +915,7 @@ class DailyProcessing(base.ProcessingType):
         runnable = available_csds(
             sorted(csds),
             self._padding,
-            self._min_coverage,
+            self._data_coverage,
             self._weather_coverage,
             require_online=require_online,
         )
@@ -1029,12 +958,7 @@ class DailyProcessing(base.ProcessingType):
                 *rev_stats["failed"],
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
-            # Prioritize recent days to ensure that data is available
-            today = np.floor(chime.get_current_lsd()).astype(int)
-            priority = [
-                tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
-            ]
-            all_tags = priority + [tag for tag in all_tags if tag not in priority]
+
             # Search the next 20 tags and request any that we may want to be brought online.
             online_request_tags = sorted(
                 [int(tag) for tag in all_tags[:20] if tag not in upcoming]
@@ -1083,16 +1007,10 @@ class DailyProcessing(base.ProcessingType):
         today = chime.get_current_lsd()
         to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
 
-        # Prioritize some number of recent days
-        today = np.floor(today).astype(int)
-        priority = [
-            csd for csd in to_run if (today - int(csd)) <= self._num_recent_days
-        ]
-
         if priority_only:
-            return priority
+            to_run = get_recent_csds(to_run, self._num_recent_days)
 
-        return priority + [csd for csd in to_run if csd not in priority]
+        return to_run
 
 
 class TestDailyProcessing(DailyProcessing):
@@ -1202,7 +1120,7 @@ def files_in_timespan(start, end, file_times):
 def available_csds(
     csds: list,
     pad: float = 0.0,
-    required_coverage: float = 0.0,
+    data_coverage: float = 0.0,
     weather_coverage: float = 1.0,
     require_online: bool = False,
 ) -> set:
@@ -1215,10 +1133,10 @@ def available_csds(
     pad
       fraction of a day to pad on either end. This data should also be available
       in order for a day to be considered available
-    required_coverage
+    data_coverage
       What fraction of the day must exist in order to be considered available.
       This *includes* the padding fraction, so values greater than 1 are
-      permitted. For example, if `pad=0.2`, setting `required_coverage=1.4`
+      permitted. For example, if `pad=0.2`, setting `data_coverage=1.4`
       would indicate that all the data must be available.
       Even if all files are online, if the data coverage is less than this
       fraction, the day shouldn't be processed.
@@ -1294,7 +1212,7 @@ def available_csds(
 
         return available
 
-    corr_available = _available(corr_online, corr_that_exist, required_coverage)
+    corr_available = _available(corr_online, corr_that_exist, data_coverage)
     weather_available = _available(weather_online, weather_that_exist, weather_coverage)
 
     return corr_available & weather_available
@@ -1669,3 +1587,23 @@ def get_flagged_csds(csds: list, flags: list, frac_flagged: float) -> dict:
         flagged_days[key] = sorted(set(val))
 
     return flagged_days
+
+
+def get_recent_csds(csds: list, ndays: int) -> list:
+    """Return CSDs from the last `ndays` chime sidereal days.
+
+    Parameters
+    ----------
+    csds
+        List of integer csds
+    ndays
+        Number of days to look back
+
+    Returns
+    -------
+    recent
+        CSDs in the past `ndays` sidereal days
+    """
+    today = np.floor(chime.get_current_lsd()).astype(int)
+
+    return [csd for csd in csds if (today - int(csd)) <= ndays]
