@@ -348,7 +348,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
 class RFIMaskReduceBeamNS(task.SingleTask):
     """Create RFIMask from HFBDirectionalRFIMaskBitmap.
 
-    This task takes an HFBDirectionalRFIMaskBitmap)freq, beam_ns, time), selects the RFI mask corresponding to a specified significance value used in the detection and subfrequency threshold, then reduce the 'beam_ns' axis to create a RFIMask container (freq, time).
+    This task takes an HFBDirectionalRFIMaskBitmap(freq, beam_ns, time), selects the RFI mask corresponding to a specified significance value used in the detection and subfrequency threshold, then reduce the 'beam_ns' axis to create a RFIMask container (freq, time).
 
     Attributes
     ----------
