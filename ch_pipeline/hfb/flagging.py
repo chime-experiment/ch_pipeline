@@ -396,10 +396,7 @@ class RFIMaskReduceBeamNS(task.SingleTask):
         output = RFIMask(freq=freq, time=time)
 
         # The output RFI mask is not frequency distributed
-        arr = reduced_mask
-        arrdist = mpiarray.MPIArray.wrap(arr, axis=0)
-        final_mask = arrdist.allgather()
-        output.mask[:] = final_mask
+        output.mask[:] = mpiarray.MPIArray.wrap(reduced_mask, axis=0).allgather()
 
         # Return output container
         return output
