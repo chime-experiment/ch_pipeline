@@ -1476,29 +1476,40 @@ def request_offline_csds(csds: list, pad: float = 0):
         fraction of data from adjacent days that should also be copied online
     """
 
-    def _make_copy_request(file, source, target):
-        try:
-            # Check if an activate request already exists. If so,
-            # leave alpenhorn alone to do its thing
-            di.ArchiveFileCopyRequest.get(
-                file=file,
-                group_to=target,
-                node_from=source,
-                completed=False,
-                cancelled=False,
-            )
-            return 0
-        except pw.DoesNotExist:
-            di.ArchiveFileCopyRequest.insert(
-                file=file_,
-                group_to=target,
-                node_from=source,
-                cancelled=0,
-                completed=0,
-                n_requests=1,
-                timestamp=datetime.now(),
-            ).execute()
-            return 1
+    def _make_copy_request(file, sources, target):
+        # Find a source with the file
+        for source in sources:
+            try:
+                di.ArchiveFileCopy.get(file=file, node=source, has_file="Y")
+            except pw.DoesNotExit:
+                continue
+
+            # There is a copy of the file on this node, try to copy it.
+            try:
+                # Check if an active request already exists. If so,
+                # leave alpenhorn alone to do its thing
+                di.ArchiveFileCopyRequest.get(
+                    file=file,
+                    group_to=target,
+                    node_from=source,
+                    completed=False,
+                    cancelled=False,
+                )
+                return 0
+            except pw.DoesNotExist:
+                di.ArchiveFileCopyRequest.insert(
+                    file=file_,
+                    group_to=target,
+                    node_from=source,
+                    cancelled=0,
+                    completed=0,
+                    n_requests=1,
+                    timestamp=datetime.now(),
+                ).execute()
+                return 1
+
+        # No source with the file
+        return 0
 
     # Figure out which chimestack files are needed
     online_files, files = db_get_corr_files_in_range(csds[0] - pad, csds[-1] + pad)
@@ -1521,12 +1532,12 @@ def request_offline_csds(csds: list, pad: float = 0):
 
     # Request chimestack files be brought back online
     for file_ in request_corr_files:
-        nr = _make_copy_request(file_, offline_node, target_node)
+        nr = _make_copy_request(file_, [offline_node, smallfile_node], target_node)
         nrequests += nr
 
     # Request weather files be brought back online
     for file_ in request_weather_files:
-        nr = _make_copy_request(file_, smallfile_node, target_node)
+        nr = _make_copy_request(file_, [smallfile_node], target_node)
         nrequests += nr
 
     return nrequests
