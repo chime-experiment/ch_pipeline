@@ -386,8 +386,6 @@ class RFIMaskReduceBeamNS(task.SingleTask):
         # Extract mask/frac and axes data
         mask = rfimaskbitmap.get_mask(self.sigma, self.subfreq_threshold)[:]
         beam_ns_axis = list(rfimaskbitmap.subfreq_rfi.attrs["axis"]).index("beam_ns")
-        freq = rfimaskbitmap.freq[:]
-        time = rfimaskbitmap.time[:]
 
         # Apply reduction condition
         reduced_mask = np.sum(mask, axis=beam_ns_axis) >= self.beam_ns_threshold
