@@ -393,7 +393,7 @@ class RFIMaskReduceBeamNS(task.SingleTask):
         reduced_mask = np.sum(mask, axis=beam_ns_axis) >= self.beam_ns_threshold
 
         # Create an output container
-        output = RFIMask(freq=freq, time=time)
+        output = RFIMask(axes_from=rfimaskbitmap, attrs_from=rfimaskbitmap)
 
         # The output RFI mask is not frequency distributed
         output.mask[:] = mpiarray.MPIArray.wrap(reduced_mask, axis=0).allgather()
