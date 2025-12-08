@@ -289,18 +289,23 @@ pipeline:
       in: [tstream_bbm, decorr_cyl_mask_day_exp]
       out: tstream_dcm
 
-    # Calculate a RFI mask from the sensitivity metric
-    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
-      in: sensitivity_day
-      out: rfimask_sensitivity
+    # Precision truncate the timestream and write to disk
+    - type: draco.core.io.Truncate
+      in: tstream_dcm
+      out: tstream_truncated
       params:
-        save: true
-        output_name: "rfi_mask_sensitivity_{{tag}}.h5"
+        dataset:
+          vis:
+            weight_dataset: vis_weight
+            variance_increase: 1.0e-4
+          vis_weight: 1.0e-5
+          save: true
+          output_name: "tstream_no_rfi_mask_{{tag}}.h5"
 
     # Calculate a RFI mask targeting transient scattered emission
     - type: draco.analysis.flagging.RFITransientVisMask
       requires: manager
-      in: tstream_dcm
+      in: tstream_truncated
       out: rfimask_transient
       params:
         save: true
@@ -308,7 +313,7 @@ pipeline:
 
     # Apply the StokesI RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_dcm, rfimask_transient]
+      in: [tstream_truncated, rfimask_transient]
       out: tstream_day_rfi
 
     # Estimate a static frequency mask from the visibilities
@@ -325,6 +330,14 @@ pipeline:
     - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream_day_rfi, rfimask_static]
       out: tstream_day_rfi2
+
+    # Calculate a RFI mask from the sensitivity metric
+    - type: ch_pipeline.analysis.flagging.RFISensitivityMask
+      in: sensitivity_day
+      out: rfimask_sensitivity
+      params:
+        save: true
+        output_name: "rfi_mask_sensitivity_{{tag}}.h5"
 
     # Apply the Sensitivity RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
@@ -374,6 +387,21 @@ pipeline:
       in: [tstream_day_rfi4, rfimask_chisq]
       out: tstream_day_rfi5
 
+    # Combine all RFI masks and write a single file to disk.
+    # We also write the individual masks for validation, but
+    # it's useful to have a single mask to load for further
+    # processing
+    - type: draco.analysis.flagging.CombineMasks
+      in:
+        - rfimask_transient
+        - rfimask_static
+        - rfimask_sensitivity
+        - freq_mask
+        - rfimask_chisq
+      params:
+        save: true
+        output_name: "rfi_mask_complete_{{tag}}.h5"
+
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
       in: tstream_day_rfi5
@@ -388,32 +416,6 @@ pipeline:
         samples: 4096
         mask_cutoff: 1.7
         kernel_width: 5
-
-    # Check the chi-squared metric post-gridding 
-    - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
-      requires: manager
-      in: sstream
-      params:
-        tauw: 0.400
-        single_mask: true
-        atten_threshold: 0.0
-        reduce_baseline: true
-        mask_short: 20.0
-        save: true
-        output_name: "chisq_sidereal_grid_{{tag}}.h5"
-
-    # Precision truncate the sidereal stream data
-    - type: draco.core.io.Truncate
-      in: sstream
-      out: sstream_trunc
-      params:
-        dataset:
-          vis:
-            weight_dataset: vis_weight
-            variance_increase: 1.0e-4
-          vis_weight: 1.0e-5
-          save: true
-          output_name: "sstream_{{tag}}.h5"
 
     # Make a map of the full dataset
     - type: draco.analysis.ringmapmaker.RingMapMaker
@@ -466,12 +468,18 @@ pipeline:
         save: true
         output_name: "ringmap_intercyl_{{tag}}.h5"
 
+    # Ensure that the ringmaps have been written out before proceeding
+    - type: draco.core.misc.WaitUntil
+      requires: ringmap_int_trunc
+      in: sstream
+      out: sstream2
+
     # Mask out intercylinder baselines before beam forming to minimise cross
     # talk. This creates a copy of the input that shares the vis dataset (but
     # with a distinct weight dataset) to save memory
     - type: draco.analysis.flagging.MaskBaselines
       requires: manager
-      in: sstream
+      in: sstream2
       out: sstream_inter
       params:
         share: vis
@@ -530,9 +538,90 @@ pipeline:
         output_name: "sourceflux_{{tag}}.h5"
         limit_outputs: 4
 
+    - type: draco.core.io.LoadFilesFromParams
+      out: sstream_template
+      params:
+        files: "{template_file}"
+
+    # Make a copy of the sidereal stream, since we're subtracting
+    # the template
+    - type: draco.core.misc.MakeCopy
+      in: sstream
+      out: sstream_copy
+
+    # Subtract the template 
+    - type: draco.analysis.flagging.BlendStack
+      requires: sstream_template
+      in: sstream_copy
+      out: sstream_template_subtract
+      params:
+        frac: 1.0e-4
+        match_median: true
+        subtract: true
+        mask_freq: true
+
+    # Make a template-subtracted ringmap
+    - type: draco.analysis.ringmapmaker.RingMapMaker
+      requires: manager
+      in: sstream_template_subtract
+      out: ringmap_template_subtract
+      params:
+        single_beam: true
+        weight: natural
+        exclude_intracyl: false
+        include_auto: false
+
+    # Compute the chi-squared of the template-subtracted ringmap
+    # and save out to disk
+    - type: draco.analysis.transform.ReduceChisq
+      in: ringmap_template_subtract
+      params:
+        axes: [freq]
+        dataset: map
+        weighting: weighted
+        compression: false
+        save: true
+        output_name: "ringmap_chisq_freq_template_sub_{{tag}}.h5"
+      
+    # Compute the chi-squared of the template-subtracted ringmap
+    # and save out to disk
+    - type: draco.analysis.transform.ReduceChisq
+      in: ringmap_template_subtract
+      out: ringmap_chisq_el
+      params:
+        axes: [el]
+        dataset: map
+        weighting: weighted
+        compression: false
+        save: true
+        output_name: "ringmap_chisq_el_template_sub_{{tag}}.h5"
+
+    # Wait until the ringmaps are done to avoid costly memory use
+    - type: draco.core.misc.WaitUntil
+      requires: ringmap_chisq_el
+      in: sstream_template_subtract
+      out: sstream_template_subtract2
+  
+    # Beamform the four brightest sources and save the spectra
+    - type: draco.analysis.beamform.BeamFormCat
+      requires: [manager, sstream_template_subtract2]
+      in: source_catalog
+      params:
+        timetrack: 3000
+        save: true
+        output_name: "sourceflux_template_subtract_{{tag}}.h5"
+        limit_output: 4    
+
+    # Block any further processing until the template-subtracted
+    # block is finished
+    - type: draco.core.misc.WaitUnilt
+      requires: sstream_template_subtract2
+      in: sstream
+      out: sstream2
+
     # Mask out day time data
     - type: ch_pipeline.analysis.flagging.DayMask
-      in: sstream
+      in: sstream2
       out: sstream_mask1
 
     - type: ch_pipeline.analysis.flagging.MaskMoon
@@ -553,35 +642,50 @@ pipeline:
           - decorrelated_cylinder
           - globalflag
 
-    # Load the stack that we will blend into the daily data
-    - type: draco.core.io.LoadBasicCont
-      out: sstack
-      params:
-        files: "{blend_stack_file}"
-        selections:
-            freq_range: [{freq[0]:d}, {freq[1]:d}]
-
-    - type: draco.analysis.flagging.BlendStack
-      requires: sstack
-      in: sstream_mask3 
-      out: sstream_blend1
-      params:
-        frac: 1e-4
-        mask_freq: true
-
-    # Mask the daytime data again. This ensures that we only see the time range in
-    # the delay spectrum we would expect
-    - type: ch_pipeline.analysis.flagging.MaskDay
-      in: sstream_blend1
-      out: sstream_blend2
+    # Get Stokes I visibilities
+    - type: draco.analysis.transform.StokesIVis
+      requires: manager
+      in: sstream_mask3
+      out: sstream_stokesI
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: sstream_blend2
-      out: sstream_blend3
+      in: sstream_stokesI
+      out: sstream_stokesI_mask
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
 
+    # DPSS inpaint to fill narrow gaps. We inpaint _before_ splitting
+    # into subbands because this produces a better overall fit to
+    # the DPSS basis functions.
+    - type: draco.analysis.interpolate.DPSSInpaintDelayStokesI
+      requires: manager
+      in: sstream_stokesI_mask
+      out: sstream_stokesI_inpaint
+      params:
+        axis: "freq"
+        centres: [0.0]
+        halfwidths: [0.2]
+        telescope_orientation: "none"
+        flag_above_cutoff: true
+        copy: false
+
+    # Split the data into sub-bands and iterate to produce
+    # separate power spectra
+    - type: draco.analysis.transform.GenerateSubBands
+      requires: sstream_stokesI_inpaint
+      out: sstream_stokesI_subband
+      params:
+        sub_band_spec:
+          banda:
+            channel_range: [10, 106]
+          bandb1:
+            channel_range: [236, 364]
+          bandb2:
+            channel_range: [364, 492]
+          bandc:
+            channel_range: [896, 1024]
+  
     # Try and derive an optimal time-freq factorizable mask that covers the
     # existing masked entries
     # Also, mask out some additional frequencies that are not masked in the stack:
@@ -594,7 +698,7 @@ pipeline:
     # 609.77 - 610.55 MHz: narrow band in stack creating artifacts in delay-filtered
     # ringmaps 
     - type: draco.analysis.flagging.MaskFreq
-      in: sstream_blend3
+      in: sstream_stokesI_subband
       out: factmask
       params:
         factorize: true
@@ -604,121 +708,25 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [sstream_blend3, factmask]
-      out: sstream_blend4
-
-    # Get Stokes I visibilities for the delay transform
-    - type: draco.analysis.transform.StokesIVis
-      requires: manager
-      in: sstream_blend4
-      out: sstream_stokesI
+      in: [sstream_stokesI_subband, factmask]
+      out: sstream_stokesI_factmask
 
     # Estimate the delay power spectrum of the data using the NRML
     # estimator. This is a good diagnostic of instrument performance.
     # Increase weights by a factor of 100 so that we're estimating
     # the combined spectrum of the signal and noise
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
-      in: sstream_stokesI
+      in: sstream_stokesI_factmask
       params:
         dataset: "vis"
         sample_axis: "ra"
         remove_mean: true
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
         nsamp: 150
         maxpost_tol: 1.0e-4
         weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
-
-    # Apply delay filter to stream
-    - type: draco.analysis.delay.DelayFilter
-      requires: manager
-      in: sstream_blend4
-      out: sstream_dfilter
-      params:
-        delay_cut: 0.1
-        za_cut: 1.0
-        window: true
-
-    # Get Stokes I visibilities for the delay transform
-    # from the high-pass filtered data
-    - type: draco.analysis.transform.StokesIVis
-      requires: manager
-      in: sstream_dfilter
-      out: sstream_dfilter_stokesI
-
-    # Estimate the delay power spectrum of the data after applying
-    # the delay filter
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
-      in: sstream_dfilter_stokesI
-      params:
-        dataset: "vis"
-        sample_axis: "ra"
-        remove_mean: true
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
-        nsamp: 150
-        maxpost_tol: 1.0e-4
-        weight_boost: 1.0e2
-        complex_timedomain: true
-        save: true
-        output_name: "delayspectrum_hpf_{{tag}}.h5"
-
-    # Make an intercylinder ringmap from the delay-filtered visibilities,
-    - type: draco.analysis.ringmapmaker.RingMapMaker
-      requires: manager
-      in: sstream_dfilter
-      out: ringmap_int_hpf
-      params:
-        single_beam: true
-        weight: natural
-        exclude_intracyl: true
-        include_auto: false
-
-    # Select 10 frequencies from the delay-filtered map that are useful for validation
-    - type: draco.analysis.transform.SelectFreq
-      in: ringmap_int_hpf
-      out: ringmap_int_hpf_sel
-      params:
-        channel_index: {val_freq}
-        output_name: "ringmap_intercyl_hpf_{{tag}}.h5"
-        remove: true
-
-    # Downselect the ringmap to keep only the XX and YY pols
-    - type: draco.analysis.transform.Downselect
-      in: ringmap_int_hpf
-      out: ringmap_int_hpf_xx_yy
-      params:
-        selections:
-          pol_index: [0, 3]
-
-    # Take the variance of the map across elevation. Apply weights
-    # as a mask only
-    - type: draco.analysis.transform.ReduceVar
-      in: ringmap_int_hpf_xx_yy
-      params:
-        axes:
-          - el
-        dataset: map
-        weighting: weighted
-        compression: false
-        save: true
-        output_name: "ringmap_intercyl_el_var_{{tag}}.h5"
-
-    # Take the variance of the map across frequency. Apply weights
-    # as a mask only
-    - type: draco.analysis.transform.ReduceVar
-      in: ringmap_int_hpf_xx_yy
-      params:
-        axes:
-          - freq
-        dataset: map
-        weighting: weighted
-        compression: false
-        save: true
-        output_name: "ringmap_intercyl_freq_var_{{tag}}.h5"
 """
 
 
@@ -831,16 +839,23 @@ class DailyProcessing(base.ProcessingType):
             "/project/rpp-chime/chime/chime_processed/catalogs/ps_OVRO.h5",
             "/project/rpp-chime/chime/chime_processed/catalogs/ps_requested.h5",
         ],
-        # Delay spectrum estimation
-        "blend_stack_file": (
-            "/project/rpp-chime/chime/chime_processed/stacks/rev_03/all/sstack.h5"
-        ),
+        # Annual template files for template subtraction/blending
+        "template_file": {
+            2018: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2019.h5",
+            2019: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2019.h5",
+            2020: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2020.h5",
+            2021: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2021.h5",
+            2022: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2022.h5",
+            2023: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2023.h5",
+            2024: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2024.h5",
+            2025: "/project/rpp-chime/chime/chime_processed/templates/rev_08/sstack_2025.h5",
+        },
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.08",
+        "modlist": "chime/python/2025.10",
         "nfreq_delay": 1025,
         # Job params
-        "time": 80,  # How long in minutes?
+        "time": 90,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
@@ -923,9 +938,30 @@ class DailyProcessing(base.ProcessingType):
         return [csd for csd in csds if csd in runnable]
 
     def _finalise_jobparams(self, tag, jobparams):
-        """Set bounds for this CSD."""
+        """Modify the job parameters before the final config is generated.
+
+        Does the following:
+
+        - Set bounds for this CSD.
+        - Select the correct template file
+        """
         csd = float(tag)
-        jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
+
+        year = datetime.fromtimestamp(chime.lsd_to_unix(csd))
+
+        if year not in self._revparams["template_file"]:
+            # Just use the most recent template if nothing
+            # exists for the current year
+            year = max(self._revparams["template_file"].keys())
+
+        template_file = self._revparams["template_file"][year]
+
+        jobparams.update(
+            {
+                "csd": [csd - self._padding, csd + 1 + self._padding],
+                "template_file": template_file,
+            }
+        )
 
         return jobparams
 
