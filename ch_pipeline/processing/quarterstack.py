@@ -603,6 +603,10 @@ class QuarterStackProcessing(base.ProcessingType):
 
         year, quarter, _ = self._parse_tag(tag)
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
+
+        if year not in self._revparams["gain_error_file"]:
+            year = max(int(year) for year in self._revparams["gain_error_file"].keys())
+
         gain_err_file = self._revparams["gain_error_file"][year]
 
         jobparams.update(
