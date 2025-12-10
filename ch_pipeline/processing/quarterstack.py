@@ -78,7 +78,7 @@ pipeline:
       params:
         timeout: 420
 
-    # Aggressivly try to establish a database connection
+    # Aggressively try to establish a database connection
     - type: ch_pipeline.core.dataquery.ConnectDatabase
       params:
         timeout: 5
@@ -177,16 +177,9 @@ pipeline:
       params:
         tag: {tag}
 
-    # Apply a gradient rebin correction. If the input dataset was gridded
-    # using a method other than rebinning, this will be a no-op
-    - type: draco.analysis.sidereal.RebinGradientCorrection
-      requires: sstack
-      in: sstack
-      out: sstack_grad_fix
-
     # Precision truncate the sidereal stack data
     - type: draco.core.io.Truncate
-      in: sstack_grad_fix
+      in: sstack
       out: sstack_trunc
       params:
         dataset:
@@ -194,31 +187,12 @@ pipeline:
             weight_dataset: vis_weight
             variance_increase: 1.0e-5
           vis_weight: 1.0e-6
-
-    # Save the sstack out to a zarr zip file
-    - type: draco.core.io.SaveZarrZip
-      in: sstack_trunc
-      out: sstack_zip_handle
-      params:
-        compression:
-          vis:
-            chunks: [32, 512, 2048]
-          vis_weight:
-            chunks: [32, 512, 2048]
         save: true
-        output_name: "sstack.zarr.zip"
-        remove: true
-
-    # Block until the stack file is written out. Otherwise,
-    # masking steps can end up getting applied before saving.
-    - type: draco.core.misc.WaitUntil
-      requires: sstack_zip_handle
-      in: sstack_grad_fix
-      out: sstack2
+        output_name: "quarterstack_{{tag}}.h5"
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstack2
+      in: sstack
       out: ringmap
       params:
         single_beam: true
@@ -237,26 +211,12 @@ pipeline:
             weight_dataset: weight
             variance_increase: 1.0e-5
           weight: 1.0e-6
-
-    # Save the ringmap out to a ZarrZip file
-    - type: draco.core.io.SaveZarrZip
-      in: ringmap_trunc
-      out: ringmap_zip_handle
-      params:
-        compression:
-          map:
-            chunks: [1, 1, 32, 512, 2048]
-          weight:
-            chunks: [1, 32, 512, 2048]
-          dirty_beam:
-            chunks: [1, 1, 32, 512, 2048]
         save: true
-        output_name: "ringmap.zarr.zip"
-        remove: true
+        output_name: "ringmap_{{tag}}.h5"
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: sstack2
+      in: sstack
       out: sstack_flag_src
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
@@ -282,7 +242,7 @@ pipeline:
       in: sstack_factmask
       out: sstack_stokesI
 
-    # Estimate the delay power spectrum with noise included
+    # Estimate the delay power spectrum
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
       in: sstack_stokesI
       params:
@@ -296,7 +256,7 @@ pipeline:
         save: true
         output_name: "delayspectrum_weightboost.h5"
 
-    # Estimate the delay power spectrum with noise removed
+    # Estimate the delay power spectrum with no weight boost
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
       in: sstack_stokesI
       params:
@@ -347,13 +307,6 @@ pipeline:
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf.h5"
-
-    # Wait for the Zipping to finish
-    - type: draco.core.io.WaitZarrZip
-      in: sstack_zip_handle
-
-    - type: draco.core.io.WaitZarrZip
-      in: ringmap_zip_handle
 """
 
 
@@ -404,7 +357,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.03",
+        "modlist": "chime/python/2025.10",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
