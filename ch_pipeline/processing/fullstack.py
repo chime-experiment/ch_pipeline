@@ -3,6 +3,7 @@
 Combines quarterstacks into a full sidereal day.
 """
 
+import os
 from typing import ClassVar
 
 from . import base, client
@@ -107,7 +108,6 @@ pipeline:
         weight_ew: natural
         exclude_intracyl: false
         include_auto: false
-        npix: 1024
 
     - type: draco.core.io.Truncate
       in: ringmap
@@ -131,7 +131,6 @@ pipeline:
         weight_ew: natural
         exclude_intracyl: true
         include_auto: false
-        npix: 1024
 
     - type: draco.core.io.Truncate
       in: ringmap_int
@@ -175,25 +174,16 @@ pipeline:
 
     # Get Stokes I visibilities
     - type: draco.analysis.transform.StokesIVis
+      requires: manager
       in: fstack_factmask
       out: fstack_stokesI
-
-    # Make a delay power spectrum with noise included
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
-      in: fstack_stokesI
-      params:
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
-        nsamp: 150
-        weight_boost: 1.0e3
-        complex_timedomain: true
-        save: true
-        output_name: "delayspectrum_weightboost.h5"
 
     # Make a delay power spectrum with noise removed
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
       in: fstack_stokesI
       params:
+        dataset: "vis"
+        sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
         nsamp: 150
@@ -210,22 +200,18 @@ pipeline:
         za_cut: 1.0
         window: true
 
-    # Make a delay power spectrum with noise included
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    # Get Stokes I visibilities
+    - type: draco.analysis.transform.StokesIVis
+      requires: manager
       in: fstack_lf
-      params:
-        freq_zero: 800.0
-        nfreq: {nfreq_delay}
-        nsamp: 150
-        weight_boost: 1.0e3
-        complex_timedomain: true
-        save: true
-        output_name: "delayspectrum_hpf_weightboost.h5"
+      out: fstack_lf_stokesI
 
     # Make a delay power spectrum with noise removed
     - type: draco.analysis.delay.DelayPowerSpectrumNRML
-      in: fstack_lf
+      in: fstack_lf_stokesI
       params:
+        dataset: "vis"
+        sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
         nsamp: 150
@@ -252,6 +238,7 @@ class FullStackProcessing(base.ProcessingType):
         # Frequencies to process
         "freq": [0, 1024],
         "nfreq_delay": 1025,
+        "split_by_year": True,
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
@@ -283,7 +270,10 @@ class FullStackProcessing(base.ProcessingType):
         if input_type == "quarterstack":
             self.default_params["stacker_instance"] = "SiderealStackerMatch"
         elif input_type == "daily":
-            self.default_params["stacker_instance"] = "SiderealStackerDeconvolve"
+            raise NotImplementedError(
+                "Stacking from a set of days is not currently supported."
+            )
+            # self.default_params["stacker_instance"] = "SiderealStackerDeconvolve"
         else:
             raise NotImplementedError(
                 f"Stacking from type {input_type} is not currently supported."
@@ -293,24 +283,37 @@ class FullStackProcessing(base.ProcessingType):
         self.default_params["input_type"] = input_type
         self.default_params["input_rev"] = input_rev.revision
 
-        stacks = {"stack_all": []}
+        stacks = {"stack_all": {}}
         inputs = {}
 
         for tag in input_rev.ls():
+            year, _, part = input_rev._parse_tag(tag)
             # Add all tags to the full stack
-            stacks["stack_all"].append(tag)
+            stacks["stack_all"].setdefault(year, []).append(tag)
+            # Add this tag to the partition stack
+            stacks.setdefault(f"p{part}", {}).setdefault(year, []).append(tag)
             # Construct the full file path and add to inputs
             inputs[tag] = str(input_rev.base_path) + "/" + tag
-
-            if input_type == "quarterstack":
-                # Figure out which partition these belong to
-                _, _, part = input_rev._parse_tag(tag)
-                # Add this tag to the partition stack
-                stacks.setdefault(f"p{part}", []).append(tag)
 
         # Store the full file path for each input to this revision
         self.default_params["inputs"] = inputs
         self.default_params["stacks"] = stacks
+
+    def _load_hook(self):
+        # Figure out if we're splitting years into separate stacks
+        by_year = self._revparams["split_by_year"]
+
+        stacks = {}
+
+        for stack_key, year_inputs in self._revparams["stacks"].items():
+            for year_key, inputs in year_inputs.items():
+                if by_year:
+                    stacks[f"{year_key}_{stack_key}"] = inputs
+                else:
+                    # Just combine all years for each partition
+                    stacks.setdefault(stack_key, []).extend(inputs)
+
+        self._revparams["stacks"] = stacks
 
     def _available_tags(self):
         """Return all the tags that are available to run.
@@ -326,14 +329,51 @@ class FullStackProcessing(base.ProcessingType):
         input_type = self._revparams["input_type"]
 
         if input_type == "quarterstack":
-            input_list_str = "\n" + "\n".join(
-                [f"- {paths[t]}/sstack.zarr.zip" for t in inputs]
-            )
+            fnames = {"sstack", "quarterstack"}
         elif input_type == "daily":
-            input_list_str = "\n" + "\n".join(
-                [f"- {paths[t]}/sstream_lsd_{t}.zarr.zip" for t in inputs]
+            fnames = {"sstream_lsd"}
+
+        # Check the file extension and file name format
+        for name in fnames:
+            testpaths = (name, name + f"_{inputs[0]}")
+
+            for ii, tst in enumerate(testpaths):
+                # This is a bit annoying - we just have to be able to
+                # deal with different output formats that have existed
+                # over the years
+                _include_tag = ii == 1
+
+                extension = _check_file_extension(paths[inputs[0]] + "/" + tst)
+
+                if extension is not None:
+                    break
+
+            if extension is not None:
+                break
+        else:
+            raise ValueError("Could not resolve any possible source file type.")
+
+        input_paths = [
+            (
+                f"- {paths[t]}/{tst}_{t}{extension}"
+                if _include_tag
+                else f"- {paths[t]}/{tst}{extension}"
             )
+            for t in inputs
+        ]
+
+        input_list_str = "\n" + "\n".join(input_paths)
 
         jobparams.update({"inputs": input_list_str})
 
         return jobparams
+
+
+def _check_file_extension(path: os.PathLike):
+    path: str = str(path)
+
+    for ext in {".h5", ".zarr.zip"}:
+        if os.path.exists(path + ext):
+            return ext
+
+    return None
