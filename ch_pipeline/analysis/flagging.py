@@ -254,6 +254,8 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         the transit of the sun.  Here sigma refers to the standard
         deviation of a a Gaussian approximation to the primary beam.
         Default is 3.0.
+    include_static_mask : bool
+        If True, use the static mask hook. Default is True.
     """
 
     sources = config.Property(
@@ -261,6 +263,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
     )
     transit_width_source = config.Property(proptype=float, default=1.0)
     transit_width_sun = config.Property(proptype=float, default=3.0)
+    include_static_mask = config.Property(proptype=bool, default=True)
 
     def _combine_st_mad_hook(self, times, freq):
         """Use the MAD mask (over SumThreshold) whenever a bright source is overhead.
@@ -307,6 +310,9 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         mask : np.ndarray[nfreq]
             Mask array. True will include a frequency channel, False masks it out.
         """
+        if not self.include_static_mask:
+            return super()._static_rfi_mask_hook(freq, timestamp)
+
         return ~rfi.frequency_mask(freq, timestamp=timestamp)
 
 
