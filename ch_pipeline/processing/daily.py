@@ -1481,7 +1481,7 @@ def request_offline_csds(csds: list, pad: float = 0):
         for source in sources:
             try:
                 di.ArchiveFileCopy.get(file=file, node=source, has_file="Y")
-            except pw.DoesNotExit:
+            except pw.DoesNotExist:
                 continue
 
             # There is a copy of the file on this node, try to copy it.
