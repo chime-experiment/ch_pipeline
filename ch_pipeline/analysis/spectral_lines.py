@@ -2,11 +2,13 @@
 
 import numpy as np
 import scipy.constants
-from caput import config, time
+from caput import config
+from caput.astro import constants as units
+from caput.astro import time
+from caput.pipeline import tasklib
 from ch_util import cal_utils
-from cora.util import units
 from draco.analysis.ringmapmaker import find_grid_indices
-from draco.core import io, task
+from draco.core import io
 from draco.util import tools
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
@@ -15,7 +17,7 @@ from skyfield.units import Angle
 from ..core import containers
 
 
-class FindSpectralLines(task.SingleTask):
+class FindSpectralLines(tasklib.base.ContainerTask):
     """Identify candidate spectral line features in continuum-filtered RingMap data.
 
     This task detects statistically significant spectral excursions, either positive

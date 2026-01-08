@@ -5,10 +5,15 @@ data quality flagging on timestream data; sun excision on sidereal data; and
 pre-map making flagging on m-modes.
 """
 
-import caput.time as ctime
 import numpy as np
 import scipy.constants
-from caput import config, interferometry, memh5, mpiarray, mpiutil, pipeline, tod
+from caput import config, memdata, mpiarray
+from caput.astro import coordinates, skyfield
+from caput.astro import time as ctime
+from caput.astro.skyfield import skyfield_wrapper
+from caput.containers import empty_like, tod
+from caput.pipeline import exceptions, tasklib
+from caput.util import mpitools
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, cal_utils, data_quality, finder, rfi, tools
@@ -17,14 +22,14 @@ from chimedb.core import connect as connect_database
 from draco.analysis import flagging as dflagging
 from draco.analysis.ringmapmaker import find_grid_indices
 from draco.core import containers as dcontainers
-from draco.core import io, task
+from draco.core import io
 from scipy.spatial import KDTree
 
 from ..core import containers
 from ..core.dataquery import _DEFAULT_NODE_SPOOF
 
 
-class RFIFilter(task.SingleTask):
+class RFIFilter(tasklib.base.ContainerTask):
     """Identify data contaminated by RFI.
 
     Attributes
@@ -193,8 +198,8 @@ class RFINarrowbandVisMask(dflagging.RFINarrowbandVisMask):
         mask : np.ndarray[float]
             Mask array. True will flag a time sample.
         """
-        moon = ctime.skyfield_wrapper.ephemeris["moon"]
-        sun = ctime.skyfield_wrapper.ephemeris["sun"]
+        moon = skyfield_wrapper.ephemeris["moon"]
+        sun = skyfield_wrapper.ephemeris["sun"]
         body = [
             sources.source_dictionary[src]
             for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
@@ -223,7 +228,7 @@ class RFINarrowbandVisMask(dflagging.RFINarrowbandVisMask):
         mask : np.ndarray[float]
             Mask array. True will mask out a time sample.
         """
-        sun = ctime.skyfield_wrapper.ephemeris["sun"]
+        sun = skyfield_wrapper.ephemeris["sun"]
 
         return transit_flag(sun, times, nsigma=self.transit_width)
 
@@ -338,7 +343,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
             (sources.source_dictionary[src], self.transit_width_source)
             for src in self.sources
         ]
-        body.append((ctime.skyfield_wrapper.ephemeris["sun"], self.transit_width_sun))
+        body.append((skyfield_wrapper.ephemeris["sun"], self.transit_width_sun))
 
         mask = np.zeros((freq.size, times.size), dtype=bool)
 
@@ -366,7 +371,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         return ~rfi.frequency_mask(freq, timestamp=timestamp)
 
 
-class RFIStaticMask(task.SingleTask):
+class RFIStaticMask(tasklib.base.ContainerTask):
     """Get the static mask for the time period covered by the data.
 
     This is the same static mask used in :class:`RFIFilter` and
@@ -407,7 +412,7 @@ class RFIStaticMask(task.SingleTask):
         return out
 
 
-class ChannelFlagger(task.SingleTask):
+class ChannelFlagger(tasklib.base.ContainerTask):
     """Mask out channels that appear weird in some way.
 
     Parameters
@@ -511,7 +516,7 @@ class ChannelFlagger(task.SingleTask):
         return timestream
 
 
-class MonitorCorrInput(task.SingleTask):
+class MonitorCorrInput(tasklib.base.ContainerTask):
     """Monitor good correlator inputs over several sidereal days.
 
     Parameters
@@ -548,7 +553,7 @@ class MonitorCorrInput(task.SingleTask):
 
         # If rank0, then create a map from csd to time range
         # and determine correlator inputs and frequencies
-        if mpiutil.rank0:
+        if mpitools.rank0:
             # Determine the days in each file and the days in all files
             se_times = get_times(files)
             se_csd = chime.unix_to_lsd(se_times)
@@ -600,13 +605,13 @@ class MonitorCorrInput(task.SingleTask):
                     )
 
         # Broadcast results to all processes
-        self.timemap = mpiutil.world.bcast(timemap, root=0)
+        self.timemap = mpitools.world.bcast(timemap, root=0)
         self.ndays = len(self.timemap)
 
-        self.input_map = mpiutil.world.bcast(input_map, root=0)
+        self.input_map = mpitools.world.bcast(input_map, root=0)
         self.ninput = len(self.input_map)
 
-        self.freq = mpiutil.world.bcast(freq, root=0)
+        self.freq = mpitools.world.bcast(freq, root=0)
         self.nfreq = len(self.freq)
 
     def process(self):
@@ -634,10 +639,10 @@ class MonitorCorrInput(task.SingleTask):
 
         # Check if we should stop
         if self.ndays == 0:
-            raise pipeline.PipelineStopIteration
+            raise exceptions.PipelineStopIteration
 
         # Get a range of days for this process to analyze
-        n_local, i_day_start, i_day_end = mpiutil.split_local(self.ndays)
+        n_local, i_day_start, i_day_end = mpitools.split_local(self.ndays)
         i_day = np.arange(i_day_start, i_day_end)
 
         # Create local arrays to hold results
@@ -705,8 +710,8 @@ class MonitorCorrInput(task.SingleTask):
         input_mask_all = np.zeros((self.ndays, self.ninput), dtype=bool)
         good_day_flag_all = np.zeros(self.ndays, dtype=bool)
 
-        mpiutil.world.Allgather(input_mask, input_mask_all)
-        mpiutil.world.Allgather(good_day_flag, good_day_flag_all)
+        mpitools.world.Allgather(input_mask, input_mask_all)
+        mpitools.world.Allgather(good_day_flag, good_day_flag_all)
 
         if not np.any(good_day_flag_all):
             ValueError("Channel monitor failed for all days.")
@@ -765,7 +770,7 @@ class MonitorCorrInput(task.SingleTask):
         return input_mon
 
 
-class TestCorrInput(task.SingleTask):
+class TestCorrInput(tasklib.base.ContainerTask):
     """Apply a series of tests to find the good correlator inputs.
 
     Parameters
@@ -933,7 +938,7 @@ class TestCorrInput(task.SingleTask):
         return corr_input_test
 
 
-class AccumulateCorrInputMask(task.SingleTask):
+class AccumulateCorrInputMask(tasklib.base.ContainerTask):
     """Find good correlator inputs over multiple sidereal days.
 
     Parameters
@@ -1039,7 +1044,7 @@ class AccumulateCorrInputMask(task.SingleTask):
         return corr_input_mask
 
 
-class ApplyCorrInputMask(task.SingleTask):
+class ApplyCorrInputMask(tasklib.base.ContainerTask):
     """Apply an input mask to a timestream."""
 
     def process(self, timestream, cmask):
@@ -1115,7 +1120,7 @@ class ApplyCorrInputMask(task.SingleTask):
         return timestream
 
 
-class ApplySiderealDayFlag(task.SingleTask):
+class ApplySiderealDayFlag(tasklib.base.ContainerTask):
     """Prevent certain sidereal days from progressing further in the pipeline.
 
     example: exclude certain sidereal days from the sidereal stack.
@@ -1191,7 +1196,7 @@ class ApplySiderealDayFlag(task.SingleTask):
         return output
 
 
-class NanToNum(task.SingleTask):
+class NanToNum(tasklib.base.ContainerTask):
     """Finds NaN and replaces with 0."""
 
     def process(self, timestream):
@@ -1235,7 +1240,7 @@ class NanToNum(task.SingleTask):
         return timestream
 
 
-class RadiometerWeight(task.SingleTask):
+class RadiometerWeight(tasklib.base.ContainerTask):
     """Update vis_weight according to the radiometer equation.
 
     vis_weight_ij = Nsamples / V_ii V_jj
@@ -1287,7 +1292,9 @@ class RadiometerWeight(task.SingleTask):
             )
 
             # Extract attributes
-            vis_weight_attrs = memh5.attrs2dict(timestream.flags["vis_weight"].attrs)
+            vis_weight_attrs = memdata._memh5.attrs2dict(
+                timestream.flags["vis_weight"].attrs
+            )
 
             # Delete current uint8 dataset
             timestream["flags"].__delitem__("vis_weight")
@@ -1298,7 +1305,7 @@ class RadiometerWeight(task.SingleTask):
             )
 
             # Copy attributes
-            memh5.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
+            memdata.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
 
         elif isinstance(timestream, dcontainers.SiderealStream):
             self.log.debug(
@@ -1321,7 +1328,7 @@ class RadiometerWeight(task.SingleTask):
         return timestream
 
 
-class BadNodeFlagger(task.SingleTask):
+class BadNodeFlagger(tasklib.base.ContainerTask):
     """Flag out bad GPU nodes by giving zero weight to their frequencies.
 
     Parameters
@@ -1376,7 +1383,7 @@ class BadNodeFlagger(task.SingleTask):
         timestream.weight[:] *= good_freq_flag[:, np.newaxis, :]
 
         # If requested, flag the first frequency
-        if self.flag_freq_zero and mpiutil.rank0:
+        if self.flag_freq_zero and mpitools.rank0:
             timestream.weight[0] = 0
 
         # Set up map from frequency to node
@@ -1408,7 +1415,7 @@ class BadNodeFlagger(task.SingleTask):
                         timestream.weight[nind] = 0
 
                         self.log.info(
-                            "Flagging node %d, freq %d.", mpiutil.rank, node, nind
+                            "Flagging node %d, freq %d.", mpitools.rank, node, nind
                         )
 
         # Return timestream with bad nodes flagged
@@ -1530,7 +1537,7 @@ def taper_mask(mask, nwidth, outer=False):
     return tapered_mask
 
 
-class MaskDay(task.SingleTask):
+class MaskDay(tasklib.base.ContainerTask):
     """Mask out the daytime data.
 
     This task can also act as a base class for applying an arbitrary
@@ -1672,7 +1679,7 @@ class MaskSource(MaskDay):
 
             if "antipode" in src:
                 # Create a body at the antipode transit RA
-                body = ctime.skyfield_star_from_ra_dec(
+                body = skyfield.skyfield_star_from_ra_dec(
                     ra=(body.ra._degrees + 180) % 360,
                     dec=body.dec._degrees,
                     name=(src,),
@@ -1693,7 +1700,7 @@ class MaskSun(MaskSource):
 
     def setup(self):
         """Save the skyfield body for the sun."""
-        planets = ctime.skyfield_wrapper.load("de421.bsp")
+        planets = skyfield_wrapper.load("de421.bsp")
         self.body = [planets["sun"]]
 
 
@@ -1702,11 +1709,11 @@ class MaskMoon(MaskSource):
 
     def setup(self):
         """Save the skyfield body for the moon."""
-        planets = ctime.skyfield_wrapper.load("de421.bsp")
+        planets = skyfield_wrapper.load("de421.bsp")
         self.body = [planets["moon"]]
 
 
-class MaskRA(task.SingleTask):
+class MaskRA(tasklib.base.ContainerTask):
     """Mask out a range in right ascension.
 
     Attributes
@@ -1788,7 +1795,7 @@ class MaskRA(task.SingleTask):
         return sstream
 
 
-class MaskCHIMEData(task.SingleTask):
+class MaskCHIMEData(tasklib.base.ContainerTask):
     """Mask out data ahead of map making.
 
     Attributes
@@ -1860,7 +1867,7 @@ class MaskCHIMEData(task.SingleTask):
         return mmodes
 
 
-class MaskCHIMEMisc(task.SingleTask):
+class MaskCHIMEMisc(tasklib.base.ContainerTask):
     """Some miscellaneous data masking routines."""
 
     mask_clock = config.Property(proptype=bool, default=True)
@@ -1902,7 +1909,7 @@ class MaskCHIMEMisc(task.SingleTask):
         return ss
 
 
-class MaskDecorrelatedCylinder(task.SingleTask):
+class MaskDecorrelatedCylinder(tasklib.base.ContainerTask):
     """Identify and mask frequencies and times where a cylinder decorrelated.
 
     If the error rate is high on a backplane link in the second stage shuffle
@@ -2131,7 +2138,7 @@ class MaskDecorrelatedCylinder(task.SingleTask):
         return out
 
 
-class ExpandMask(task.SingleTask):
+class ExpandMask(tasklib.base.ContainerTask):
     """Expand a mask along the time/RA axis.
 
     Used to mask the transitional regions between good and bad data.
@@ -2172,14 +2179,14 @@ class ExpandMask(task.SingleTask):
         if self.in_place:
             exp_mask = raw_mask
         else:
-            exp_mask = dcontainers.empty_like(raw_mask)
+            exp_mask = empty_like(raw_mask)
 
         exp_mask.mask[:] = mexp
 
         return exp_mask
 
 
-class DataFlagger(task.SingleTask):
+class DataFlagger(tasklib.base.ContainerTask):
     """Flag data based on DataFlags in database.
 
     Parameters
@@ -2350,7 +2357,7 @@ class DataFlagger(task.SingleTask):
         return timestream
 
 
-class ApplyInputFlag(task.SingleTask):
+class ApplyInputFlag(tasklib.base.ContainerTask):
     """Flag bad inputs.
 
     Uses the flaginput acquisition generated by the real-time pipeline.
@@ -2595,7 +2602,7 @@ def compute_cumulative_rainfall(
     return cumu_rainfall[time_timestamp_idx]
 
 
-class FlagRainfall(task.SingleTask):
+class FlagRainfall(tasklib.base.ContainerTask):
     """Flag times following periods of heavy rainfall.
 
     This task uses rainfall measurements from the DRAO weather station to compute
@@ -2681,7 +2688,7 @@ class FlagRainfall(task.SingleTask):
         return stream
 
 
-class MaskManyBadInputs(task.SingleTask):
+class MaskManyBadInputs(tasklib.base.ContainerTask):
     """Flag spans of time where a large number of inputs were flagged as bad.
 
     Parameters
@@ -2739,7 +2746,7 @@ class MaskManyBadInputs(task.SingleTask):
         return stream
 
 
-class MaskHighFracLost(task.SingleTask):
+class MaskHighFracLost(tasklib.base.ContainerTask):
     """Mask frequencies and times with significant data loss during integration.
 
     Parameters
@@ -2842,7 +2849,7 @@ def search_grid(xeval, window, x, wrap=False):
     return xlb, xub
 
 
-class CatalogBase(task.SingleTask):
+class CatalogBase(tasklib.base.ContainerTask):
     """Shared methods for catalog-based masking and tapering."""
 
     def setup(self, manager, catalog, horizon=None):
@@ -2889,7 +2896,7 @@ class CatalogBase(task.SingleTask):
         src_freq_err : np.ndarray[nsource,]
             Uncertainty in source frequency in MHz, propagated from redshift errors.
         """
-        from cora.util import units
+        from caput.astro import constants
 
         if "frequency" in self.catalog:
             src_freq = self.catalog["frequency"]["freq"][:]
@@ -2899,7 +2906,7 @@ class CatalogBase(task.SingleTask):
             z = self.catalog["redshift"]["z"][:]
             zerr = self.catalog["redshift"]["z_error"][:]
 
-            src_freq = units.nu21 / (1.0 + z)
+            src_freq = constants.nu21 / (1.0 + z)
             src_freq_err = src_freq * zerr / (1.0 + z)
 
         return src_freq, src_freq_err
@@ -3035,7 +3042,7 @@ class SourceTracksMixin(SourcePixelsMixin):
         ha = np.radians(ra[np.newaxis, :] - src_ra[:, np.newaxis])
         ha = ((ha + np.pi) % (2 * np.pi)) - np.pi  # correct phase wrap
 
-        x, y, z = interferometry.sph_to_ground(
+        x, y, z = coordinates.spherical.sph_to_ground(
             ha, self.latitude, np.radians(src_dec[:, np.newaxis])
         )
 
@@ -3364,8 +3371,8 @@ class TaperFromCatalogBase(CatalogBase):
                         (track_yalias, track_yalias, track_yalias)
                     )
 
-                track_x = np.concatentate((track_x, track_x))
-                track_y = np.concatentate((track_y, track_yalias))
+                track_x = np.concatenate((track_x, track_x))
+                track_y = np.concatenate((track_y, track_yalias))
 
             track_points = np.column_stack((track_x, track_y))
 
@@ -3391,7 +3398,7 @@ class TaperSourceTracksFromCatalog(SourceTracksMixin, TaperFromCatalogBase):
     """Taper regions of a map near the U-shaped tracks of bright point sources."""
 
 
-class MaskAliasedMap(task.SingleTask):
+class MaskAliasedMap(tasklib.base.ContainerTask):
     """Mask regions of a map that contain north-south aliases.
 
     Parameters

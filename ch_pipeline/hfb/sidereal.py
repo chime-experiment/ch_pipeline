@@ -16,7 +16,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
 
         Parameters
         ----------
-        observer : caput.time.Observer, optional
+        observer : caput.astro.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
         # Set up the default Observer

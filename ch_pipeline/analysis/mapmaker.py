@@ -6,14 +6,15 @@ Tools for making maps from CHIME data.
 import numpy as np
 import scipy.constants
 from caput import config
+from caput.pipeline import tasklib
 from ch_ephem.observers import chime
-from draco.core import io, task
+from draco.core import io
 from draco.util import tools
 
 from ..core import containers
 
 
-class RingMapMaker(task.SingleTask):
+class RingMapMaker(tasklib.base.ContainerTask):
     """A simple and quick map-maker that forms a series of beams on the meridian.
 
     This is designed to run on data after it has been collapsed down to
@@ -257,7 +258,7 @@ class RingMapMaker(task.SingleTask):
         return rm
 
 
-class ConvertRingMap(task.SingleTask):
+class ConvertRingMap(tasklib.base.ContainerTask):
     """Covert a ch_pipeline RingMap to a draco RingMap.
 
     The ch_pipeline RingMap container has an rms dataset instead of

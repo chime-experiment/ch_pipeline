@@ -13,7 +13,7 @@ import warnings
 from typing import ClassVar
 
 import numpy as np
-from caput import time as ctime
+from caput.astro import time as ctime
 from ch_ephem.observers import chime
 from chimedb import core
 from chimedb import dataflag as df
