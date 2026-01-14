@@ -718,19 +718,18 @@ pipeline:
       in: [sstream_stokesI_subband, factmask]
       out: sstream_stokesI_factmask
 
-    # Estimate the delay power spectrum of the data using the NRML
+    # Estimate the delay power spectrum of the data using the Gibbs
     # estimator. This is a good diagnostic of instrument performance.
     # Increase weights by a factor of 100 so that we're estimating
     # the combined spectrum of the signal and noise
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    - type: draco.analysis.delay.DelayPowerSpectrumGibbs
       in: sstream_stokesI_factmask
       params:
         dataset: "vis"
         sample_axis: "ra"
         remove_mean: true
-        nsamp: 150
-        maxpost_tol: 1.0e-4
-        weight_boost: 1.0e2
+        nsamp: 400
+        weight_boost: 1.0
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_{{tag}}.h5"
