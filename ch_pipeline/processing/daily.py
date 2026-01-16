@@ -637,25 +637,10 @@ pipeline:
           - decorrelated_cylinder
           - globalflag
 
-    # DPSS inpaint to fill narrow gaps. Inpaint _before_ splitting
-    # into subbands because this produces a better overall fit to
-    # the DPSS basis functions
-    - type: draco.analysis.interpolate.DPSSFilterDelay
-      requires: manager
-      in: sstream_mask3
-      out: sstream_inpaint
-      params:
-        inpaint: true
-        axis: "freq"
-        centres: [0.0]
-        halfwidths: [0.2]
-        telescope_orientation: "none"
-        copy: false
-
     # Blend in the template file
     - type: draco.analysis.flagging.BlendStack
       requires: sstream_template
-      in: sstream_inpaint
+      in: sstream_mask3
       out: sstream_blend
       params:
         frac: 1.0e-4
@@ -819,8 +804,6 @@ class DailyProcessing(base.ProcessingType):
         "num_recent_days_first": 7,
         # Frequencies to process
         "freq": [0, 1024],
-        # Frequencies to save for validation ringmaps
-        "val_freq": [65, 250, 325, 399, 470, 605, 730, 830, 950, 990],
         # The beam transfers to use (need to have the same freq range as above)
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # Calibration times for thermal correction
@@ -861,7 +844,7 @@ class DailyProcessing(base.ProcessingType):
         "modlist": "chime/python/2025.10",
         "nfreq_delay": 1025,
         # Job params
-        "time": 120,  # How long in minutes?
+        "time": 90,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
