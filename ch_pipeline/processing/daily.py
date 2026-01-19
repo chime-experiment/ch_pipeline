@@ -337,7 +337,7 @@ pipeline:
       in: sensitivity_day
       out: rfimask_sensitivity
       params:
-        include_static_mask: false
+        include_static_mask: true
         save: true
         output_name: "rfi_mask_sensitivity_{{tag}}.h5"
 
@@ -361,21 +361,11 @@ pipeline:
       in: [tstream_day_rfi3, freq_mask]
       out: tstream_day_rfi4
 
-    # Generate the fixed static RFI mask
-    - type: ch_pipeline.analysis.flagging.RFIStaticMask
-      in: tstream_day_rfi4
-      out: rfimask_static_fixed
-
-    # Apply the fixed static mask
-    - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi4, rfimask_static_fixed]
-      out: tstream_day_rfi5
-
     # Apply an aggressive delay filter and check consistency of
     # data with noise at high delay.
     - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff
       requires: manager
-      in: tstream_day_rfi5
+      in: tstream_day_rfi4
       out: chisq_day_filtered
       params:
         tauw: 0.400
@@ -396,12 +386,12 @@ pipeline:
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      in: [tstream_day_rfi5, rfimask_chisq]
-      out: tstream_day_rfi6
+      in: [tstream_day_rfi4, rfimask_chisq]
+      out: tstream_day_rfi5
 
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
-      in: tstream_day_rfi6
+      in: tstream_day_rfi5
       out: tstream_day_smoothweight
 
     # Regrid the data onto a regular grid in sidereal time
