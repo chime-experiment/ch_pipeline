@@ -399,22 +399,6 @@ pipeline:
       in: [tstream_day_rfi5, rfimask_chisq]
       out: tstream_day_rfi6
 
-    # Combine all RFI masks and write a single file to disk.
-    # We also write the individual masks for validation, but
-    # it's useful to have a single mask to load for further
-    # processing
-    # NOTE: this doesn't work yet
-    #- type: draco.analysis.flagging.CombineMasks
-    #  in:
-    #    - rfimask_transient
-    #    - rfimask_static
-    #    - rfimask_sensitivity
-    #    - freq_mask
-    #    - rfimask_chisq
-    #  params:
-    #    save: true
-    #    output_name: "rfi_mask_complete_{{tag}}.h5"
-
     # Smooth the noise estimates which suffer from sample variance
     - type: draco.analysis.flagging.SmoothVisWeight
       in: tstream_day_rfi6
@@ -645,7 +629,7 @@ pipeline:
       params:
         frac: 1.0e-4
         match_median: true
-        mask_freq: true
+        mask_freq: false
 
     # Re-mask the daytime
     - type: ch_pipeline.analysis.flagging.DayMask
@@ -713,7 +697,7 @@ pipeline:
         dataset: "vis"
         sample_axis: "ra"
         remove_mean: true
-        nsamp: 400
+        nsamp: 500
         weight_boost: 1.0
         complex_timedomain: true
         save: true
