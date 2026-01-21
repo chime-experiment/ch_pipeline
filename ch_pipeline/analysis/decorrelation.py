@@ -49,12 +49,15 @@ class CorrectDecorrelation(task.SingleTask):
         anti-clockwise when looking down at the telescope from the sky.
     wterm : bool (default False)
         Include the w term (vertical displacement) in the delay calculation.
+    bterm : bool (default False)
+        Include a correction for the geometry of the 26m Galt telescope.
     """
 
     source = config.Property(proptype=str)
     overwrite = config.Property(proptype=bool, default=False)
     telescope_rotation = config.Property(proptype=float, default=chime.rotation)
     wterm = config.Property(proptype=bool, default=False)
+    bterm = config.Property(proptype=bool, default=False)
 
     def process(self, tstream, inputmap):
         """Apply the decorrelation correction for a given source.
@@ -88,6 +91,7 @@ class CorrectDecorrelation(task.SingleTask):
             src=src,
             prod_map=prod_map,
             wterm=self.wterm,
+            bterm=self.bterm,
             inplace=self.overwrite,
         )
 
@@ -100,6 +104,7 @@ class CorrectDecorrelation(task.SingleTask):
             src=src,
             prod_map=prod_map,
             wterm=self.wterm,
+            bterm=self.bterm,
             inplace=True,
         )
         weight = invert_no_zero(weight) ** 2
