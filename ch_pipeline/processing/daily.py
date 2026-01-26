@@ -172,12 +172,12 @@ pipeline:
     # Apply the negative auto mask
     - type: draco.analysis.flagging.ApplyTimeFreqMask
       in: [tstream, negative_auto_mask]
-      out: tstream_neg_auto
+      out: tstream_no_neg_auto
 
     # Calculate the system sensitivity for this file
     - type: draco.analysis.sensitivity.ComputeSystemSensitivity
       requires: manager
-      in: tstream_neg_auto
+      in: tstream_no_neg_auto
       out: sensitivity
       params:
         exclude_intracyl: true
@@ -185,7 +185,7 @@ pipeline:
     # Identify individual baselines with much lower weights than expected
     - type: draco.analysis.flagging.ThresholdVisWeightBaseline
       requires: manager
-      in: tstream_neg_auto
+      in: tstream_no_neg_auto
       out: full_bad_baseline_mask
       params:
         average_type: "median"
@@ -201,14 +201,14 @@ pipeline:
 
     # Load the frequency map that was active when this data was collected
     - type: ch_pipeline.core.dataquery.QueryFrequencyMap
-      in: tstream_neg_auto
+      in: tstream_no_neg_auto
       out: freqmap
       params:
         cache: false
 
     # Identify decorrelated cylinders
     - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder
-      in: [tstream_neg_auto, inputmap, freqmap]
+      in: [tstream_no_neg_auto, inputmap, freqmap]
       out: decorr_cyl_mask
       params:
         threshold: 5.0
@@ -217,7 +217,7 @@ pipeline:
     # Average over redundant baselines across all cylinder pairs
     - type: draco.analysis.transform.CollateProducts
       requires: manager
-      in: tstream_neg_auto
+      in: tstream_no_neg_auto
       out: tstream_col
       params:
         weight: "natural"
@@ -565,26 +565,10 @@ pipeline:
         save: true
         output_name: "ringmap_chisq_el_template_sub_{{tag}}.h5"
 
-    # Wait until the ringmaps are done
-    - type: draco.core.misc.WaitUntil
-      requires: ringmap_chisq_el
-      in: sstream_template_subtract
-      out: sstream_template_subtract2
-  
-    # Beamform the four brightest sources and save the spectra
-    - type: draco.analysis.beamform.BeamFormCat
-      requires: [manager, sstream_template_subtract2]
-      in: source_catalog
-      params:
-        timetrack: 300.0
-        save: true
-        output_name: "sourceflux_template_subtract_{{tag}}.h5"
-        limit_outputs: 4
-
     # Block any further processing until the template-subtracted
     # block is finished
     - type: draco.core.misc.WaitUntil
-      requires: sstream_template_subtract2
+      requires: ringmap_chisq_el
       in: sstream
       out: sstream3
 
