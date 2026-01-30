@@ -1291,21 +1291,18 @@ class RadiometerWeight(tasklib.base.ContainerTask):
                 vis_weight, axis=0, comm=timestream.comm
             )
 
-            # Extract attributes
-            vis_weight_attrs = memdata._memh5.attrs2dict(
-                timestream.flags["vis_weight"].attrs
-            )
-
-            # Delete current uint8 dataset
-            timestream["flags"].__delitem__("vis_weight")
-
             # Create new float32 dataset
             vis_weight_dataset = timestream.create_flag(
                 "vis_weight", data=vis_weight, distributed=True
             )
 
             # Copy attributes
-            memdata.copyattrs(vis_weight_attrs, vis_weight_dataset.attrs)
+            memdata.copyattrs(
+                timestream.flags["vis_weight"].attrs, vis_weight_dataset.attrs
+            )
+
+            # Delete current uint8 dataset
+            timestream["flags"].__delitem__("vis_weight")
 
         elif isinstance(timestream, dcontainers.SiderealStream):
             self.log.debug(
