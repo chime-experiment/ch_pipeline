@@ -35,6 +35,7 @@ import numpy as np
 from caput import memdata
 from caput.containers import Container, ContainerPrototype
 from caput.pipeline.tasklib.base import MPILoggedTask
+from caput.util import typeutils
 from ch_util import andata
 from draco.core.containers import (
     FormedBeam,
@@ -1144,7 +1145,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     @property
     def dataset_id(self):
         """Get the dataset_id dataset in Unicode."""
-        dsid = memdata._typeutils.ensure_unicode(self["flags/dataset_id"][:])
+        dsid = typeutils.ensure_unicode(self["flags/dataset_id"][:])
         dsid.flags.writeable = False
 
         return dsid

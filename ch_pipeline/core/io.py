@@ -357,7 +357,7 @@ class LoadGainUpdates(LoadDataFiles):
 
 
 class LoadSetupFile(tasklib.io.BaseLoadFiles):
-    """Loads a file from disk into a memh5 container during setup.
+    """Loads a file from disk into a memdata container during setup.
 
     Attributes
     ----------
@@ -372,7 +372,7 @@ class LoadSetupFile(tasklib.io.BaseLoadFiles):
 
         Returns
         -------
-        cont : subclass of `memh5.BasicCont`
+        cont : subclass of `memdata.Container`
         """
         # Call the baseclass setup to resolve any selections
         super().setup()
@@ -391,7 +391,7 @@ class LoadSetupFile(tasklib.io.BaseLoadFiles):
 
 
 class LoadFileFromTag(tasklib.io.BaseLoadFiles):
-    """Loads a file from disk into a memh5 container.
+    """Loads a file from disk into a memdata container.
 
     The suffix of the filename is extracted from the tag of the input container.
 
@@ -437,12 +437,12 @@ class LoadFileFromTag(tasklib.io.BaseLoadFiles):
 
         Parameters
         ----------
-        incont : subclass of `memh5.BasicCont`
+        incont : subclass of `memdata.Container`
             get the `tag` attribute from this container
 
         Returns
         -------
-        outcont : subclass of `memh5.BasicCont`
+        outcont : subclass of `memdata.Container`
         """
         if not self.only_prefix:
             filename = self.prefix + incont.attrs["tag"] + ".h5"
