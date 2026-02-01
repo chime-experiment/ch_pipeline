@@ -1308,9 +1308,9 @@ def _interpolation_linear(x, y, w, xeval, mode="zero", xperiod=None):
         # For points below and above the range of x, overwrite the interval,
         # adjusting for the period
         if below.size > 0:
-            adx1[below] = xeval - x[ind1] - xperiod
+            adx1[below] = xeval[below] - x[-1] - xperiod
         if above.size > 0:
-            adx2[above] = x[ind2] + xperiod - xeval
+            adx2[above] = x[0] + xperiod - xeval[above]
 
     # Compute relative weights of left and right points
     norm = tools.invert_no_zero(adx1 + adx2)
