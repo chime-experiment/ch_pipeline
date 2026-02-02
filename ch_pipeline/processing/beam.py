@@ -17,12 +17,13 @@ DEFAULT_SCRIPT = """
 # Cluster configuration
 cluster:
   name: {jobname}
+  account: rpp-chime
 
   directory: {dir}
   temp_directory: {tempdir}
 
   time: {time}
-  system: fir
+  system: slurm
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -41,7 +42,7 @@ param_anchors:
 pipeline:
   tasks:
 
-    - type: draco.core.task.SetMPILogging
+    - type: caput.pipeline.tasklib.base.SetMPILogging
       params:
           level_all: INFO
           level_rank0: DEBUG
@@ -59,17 +60,17 @@ pipeline:
         exclude_data_flag_types: ["misc"]
         return_intervals: True
 
-    - type: draco.core.io.LoadFilesFromParams
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: tcorr
       params:
         files: {timing_corr}
         distributed: No
 
-    - type: draco.core.misc.AccumulateList
+    - type: caput.pipeline.tasklib.flow.AccumulateList
       in: tcorr
       out: tcorrlist
 
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: tcorrlist
       in: files_wait
       out: files

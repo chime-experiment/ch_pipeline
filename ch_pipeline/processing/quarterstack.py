@@ -24,12 +24,13 @@ DEFAULT_SCRIPT = """
 # Cluster configuration
 cluster:
   name: {jobname}
+  account: rpp-chime
 
   directory: {dir}
   temp_directory: {tempdir}
 
   time: {time}
-  system: fir
+  system: slurm
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -67,14 +68,14 @@ pipeline:
 
   tasks:
 
-    - type: draco.core.task.SetMPILogging
+    - type: caput.pipeline.tasklib.base.SetMPILogging
       params:
         level_rank0: DEBUG
         level_all: WARNING
 
     # Test the MPI environment so that the pipeline fails
     # early if there are issues
-    - type: draco.core.misc.CheckMPIEnvironment
+    - type: caput.pipeline.tasklib.debug.CheckMPIEnvironment
       params:
         timeout: 420
 
@@ -91,7 +92,7 @@ pipeline:
         product_directory: "{product_path}"
 
     # Load each Sidereal Stream which will go into this stack
-    - type: draco.core.io.LoadBasicCont
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: sstream
       params:
         files: *days
@@ -178,7 +179,7 @@ pipeline:
         tag: {tag}
 
     # Precision truncate the sidereal stack data
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: sstack
       out: sstack_trunc
       params:
@@ -202,7 +203,7 @@ pipeline:
         npix: 1024
 
     # Precision truncate the chunked normal ringmap
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: ringmap
       out: ringmap_trunc
       params:
