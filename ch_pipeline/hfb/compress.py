@@ -64,6 +64,7 @@ class CompressHFBWeights(task.SingleTask):
         compress_fn_map = {
             "svd": self._compress_svd,
             "sum": self._compress_sum,
+            "med": self._compress_med,
         }
 
         self._compress_fn = compress_fn_map[self.method]
@@ -132,6 +133,15 @@ class CompressHFBWeights(task.SingleTask):
         rows = array.sum(axis=1)
         cols = array.sum(axis=0)
         norm = tools.invert_no_zero(array.sum())
+
+        return rows, cols, norm
+
+    def _compress_med(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
+        # Take the median over the rows of the input array, over its columns, and
+        # over the entire array, taking the reciprocal
+        rows = np.nanmedian(array, axis=1)
+        cols = np.nanmedian(array, axis=0)
+        norm = tools.invert_no_zero(np.nanmedian(array))
 
         return rows, cols, norm
 
