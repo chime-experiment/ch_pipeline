@@ -30,12 +30,13 @@ DEFAULT_SCRIPT = """
 # Cluster configuration
 cluster:
   name: {jobname}
+  account: rpp-chime
 
   directory: {dir}
   temp_directory: {tempdir}
 
   time: {time}
-  system: fir
+  system: slurm
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -63,6 +64,7 @@ pipeline:
     - cora
     - draco
     - drift
+    - fluxcat
     - numpy
     - scipy
     - h5py
@@ -70,12 +72,12 @@ pipeline:
 
   tasks:
 
-    - type: draco.core.task.SetMPILogging
+    - type: caput.pipeline.tasklib.base.SetMPILogging
       params:
         level_rank0: DEBUG
         level_all: WARNING
 
-    - type: draco.core.misc.CheckMPIEnvironment
+    - type: caput.pipeline.tasklib.debug.CheckMPIEnvironment
       params:
         timeout: 420
 
@@ -102,18 +104,18 @@ pipeline:
         product_directory: "{product_path}"
 
     # Load and accumulate the available timing correction files.
-    - type: draco.core.io.LoadFilesFromParams
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: tcorr
       params:
         files: "{timing_file}"
         distributed: false
 
-    - type: draco.core.misc.AccumulateList
+    - type: caput.pipeline.tasklib.flow.AccumulateList
       in: tcorr
       out: tcorrlist
 
     # We need to block the loading of the files until all the timing correction files are available
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: tcorrlist
       in: filelist
       out: filelist2
@@ -271,7 +273,7 @@ pipeline:
         caltime_path: "{caltimes_file}"
 
     # Apply the thermal correction
-    - type: draco.core.misc.ApplyGain
+    - type: draco.analysis.calibration.ApplyGain
       in: [tstream_day, thermal_gain]
       out: tstream_thermal_corrected
       params:
@@ -290,7 +292,7 @@ pipeline:
       out: tstream_dcm
 
     # Precision truncate the timestream and write to disk
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: tstream_dcm
       out: tstream_truncated
       params:
@@ -416,7 +418,7 @@ pipeline:
         include_auto: false
 
     # Precision truncate and write out the chunked normal ringmap
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: ringmap
       out: ringmap_trunc
       params:
@@ -443,7 +445,7 @@ pipeline:
     # Precision truncate and write out the chunked intercylinder ringmap
     # NOTE: this cannot be combined with the above Truncate task as it would
     # result in both ringmaps existing in memory at the same time.
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: ringmap_int
       out: ringmap_int_trunc
       params:
@@ -456,7 +458,7 @@ pipeline:
         output_name: "ringmap_intercyl_{{tag}}.h5"
 
     # Ensure that the ringmaps have been written out before proceeding
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: ringmap_int_trunc
       in: sstream
       out: sstream2
@@ -473,7 +475,7 @@ pipeline:
         mask_short_ew: 1.0
 
     # Load the source catalogs to measure flux as a function of hour angle
-    - type: draco.core.io.LoadBasicCont
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: source_catalog_nocollapse
       params:
         files:
@@ -481,7 +483,7 @@ pipeline:
 
     # Wait until the catalog is loaded, otherwise this task will
     # run its setup method and significantly increase memory used
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: source_catalog_nocollapse
       in: sstream_inter
       out: sstream_inter2
@@ -500,13 +502,13 @@ pipeline:
 
     # Wait until the first beam forming task is done in order to
     # avoid unnecessary memory usage
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: sourceflux_nocollapse
       in: sstream_inter
       out: sstream_inter3
 
     # Load the source catalogs to measure fluxes of
-    - type: draco.core.io.LoadBasicCont
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: source_catalog
       params:
         files:
@@ -525,7 +527,7 @@ pipeline:
         output_name: "sourceflux_{{tag}}.h5"
         limit_outputs: 4
 
-    - type: draco.core.io.LoadFilesFromParams
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: sstream_template
       params:
         files: "{template_file}"
@@ -567,7 +569,7 @@ pipeline:
 
     # Block any further processing until the template-subtracted
     # block is finished
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.flow.WaitUntil
       requires: ringmap_chisq_el
       in: sstream
       out: sstream3
