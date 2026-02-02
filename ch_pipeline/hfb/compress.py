@@ -115,7 +115,7 @@ class CompressHFBWeights(task.SingleTask):
         # Return output container
         return out
 
-    def _compress_svd(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
+    def _compress_svd(self, array: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         # Do the Singular Value Decomposition (SVD)
         u, s, vh = la.svd(array, full_matrices=False)
 
@@ -127,7 +127,7 @@ class CompressHFBWeights(task.SingleTask):
 
         return rows, cols, norm
 
-    def _compress_sum(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
+    def _compress_sum(self, array: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         # Take the sum over the rows of the input array, over its columns, and
         # over the entire array, taking the reciprocal
         rows = array.sum(axis=1)
@@ -136,7 +136,7 @@ class CompressHFBWeights(task.SingleTask):
 
         return rows, cols, norm
 
-    def _compress_med(self, array: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
+    def _compress_med(self, array: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         # Take the median over the rows of the input array, over its columns, and
         # over the entire array, taking the reciprocal
         rows = np.nanmedian(array, axis=1)
