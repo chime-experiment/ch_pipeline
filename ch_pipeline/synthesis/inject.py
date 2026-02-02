@@ -6,6 +6,7 @@ import numpy as np
 import scipy.interpolate
 import scipy.stats
 from caput import config
+from caput.containers import empty_like
 from ch_util import fluxcat
 from cora.util import units
 from draco.analysis.beamform import icrs_to_cirs
@@ -126,7 +127,7 @@ class BaseInject(task.SingleTask):
 
         else:
             self.log.info("Creating new container to inject signal.")
-            out = containers.empty_like(data)
+            out = empty_like(data)
             out.redistribute("freq")
 
             out.vis[:] = 0.0
