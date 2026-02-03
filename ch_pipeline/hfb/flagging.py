@@ -6,7 +6,7 @@ from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
 from caput.pipeline import tasklib
 from draco.analysis.sidereal import _search_nearest
-from draco.core import task
+from caput.pipeline import tasklib
 from draco.core.containers import LocalizedRFIMask, RFIMask
 from scipy.spatial.distance import cdist
 
