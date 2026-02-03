@@ -1,0 +1,542 @@
+"""HFB Daily Pipeline processing type.
+
+This processing type is used to run the HFB daily pipeline.
+
+Classes
+=======
+- :py:class:`DailyProcessing`
+- :py:class:`TestDailyProcessing`
+"""
+
+import logging
+import math
+from datetime import datetime
+from typing import ClassVar
+
+import chimedb.core as db
+import chimedb.data_index as di
+import chimedb.dataflag as df
+import numpy as np
+import peewee as pw
+from caput.util.arraytools import unique_ordered
+from ch_ephem.observers import chime
+
+from ch_pipeline.processing import base
+from ch_pipeline.processing.daily import (
+    expand_csd_range,
+    files_in_timespan,
+    get_filenames_used_by_csds,
+    remove_online_csds,
+)
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_SCRIPT = """
+# Cluster configuration
+cluster:
+  name: {jobname}
+
+  directory: {dir}
+  temp_directory: {tempdir}
+
+  time: {time}
+  system: fir
+  nodes: {nodes}
+  ompnum: {ompnum}
+  pernode: {pernode}
+  mem: 768000M
+
+  venv: {venv}
+  module_path: {modpath}
+  module_list: {modlist}
+
+# Pipeline task configuration
+pipeline:
+
+  logging:
+    root: DEBUG
+    peewee: INFO
+    matplotlib: INFO
+
+  save_versions:
+    - caput
+    - ch_util
+    - ch_pipeline
+    - chimedb.core
+    - chimedb.data_index
+    - chimedb.dataflag
+    - cora
+    - draco
+    - drift
+    - numpy
+    - scipy
+    - h5py
+    - mpi4py
+
+  tasks:
+
+    - type: draco.core.task.SetMPILogging
+      params:
+        level_rank0: DEBUG
+        level_all: WARNING
+
+    - type: draco.core.misc.CheckMPIEnvironment
+      params:
+        timeout: 420
+
+    - type: ch_pipeline.core.dataquery.ConnectDatabase
+      params:
+        timeout: 5
+        ntries: 5
+
+    # Query for all the data for the sidereal day we are processing
+    - type: ch_pipeline.core.dataquery.QueryDatabase
+      out: filelist
+      params:
+        start_csd: {csd[0]:.2f}
+        end_csd: {csd[1]:.2f}
+        #accept_all_global_flags: true
+        node_spoof:
+          fir_online: "/project/rpp-chime/chime/chime_online/"
+        instrument: 'chime'
+        #exclude_daytime : True
+
+    # Load the telescope model that we need for several steps
+    - type: draco.core.io.LoadProductManager
+      out: manager
+      params:
+        product_directory: "{product_path}"
+
+    # Load HFB files
+    - type: ch_pipeline.hfb.io.LoadFiles
+      requires: filelist
+      out: tstream
+      params:
+        distributed: true
+        single_group: false
+
+    # Run HFB directional RFI flagging / bitmap creation
+    - type: ch_pipeline.hfb.flagging.HFBDirectionalRFIFlagging
+      in: tstream
+      out: rfimask_hfb
+      params:
+        sigma: "{sigma_list}" #[2, 4, 5, 7]
+
+    # Group into one sidereal-day container
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: rfibitmap_hfb
+      out: rfibitmap_hfb_grouped
+
+    - type: draco.core.io.Truncate
+      in: rfibitmap_hfb_grouped
+      out: rfibitmap_hfb_grouped_trunc
+
+    - type: draco.core.io.SaveZarrZip
+      in: rfibitmap_hfb_grouped_trunc
+      out: rfibitmap_hfb_grouped_trunc_handle
+      params:
+        save: true
+        output_name: "rfibitmap_hfb_{{tag}}.zarr.zip"
+        remove: true
+
+    - type: draco.core.io.WaitZarrZip
+      in: rfibitmap_hfb_grouped_trunc_handle
+"""
+
+
+class HFBDailyProcessing(base.ProcessingType):
+    """HFB daily processing pipeline processing type."""
+
+    type_name = "hfb_daily"
+    tag_pattern = r"\d+"
+
+    # Parameters of the job processing
+    default_params: ClassVar = {
+        # Time ranges(s) to process
+        "intervals": [
+            {"start": "CSD3000", "step": 1}
+        ],  ####################################
+        "intervals": [
+            # 1878 and 1885 have files available online
+            {"start": "CSD1878", "end": "CSD1889", "step": 7},
+        ],
+        # Significance values used for RFI detection
+        "sigma_list": [2, 4, 5, 7],
+        # The beam transfers to use (need to have the same freq range as above)
+        "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
+        # System modules to use/load
+        "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
+        "modlist": "chime/python/2024.04",
+        # Job params
+        "time": 120,  # How long in minutes?
+        "nodes": 4,  # Number of nodes to use.
+        "ompnum": 8,  # Number of OpenMP threads
+        "pernode": 24,  # Jobs per node
+    }
+
+    default_script = DEFAULT_SCRIPT
+
+    # Make sure not to remove hfb files before this CSD
+    # Range is from 2018/10/14 to 2020/01/06
+    daemon_config: ClassVar = {
+        "keep_online": {"start": "CSD1800", "end": "CSD2250"}
+    }  ####################################
+
+    def _available_tags(self) -> list:
+        """Return all the tags that are available to run.
+
+        This includes any that currently exist or are in the job queue.
+        """
+        csds = self.runnable_tags(require_online=True)
+
+        return [str(int(csd)) for csd in csds]
+
+    @property
+    def _config_tags(self) -> list:
+        """Return all tags desired from the config."""
+        return unique_ordered(
+            csd for i in self._intervals for csd in expand_csd_range(*i)
+        )
+
+    def runnable_tags(self, require_online=False) -> list:
+        """Return all runnable tags, whether or not the data is available."""
+        csds = [csd for csd in self._config_tags if csd not in self._exclude]
+
+        runnable = available_csds(
+            sorted(csds),
+            self._padding,
+            self._min_coverage,
+            require_online=require_online,
+        )
+
+        return [csd for csd in csds if csd in runnable]
+
+    def _finalise_jobparams(self, tag, jobparams):
+        """Set bounds for this CSD."""
+        csd = float(tag)
+        jobparams.update({"csd": [csd - self._padding, csd + 1 + self._padding]})
+
+        return jobparams
+
+    def update_files(self, user=None, retrieve=True, clear=True):
+        """Update the status of files used by this revision.
+
+        This includes requesting that soon-to-be needed files get brought
+        online, and that files that are no longer needed be moved offline.
+        """
+        nfiles = {"nretrieve": 0, "nclear": 0}
+
+        if not self._include_offline_files:
+            # Cannot try to retrieve files if forbidden. Can
+            # still clear out files which are no longer needed
+            retrieve = False
+
+        rev_stats = self.status(user=user)
+        # Get the upcoming jobs
+        upcoming = rev_stats["not_yet_submitted"]
+        # Get all the runnable tags
+        all_tags = [str(tag) for tag in self.runnable_tags(require_online=False)]
+
+        if retrieve:
+            # If there are any upcoming jobs which require offline data,
+            # request that this be moved online
+            exclude_tags = {
+                *rev_stats["pending"],
+                *rev_stats["running"],
+                *rev_stats["successful"],
+                *rev_stats["failed"],
+            }
+            all_tags = [tag for tag in all_tags if tag not in exclude_tags]
+            # Prioritize recent days to ensure that data is available
+            today = np.floor(chime.get_current_lsd()).astype(int)
+            priority = [
+                tag for tag in all_tags if (today - int(tag)) <= self._num_recent_days
+            ]
+            all_tags = priority + [tag for tag in all_tags if tag not in priority]
+            # Search the next 20 tags and request any that we may want to be brought online.
+            online_request_tags = sorted(
+                [int(tag) for tag in all_tags[:20] if tag not in upcoming]
+            )
+            if online_request_tags:
+                # Submit the request to bring files online
+                nfiles["nretrieve"] = request_offline_csds(
+                    online_request_tags, self._padding
+                )
+
+        if clear:
+            # Clear out data that we don't need anymore
+            remove_request_tags = sorted([int(tag) for tag in rev_stats["successful"]])
+            exclude_tags = [
+                *rev_stats["running"],
+                *rev_stats["pending"],
+                *rev_stats["failed"],
+                *rev_stats["not_yet_submitted"],
+                *expand_csd_range(*self.daemon_config["keep_online"].values()),
+            ]
+            exclude_tags = sorted([int(tag) for tag in exclude_tags])
+            if remove_request_tags:
+                # Submit the request to remove these files
+                nfiles["nclear"] = remove_online_csds(
+                    remove_request_tags, exclude_tags, self._padding
+                )
+
+        return nfiles
+
+    def _generate_hook(self, user=None, priority_only=False, check_failed=False):
+        # Get the list of tags remaining to run, in order
+        to_run = self.status(user=user)["not_yet_submitted"]
+
+        if check_failed:
+            requeue = {"chimedb_error", "time_limit", "mpi_error"}
+
+            # Place failed jobs at the start of the queue
+            to_run = [
+                tag
+                for key, tags in self.failed().items()
+                for tag in tags
+                if key in requeue
+            ] + to_run
+
+        # Ensure that the current in-progress acquisition does not get queued
+        today = chime.get_current_lsd()
+        to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
+
+        # Prioritize some number of recent days
+        today = np.floor(today).astype(int)
+        priority = [
+            csd for csd in to_run if (today - int(csd)) <= self._num_recent_days
+        ]
+
+        if priority_only:
+            return priority
+
+        return priority + [csd for csd in to_run if csd not in priority]
+
+
+def available_csds(
+    csds: list,
+    pad: float = 0.0,
+    required_coverage: float = 0.0,
+    require_online: bool = False,
+) -> set:
+    """Return the subset of csds in `csds` for whom all files are online.
+
+    Parameters
+    ----------
+    csds
+        sorted list of csds to check
+    pad
+      fraction of a day to pad on either end. This data should also be available
+      in order for a day to be considered available
+    required_coverage
+      What fraction of the day must exist in order to be considered available.
+      This *includes* the padding fraction, so values greater than 1 are
+      permitted. For example, if `pad=0.2`, setting `required_coverage=1.4`
+      would indicate that all the data must be available.
+      Even if all files are online, if the data coverage is less than this
+      fraction, the day shouldn't be processed.
+    require_online
+        If True, a CSD must have all files available online to be considered
+        available. Default is True.
+
+    Returns
+    -------
+    available
+        set of all available csds
+    """
+    # Figure out which files exist online and which ones exist entirely
+    # Repeat the process for corr data and weather data
+    corr_online, corr_that_exist = db_get_hfb_files_in_range(
+        csds[0] - pad, csds[-1] + pad
+    )
+
+    def _available(filenames_online, filenames_that_exist, coverage):
+        available = set()
+        coverage = coverage * 86400
+
+        def _check_coverage(x):
+            time_range = 0
+            for tr in x:
+                time_range += tr[2] - tr[1]
+
+            if time_range > coverage:
+                return True
+
+            return False
+
+        for csd in csds:
+            start_time = chime.lsd_to_unix(csd - pad)
+            end_time = chime.lsd_to_unix(csd + 1 + pad)
+
+            exists, index_exists = files_in_timespan(
+                start_time, end_time, filenames_that_exist
+            )
+
+            available_offline = _check_coverage(exists)
+
+            # The final file in the span may contain more than one sidereal day
+            index_exists = max(index_exists - 1, 0)
+            filenames_that_exist = filenames_that_exist[index_exists:]
+
+            if not available_offline:
+                # We can't get this data no matter what
+                continue
+
+            if require_online:
+                # online - list of file start and end times that are online
+                # between start_time and end_time
+                # index_online - the final index in which data was located
+                online, index_online = files_in_timespan(
+                    start_time, end_time, filenames_online
+                )
+
+                if _check_coverage(online) & (len(online) == len(exists)):
+                    available.add(csd)
+
+                index_online = max(index_online - 1, 0)
+                filenames_online = filenames_online[index_online:]
+            else:
+                available.add(csd)
+
+        return available
+
+    hfb_available = _available(corr_online, corr_that_exist, required_coverage)
+
+    return hfb_available
+
+
+def db_get_hfb_files_in_range(start_csd: int, end_csd: int):
+    """Get the name and start and end times of corrdata files in the CSD range.
+
+    Return both a list of files which were found on the online node and those
+    which were found anywhere. If `has_file` is `N`, these lists should be
+    the same.
+
+    Return an empty list if files between start_csd and end_csd are only
+    partially available online.
+
+    Total file count is verified by checking files that exist everywhere.
+
+    Parameters
+    ----------
+    start_csd
+        Start date in sidereal day format
+    end_csd
+        End date in sidereal day format
+
+    Returns
+    -------
+    filenames_online
+        hfb files available in the timespan, if
+        all of them are available online
+    filenames_that_exist
+        all hfb files available in the timespan
+    """
+    # Query all the files in this time range
+    start_time = chime.lsd_to_unix(start_csd)
+    end_time = chime.lsd_to_unix(end_csd + 1)
+
+    db.connect()
+
+    hfb_inst = di.ArchiveInst.get(name="hfb")
+
+    # Query for all chimestack files in the time range
+    archive_files = (
+        di.ArchiveFileCopy.select(
+            di.ArchiveFileCopy.file,
+            di.HFBFileInfo.start_time,
+            di.HFBFileInfo.finish_time,
+        )
+        .join(di.ArchiveFile)
+        .join(di.ArchiveAcq)
+        .switch(di.ArchiveFile)
+        .join(di.HFBFileInfo)
+    ).where(
+        di.ArchiveAcq.inst == hfb_inst,
+        di.HFBFileInfo.start_time < end_time,
+        di.HFBFileInfo.finish_time >= start_time,
+        di.ArchiveFileCopy.has_file == "Y",
+    )
+    # Figure out which files are online
+    online_node = di.StorageNode.get(name="fir_online", active=True)
+    files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
+
+    files_online = sorted(files_online.tuples(), key=lambda x: x[1])
+    # files_that_exist might contain the same file multiple files
+    # if it exists in multiple locations (nearline, online, gossec, etc)
+    # we only want to include it once, so we initially create a set
+    files_that_exist = sorted(set(archive_files.tuples()), key=lambda x: x[1])
+
+    return files_online, files_that_exist
+
+
+def request_offline_csds(csds: list, pad: float = 0):
+    """Given a list of csds, request that all required data be copied online.
+
+    Request that all data required by the list of CSDS get copied to the
+    fir_online node.
+
+    Parameters
+    ----------
+    csds
+        list of integer csds to copy
+    pad
+        fraction of data from adjacent days that should also be copied online
+    """
+
+    def _make_copy_request(file, sources, target):
+        # Find a source with the file
+        for source in sources:
+            try:
+                di.ArchiveFileCopy.get(file=file, node=source, has_file="Y")
+            except pw.DoesNotExist:
+                continue
+
+            # There is a copy of the file on this node, try to copy it.
+            try:
+                # Check if an active request already exists. If so,
+                # leave alpenhorn alone to do its thing
+                di.ArchiveFileCopyRequest.get(
+                    file=file,
+                    group_to=target,
+                    node_from=source,
+                    completed=False,
+                    cancelled=False,
+                )
+                return 0
+            except pw.DoesNotExist:
+                di.ArchiveFileCopyRequest.insert(
+                    file=file_,
+                    group_to=target,
+                    node_from=source,
+                    cancelled=0,
+                    completed=0,
+                    n_requests=1,
+                    timestamp=datetime.now(),
+                ).execute()
+                return 1
+
+        # No source with the file
+        return 0
+
+    # Figure out which chimestack files are needed
+    online_files, files = db_get_hfb_files_in_range(csds[0] - pad, csds[-1] + pad)
+    # Only check files that are not online
+    files = [f for f in files if f not in online_files]
+    request_hfb_files = get_filenames_used_by_csds(csds, files, pad)
+
+    db.connect(read_write=True)
+
+    target_node = di.StorageGroup.get(name="fir_online")
+    offline_node = di.StorageNode.get(name="fir_nearline")
+    smallfile_node = di.StorageNode.get(name="fir_smallfile")
+
+    nrequests = 0
+
+    # Request chimestack files be brought back online
+    for file_ in request_hfb_files:
+        nr = _make_copy_request(file_, [offline_node, smallfile_node], target_node)
+        nrequests += nr
+
+    return nrequests
