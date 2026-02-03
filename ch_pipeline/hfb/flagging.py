@@ -2,7 +2,7 @@
 
 import beam_model.formed as fm
 import numpy as np
-from caput import config, mpiarray, tools
+from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
 from caput.pipeline import tasklib
 from draco.analysis.sidereal import _search_nearest
