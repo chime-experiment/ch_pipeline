@@ -725,7 +725,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
                 mask.sum(axis=-1) > remove_persistent_beamns_frac * ntime
             )  # persistent shape: (freq, beam_ns)
 
-            mask &= ~persistent[..., None]
+            mask &= ~persistent[..., np.newaxis]
 
         return mask
 
