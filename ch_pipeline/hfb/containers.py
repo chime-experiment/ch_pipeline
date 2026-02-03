@@ -4,12 +4,15 @@ from functools import cached_property
 from typing import ClassVar
 
 import numpy as np
-from caput import memh5, tod
-from ch_util import andata
-from draco.core.containers import (
+from caput import memdata
+from caput.containers import (
     COMPRESSION,
     COMPRESSION_OPTS,
     DataWeightContainer,
+    tod,
+)
+from ch_util import andata
+from draco.core.containers import (
     SiderealContainer,
     TODContainer,
 )
@@ -27,7 +30,7 @@ class HFBContainer(DataWeightContainer):
     _weight_dset_name = None  # Leave as None as this could potentially change location
 
     @property
-    def hfb(self) -> memh5.MemDataset:
+    def hfb(self) -> memdata.MemDataset:
         """Convenience access to the main hfb dataset."""
         if "hfb" in self.datasets:
             return self.datasets["hfb"]
@@ -35,7 +38,7 @@ class HFBContainer(DataWeightContainer):
         raise KeyError("Dataset 'hfb' not initialised.")
 
     @property
-    def weight(self) -> memh5.MemDataset:
+    def weight(self) -> memdata.MemDataset:
         """The inverse variance weight dataset."""
         if "weight" in self:
             weight = self["weight"]
@@ -48,7 +51,7 @@ class HFBContainer(DataWeightContainer):
         return weight
 
     @property
-    def nsample(self) -> memh5.MemDataset:
+    def nsample(self) -> memdata.MemDataset:
         """Get the nsample dataset (number of non-zero samples) if it exists."""
         if "nsample" in self.datasets:
             return self.datasets["nsample"]
@@ -219,7 +222,7 @@ class HFBReader(tod.Reader):
 
         Parameters
         ----------
-        out_group : `h5py.Group`, hdf5 filename or `memh5.Group`
+        out_group : `h5py.Group`, hdf5 filename or `memdata.Group`
             Underlying hdf5 like container that will store the data for the
             BaseData instance.
 

@@ -7,7 +7,7 @@ Classes
 
 from typing import ClassVar
 
-from caput import time as ctime
+from caput.astro import time as ctime
 from ch_util import holography as holo
 from chimedb.core import connect as connect_db
 
@@ -22,7 +22,7 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -50,7 +50,7 @@ pipeline:
       out: files_wait
       params:
         node_spoof:
-          cedar_online: /project/rpp-krs/chime/chime_online
+            fir_online: /project/rpp-chime/chime/chime_online
         instrument: chime26m
         source_26m: *db_source_name
         start_time: {start_time}
@@ -154,11 +154,11 @@ class HolographyFringestop(base.ProcessingType):
         "transits_per_run": 10,
         "ha_span": 60.0,
         "num_samples": 720,
-        "nodes": 4,
-        "pernode": 4,
-        "ompnum": 8,
+        "nodes": 1,
+        "pernode": 8,
+        "ompnum": 24,
         "time": "0-4:00:00",
-        "timing_corr": "/project/rpp-krs/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
+        "timing_corr": "/project/rpp-chime/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
         "modlist": "chime/python/2022.06",

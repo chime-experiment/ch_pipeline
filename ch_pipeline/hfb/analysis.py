@@ -2,10 +2,12 @@
 
 import numpy as np
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
-from caput import config, mpiarray, mpiutil, weighted_median
+from caput import config, mpiarray
+from caput.algorithms import median
+from caput.containers import copy_datasets_filter, empty_like
+from caput.pipeline import tasklib
+from caput.util import mpitools
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
-from draco.core import containers as dcontainers
-from draco.core import task
 from draco.util import tools
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
@@ -15,7 +17,7 @@ from .io import BeamSelectionMixin
 from .pfb import DeconvolvePFB
 
 
-class HFBAverage(task.SingleTask):
+class HFBAverage(tasklib.base.ContainerTask):
     """Take average of HFB data over any axis.
 
     Used for making sub-frequency band shape template and general time averaging,
@@ -125,7 +127,7 @@ class HFBAverage(task.SingleTask):
         return out
 
 
-class MakeHighFreqRes(task.SingleTask):
+class MakeHighFreqRes(tasklib.base.ContainerTask):
     """Combine frequency and sub-frequency axes."""
 
     def process(self, stream):
@@ -188,7 +190,7 @@ class MakeHighFreqRes(task.SingleTask):
         return out
 
 
-class MakeHighFreqResRingMap(task.SingleTask):
+class MakeHighFreqResRingMap(tasklib.base.ContainerTask):
     """Combine frequency and sub-frequency axes and reorder axes for HFB ringmaps."""
 
     def process(self, stream):
@@ -248,14 +250,14 @@ class MakeHighFreqResRingMap(task.SingleTask):
 
         # HACK: If the `el` axis is contains fewer elements than there are MPI processes,
         # redistribute along new (longer) `freq` axis to avoid write-out bug
-        if len(out.el) < mpiutil.size:
+        if len(out.el) < mpitools.size:
             out.redistribute("freq")
 
         # Return output container
         return out
 
 
-class HFBDivideByTemplate(task.SingleTask):
+class HFBDivideByTemplate(tasklib.base.ContainerTask):
     """Divide HFB data by template of time-averaged HFB data.
 
     Used for flattening sub-frequency band shape by dividing on-source data by a
@@ -298,7 +300,7 @@ class HFBDivideByTemplate(task.SingleTask):
         return out
 
 
-class HFBAlignEWBeams(task.SingleTask):
+class HFBAlignEWBeams(tasklib.base.ContainerTask):
     """Shift HFB ringmap data to true RA values in order to align EW beams."""
 
     def setup(self):
@@ -371,7 +373,7 @@ class HFBAlignEWBeams(task.SingleTask):
         return out
 
 
-class HFBDifference(task.SingleTask):
+class HFBDifference(tasklib.base.ContainerTask):
     """Take the difference of two sets of HFB data.
 
     Used for flattening sub-frequency band shape by differencing on-source and
@@ -405,7 +407,7 @@ class HFBDifference(task.SingleTask):
         )
 
         # Create container to hold output
-        out = dcontainers.empty_like(minuend)
+        out = empty_like(minuend)
 
         # Save data and weights to output container
         out.hfb[:] = data
@@ -414,7 +416,7 @@ class HFBDifference(task.SingleTask):
         return out
 
 
-class HFBOnOffDifference(task.SingleTask):
+class HFBOnOffDifference(tasklib.base.ContainerTask):
     """Computes on-off differencing.
 
     Used for flattening sub-frequency band shape by differencing on-source and
@@ -531,7 +533,7 @@ class HFBOnOffDifference(task.SingleTask):
         return out
 
 
-class HFBStackDays(task.SingleTask):
+class HFBStackDays(tasklib.base.ContainerTask):
     """Combine HFB data of multiple days.
 
     Attributes
@@ -571,7 +573,7 @@ class HFBStackDays(task.SingleTask):
         # If this is our first sidereal day, then initialize the
         # container that will hold the stack.
         if self.stack is None:
-            self.stack = dcontainers.empty_like(sdata)
+            self.stack = empty_like(sdata)
 
             # Add stack-specific dataset: count of samples, to be used as weight
             # for the uniform weighting case. Initialize this dataset to zero.
@@ -653,7 +655,7 @@ class HFBStackDays(task.SingleTask):
         return self.stack
 
 
-class HFBSelectTransit(task.SingleTask):
+class HFBSelectTransit(tasklib.base.ContainerTask):
     """Find transit data through FRB beams.
 
     Task for selecting on- and off-source data. The task can do both, but only
@@ -908,7 +910,7 @@ class HFBSelectTransit(task.SingleTask):
         return out
 
 
-class SelectBeam(BeamSelectionMixin, task.SingleTask):
+class SelectBeam(BeamSelectionMixin, tasklib.base.ContainerTask):
     """Select a subset of EW and/or NS beams from a container.
 
     The selection is made by passing `beam_ew_include` and/or `beam_ns_index` or
@@ -936,7 +938,7 @@ class SelectBeam(BeamSelectionMixin, task.SingleTask):
             New container with a selection of beams.
         """
         # Create new container with subset of beams
-        newstream = dcontainers.empty_like(stream, beam=self.beam_sel)
+        newstream = empty_like(stream, beam=self.beam_sel)
 
         # Make sure all datasets are initialised
         for name in stream.datasets.keys():
@@ -947,12 +949,12 @@ class SelectBeam(BeamSelectionMixin, task.SingleTask):
         selindex = np.flatnonzero(np.isin(stream.beam, self.beam_sel)).tolist()
 
         # Copy over datasets
-        dcontainers.copy_datasets_filter(stream, newstream, "beam", selindex)
+        copy_datasets_filter(stream, newstream, "beam", selindex)
 
         return newstream
 
 
-class HFBFlattenPFB(task.SingleTask):
+class HFBFlattenPFB(tasklib.base.ContainerTask):
     """Flatten HFB data using PFB deconvolution."""
 
     def process(self, stream):
@@ -999,7 +1001,7 @@ class HFBFlattenPFB(task.SingleTask):
         return out
 
 
-class HFBFlattenRingMapPFB(task.SingleTask):
+class HFBFlattenRingMapPFB(tasklib.base.ContainerTask):
     """Flatten HFB ringmap using PFB deconvolution."""
 
     def process(self, stream):
@@ -1047,7 +1049,7 @@ class HFBFlattenRingMapPFB(task.SingleTask):
         return out
 
 
-class HFBDividePFB(task.SingleTask):
+class HFBDividePFB(tasklib.base.ContainerTask):
     """Flatten HFB data by dividing out the PFB shape."""
 
     def process(self, stream):
@@ -1086,7 +1088,7 @@ class HFBDividePFB(task.SingleTask):
             )
 
         # Create container to hold output
-        out = dcontainers.empty_like(stream)
+        out = empty_like(stream)
 
         # Divide data by PFB shape and place in output container
         out.hfb[:] = data / pfb_shape
@@ -1098,7 +1100,7 @@ class HFBDividePFB(task.SingleTask):
         return out
 
 
-class HFBDopplerShift(task.SingleTask):
+class HFBDopplerShift(tasklib.base.ContainerTask):
     """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
 
     Attributes
@@ -1214,7 +1216,7 @@ class HFBDopplerShift(task.SingleTask):
         weight_shifted = weight_shifted[::-1, ...]
 
         # Create container to hold output.
-        out = dcontainers.empty_like(stream)
+        out = empty_like(stream)
 
         out.hfb[:] = data_shifted
         out.weight[:] = weight_shifted
@@ -1347,7 +1349,7 @@ def _ensure_list(x):
     return y
 
 
-class HFBMedianSubtraction(task.SingleTask):
+class HFBMedianSubtraction(tasklib.base.ContainerTask):
     """Subtract weighted median along beam axis.
 
     This is to remove fluctuations in the data induced by temperature
@@ -1391,10 +1393,10 @@ class HFBMedianSubtraction(task.SingleTask):
         binary_weight = np.swapaxes(binary_weight, 2, 3)
 
         # Calculate weighted median (to exclude flagged data) along beam axis:
-        median = weighted_median.weighted_median(data_s, binary_weight)
+        med = median.weighted_median(data_s, binary_weight)
 
-        # Subtract weighted median along all beams from the data
-        diff = data - median[:, :, np.newaxis, :]
+        # Sjubtract weighted median along all beams from the data
+        diff = data - med[:, :, np.newaxis, :]
 
         # Create container to hold output
         out = containers.HFBData(stream)

@@ -219,7 +219,7 @@ class ProcessingType:
 
         # Revisions are labelled by a two digit code
         # TODO: decide if two digits (i.e. 100 revisions max is enough)
-        rev_regex = re.compile("^rev_\d{2}$")
+        rev_regex = re.compile(r"^rev_\d{2}$")
 
         return sorted([t.name for t in base.glob("*") if rev_regex.match(t.name)])
 
@@ -690,7 +690,7 @@ def slurm_jobs(user: str | None = None) -> list:
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError:
         warnings.warn('Failure running "squeue".')
@@ -872,7 +872,7 @@ def slurm_fairshare(account: str, user: str | None = None) -> tuple[str, str]:
             shell=False,
             universal_newlines=True,
         )
-        proc_stdout, proc_stderr = process.communicate()
+        proc_stdout, _ = process.communicate()
         lines = proc_stdout.split("\n")
     except OSError as e:
         raise RuntimeError('Failure running "sshare".') from e

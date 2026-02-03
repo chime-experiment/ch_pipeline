@@ -16,7 +16,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
 
         Parameters
         ----------
-        observer : caput.time.Observer, optional
+        observer : caput.astro.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
         # Set up the default Observer
@@ -61,7 +61,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
 
         # Massage down to a 3D array by combining the subfreq and beam axes;
         # this is to fit the expectations of the base class
-        lfreq, *sb, ntime = hfb_data.shape
+        lfreq, *_, ntime = hfb_data.shape
         hfb_data = hfb_data.reshape(lfreq, -1, ntime)
         weight = weight.reshape(lfreq, -1, ntime)
 

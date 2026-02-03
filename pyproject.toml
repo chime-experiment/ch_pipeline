@@ -32,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 docs = [
     "docutils",
-    "Sphinx",
+    "Sphinx<9",
     "sphinx_rtd_theme"
 ]
 hfb = [

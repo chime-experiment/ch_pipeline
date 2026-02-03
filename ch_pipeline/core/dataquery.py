@@ -42,19 +42,21 @@ from __future__ import annotations
 import os
 
 import numpy as np
-from caput import config, mpiutil, pipeline
-from caput import time as ctime
+from caput import config
+from caput.astro import time as ctime
+from caput.pipeline import tasklib
+from caput.pipeline.exceptions import PipelineStopIteration
+from caput.util import mpitools
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import andata, finder, layout, tools
 from chimedb import data_index as di
 from chimedb import dataset as ds
 from chimedb.core import exceptions
-from draco.core import task
 
 from ch_pipeline.core import containers
 
-_DEFAULT_NODE_SPOOF = {"cedar_online": "/project/rpp-chime/chime/chime_online/"}
+_DEFAULT_NODE_SPOOF = {"fir_online": "/project/rpp-chime/chime/chime_online/"}
 
 
 def _force_list(val) -> list:
@@ -68,7 +70,7 @@ def _force_list(val) -> list:
     return [val]
 
 
-class ConnectDatabase(task.MPILoggedTask):
+class ConnectDatabase(tasklib.base.MPILoggedTask):
     """Establish an initial connection to the chimedb database.
 
     This is useful when running pipelines on machines with poor
@@ -96,7 +98,7 @@ class ConnectDatabase(task.MPILoggedTask):
         chimedb.core.connect(ntries=self.ntries)
 
 
-class QueryDatabase(task.MPILoggedTask):
+class QueryDatabase(tasklib.base.MPILoggedTask):
     """Find files from specified database queries.
 
     This routine will query the database as specified in the runtime
@@ -105,7 +107,7 @@ class QueryDatabase(task.MPILoggedTask):
     Attributes
     ----------
     node_spoof : dictionary
-        (default: {'cedar_online': '/project/rpp-krs/chime/chime_online/'} )
+        (default: {'fir_online': '/project/rpp-chime/chime/chime_online/'} )
         host and directory in which to find data.
     start_time, end_time : string (default: None)
         start and end times to restrict the database search to
@@ -208,7 +210,7 @@ class QueryDatabase(task.MPILoggedTask):
         files = None
 
         # Query the database on rank=0 only, and broadcast to everywhere else
-        if mpiutil.rank0:
+        if mpitools.rank0:
             if self.run_name:
                 return self.QueryRun()
 
@@ -308,15 +310,15 @@ class QueryDatabase(task.MPILoggedTask):
                 files = results
                 files.sort(key=lambda x: x[1][0])
 
-        files = mpiutil.world.bcast(files, root=0)
+        files = mpitools.world.bcast(files, root=0)
 
         # Make sure all nodes have container before return
-        mpiutil.world.Barrier()
+        mpitools.world.Barrier()
 
         return files
 
 
-class QueryRun(task.MPILoggedTask):
+class QueryRun(tasklib.base.MPILoggedTask):
     """Find the files belonging to a specific `run`.
 
     This routine will query the database for the global flag corresponding to
@@ -348,7 +350,7 @@ class QueryRun(task.MPILoggedTask):
         files = None
 
         # Query the database on rank=0 only, and broadcast to everywhere else
-        if mpiutil.rank0:
+        if mpitools.rank0:
             layout.connect_database()
 
             cat_run = (
@@ -408,15 +410,15 @@ class QueryRun(task.MPILoggedTask):
             files = [fname for result in results for fname in result[0]]
             files.sort()
 
-        files = mpiutil.world.bcast(files, root=0)
+        files = mpitools.world.bcast(files, root=0)
 
         # Make sure all nodes have container before return
-        mpiutil.world.Barrier()
+        mpitools.world.Barrier()
 
         return files
 
 
-class QueryDataspecFile(task.MPILoggedTask):
+class QueryDataspecFile(tasklib.base.MPILoggedTask):
     """Find the available files given a dataspec from a file.
 
     .. deprecated:: pass1
@@ -487,7 +489,7 @@ class QueryDataspecFile(task.MPILoggedTask):
         return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
-class QueryDataspec(task.MPILoggedTask):
+class QueryDataspec(tasklib.base.MPILoggedTask):
     """Find the available files given a dataspec in the config file.
 
     Attributes
@@ -521,7 +523,7 @@ class QueryDataspec(task.MPILoggedTask):
         return files_from_spec(dspec, node_spoof=self.node_spoof)
 
 
-class QueryAcquisitions(task.MPILoggedTask):
+class QueryAcquisitions(tasklib.base.MPILoggedTask):
     """Iterate over acquisitions.
 
     This routine will query the database as specified in the runtime
@@ -630,12 +632,12 @@ class QueryAcquisitions(task.MPILoggedTask):
             List of files to load
         """
         if len(self.files) == 0:
-            raise pipeline.PipelineStopIteration
+            raise PipelineStopIteration
 
         return self.files.pop(0)
 
 
-class QueryInputs(task.MPILoggedTask):
+class QueryInputs(tasklib.base.MPILoggedTask):
     """From a dataspec describing the data create a list of objects describing the inputs in the files.
 
     Attributes
@@ -670,7 +672,7 @@ class QueryInputs(task.MPILoggedTask):
 
         inputs = None
 
-        if mpiutil.rank0:
+        if mpitools.rank0:
             # Get the datetime of the middle of the file
             time = ctime.unix_to_datetime(0.5 * (ts.time[0] + ts.time[-1]))
             inputs = tools.get_correlator_inputs(time)
@@ -678,19 +680,19 @@ class QueryInputs(task.MPILoggedTask):
             inputs = tools.reorder_correlator_inputs(ts.index_map["input"], inputs)
 
         # Broadcast input description to all ranks
-        inputs = mpiutil.world.bcast(inputs, root=0)
+        inputs = mpitools.world.bcast(inputs, root=0)
 
         # Save into the cache for the next iteration
         if self.cache:
             self._cached_inputs = inputs
 
         # Make sure all nodes have container before return
-        mpiutil.world.Barrier()
+        mpitools.world.Barrier()
 
         return inputs
 
 
-class QueryFrequencyMap(task.MPILoggedTask):
+class QueryFrequencyMap(tasklib.base.MPILoggedTask):
     """Get the CHIME frequency map that was active when this data was collected.
 
     Attributes
@@ -825,7 +827,7 @@ def finder_from_spec(spec, node_spoof=None):
     timerange = spec["timerange"]
 
     fi = None
-    if mpiutil.rank0:
+    if mpitools.rank0:
         # Get instrument
         inst_obj = (
             di.ArchiveInst.select().where(di.ArchiveInst.name == instrument).get()
@@ -877,7 +879,7 @@ def files_from_spec(spec, node_spoof=None):
 
     files = None
 
-    if mpiutil.rank0:
+    if mpitools.rank0:
         # Get the finder object
         fi = finder_from_spec(spec, node_spoof)
 
@@ -886,4 +888,4 @@ def files_from_spec(spec, node_spoof=None):
         files = [fname for result in results for fname in result[0]]
         files.sort()
 
-    return mpiutil.world.bcast(files, root=0)
+    return mpitools.world.bcast(files, root=0)

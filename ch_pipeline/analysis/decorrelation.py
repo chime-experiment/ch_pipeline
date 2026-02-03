@@ -23,14 +23,15 @@ Use this task together with:
 
 import numpy as np
 from caput import config
+from caput.algorithms import invert_no_zero
+from caput.containers import empty_like
+from caput.pipeline import tasklib
 from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import tools
-from draco.core import containers, task
-from draco.util.tools import invert_no_zero
 
 
-class CorrectDecorrelation(task.SingleTask):
+class CorrectDecorrelation(tasklib.base.ContainerTask):
     """Correct decorrelation in the PFB due to delays between signals.
 
     The delays and therefore the correction are direction dependent, so
@@ -112,7 +113,7 @@ class CorrectDecorrelation(task.SingleTask):
             tstream.weight[:] = weight
             return tstream
 
-        tstream_corr = containers.empty_like(tstream)
+        tstream_corr = empty_like(tstream)
         tstream_corr.vis[:] = corr_vis
         tstream_corr.weight[:] = weight
 

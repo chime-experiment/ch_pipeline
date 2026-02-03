@@ -3,6 +3,8 @@
 import beam_model.formed as fm
 import numpy as np
 from caput import config, mpiarray, tools
+from caput.algorithms import invert_no_zero
+from caput.pipeline import tasklib
 from draco.analysis.sidereal import _search_nearest
 from draco.core import task
 from draco.core.containers import LocalizedRFIMask, RFIMask
@@ -11,7 +13,7 @@ from scipy.spatial.distance import cdist
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
 
 
-class HFBRadiometerRFIFlagging(task.SingleTask):
+class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
     """Identify RFI in HFB data using the radiometer noise test, averaging over beams.
 
     Attributes
@@ -66,7 +68,7 @@ class HFBRadiometerRFIFlagging(task.SingleTask):
         return out
 
 
-class ApplyHFBMask(task.SingleTask):
+class ApplyHFBMask(tasklib.base.ContainerTask):
     """Apply a mask to an HFB stream.
 
     Attributes
@@ -126,7 +128,7 @@ class ApplyHFBMask(task.SingleTask):
         return stream
 
 
-class HFBDirectionalRFIFlagging(task.SingleTask):
+class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
     This task detects RFI signals based on deviations from expected radiometer noise
@@ -213,7 +215,7 @@ class HFBDirectionalRFIFlagging(task.SingleTask):
         return out
 
 
-class RFIMaskHFBRegridderNearest(task.SingleTask):
+class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
     """Convert HFBDirectionalRFIMaskBitmap axis from beam_ns to el.
 
     This task takes an HFBDirectionalRFIMaskBitmap, selects the RFI mask corresponding
@@ -352,7 +354,7 @@ class RFIMaskHFBRegridderNearest(task.SingleTask):
                 denominator = np.sum(window, axis=-1).reshape(
                     (-1,) + (1,) * (numerator.ndim - 1)
                 )
-                converted = numerator * tools.invert_no_zero(denominator)
+                converted = numerator * invert_no_zero(denominator)
                 out.frac_rfi[:].local_array[i - sf, el_start:el_end, :] = converted
 
         # Return output container
@@ -478,12 +480,12 @@ def sensitivity_metric(stream, average_beams):
     n_samp = delta_nu * delta_t * (1.0 - frac_lost)
 
     if average_beams:
-        inv_n_samp = tools.invert_no_zero(n_samp)[:, None, :]
+        inv_n_samp = invert_no_zero(n_samp)[:, None, :]
     else:
-        inv_n_samp = tools.invert_no_zero(n_samp)[:, None, None, :]
+        inv_n_samp = invert_no_zero(n_samp)[:, None, None, :]
 
     # The ideal radiometer equation
     radiometer = data**2 * inv_n_samp
 
     # Compute and return the sensitivity metric
-    return 2.0 * tools.invert_no_zero(radiometer * weight)
+    return 2.0 * invert_no_zero(radiometer * weight)

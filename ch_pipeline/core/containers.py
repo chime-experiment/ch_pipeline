@@ -32,10 +32,12 @@ import posixpath
 from typing import ClassVar
 
 import numpy as np
-from caput import memh5
+from caput import memdata
+from caput.containers import Container, ContainerPrototype
+from caput.pipeline.tasklib.base import MPILoggedTask
+from caput.util import typeutils
 from ch_util import andata
 from draco.core.containers import (
-    ContainerBase,
     FormedBeam,
     FreqContainer,
     SpectroscopicCatalog,
@@ -43,7 +45,6 @@ from draco.core.containers import (
     TimeStream,
     TODContainer,
 )
-from draco.core.task import MPILoggedTask
 
 
 class FrequencyMapSingle(FreqContainer):
@@ -143,7 +144,7 @@ class FrequencyMap(FreqContainer, TODContainer):
         return self.datasets["node"]
 
 
-class RFIMask(ContainerBase):
+class RFIMask(ContainerPrototype):
     """Container for holding a mask that indicates data that is free of RFI events."""
 
     _axes = ("freq", "input", "time")
@@ -185,7 +186,7 @@ class RFIMask(ContainerBase):
         return self.datasets["ndev"]
 
 
-class CorrInputMask(ContainerBase):
+class CorrInputMask(ContainerPrototype):
     """Container for holding mask indicating good correlator inputs."""
 
     _axes = ("input",)
@@ -208,7 +209,7 @@ class CorrInputMask(ContainerBase):
         return self.index_map["input"]
 
 
-class CorrInputTest(ContainerBase):
+class CorrInputTest(ContainerPrototype):
     """Container for holding results of tests for good correlator inputs."""
 
     _axes = ("freq", "input", "test")
@@ -257,7 +258,7 @@ class CorrInputTest(ContainerBase):
         return self.index_map["test"]
 
 
-class CorrInputMonitor(ContainerBase):
+class CorrInputMonitor(ContainerPrototype):
     """Container for holding results of good correlator inputs monitor."""
 
     _axes = ("freq", "input", "coord")
@@ -344,7 +345,7 @@ class CorrInputMonitor(ContainerBase):
         return self.index_map["coord"]
 
 
-class SiderealDayFlag(ContainerBase):
+class SiderealDayFlag(ContainerPrototype):
     """Container for holding flag that indicates good chime sidereal days."""
 
     _axes = ("csd",)
@@ -367,7 +368,7 @@ class SiderealDayFlag(ContainerBase):
         return self.index_map["csd"]
 
 
-class TransitFitParams(ContainerBase):
+class TransitFitParams(ContainerPrototype):
     """Parallel container for holding the results of fitting a model to a point source transit."""
 
     _axes = ("freq", "input", "param", "component")
@@ -639,7 +640,7 @@ class SourceModel(FreqContainer):
         return np.array([src.index(par) for par in self.param["source"]])
 
 
-class SunTransit(ContainerBase):
+class SunTransit(ContainerPrototype):
     """Parallel container for holding the results of a fit to a point source transit."""
 
     _axes = (
@@ -852,7 +853,7 @@ class FormedBeamTime(FormedBeam, TODContainer):
     }
 
 
-class RingMap(ContainerBase):
+class RingMap(ContainerPrototype):
     """Container for holding multifrequency ring maps.
 
     The maps are packed in format `[freq, pol, ra, EW beam, el]` where
@@ -925,7 +926,7 @@ class RingMap(ContainerBase):
         return self.datasets["dirty_beam"]
 
 
-class Photometry(ContainerBase):
+class Photometry(ContainerPrototype):
     """Parallel container for holding photometry extracted from a map."""
 
     _axes = ("freq", "pol", "param", "source")
@@ -1144,7 +1145,7 @@ class CHIMETimeStream(TimeStream, RawContainer):
     @property
     def dataset_id(self):
         """Get the dataset_id dataset in Unicode."""
-        dsid = memh5.ensure_unicode(self["flags/dataset_id"][:])
+        dsid = typeutils.ensure_unicode(self["flags/dataset_id"][:])
         dsid.flags.writeable = False
 
         return dsid
@@ -1226,11 +1227,11 @@ def make_empty_corrdata(
 
     # Initialise distributed container
     data = andata.CorrData.__new__(andata.CorrData)
-    memh5.BasicCont.__init__(data, distributed=True, comm=comm)
+    Container.__init__(data, distributed=True, comm=comm)
 
     # Copy over attributes
     if attrs_from is not None:
-        memh5.copyattrs(attrs_from.attrs, data.attrs)
+        memdata.copyattrs(attrs_from.attrs, data.attrs)
 
     # Create index map
     data.create_index_map("freq", freq)
@@ -1363,16 +1364,16 @@ class MonkeyPatchContainers(MPILoggedTask):
 
             Parameters
             ----------
-            obj : ContainerBase or CorrData
+            obj : ContainerPrototype or CorrData
                 Container to base this one off.
             kwargs : optional
                 Optional definitions of specific axes we want to override. Works in the
-                same way as the `ContainerBase` constructor, though `axes_from=obj` and
+                same way as the `ContainerPrototype` constructor, though `axes_from=obj` and
                 `attrs_from=obj` are implied.
 
             Returns
             -------
-            newobj : container.ContainerBase or CorrData
+            newobj : container.ContainerPrototype or CorrData
                 New data container.
             """
             from ch_util import andata

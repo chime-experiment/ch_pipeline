@@ -32,14 +32,14 @@ import re
 from typing import ClassVar
 
 import numpy as np
-from caput import config, pipeline
+from caput import config
+from caput.pipeline import exceptions, tasklib
 from ch_util import andata
-from draco.core import io, task
 
 from . import containers
 
 
-class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
+class LoadCorrDataFiles(tasklib.base.ContainerTask, tasklib.io.SelectionsMixin):
     """Load CHIME correlator data from a file list passed into the setup routine.
 
     File must be a serialised subclass of :class:`ch_util.andata.CorrData`.
@@ -119,7 +119,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
             `use_draco_container`.
         """
         if len(self.files) == self._file_ptr:
-            raise pipeline.PipelineStopIteration
+            raise exceptions.PipelineStopIteration
 
         # Collect garbage to remove any prior CorrData objects
         gc.collect()
@@ -200,7 +200,7 @@ class LoadCorrDataFiles(task.SingleTask, io.SelectionsMixin):
         return ts
 
 
-class LoadDataFiles(task.SingleTask):
+class LoadDataFiles(tasklib.base.ContainerTask):
     """Load general CHIME data from files passed into the setup routine.
 
     This does *not* support correlator data. Use `LoadCorrDataFiles` instead.
@@ -252,7 +252,7 @@ class LoadDataFiles(task.SingleTask):
     def _load_next_file(self):
         """Load the next available file into memory."""
         if self._file_ptr == len(self.files):
-            raise pipeline.PipelineStopIteration
+            raise exceptions.PipelineStopIteration
 
         # Collect garbage to remove any prior data objects
         gc.collect()
@@ -356,8 +356,8 @@ class LoadGainUpdates(LoadDataFiles):
         return gains
 
 
-class LoadSetupFile(io.BaseLoadFiles):
-    """Loads a file from disk into a memh5 container during setup.
+class LoadSetupFile(tasklib.io.BaseLoadFiles):
+    """Loads a file from disk into a memdata container during setup.
 
     Attributes
     ----------
@@ -372,7 +372,7 @@ class LoadSetupFile(io.BaseLoadFiles):
 
         Returns
         -------
-        cont : subclass of `memh5.BasicCont`
+        cont : subclass of `memdata.Container`
         """
         # Call the baseclass setup to resolve any selections
         super().setup()
@@ -390,8 +390,8 @@ class LoadSetupFile(io.BaseLoadFiles):
         pass
 
 
-class LoadFileFromTag(io.BaseLoadFiles):
-    """Loads a file from disk into a memh5 container.
+class LoadFileFromTag(tasklib.io.BaseLoadFiles):
+    """Loads a file from disk into a memdata container.
 
     The suffix of the filename is extracted from the tag of the input container.
 
@@ -437,12 +437,12 @@ class LoadFileFromTag(io.BaseLoadFiles):
 
         Parameters
         ----------
-        incont : subclass of `memh5.BasicCont`
+        incont : subclass of `memdata.Container`
             get the `tag` attribute from this container
 
         Returns
         -------
-        outcont : subclass of `memh5.BasicCont`
+        outcont : subclass of `memdata.Container`
         """
         if not self.only_prefix:
             filename = self.prefix + incont.attrs["tag"] + ".h5"
@@ -454,7 +454,7 @@ class LoadFileFromTag(io.BaseLoadFiles):
         return self.outcont
 
 
-class FilterExisting(task.MPILoggedTask):
+class FilterExisting(tasklib.base.MPILoggedTask):
     """Filter out files from any list that have already been processed.
 
     Each file is found in the database and is compared against given
@@ -476,12 +476,12 @@ class FilterExisting(task.MPILoggedTask):
     def __init__(self):
         super().__init__()
 
-        from caput import mpiutil
+        from caput.util import mpitools
 
         self.csd_list = []
         self.corr_files = {}
 
-        if mpiutil.rank0:
+        if mpitools.rank0:
             # Look for CSDs in the current directory
             import glob
 
@@ -523,8 +523,8 @@ class FilterExisting(task.MPILoggedTask):
             self.log.debug("Skipping existing CSDs %s", repr(self.csd_list))
 
         # Broadcast results to other ranks
-        self.corr_files = mpiutil.world.bcast(self.corr_files, root=0)
-        self.csd_list = mpiutil.world.bcast(self.csd_list, root=0)
+        self.corr_files = mpitools.world.bcast(self.corr_files, root=0)
+        self.csd_list = mpitools.world.bcast(self.csd_list, root=0)
 
     def next(self, files):
         """Filter the incoming file lists."""

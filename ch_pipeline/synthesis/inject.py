@@ -5,12 +5,12 @@ import os
 import numpy as np
 import scipy.interpolate
 import scipy.stats
-from caput import config, interferometry
+from caput import config
 from ch_util import fluxcat
 from cora.util import units
 from draco.analysis.beamform import icrs_to_cirs
 from draco.core import io, task
-from draco.util import tools
+from draco.util import interferometry, tools
 
 from ..core import containers
 
@@ -868,7 +868,7 @@ class SpectroscopicCatalogWithBeamExternal(BeamExternal, SpectroscopicCatalog):
 
 def _get_baseline_info(data, telescope):
     # Determine stack axis
-    stack_new, stack_flag = tools.redefine_stack_index_map(
+    stack_new, _ = tools.redefine_stack_index_map(
         telescope, data.input, data.prod, data.stack, data.reverse_map["stack"]
     )
 

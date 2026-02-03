@@ -13,13 +13,13 @@ import math
 from datetime import datetime
 from typing import ClassVar
 
-import caput.time as ctime
+import caput.astro.time as ctime
 import chimedb.core as db
 import chimedb.data_index as di
 import chimedb.dataflag as df
 import numpy as np
 import peewee as pw
-from caput.tools import unique_ordered
+from caput.util.arraytools import unique_ordered
 from ch_ephem.observers import chime
 
 from ch_pipeline.processing import base
@@ -35,11 +35,11 @@ cluster:
   temp_directory: {tempdir}
 
   time: {time}
-  system: cedar
+  system: fir
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
-  mem: 192000M
+  mem: 768000M
 
   venv: {venv}
   module_path: {modpath}
@@ -92,7 +92,7 @@ pipeline:
         end_csd: {csd[1]:.2f}
         accept_all_global_flags: true
         node_spoof:
-          cedar_online: "/project/rpp-chime/chime/chime_online/"
+          fir_online: "/project/rpp-chime/chime/chime_online/"
         instrument: chimestack
 
     # Load the telescope model that we need for several steps
@@ -921,10 +921,10 @@ class DailyProcessing(base.ProcessingType):
         "modlist": "chime/python/2024.04",
         "nfreq_delay": 1025,
         # Job params
-        "time": 150,  # How long in minutes?
-        "nodes": 12,  # Number of nodes to use.
-        "ompnum": 4,  # Number of OpenMP threads
-        "pernode": 12,  # Jobs per node
+        "time": 120,  # How long in minutes?
+        "nodes": 4,  # Number of nodes to use.
+        "ompnum": 8,  # Number of OpenMP threads
+        "pernode": 24,  # Jobs per node
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove chimestack files before this CSD
@@ -1119,8 +1119,8 @@ class TestDailyProcessing(DailyProcessing):
             "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/",
             "time": 60,  # How long in minutes?
             "nodes": 1,  # Number of nodes to use.
-            "ompnum": 12,  # Number of OpenMP threads
-            "pernode": 4,  # Jobs per node
+            "ompnum": 8,  # Number of OpenMP threads
+            "pernode": 16,  # Jobs per node
         }
     )
 
@@ -1130,7 +1130,7 @@ def expand_csd_range(start, end, step=1):
 
     The start and end parameters must either be strings of the form "CSD\d+"
     (i.e. CSD followed by an int), which specifies an exact CSD start, or a
-    form that `caput.time.ensure_unix` understands.
+    form that `caput.astro.time.ensure_unix` understands.
 
     Parameters
     ----------
@@ -1353,7 +1353,7 @@ def db_get_corr_files_in_range(start_csd: int, end_csd: int):
         di.ArchiveFileCopy.has_file == "Y",
     )
     # Figure out which files are online
-    online_node = di.StorageNode.get(name="cedar_online", active=True)
+    online_node = di.StorageNode.get(name="fir_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
     files_online = sorted(files_online.tuples(), key=lambda x: x[1])
@@ -1415,7 +1415,7 @@ def db_get_weather_files_in_range(start_csd: int, end_csd: int):
         di.ArchiveFileCopy.has_file == "Y",
     )
     # Figure out which files are online
-    online_node = di.StorageNode.get(name="cedar_online", active=True)
+    online_node = di.StorageNode.get(name="fir_online", active=True)
     files_online = archive_files.where(di.ArchiveFileCopy.node == online_node)
 
     files_online = sorted(files_online.tuples(), key=lambda x: x[1])
@@ -1466,7 +1466,7 @@ def request_offline_csds(csds: list, pad: float = 0):
     """Given a list of csds, request that all required data be copied online.
 
     Request that all data required by the list of CSDS get copied to the
-    cedar_online node.
+    fir_online node.
 
     Parameters
     ----------
@@ -1476,29 +1476,40 @@ def request_offline_csds(csds: list, pad: float = 0):
         fraction of data from adjacent days that should also be copied online
     """
 
-    def _make_copy_request(file, source, target):
-        try:
-            # Check if an activate request already exists. If so,
-            # leave alpenhorn alone to do its thing
-            di.ArchiveFileCopyRequest.get(
-                file=file,
-                group_to=target,
-                node_from=source,
-                completed=False,
-                cancelled=False,
-            )
-            return 0
-        except pw.DoesNotExist:
-            di.ArchiveFileCopyRequest.insert(
-                file=file_,
-                group_to=target,
-                node_from=source,
-                cancelled=0,
-                completed=0,
-                n_requests=1,
-                timestamp=datetime.now(),
-            ).execute()
-            return 1
+    def _make_copy_request(file, sources, target):
+        # Find a source with the file
+        for source in sources:
+            try:
+                di.ArchiveFileCopy.get(file=file, node=source, has_file="Y")
+            except pw.DoesNotExist:
+                continue
+
+            # There is a copy of the file on this node, try to copy it.
+            try:
+                # Check if an active request already exists. If so,
+                # leave alpenhorn alone to do its thing
+                di.ArchiveFileCopyRequest.get(
+                    file=file,
+                    group_to=target,
+                    node_from=source,
+                    completed=False,
+                    cancelled=False,
+                )
+                return 0
+            except pw.DoesNotExist:
+                di.ArchiveFileCopyRequest.insert(
+                    file=file_,
+                    group_to=target,
+                    node_from=source,
+                    cancelled=0,
+                    completed=0,
+                    n_requests=1,
+                    timestamp=datetime.now(),
+                ).execute()
+                return 1
+
+        # No source with the file
+        return 0
 
     # Figure out which chimestack files are needed
     online_files, files = db_get_corr_files_in_range(csds[0] - pad, csds[-1] + pad)
@@ -1513,20 +1524,20 @@ def request_offline_csds(csds: list, pad: float = 0):
 
     db.connect(read_write=True)
 
-    target_node = di.StorageGroup.get(name="cedar_online")
-    offline_node = di.StorageNode.get(name="cedar_nearline")
-    smallfile_node = di.StorageNode.get(name="cedar_smallfile")
+    target_node = di.StorageGroup.get(name="fir_online")
+    offline_node = di.StorageNode.get(name="fir_nearline")
+    smallfile_node = di.StorageNode.get(name="fir_smallfile")
 
     nrequests = 0
 
     # Request chimestack files be brought back online
     for file_ in request_corr_files:
-        nr = _make_copy_request(file_, offline_node, target_node)
+        nr = _make_copy_request(file_, [offline_node, smallfile_node], target_node)
         nrequests += nr
 
     # Request weather files be brought back online
     for file_ in request_weather_files:
-        nr = _make_copy_request(file_, smallfile_node, target_node)
+        nr = _make_copy_request(file_, [smallfile_node], target_node)
         nrequests += nr
 
     return nrequests
@@ -1537,7 +1548,7 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
 
     Check the files required by `csds_remove` and check against those used
     by `csds_keep`. Any files which are _only_ used by csds in `csds_remove`
-    are removed from the `cedar_online` node, provided that a copy exists
+    are removed from the `fir_online` node, provided that a copy exists
     elsewhere.
 
     Parameters
@@ -1561,7 +1572,7 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     remove_files = get_filenames_used_by_csds(csds_remove, files, pad)
     remove_files = [file for file in remove_files if file not in keep_files]
 
-    online_node = di.StorageNode.get(name="cedar_online")
+    online_node = di.StorageNode.get(name="fir_online")
     # Establish a read-write database connection
     db.connect(read_write=True)
     # Request that these files be removed from the online node
