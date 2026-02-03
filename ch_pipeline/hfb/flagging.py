@@ -361,7 +361,7 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
         return out
 
 
-class RFIMaskReduceBeamNS(task.SingleTask):
+class RFIMaskReduceBeamNS(tasklib.base.ContainerTask):
     """Create RFIMask from HFBDirectionalRFIMaskBitmap.
 
     This task takes an HFBDirectionalRFIMaskBitmap(freq, beam_ns, time), selects the RFI
