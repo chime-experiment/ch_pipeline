@@ -6,7 +6,6 @@ from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
 from caput.pipeline import tasklib
 from draco.analysis.sidereal import _search_nearest
-from caput.pipeline import tasklib
 from draco.core.containers import LocalizedRFIMask, RFIMask
 from scipy.spatial.distance import cdist
 
@@ -192,12 +191,12 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
 
         # Create output container with the same axes
         out = HFBDirectionalRFIMaskBitmap(
-            std_key=self.std,
+            sigma_key=self.sigma,
             freq=stream.freq[:],
             beam_ns=stream.beam_ns[:],
             time=stream.time[:],
         )
-        out.attrs["bitmap"] = {std: i for i, std in enumerate(self.sigma[:])}
+        out.attrs["bitmap"] = {sigma: i for i, sigma in enumerate(self.sigma[:])}
 
         # For each significance, compute RFI flags and store counts
         for i in range(len(self.sigma)):
@@ -254,7 +253,7 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
     keep_frac_rfi = config.Property(proptype=bool, default=False)
     spread_factor = config.Property(proptype=float, default=1)
     npix = config.Property(proptype=int, default=512)
-    remove_persistent_beamns_frac = config.Property(proptype=float, default=0.0)
+    remove_persistent_beamns_frac = config.Property(proptype=float, default=None)
 
     def process(self, rfimaskbitmap):
         """Convert beam_ns axis of an HFBDIrectionalRFIMaskBitmap to el axis.
@@ -366,7 +365,7 @@ class RFIMaskReduceBeamNS(tasklib.base.ContainerTask):
 
     This task takes an HFBDirectionalRFIMaskBitmap(freq, beam_ns, time), selects the RFI
     mask corresponding to a specified significance value used in the detection and
-    subfrequency threshold, then reduce the 'beam_ns' axis to create a RFIMask container
+    subfrequency threshold, then reduces the 'beam_ns' axis to create a RFIMask container
     (freq, time).
 
     Attributes
@@ -391,14 +390,14 @@ class RFIMaskReduceBeamNS(tasklib.base.ContainerTask):
     sigma = config.Property(proptype=float, default=5)
     subfreq_threshold = config.Property(proptype=int, default=2)
     beam_ns_threshold = config.Property(proptype=int, default=1)
-    remove_persistent_beamns_frac = config.Property(proptype=float, default=0.0)
+    remove_persistent_beamns_frac = config.Property(proptype=float, default=None)
 
     def process(self, rfimaskbitmap):
         """Produce a RFI mask.
 
         Parameters
         ----------
-        rfimaskbitmap : containers.HFBDirectionalRFIMaskBitmap
+        rfimaskbitmap : hfb.containers.HFBDirectionalRFIMaskBitmap
             beam_ns-specific RFI mask with axes (freq, beam_ns, time).
 
         Returns
