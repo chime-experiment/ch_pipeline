@@ -5,14 +5,12 @@ from typing import ClassVar
 
 import numpy as np
 from caput import memdata
-from caput.containers import (
+from caput.containers import tod
+from ch_util import andata
+from draco.core.containers import (
     COMPRESSION,
     COMPRESSION_OPTS,
     DataWeightContainer,
-    tod,
-)
-from ch_util import andata
-from draco.core.containers import (
     SiderealContainer,
     TODContainer,
 )
@@ -164,7 +162,7 @@ class HFBData(RawContainer, FreqContainer, HFBBeamContainer):
         return super().from_file(*args, **kwargs)
 
 
-class HFBReader(tod.Reader):
+class HFBReader(tod.TODReader):
     """A reader for HFB type data."""
 
     data_class = HFBData
@@ -583,7 +581,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
 
     Each 32-bit unsigned integer stores four separate 8-bit data segments,
     corresponding to the number of HFB subfrequency channels detecting RFI
-    under different values of estimated standard deviation used for detection.
+    under different values of significance used for detection.
     """
 
     _axes = ("beam_ns",)
@@ -602,23 +600,54 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         },
     }
 
-    def __init__(self, *args, std_key: list[float] = [], **kwargs):
+    def __init__(self, *args, sigma_key: list[float] | None = None, **kwargs):
         """Sets up the bitmap attribute in the packed 32-bit representation."""
         super().__init__(*args, **kwargs)
 
-        # If std_key is provided, validat and store mapping for decoding individual 8-bit RFI segments
-        if std_key:
-            if len(std_key) != 4:
-                raise ValueError(
-                    f"Exactly four std values must be provided for packing into 32 bits, but got '{len(std_key)}'."
+        # If sigma_key is provided
+        if sigma_key is not None:
+
+            # Sort in increasing order
+            sigma_sorted = sorted(float(sigma) for sigma in sigma_key)
+
+            # De-duplicate
+            sigma_unique: list[float] = []
+            duplicates: list[float] = []
+            for sigma in sigma_sorted:
+                if any(np.isclose(s, sigma, rtol=0, atol=0.001) for s in sigma_unique):
+                    duplicates.append(sigma)
+                else:
+                    sigma_unique.append(sigma)
+
+            # If duplicates exist, print them and proceed with unique values only
+            if duplicates:
+                self.log.warning(
+                    f"Duplicate sigma_key values provided (within atol=0.001): {duplicates}. "
+                    f"Using unique values only: {sigma_unique}."
                 )
-        self.attrs["bitmap"] = {std: i for i, std in enumerate(std_key)}
+
+            # Validate after de-duplication
+            if len(sigma_unique) == 0:
+                raise ValueError(
+                    "sigma_key must contain at least one unique value (within atol=0.001)."
+                )
+            if len(sigma_unique) > 4:
+                raise ValueError(
+                    f"sigma_key must contain at most 4 unique values, but got {len(sigma_unique)}."
+                )
+            if any(sigma <= 0 for sigma in sigma_unique):
+                raise ValueError("All sigma_key values must be strictly positive.")
+
+            # Store mapping for decoding individual 8-bit RFI segments
+            self.attrs["bitmap"] = {
+                float(sigma): i for i, sigma in enumerate(sigma_key)
+            }
 
     @property
     def bitmap(self):
-        """Return the bitmap, the std-to-byte-offset mapping used in the packed 32-bit representation.
+        """Return the bitmap, the sigma-to-byte-offset mapping used in the packed 32-bit representation.
 
-        The bitmap is a dictionary mapping each std_key value to an integer in [0, 3],
+        The bitmap is a dictionary mapping each sigma_key value to an integer in [0, 3],
         indicating which 8-bit segment (out of four) stores the corresponding RFI data.
         """
         return self.attrs["bitmap"]
@@ -632,14 +661,13 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
     def subfreq_rfi(self):
         """Return the packed 32-bit unsigned integer subfrequency RFI masks.
 
-        Each 32-bit unsigned integer encodes four independent 8-bit RFI counts, one for each std_key.
-        The lowest-order byte (bits 0-7) corresponds to the first std_key,
+        Each 32-bit unsigned integer encodes four independent 8-bit RFI counts, one for each sigma_key.
+        The lowest-order byte (bits 0-7) corresponds to the first sigma_key,
         the next byte (bits 8-15) to the second, and so on, up to bits 24-31.
 
         Note: On little-endian systems, this byte order matches the memory layout.
         On big-endian systems, the order in memory will differ, but bit-level encoding remains consistent.
         """
-        """Return the packed 32-bit unsigned integer subfrequency RFI masks."""
         return self.datasets["subfreq_rfi"]
 
     @property
@@ -647,7 +675,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         """Disables the property for this container."""
         raise AttributeError(
             "The 'mask' property is not available in HFBDirectionalRFIMaskBitmap. "
-            "Use 'get_mask(std_key, subfreq_threshold)' to extract a specific 8-bit mask."
+            "Use 'get_mask(sigma_key, subfreq_threshold)' to extract a specific 8-bit mask."
         )
 
     @property
@@ -655,38 +683,45 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         """Disables the property for this container."""
         raise AttributeError(
             "The 'frac_rfi' property is not available in HFBDirectionalRFIMaskBitmap. "
-            "Use 'get_frac_rfi(std_type)' to extract a specific 8-bit mask."
+            "Use 'get_frac_rfi(sigma_type)' to extract a specific 8-bit mask."
         )
 
-    def get_subfreq_rfi(self, std_key: float) -> np.ndarray:
-        """Extract the 8-bit RFI data for a given std value."""
+    def get_subfreq_rfi(self, sigma_key: float) -> np.ndarray:
+        """Extract the 8-bit RFI data for a given sigma value."""
         if not self.attrs["bitmap"]:
             raise AttributeError(
                 "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
             )
 
-        offset = self.bitmap.get(std_key)
-
-        if offset is None:
+        offset = None
+        for k, v in self.bitmap.items():
+            if np.isclose(float(k), float(sigma_key), rtol=0, atol=0.001):
+                offset = v
+                break
+        else:
             raise KeyError(
-                f"Invalid std_key '{std_key}'. Must be one of {list(self.bitmap.keys())}."
+                f"Invalid sigma_key {sigma_key}. Must be one of {list(self.bitmap.keys())}."
             )
 
         return ((self.subfreq_rfi[:] >> (8 * offset)) & 0xFF).astype(np.uint8)
 
-    def set_subfreq_rfi(self, std_key: float, values: np.ndarray) -> None:
+    def set_subfreq_rfi(self, sigma_key: float, values: np.ndarray) -> None:
         """Set the 8-bit RFI data for a given beam type."""
         if not self.attrs["bitmap"]:
             raise AttributeError(
                 "'bitmap' has not been set in attrs. It must be defined to unpack RFI data."
             )
 
-        offset = self.bitmap.get(std_key)
-
-        if offset is None:
+        offset = None
+        for k, v in self.bitmap.items():
+            if np.isclose(float(k), float(sigma_key), rtol=0, atol=0.001):
+                offset = v
+                break
+        else:
             raise KeyError(
-                f"Invalid std_key '{std_key}'. Must be one of {list(self.bitmap.keys())}."
+                f"Invalid sigma_key {sigma_key}. Must be one of {list(self.bitmap.keys())}."
             )
+
         if np.any((values < 0) | (values > 128)):
             raise ValueError("Values must be in range 0 to 128.")
 
@@ -695,10 +730,56 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         # Set the new values in the correct byte position
         self.subfreq_rfi[:] |= (values.astype(np.uint32) & 0xFF) << (8 * offset)
 
-    def get_mask(self, std_key: float, subfreq_threshold: int) -> np.ndarray:
-        """Get a boolean RFI mask for a given std value and subfrequency RFI threshold."""
-        return self.get_subfreq_rfi(std_key) >= subfreq_threshold
+    def get_mask(
+        self,
+        sigma_key: float,
+        subfreq_threshold: int,
+        *,
+        remove_persistent_beamns_frac: float | None = None,
+    ) -> np.ndarray:
+        """Return a boolean RFI mask for a given sigma value and subfrequency threshold.
 
-    def get_frac_rfi(self, std_key: float) -> np.ndarray:
-        """Get the fraction of HFB subfrequency channels detecting RFI for a given std value."""
-        return self.get_subfreq_rfi(std_key) / 128
+        If desired, beam_ns rows that are persistently flagged across time are removed.
+        These are interpreted as instrumental offsets or calibration effects rather
+        than physical RFI.
+
+        Parameters
+        ----------
+        sigma_key : float
+            Sigma value identifying which 8-bit RFI bitmap to extract.
+            Must match one of the values provided (within atol=0.001).
+        subfreq_threshold : int
+            Minimum number of flagged HFB subfrequency channels required for a
+            time-frequency-beam sample to be considered RFI-contaminated.
+        remove_persistent_beamns_frac : float or None, optional
+            If provided, beam_ns rows that are flagged for more than this fraction
+            of time samples are treated as persistent instrumental contamination
+            or calibration offset rather than RFI, and removed from the mask.
+            Must be in the range [0, 1]. If None, no persistent beam_ns removal is applied.
+
+        Returns
+        -------
+        mask : np.ndarray
+            Boolean array of shape ``(freq, beam_ns, time)`` indicating RFI-flagged
+            samples.
+        """
+        mask = (
+            self.get_subfreq_rfi(sigma_key) >= subfreq_threshold
+        )  # mask shape: (freq, beam_ns, time)
+
+        if remove_persistent_beamns_frac is not None:
+            if not (0.0 <= remove_persistent_beamns_frac <= 1.0):
+                raise ValueError("remove_persistent_beamns_frac must be in [0, 1].")
+
+            ntime = mask.shape[-1]
+            persistent = (
+                mask.sum(axis=-1) > remove_persistent_beamns_frac * ntime
+            )  # persistent shape: (freq, beam_ns)
+
+            mask &= ~persistent[..., np.newaxis]
+
+        return mask
+
+    def get_frac_rfi(self, sigma_key: float) -> np.ndarray:
+        """Get the fraction of HFB subfrequency channels detecting RFI for a given sigma value."""
+        return self.get_subfreq_rfi(sigma_key) / 128
