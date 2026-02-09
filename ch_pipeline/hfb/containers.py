@@ -4,8 +4,8 @@ from functools import cached_property
 from typing import ClassVar
 
 import numpy as np
+from caput import memdata
 from caput.containers import tod
-from caput.memdata import _memh5
 from ch_util import andata
 from draco.core.containers import (
     COMPRESSION,
@@ -28,7 +28,7 @@ class HFBContainer(DataWeightContainer):
     _weight_dset_name = None  # Leave as None as this could potentially change location
 
     @property
-    def hfb(self) -> _memh5.MemDataset:
+    def hfb(self) -> memdata.MemDataset:
         """Convenience access to the main hfb dataset."""
         if "hfb" in self.datasets:
             return self.datasets["hfb"]
@@ -36,7 +36,7 @@ class HFBContainer(DataWeightContainer):
         raise KeyError("Dataset 'hfb' not initialised.")
 
     @property
-    def weight(self) -> _memh5.MemDataset:
+    def weight(self) -> memdata.MemDataset:
         """The inverse variance weight dataset."""
         if "weight" in self:
             weight = self["weight"]
@@ -49,7 +49,7 @@ class HFBContainer(DataWeightContainer):
         return weight
 
     @property
-    def nsample(self) -> _memh5.MemDataset:
+    def nsample(self) -> memdata.MemDataset:
         """Get the nsample dataset (number of non-zero samples) if it exists."""
         if "nsample" in self.datasets:
             return self.datasets["nsample"]
@@ -220,7 +220,7 @@ class HFBReader(tod.TODReader):
 
         Parameters
         ----------
-        out_group : `h5py.Group`, hdf5 filename or `memh5.Group`
+        out_group : `h5py.Group`, hdf5 filename or `memdata.Group`
             Underlying hdf5 like container that will store the data for the
             BaseData instance.
 
@@ -621,7 +621,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
 
             # If duplicates exist, print them and proceed with unique values only
             if duplicates:
-                print(
+                self.log.warning(
                     f"Duplicate sigma_key values provided (within atol=0.001): {duplicates}. "
                     f"Using unique values only: {sigma_unique}."
                 )
@@ -698,9 +698,9 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
             if np.isclose(float(k), float(sigma_key), rtol=0, atol=0.001):
                 offset = v
                 break
-        if offset is None:
+        else:
             raise KeyError(
-                f"Invalid sigma_key '{sigma_key}'. Must be one of {list(self.bitmap.keys())}."
+                f"Invalid sigma_key {sigma_key}. Must be one of {list(self.bitmap.keys())}."
             )
 
         return ((self.subfreq_rfi[:] >> (8 * offset)) & 0xFF).astype(np.uint8)
@@ -717,10 +717,11 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
             if np.isclose(float(k), float(sigma_key), rtol=0, atol=0.001):
                 offset = v
                 break
-        if offset is None:
+        else:
             raise KeyError(
-                f"Invalid sigma_key '{sigma_key}'. Must be one of {list(self.bitmap.keys())}."
+                f"Invalid sigma_key {sigma_key}. Must be one of {list(self.bitmap.keys())}."
             )
+
         if np.any((values < 0) | (values > 128)):
             raise ValueError("Values must be in range 0 to 128.")
 
@@ -775,7 +776,7 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
                 mask.sum(axis=-1) > remove_persistent_beamns_frac * ntime
             )  # persistent shape: (freq, beam_ns)
 
-            mask &= ~persistent[..., None]
+            mask &= ~persistent[..., np.newaxis]
 
         return mask
 
