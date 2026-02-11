@@ -42,6 +42,9 @@ cluster:
   pernode: {pernode}
   mem: 768000M
 
+  invoke: mpirun
+  invoke_args: "--map-by l3cache:PE=$SLURM_CPUS_PER_TASK"
+
   venv: {venv}
   module_path: {modpath}
   module_list: {modlist}
