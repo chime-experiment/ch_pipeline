@@ -143,8 +143,7 @@ pipeline:
 class HFBDailyProcessing(base.ProcessingType):
     """Chime/HFB daily processing pipeline processing type.
 
-    Processes individual chimestack files into one CSD in RA, along with
-    ringmaps and other data products.
+    Processes individual hfb files to save RFI information.
     """
 
     type_name = "hfb_daily"
@@ -178,36 +177,9 @@ class HFBDailyProcessing(base.ProcessingType):
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove hfb files corresponding to CSDs below
+    # Absorber search for October 2021
     daemon_config: ClassVar = {
-        "keep_online": [
-            # Absorber search for October 2021
-            {"start": "CSD2872", "end": "CSD2943"},
-            # Rev 9 testing
-            {"start": "CSD2700", "end": "CSD2701"},
-            {"start": "CSD2800", "end": "CSD2801"},
-            {"start": "CSD3042", "end": "CSD3043"},
-            {"start": "CSD3103", "end": "CSD3104"},
-            {"start": "CSD3300", "end": "CSD3301"},
-            {"start": "CSD3405", "end": "CSD3406"},
-            {"start": "CSD3593", "end": "CSD3594"},
-            {"start": "CSD3741", "end": "CSD3742"},
-            {"start": "CSD3798", "end": "CSD3799"},
-            {"start": "CSD4000", "end": "CSD4001"},
-            {"start": "CSD4100", "end": "CSD4101"},
-            {"start": "CSD4230", "end": "CSD4231"},
-            {"start": "CSD4431", "end": "CSD4432"},
-            # HFB mask testing
-            {"start": "CSD3735", "end": "CSD3736"},
-            {"start": "CSD3744", "end": "CSD3745"},
-            {"start": "CSD3749", "end": "CSD3750"},
-            {"start": "CSD3754", "end": "CSD3755"},
-            {"start": "CSD3774", "end": "CSD3775"},
-            {"start": "CSD3776", "end": "CSD3777"},
-            {"start": "CSD3788", "end": "CSD3789"},
-            {"start": "CSD3794", "end": "CSD3795"},
-            {"start": "CSD3796", "end": "CSD3797"},
-            {"start": "CSD3798", "end": "CSD3799"},
-        ],
+        "keep_online": {"start": "CSD2872", "end": "CSD2943"},
     }
 
     def _create_hook(self):
@@ -327,9 +299,9 @@ class HFBDailyProcessing(base.ProcessingType):
             }
             all_tags = [tag for tag in all_tags if tag not in exclude_tags]
 
-            # Search the next 20 tags and request any that we may want to be brought online.
+            # Search the next 5 tags and request any that we may want to be brought online.
             online_request_tags = sorted(
-                [int(tag) for tag in all_tags[:20] if tag not in upcoming]
+                [int(tag) for tag in all_tags[:5] if tag not in upcoming]
             )
             if online_request_tags:
                 # Submit the request to bring files online
