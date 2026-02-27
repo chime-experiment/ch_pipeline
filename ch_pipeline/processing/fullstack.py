@@ -12,12 +12,13 @@ DEFAULT_SCRIPT = """
 # Cluster configuration
 cluster:
   name: {jobname}
+  account: rpp-chime
 
   directory: {dir}
   temp_directory: {tempdir}
 
   time: {time}
-  system: fir
+  system: slurm
   nodes: {nodes}
   ompnum: {ompnum}
   pernode: {pernode}
@@ -54,12 +55,12 @@ pipeline:
 
   tasks:
 
-    - type: draco.core.task.SetMPILogging
+    - type: caput.pipeline.tasklib.base.SetMPILogging
       params:
         level_rank0: DEBUG
         level_all: WARNING
 
-    - type: draco.core.misc.CheckMPIEnvironment
+    - type: caput.pipeline.tasklib.debug.CheckMPIEnvironment
       params:
         timeout: 420
 
@@ -73,7 +74,7 @@ pipeline:
       params:
         product_directory: "{product_path}"
 
-    - type: draco.core.io.LoadBasicCont
+    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
       out: sstream
       params:
         files: *inputs
@@ -86,7 +87,7 @@ pipeline:
       params:
         tag: "fullstack"
 
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: fstack
       out: fstack_trunc
       params:
@@ -109,7 +110,7 @@ pipeline:
         exclude_intracyl: false
         include_auto: false
 
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: ringmap
       out: ringmap_trunc
       params:
@@ -132,7 +133,7 @@ pipeline:
         exclude_intracyl: true
         include_auto: false
 
-    - type: draco.core.io.Truncate
+    - type: caput.pipeline.tasklib.io.Truncate
       in: ringmap_int
       out: ringmap_int_trunc
       params:
@@ -145,7 +146,7 @@ pipeline:
         output_name: "ringmap_intercyl.h5"
 
     # Block
-    - type: draco.core.misc.WaitUntil
+    - type: caput.pipeline.tasklib.debug.WaitUntil
       requires: ringmap_int_trunc
       in: fstack
       out: fstack2

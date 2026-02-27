@@ -150,73 +150,14 @@ class RFIFilter(tasklib.base.ContainerTask):
         return out
 
 
-class RFINarrowbandVisMask(dflagging.RFINarrowbandVisMask):
-    """CHIME version of RFIFourierMask.
+class RFIStaticVisMask(dflagging.RFIStaticVisMask):
+    """CHIME version of RFIStaticVisMask.
 
-    This has a static mask for the local environment and will use the MAD
-    algorithm (over SumThreshold) when bright sources are visible.
-
-    Attributes
-    ----------
-    transit_width : float, optional
-        Ignore any times that occur within this number of sigma from
-        the transit of a bright source.  Here sigma refers to the standard
-        deviation of a a Gaussian approximation to the primary beam.
-        Default is 2.0.
+    Includes an accurate daytime flag.
     """
 
-    transit_width = config.Property(proptype=float, default=2.0)
-
-    def _static_rfi_mask_hook(self, freq, timestamp=None):
-        """Use the static CHIME RFI mask.
-
-        Parameters
-        ----------
-        freq : np.ndarray[nfreq]
-            1D array of frequencies in the data (in MHz).
-
-        timestamp : np.array[float]
-            Start observing time (in unix time)
-
-        Returns
-        -------
-        mask : np.ndarray[nfreq]
-            Mask array. True will mask a frequency channel.
-        """
-        return rfi.frequency_mask(freq, timestamp=timestamp)
-
-    def _source_flag_hook(self, times):
-        """Flag times where bright sources are transiting or sun is up.
-
-        Parameters
-        ----------
-        times : np.ndarray[float]
-            Array of timestamps associated with the full dataset.
-
-        Returns
-        -------
-        mask : np.ndarray[float]
-            Mask array. True will flag a time sample.
-        """
-        moon = skyfield_wrapper.ephemeris["moon"]
-        sun = skyfield_wrapper.ephemeris["sun"]
-        body = [
-            sources.source_dictionary[src]
-            for src in ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
-        ]
-        body += [sun, moon]
-
-        mask = np.zeros_like(times, dtype=bool)
-
-        for b_ in body:
-            mask |= transit_flag(b_, times, nsigma=self.transit_width)
-
-        mask |= daytime_flag(times)
-
-        return mask
-
-    def _solar_transit_hook(self, times):
-        """Override to flag solar transit times.
+    def _day_flag_hook(self, times):
+        """Ignores times during the day.
 
         Parameters
         ----------
@@ -228,9 +169,7 @@ class RFINarrowbandVisMask(dflagging.RFINarrowbandVisMask):
         mask : np.ndarray[float]
             Mask array. True will mask out a time sample.
         """
-        sun = skyfield_wrapper.ephemeris["sun"]
-
-        return transit_flag(sun, times, nsigma=self.transit_width)
+        return ~daytime_flag(times)
 
 
 class RFIMaskChisqHighDelay(dflagging.RFIMaskChisqHighDelay):
@@ -315,6 +254,8 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         the transit of the sun.  Here sigma refers to the standard
         deviation of a a Gaussian approximation to the primary beam.
         Default is 3.0.
+    include_static_mask : bool
+        If True, use the static mask hook. Default is True.
     """
 
     sources = config.Property(
@@ -322,6 +263,7 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
     )
     transit_width_source = config.Property(proptype=float, default=1.0)
     transit_width_sun = config.Property(proptype=float, default=3.0)
+    include_static_mask = config.Property(proptype=bool, default=True)
 
     def _combine_st_mad_hook(self, times, freq):
         """Use the MAD mask (over SumThreshold) whenever a bright source is overhead.
@@ -368,6 +310,9 @@ class RFISensitivityMask(dflagging.RFISensitivityMask):
         mask : np.ndarray[nfreq]
             Mask array. True will include a frequency channel, False masks it out.
         """
+        if not self.include_static_mask:
+            return super()._static_rfi_mask_hook(freq, timestamp)
+
         return ~rfi.frequency_mask(freq, timestamp=timestamp)
 
 
