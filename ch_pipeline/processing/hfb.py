@@ -13,17 +13,17 @@ from typing import ClassVar
 
 import chimedb.core as db
 import chimedb.data_index as di
-import numpy as np
 import peewee as pw
 from caput.util.arraytools import unique_ordered
 from ch_ephem.observers import chime
 
-from ch_pipeline.processing import base
-from ch_pipeline.processing.daily import (
+from . import base
+from .daily import (
     expand_csd_range,
     files_in_timespan,
     get_filenames_used_by_csds,
     get_flagged_csds,
+    get_recent_csds,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,6 @@ pipeline:
 
   tasks:
 
-  tasks:
-
     - type: caput.pipeline.tasklib.base.SetMPILogging
       params:
         level_rank0: DEBUG
@@ -123,27 +121,36 @@ pipeline:
       in: tstream_hfb
       out: rfibitmap_hfb
       params:
-        sigma: "{sigma_list}" #[2, 4, 5, 7]
+        sigma: "{sigma_list}"
 
     # Group into one sidereal-day container
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
       in: rfibitmap_hfb
       out: rfibitmap_hfb_grouped
-
-    - type: caput.pipeline.tasklib.io.Truncate
-      in: rfibitmap_hfb_grouped
-      out: rfibitmap_hfb_grouped_trunc
       params:
+	compression:
+          subfreq_rfi:
+            chunks: [64, 128, 512]
         save: true
         output_name: "rfibitmap_hfb_{{tag}}.h5"
 """
 
 
 class HFBDailyProcessing(base.ProcessingType):
-    """Chime/HFB daily processing pipeline processing type.
+    """Daily HFB pipeline.
 
-    Processes individual hfb files to save RFI information.
+    Defines the configuration and scheduling logic for running the CHIME
+    HFB daily pipeline. For each sidereal day (CSD), this pipeline:
+
+    - Queries the database for HFB acquisitions
+    - Loads the corresponding HFB files
+    - Runs directional RFI flagging to produce an RFI bitmap
+    - Groups results into a sidereal container
+    - Writes a truncated output product
+
+    This class also manages job submission, prioritization of recent days,
+    exclusion of flagged CSDs, and online/offline file staging.
     """
 
     type_name = "hfb_daily"
@@ -158,19 +165,17 @@ class HFBDailyProcessing(base.ProcessingType):
         # Any days flagged by these flags are excluded from
         # the days to run
         "exclude_flags": ["corrupted_file"],
-        # Amount of padding each side of sidereal day to load
-        "padding": 0.02,
         # Whether to look for offline data and request it be brought online
         "include_offline_files": True,
         # Number of recent days to prioritize in queue
         "num_recent_days_first": 7,
-        # The beam transfers to use (need to have the same freq range as above)
+        # The beam transfers to use
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
         "modlist": "chime/python/2025.10",
         # Job params
-        "time": 90,  # How long in minutes?
+        "time": 40,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
@@ -201,7 +206,6 @@ class HFBDailyProcessing(base.ProcessingType):
         for t in self._revparams["intervals"]:
             self._intervals.append((t["start"], t.get("end", None), t.get("step", 1)))
 
-        self._padding = self._revparams.get("padding", 0)
         self._data_coverage = self._revparams.get("data_coverage", 0.0)
         self._num_recent_days = self._revparams.get("num_recent_days_first", 0)
         self._include_offline_files = self._revparams.get(
@@ -244,7 +248,6 @@ class HFBDailyProcessing(base.ProcessingType):
 
         runnable = available_csds(
             sorted(csds),
-            self._padding,
             self._data_coverage,
             require_online=require_online,
         )
@@ -263,7 +266,7 @@ class HFBDailyProcessing(base.ProcessingType):
 
         jobparams.update(
             {
-                "csd": [csd - self._padding, csd + 1 + self._padding],
+                "csd": [csd, csd + 1],
             }
         )
 
@@ -290,7 +293,7 @@ class HFBDailyProcessing(base.ProcessingType):
 
         if retrieve:
             # If there are any upcoming jobs which require offline data,
-            # request that this be moved online
+            # request that these be moved online
             exclude_tags = {
                 *rev_stats["pending"],
                 *rev_stats["running"],
@@ -305,9 +308,7 @@ class HFBDailyProcessing(base.ProcessingType):
             )
             if online_request_tags:
                 # Submit the request to bring files online
-                nfiles["nretrieve"] = request_offline_csds(
-                    online_request_tags, self._padding
-                )
+                nfiles["nretrieve"] = request_offline_csds(online_request_tags)
 
         if clear:
             # Clear out data that we don't need anymore
@@ -322,9 +323,7 @@ class HFBDailyProcessing(base.ProcessingType):
             exclude_tags = sorted([int(tag) for tag in exclude_tags])
             if remove_request_tags:
                 # Submit the request to remove these files
-                nfiles["nclear"] = remove_online_csds(
-                    remove_request_tags, exclude_tags, self._padding
-                )
+                nfiles["nclear"] = remove_online_csds(remove_request_tags, exclude_tags)
 
         return nfiles
 
@@ -345,7 +344,7 @@ class HFBDailyProcessing(base.ProcessingType):
 
         # Ensure that the current in-progress acquisition does not get queued
         today = chime.get_current_lsd()
-        to_run = [csd for csd in to_run if (today - float(csd)) > (1 + self._padding)]
+        to_run = [csd for csd in to_run if (today - float(csd)) > 1]
 
         if priority_only:
             to_run = get_recent_csds(to_run, self._num_recent_days)
@@ -355,7 +354,6 @@ class HFBDailyProcessing(base.ProcessingType):
 
 def available_csds(
     csds: list,
-    pad: float = 0.0,
     data_coverage: float = 0.0,
     require_online: bool = False,
 ) -> set:
@@ -365,14 +363,8 @@ def available_csds(
     ----------
     csds
         sorted list of csds to check
-    pad
-      fraction of a day to pad on either end. This data should also be available
-      in order for a day to be considered available
     data_coverage
       What fraction of the day must exist in order to be considered available.
-      This *includes* the padding fraction, so values greater than 1 are
-      permitted. For example, if `pad=0.2`, setting `data_coverage=1.4`
-      would indicate that all the data must be available.
       Even if all files are online, if the data coverage is less than this
       fraction, the day shouldn't be processed.
     require_online
@@ -386,9 +378,7 @@ def available_csds(
     """
     # Figure out which files exist online and which ones exist entirely
     # Repeat the process for hfb data and weather data
-    hfb_online, hfb_that_exist = db_get_hfb_files_in_range(
-        csds[0] - pad, csds[-1] + pad
-    )
+    hfb_online, hfb_that_exist = db_get_hfb_files_in_range(csds[0], csds[-1])
 
     def _available(filenames_online, filenames_that_exist, coverage):
         available = set()
@@ -405,8 +395,8 @@ def available_csds(
             return False
 
         for csd in csds:
-            start_time = chime.lsd_to_unix(csd - pad)
-            end_time = chime.lsd_to_unix(csd + 1 + pad)
+            start_time = chime.lsd_to_unix(csd)
+            end_time = chime.lsd_to_unix(csd + 1)
 
             exists, index_exists = files_in_timespan(
                 start_time, end_time, filenames_that_exist
@@ -511,7 +501,7 @@ def db_get_hfb_files_in_range(start_csd: int, end_csd: int):
     return files_online, files_that_exist
 
 
-def request_offline_csds(csds: list, pad: float = 0):
+def request_offline_csds(csds: list):
     """Given a list of csds, request that all required data be copied online.
 
     Request that all data required by the list of CSDS get copied to the
@@ -561,10 +551,10 @@ def request_offline_csds(csds: list, pad: float = 0):
         return 0
 
     # Figure out which chimestack files are needed
-    online_files, files = db_get_hfb_files_in_range(csds[0] - pad, csds[-1] + pad)
+    online_files, files = db_get_hfb_files_in_range(csds[0], csds[-1])
     # Only check files that are not online
     files = [f for f in files if f not in online_files]
-    request_hfb_files = get_filenames_used_by_csds(csds, files, pad)
+    request_hfb_files = get_filenames_used_by_csds(csds, files)
 
     db.connect(read_write=True)
 
@@ -582,7 +572,7 @@ def request_offline_csds(csds: list, pad: float = 0):
     return nrequests
 
 
-def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
+def remove_online_csds(csds_remove: list, csds_keep: list):
     """Remove online files which are solely used by specified csds.
 
     Check the files required by `csds_remove` and check against those used
@@ -596,10 +586,6 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
         list of integer csds to clear data where possible
     csds_keep
         list of integer csds for which all data is still required
-    pad
-        fraction of data required by adjacent days. This will prevent
-        a csd in `csds_remove` from clearing all its data if that fraction
-        of data is needed by an adjacent csd in `csds_keep`
     """
     files, _ = db_get_hfb_files_in_range(
         min(csds_remove[0], csds_keep[0]),
@@ -607,8 +593,8 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     )
     # Get all the files we want to keep and remove. Choosing to
     # keep a file supercedes choosing to remove one
-    keep_files = get_filenames_used_by_csds(csds_keep, files, pad)
-    remove_files = get_filenames_used_by_csds(csds_remove, files, pad)
+    keep_files = get_filenames_used_by_csds(csds_keep, files)
+    remove_files = get_filenames_used_by_csds(csds_remove, files)
     remove_files = [file for file in remove_files if file not in keep_files]
 
     online_node = di.StorageNode.get(name="fir_online")
@@ -621,23 +607,3 @@ def remove_online_csds(csds_remove: list, csds_keep: list, pad: float = 0):
     ).execute()
 
     return len(remove_files)
-
-
-def get_recent_csds(csds: list, ndays: int) -> list:
-    """Return CSDs from the last `ndays` chime sidereal days.
-
-    Parameters
-    ----------
-    csds
-        List of integer csds
-    ndays
-        Number of days to look back
-
-    Returns
-    -------
-    recent
-        CSDs in the past `ndays` sidereal days
-    """
-    today = np.floor(chime.get_current_lsd()).astype(int)
-
-    return [csd for csd in csds if (today - int(csd)) <= ndays]
