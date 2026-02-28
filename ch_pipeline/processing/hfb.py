@@ -121,7 +121,7 @@ pipeline:
       in: tstream_hfb
       out: rfibitmap_hfb
       params:
-        sigma: "{sigma_list}"
+        sigma: {sigma_list}
 
     # Group into one sidereal-day container
     - type: draco.analysis.sidereal.SiderealGrouper
@@ -129,7 +129,7 @@ pipeline:
       in: rfibitmap_hfb
       out: rfibitmap_hfb_grouped
       params:
-	compression:
+        compression:
           subfreq_rfi:
             chunks: [64, 128, 512]
         save: true
@@ -165,6 +165,8 @@ class HFBDailyProcessing(base.ProcessingType):
         # Any days flagged by these flags are excluded from
         # the days to run
         "exclude_flags": ["corrupted_file"],
+        # Fraction of day flagged to exclude
+        "frac_flagged": 0.8,
         # Whether to look for offline data and request it be brought online
         "include_offline_files": True,
         # Number of recent days to prioritize in queue
@@ -174,6 +176,8 @@ class HFBDailyProcessing(base.ProcessingType):
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
         "modlist": "chime/python/2025.10",
+        # RFI detection significance params
+        "sigma_list": [2, 4, 5, 7],
         # Job params
         "time": 40,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
@@ -197,6 +201,7 @@ class HFBDailyProcessing(base.ProcessingType):
             get_flagged_csds(
                 [csd for i in intervals for csd in expand_csd_range(*i)],
                 self.default_params["exclude_flags"],
+                self.default_params["frac_flagged"],
             )
         )
 
