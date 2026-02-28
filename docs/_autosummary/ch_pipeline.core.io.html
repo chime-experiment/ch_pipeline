@@ -1,0 +1,499 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.io &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.core.pathfinder" href="ch_pipeline.core.pathfinder.html" />
+    <link rel="prev" title="ch_pipeline.core.dataquery" href="ch_pipeline.core.dataquery.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a><ul class="current">
+<li class="toctree-l4 current"><a class="reference internal" href="ch_pipeline.core.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.io</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.core.io.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.core.io">
+<span id="ch-pipeline-core-io"></span><h1>ch_pipeline.core.io<a class="headerlink" href="#module-ch_pipeline.core.io" title="Link to this heading"></a></h1>
+<p>Tasks for IO.</p>
+<p>Tasks for calculating IO. Notably a task which will write out the parallel
+MPIDataset classes.</p>
+<section id="file-groups">
+<h2>File Groups<a class="headerlink" href="#file-groups" title="Link to this heading"></a></h2>
+<p>Several tasks accept groups of files as arguments. These are specified in the YAML file as a dictionary like below.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">list_of_file_groups</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">first_group</span><span class="w">  </span><span class="c1"># An optional tag naming the group</span>
+<span class="w">        </span><span class="nt">files</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="s">&#39;file1.h5&#39;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="s">&#39;file[3-4].h5&#39;</span><span class="w">  </span><span class="c1"># Globs are processed</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="s">&#39;file7.h5&#39;</span>
+
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="nt">files</span><span class="p">:</span><span class="w">  </span><span class="c1"># No tag specified, implicitly gets the tag &#39;group_2&#39;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="s">&#39;another_file1.h5&#39;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="s">&#39;another_file2.h5&#39;</span>
+
+
+<span class="nt">single_group</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">files</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&#39;file1.h5&#39;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&#39;file2.h5&#39;</span><span class="p p-Indicator">]</span>
+</pre></div>
+</div>
+</section>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.io.FilterExisting" title="ch_pipeline.core.io.FilterExisting"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FilterExisting</span></code></a>()</p></td>
+<td><p>Filter out files from any list that have already been processed.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.io.LoadCorrDataFiles" title="ch_pipeline.core.io.LoadCorrDataFiles"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadCorrDataFiles</span></code></a>()</p></td>
+<td><p>Load CHIME correlator data from a file list passed into the setup routine.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.io.LoadDataFiles" title="ch_pipeline.core.io.LoadDataFiles"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadDataFiles</span></code></a>()</p></td>
+<td><p>Load general CHIME data from files passed into the setup routine.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.io.LoadFileFromTag" title="ch_pipeline.core.io.LoadFileFromTag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadFileFromTag</span></code></a>()</p></td>
+<td><p>Loads a file from disk into a memdata container.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.io.LoadGainUpdates" title="ch_pipeline.core.io.LoadGainUpdates"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadGainUpdates</span></code></a>()</p></td>
+<td><p>Iterate over gain updates.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.io.LoadSetupFile" title="ch_pipeline.core.io.LoadSetupFile"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadSetupFile</span></code></a>()</p></td>
+<td><p>Loads a file from disk into a memdata container during setup.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.FilterExisting">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">FilterExisting</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#FilterExisting"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.FilterExisting" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Filter out files from any list that have already been processed.</p>
+<p>Each file is found in the database and is compared against given
+criteria to see if has already been processed.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.FilterExisting.regex_csd">
+<span class="sig-name descname"><span class="pre">regex_csd</span></span><a class="headerlink" href="#ch_pipeline.core.io.FilterExisting.regex_csd" title="Link to this definition"></a></dt>
+<dd><p>A regular expression to find processed CSDs. Compared to filenames
+in the current directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.FilterExisting.min_files_csd">
+<span class="sig-name descname"><span class="pre">min_files_csd</span></span><a class="headerlink" href="#ch_pipeline.core.io.FilterExisting.min_files_csd" title="Link to this definition"></a></dt>
+<dd><p>The minimum number of files on a CSD for it to be processed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.FilterExisting.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#FilterExisting.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.FilterExisting.next" title="Link to this definition"></a></dt>
+<dd><p>Filter the incoming file lists.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">LoadCorrDataFiles</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadCorrDataFiles"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a>, <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/io/SelectionsMixin.html#caput.pipeline.tasklib.io.SelectionsMixin" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">SelectionsMixin</span></code></a></p>
+<p>Load CHIME correlator data from a file list passed into the setup routine.</p>
+<p>File must be a serialised subclass of <code class="xref py py-class docutils literal notranslate"><span class="pre">ch_util.andata.CorrData</span></code>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.freq_physical">
+<span class="sig-name descname"><span class="pre">freq_physical</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.freq_physical" title="Link to this definition"></a></dt>
+<dd><p>List of physical frequencies in MHz. Given highest priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.channel_range">
+<span class="sig-name descname"><span class="pre">channel_range</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.channel_range" title="Link to this definition"></a></dt>
+<dd><p>Range of frequency channel indices, either <cite>[start, stop, step]</cite>, <cite>[start,
+stop]</cite>, or <cite>[stop]</cite> is acceptable. Given second priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.channel_index">
+<span class="sig-name descname"><span class="pre">channel_index</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.channel_index" title="Link to this definition"></a></dt>
+<dd><p>List of frequency channel indices. Given third priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.datasets">
+<span class="sig-name descname"><span class="pre">datasets</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.datasets" title="Link to this definition"></a></dt>
+<dd><p>List of datasets to load. Defaults to all available datasets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.only_autos">
+<span class="sig-name descname"><span class="pre">only_autos</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.only_autos" title="Link to this definition"></a></dt>
+<dd><p>Only load the autocorrelations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.use_draco_container">
+<span class="sig-name descname"><span class="pre">use_draco_container</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.use_draco_container" title="Link to this definition"></a></dt>
+<dd><p>Load the data into a draco compatible container rather than CorrData. Defaults
+to True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadCorrDataFiles.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.process" title="Link to this definition"></a></dt>
+<dd><p>Load in each sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> – The timestream file. Return type depends on the value of
+<cite>use_draco_container</cite>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>andata.CorrData or <a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CHIMETimeStream" title="ch_pipeline.core.containers.CHIMETimeStream">containers.CHIMETimeStream</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadCorrDataFiles.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadCorrDataFiles.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadCorrDataFiles.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the list of files to load.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> (<em>list</em>) – list of correlator data file paths</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadDataFiles">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">LoadDataFiles</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadDataFiles"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadDataFiles" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Load general CHIME data from files passed into the setup routine.</p>
+<p>This does <em>not</em> support correlator data. Use <cite>LoadCorrDataFiles</cite> instead.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadDataFiles.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadDataFiles.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadDataFiles.process" title="Link to this definition"></a></dt>
+<dd><p>Load and return the next available file.</p>
+<p>Raises a PipelineStopIteration if there are no more files to load.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong></p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>subclass of andata.BaseData</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadDataFiles.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadDataFiles.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadDataFiles.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the list of files to load.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> (<em>list</em>) – list of chime data file paths to load, EXCLUDING correlator data</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadFileFromTag">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">LoadFileFromTag</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadFileFromTag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadFileFromTag" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/io/BaseLoadFiles.html#caput.pipeline.tasklib.io.BaseLoadFiles" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseLoadFiles</span></code></a></p>
+<p>Loads a file from disk into a memdata container.</p>
+<p>The suffix of the filename is extracted from the tag of the input container.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadFileFromTag.prefix">
+<span class="sig-name descname"><span class="pre">prefix</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadFileFromTag.prefix" title="Link to this definition"></a></dt>
+<dd><p>Filename is assumed to have the format: “{prefix}{incont.attrs[‘tag’]}.h5”</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadFileFromTag.only_prefix">
+<span class="sig-name descname"><span class="pre">only_prefix</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadFileFromTag.only_prefix" title="Link to this definition"></a></dt>
+<dd><p>If True, then the class will return the same container at each iteration.
+The filename is assumed to have the format: “{prefix}.h5”</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadFileFromTag.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">incont</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadFileFromTag.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadFileFromTag.process" title="Link to this definition"></a></dt>
+<dd><p>Determine filename from input container.  Load file into output container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>incont</strong> (subclass of <cite>memdata.Container</cite>) – get the <cite>tag</cite> attribute from this container</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>outcont</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>subclass of <cite>memdata.Container</cite></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadFileFromTag.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadFileFromTag.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadFileFromTag.setup" title="Link to this definition"></a></dt>
+<dd><p>Determine filename convention.</p>
+<p>If only_prefix is True, then load the file into a container.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadGainUpdates">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">LoadGainUpdates</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadGainUpdates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadGainUpdates" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.core.io.LoadDataFiles" title="ch_pipeline.core.io.LoadDataFiles"><code class="xref py py-class docutils literal notranslate"><span class="pre">LoadDataFiles</span></code></a></p>
+<p>Iterate over gain updates.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadGainUpdates.acqtype">
+<span class="sig-name descname"><span class="pre">acqtype</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadGainUpdates.acqtype" title="Link to this definition"></a></dt>
+<dd><p>Type of acquisition.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>{“gain”|”digitalgain”}</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadGainUpdates.keep_transition">
+<span class="sig-name descname"><span class="pre">keep_transition</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadGainUpdates.keep_transition" title="Link to this definition"></a></dt>
+<dd><p>If this is True, then gain updates that were transitional
+in nature – i.e., they executed a smooth transition to
+new gains – will be loaded. By default, transitional
+gain updates are ignored.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadGainUpdates.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadGainUpdates.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadGainUpdates.process" title="Link to this definition"></a></dt>
+<dd><p>Load the next available gain update.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>out</strong> – The next gain update, packaged into a pipeline container.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>StaticGainUpdate</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadSetupFile">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.io.</span></span><span class="sig-name descname"><span class="pre">LoadSetupFile</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadSetupFile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadSetupFile" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/io/BaseLoadFiles.html#caput.pipeline.tasklib.io.BaseLoadFiles" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseLoadFiles</span></code></a></p>
+<p>Loads a file from disk into a memdata container during setup.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadSetupFile.filename">
+<span class="sig-name descname"><span class="pre">filename</span></span><a class="headerlink" href="#ch_pipeline.core.io.LoadSetupFile.filename" title="Link to this definition"></a></dt>
+<dd><p>Path to a saved container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadSetupFile.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadSetupFile.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadSetupFile.process" title="Link to this definition"></a></dt>
+<dd><p>Override parent process method to do nothing.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.io.LoadSetupFile.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/io.html#LoadSetupFile.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.io.LoadSetupFile.setup" title="Link to this definition"></a></dt>
+<dd><p>Load the file into a container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cont</strong></p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>subclass of <cite>memdata.Container</cite></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.core.dataquery.html" class="btn btn-neutral float-left" title="ch_pipeline.core.dataquery" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.core.pathfinder.html" class="btn btn-neutral float-right" title="ch_pipeline.core.pathfinder" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

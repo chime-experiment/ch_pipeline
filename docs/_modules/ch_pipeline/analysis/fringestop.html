@@ -1,0 +1,206 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.fringestop &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.fringestop</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.analysis.fringestop</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for fringestopping CHIME data.</span>
+
+<span class="sd">Tasks for taking the timestream data and fringestop it to a given source</span>
+
+<span class="sd">Usage</span>
+<span class="sd">=====</span>
+
+<span class="sd">Use this task together with:</span>
+
+<span class="sd">* :class:`~ch_pipeline.core.dataquery.QueryDatabase` to query the database</span>
+<span class="sd">  and generate a file list.</span>
+<span class="sd">* :class:`~ch_pipeline.core.io.LoadCorrDataFiles` to load the timestream</span>
+<span class="sd">  from the files in the previous file list</span>
+<span class="sd">* :class:`~ch_pipeline.core.dataquery.QueryInputs` to query the inputmap</span>
+<span class="sd">  of the timestream data</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem</span><span class="w"> </span><span class="kn">import</span> <span class="n">sources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">containers</span>
+
+
+<div class="viewcode-block" id="FringeStop">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.fringestop.html#ch_pipeline.analysis.fringestop.FringeStop">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FringeStop</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fringe stop CHIME data to a given source.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    source : string</span>
+<span class="sd">        The source to fringe stop data to, for example, &#39;CAS_A&#39;, &#39;CYG_A&#39;</span>
+<span class="sd">    overwrite : bool</span>
+<span class="sd">        Whether overwrite the original timestream data with the fringestopped</span>
+<span class="sd">        timestream data, default is False</span>
+<span class="sd">    telescope_rotation : float</span>
+<span class="sd">        Rotation of the telescope from true north in degrees.  A positive rotation is</span>
+<span class="sd">        anti-clockwise when looking down at the telescope from the sky.</span>
+<span class="sd">    wterm : bool (default False)</span>
+<span class="sd">        Include the w term (vertical displacement) in the fringestop phase calculation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">source</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">overwrite</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">telescope_rotation</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">chime</span><span class="o">.</span><span class="n">rotation</span><span class="p">)</span>
+    <span class="n">wterm</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="FringeStop.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.fringestop.html#ch_pipeline.analysis.fringestop.FringeStop.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tstream</span><span class="p">,</span> <span class="n">inputmap</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply the fringe stop of CHIME data to a given source.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tstream : andata.CorrData</span>
+<span class="sd">            timestream data to be fringestoped</span>
+<span class="sd">        inputmap : list of :class:`CorrInput`</span>
+<span class="sd">            A list describing the inputs as they are in the file, output from</span>
+<span class="sd">            `ch_pipeline.core.dataquery.QueryInputs`</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tstream : andata.CorrData</span>
+<span class="sd">            Returns the same timestream object but fringestopped</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">tstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="n">start_freq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">nfreq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">end_freq</span> <span class="o">=</span> <span class="n">start_freq</span> <span class="o">+</span> <span class="n">nfreq</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">start_freq</span><span class="p">:</span><span class="n">end_freq</span><span class="p">]</span>
+        <span class="n">prod_map</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">tstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">][</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="n">sources</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">]</span>
+
+        <span class="c1"># Rotate the telescope</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">rotation</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_rotation</span><span class="p">)</span>
+
+        <span class="c1"># Fringestop</span>
+        <span class="n">fs_vis</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">fringestop_time</span><span class="p">(</span>
+            <span class="n">tstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:],</span>
+            <span class="n">times</span><span class="o">=</span><span class="n">tstream</span><span class="o">.</span><span class="n">time</span><span class="p">,</span>
+            <span class="n">freq</span><span class="o">=</span><span class="n">freq</span><span class="p">,</span>
+            <span class="n">feeds</span><span class="o">=</span><span class="n">inputmap</span><span class="p">,</span>
+            <span class="n">src</span><span class="o">=</span><span class="n">src</span><span class="p">,</span>
+            <span class="n">prod_map</span><span class="o">=</span><span class="n">prod_map</span><span class="p">,</span>
+            <span class="n">wterm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">wterm</span><span class="p">,</span>
+            <span class="n">inplace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">overwrite</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Return telescope to default rotation</span>
+        <span class="n">tools</span><span class="o">.</span><span class="n">change_chime_location</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">overwrite</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">tstream</span>
+
+        <span class="n">tstream_fs</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">tstream</span><span class="p">)</span>
+        <span class="n">tstream_fs</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">fs_vis</span>
+        <span class="n">tstream_fs</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">weight</span>
+
+        <span class="k">return</span> <span class="n">tstream_fs</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

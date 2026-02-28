@@ -1,0 +1,228 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.client &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.processing.daily" href="ch_pipeline.processing.daily.html" />
+    <link rel="prev" title="ch_pipeline.processing.beam" href="ch_pipeline.processing.beam.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.base.html">ch_pipeline.processing.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.beam.html">ch_pipeline.processing.beam</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.processing.client</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.daily.html">ch_pipeline.processing.daily</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.client</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.processing.client.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.processing.client">
+<span id="ch-pipeline-processing-client"></span><h1>ch_pipeline.processing.client<a class="headerlink" href="#module-ch_pipeline.processing.client" title="Link to this heading"></a></h1>
+<p>Command line client for Chime Pipeline processing.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.client.dirstats" title="ch_pipeline.processing.client.dirstats"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dirstats</span></code></a>(path)</p></td>
+<td><p>Get stats for the specified directory.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.client.humansize" title="ch_pipeline.processing.client.humansize"><code class="xref py py-obj docutils literal notranslate"><span class="pre">humansize</span></code></a>(num[, suffix, precision, width])</p></td>
+<td><p>Human readable file size.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.client.PRev" title="ch_pipeline.processing.client.PRev"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PRev</span></code></a>()</p></td>
+<td><p>Param type for validating and returning ProcessingType arguments.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.client.PType" title="ch_pipeline.processing.client.PType"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PType</span></code></a>()</p></td>
+<td><p>Param type for validating and returning ProcessingType arguments.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PRev">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.client.</span></span><span class="sig-name descname"><span class="pre">PRev</span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#PRev"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.PRev" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ParamType</span></code></p>
+<p>Param type for validating and returning ProcessingType arguments.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PRev.convert">
+<span class="sig-name descname"><span class="pre">convert</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">param</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#PRev.convert"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.PRev.convert" title="Link to this definition"></a></dt>
+<dd><p>Parses <cite>value</cite> as {type}:{revision}.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PRev.name">
+<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'processing</span> <span class="pre">revision'</span></em><a class="headerlink" href="#ch_pipeline.processing.client.PRev.name" title="Link to this definition"></a></dt>
+<dd><p>the descriptive name of this type</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PType">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.client.</span></span><span class="sig-name descname"><span class="pre">PType</span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#PType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.PType" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ParamType</span></code></p>
+<p>Param type for validating and returning ProcessingType arguments.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PType.convert">
+<span class="sig-name descname"><span class="pre">convert</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">param</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#PType.convert"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.PType.convert" title="Link to this definition"></a></dt>
+<dd><p>Get a processing type from a string.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.PType.name">
+<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'processing</span> <span class="pre">type'</span></em><a class="headerlink" href="#ch_pipeline.processing.client.PType.name" title="Link to this definition"></a></dt>
+<dd><p>the descriptive name of this type</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.dirstats">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.client.</span></span><span class="sig-name descname"><span class="pre">dirstats</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#dirstats"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.dirstats" title="Link to this definition"></a></dt>
+<dd><p>Get stats for the specified directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>path</strong> (<em>Path</em>) – Directory to calculate stats of.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>num_files</strong> (<em>int</em>) – Number of files under the directory (recursive).</p></li>
+<li><p><strong>total_size</strong> (<em>int</em>) – Total size in bytes of all files under the directory (recursive).</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.client.humansize">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.client.</span></span><span class="sig-name descname"><span class="pre">humansize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">num</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suffix</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">precision</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">width</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/client.html#humansize"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.client.humansize" title="Link to this definition"></a></dt>
+<dd><p>Human readable file size.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num</strong> (<em>int</em>) – Size in bytes.</p></li>
+<li><p><strong>suffix</strong> (<em>str</em>) – unit suffix to include</p></li>
+<li><p><strong>precision</strong> (<em>int</em>) – number of decimal places to include</p></li>
+<li><p><strong>width</strong> (<em>int</em>) – minimum number of characters to include</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>size</strong> – The size as a human readable string.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.processing.beam.html" class="btn btn-neutral float-left" title="ch_pipeline.processing.beam" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.processing.daily.html" class="btn btn-neutral float-right" title="ch_pipeline.processing.daily" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

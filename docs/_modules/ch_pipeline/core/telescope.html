@@ -1,0 +1,1322 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.telescope &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.telescope</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.core.telescope</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Pathfinder/CHIME Telescope Model.</span>
+
+<span class="sd">A model for both CHIME and Pathfinder telescopes. This attempts to query the</span>
+<span class="sd">configuration db (:mod:`~ch_analysis.pathfinder.configdb`) for the details of</span>
+<span class="sd">the feeds and their positions.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">cached_property</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">healpy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.astro.coordinates</span><span class="w"> </span><span class="kn">import</span> <span class="n">spherical</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.containers</span><span class="w"> </span><span class="kn">import</span> <span class="n">ContainerPrototype</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">importtools</span><span class="p">,</span> <span class="n">mpitools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cora.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">hputil</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.core.containers</span><span class="w"> </span><span class="kn">import</span> <span class="n">GridBeam</span><span class="p">,</span> <span class="n">HEALPixBeam</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">drift.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">telescope</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">drift.telescope</span><span class="w"> </span><span class="kn">import</span> <span class="n">cylbeam</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.interpolate</span><span class="w"> </span><span class="kn">import</span> <span class="n">RectBivariateSpline</span>
+
+<span class="c1"># Get the logger for the module</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CHIME">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CHIME</span><span class="p">(</span><span class="n">telescope</span><span class="o">.</span><span class="n">PolarisedTelescope</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Model telescope for the CHIME/Pathfinder.</span>
+
+<span class="sd">    This class currently uses a simple Gaussian model for the primary beams.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    layout : datetime or int</span>
+<span class="sd">        Specify which layout to use.</span>
+<span class="sd">    correlator : string</span>
+<span class="sd">        Restrict to a specific correlator.</span>
+<span class="sd">    skip_non_chime : boolean</span>
+<span class="sd">        Ignore non CHIME feeds in the BeamTransfers.</span>
+<span class="sd">    read_local_layout : boolean</span>
+<span class="sd">        Read in the layout of the CHIME telescope from a file, saved to this</span>
+<span class="sd">        repository, rather than attempting to connect and read the layout from</span>
+<span class="sd">        the database. Default is True.</span>
+<span class="sd">    stack_type : string, optional</span>
+<span class="sd">        Stacking type.</span>
+<span class="sd">        `redundant`: feeds of same polarization have same beam class (default).</span>
+<span class="sd">        `redundant_cyl`: feeds of same polarization and cylinder have same beam</span>
+<span class="sd">        class.</span>
+<span class="sd">        `unique`: Each feed has a unique beam class.</span>
+<span class="sd">    use_pathfinder_freq: boolean</span>
+<span class="sd">        Use the pathfinder channelization of 1024 frequencies between 400 and</span>
+<span class="sd">        800 MHz.  Setting this to True also enables the specification of a</span>
+<span class="sd">        subset of these frequencies through the four attributes below.  Default</span>
+<span class="sd">        is True.</span>
+<span class="sd">    channel_bin : int, optional</span>
+<span class="sd">        Number of channels to bin together. Must exactly divide the total</span>
+<span class="sd">        number. Binning is performed prior to selection of any subset. Default</span>
+<span class="sd">        is 1.</span>
+<span class="sd">    freq_physical : list, optional</span>
+<span class="sd">        Select subset of frequencies using a list of physical frequencies in</span>
+<span class="sd">        MHz. Finds the closests pathfinder channel.</span>
+<span class="sd">    channel_range : list, optional</span>
+<span class="sd">        Select subset of frequencies using a range of frequency channel indices,</span>
+<span class="sd">        either [start, stop, step], [start, stop], or [stop] is acceptable.</span>
+<span class="sd">    channel_index : list, optional</span>
+<span class="sd">        Select subset of frequencies using a list of frequency channel indices.</span>
+<span class="sd">    input_sel : list, optional</span>
+<span class="sd">        Select a reduced set of feeds to use. Useful for generating small</span>
+<span class="sd">        subsets of the data.</span>
+<span class="sd">    baseline_masking_type : string, optional</span>
+<span class="sd">        Select a subset of baselines.  `total_length` selects baselines according to</span>
+<span class="sd">        their total length. Need to specify `minlength` and `maxlength` properties</span>
+<span class="sd">        (defined in baseclass).  `individual_length` selects baselines according to</span>
+<span class="sd">        their seperation in the North-South (specify `minlength_ns` and `maxlength_ns`)</span>
+<span class="sd">        or the East-West (specify `minlength_ew` and `maxlength_ew`).</span>
+<span class="sd">    minlength_ns, maxlength_ns : float</span>
+<span class="sd">        Minimum and maximum North-South baseline lengths to include (in metres)</span>
+<span class="sd">    minlength_ew, maxlength_ew: float</span>
+<span class="sd">        Minimum and maximum East-West baseline lengths to include (in metres)</span>
+<span class="sd">    dec_normalized: float, optional</span>
+<span class="sd">        Normalize the beam by its magnitude at transit at this declination</span>
+<span class="sd">        in degrees.</span>
+<span class="sd">    skip_pol_pair : list</span>
+<span class="sd">        List of antenna polarisation pairs to skip. Valid entries are &quot;XX&quot;, &quot;XY&quot;, &quot;YX&quot;</span>
+<span class="sd">        or &quot;YY&quot;. Like the skipped frequencies these pol pairs will have entries</span>
+<span class="sd">        generated but their beam transfer matrices are implicitly zero and thus not</span>
+<span class="sd">        calculated.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Configure which feeds and layout to use</span>
+    <span class="n">layout</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">correlator</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">skip_non_chime</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">read_local_layout</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Redundancy settings</span>
+    <span class="n">stack_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">enum</span><span class="p">(</span>
+        <span class="p">[</span><span class="s2">&quot;redundant&quot;</span><span class="p">,</span> <span class="s2">&quot;redundant_cyl&quot;</span><span class="p">,</span> <span class="s2">&quot;unique&quot;</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;redundant&quot;</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Configure frequency properties</span>
+    <span class="n">use_pathfinder_freq</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">channel_bin</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">freq_physical</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_range</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_index</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="c1"># Input selection</span>
+    <span class="n">input_sel</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="c1"># Baseline masking options</span>
+    <span class="n">baseline_masking_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">enum</span><span class="p">(</span>
+        <span class="p">[</span><span class="s2">&quot;total_length&quot;</span><span class="p">,</span> <span class="s2">&quot;individual_length&quot;</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;individual_length&quot;</span>
+    <span class="p">)</span>
+    <span class="n">minlength_ew</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="n">maxlength_ew</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0e7</span><span class="p">)</span>
+    <span class="n">minlength_ns</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="n">maxlength_ns</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0e7</span><span class="p">)</span>
+
+    <span class="c1"># Auto-correlations setting (overriding default in baseclass)</span>
+    <span class="n">auto_correlations</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Beam normalization</span>
+    <span class="n">dec_normalized</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="c1"># Skipping frequency/baseline parameters</span>
+    <span class="n">skip_pol_pair</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">list_type</span><span class="p">(</span><span class="n">type_</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">maxlength</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="c1"># Fix base properties</span>
+    <span class="n">cylinder_width</span> <span class="o">=</span> <span class="mf">20.0</span>
+    <span class="c1"># XXX CHECK: Should CHIME be using the Pathfinder antenna spacing?</span>
+    <span class="n">cylinder_spacing</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">PF_SPACE</span>
+
+    <span class="n">_exwidth</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.7</span><span class="p">]</span>
+    <span class="n">_eywidth</span> <span class="o">=</span> <span class="n">_exwidth</span>
+
+    <span class="n">_hxwidth</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.2</span><span class="p">]</span>
+    <span class="n">_hywidth</span> <span class="o">=</span> <span class="n">_hxwidth</span>
+
+    <span class="n">_pickle_keys</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;_feeds&quot;</span><span class="p">]</span>
+
+    <span class="c1">#</span>
+    <span class="c1"># === Initialisation routines ===</span>
+    <span class="c1">#</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feeds</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_feeds</span> <span class="o">=</span> <span class="n">feeds</span>
+
+        <span class="c1"># Set location properties</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">latitude</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">latitude</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">longitude</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">longitude</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">altitude</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">altitude</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">skyfield</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">skyfield</span>
+
+        <span class="c1"># Set the LSD start epoch (i.e. CHIME/Pathfinder first light)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lsd_start_day</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="p">(</span><span class="mi">2013</span><span class="p">,</span> <span class="mi">11</span><span class="p">,</span> <span class="mi">15</span><span class="p">)</span>
+
+        <span class="c1"># Set the overall normalization of the beam</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_beam_normalization</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CHIME.from_layout">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.from_layout">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_layout</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">layout</span><span class="p">,</span> <span class="n">read_local_layout</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">correlator</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">skip</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a CHIME/Pathfinder telescope description for the specified layout.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        layout : integer or datetime</span>
+<span class="sd">            Layout id number (corresponding to one in database), or datetime</span>
+<span class="sd">        read_local_layout: boolean, optional</span>
+<span class="sd">            Read the feed layout from a file saved to this repository, rather</span>
+<span class="sd">            than connecting to the database. Default is True.</span>
+<span class="sd">        correlator : string, optional</span>
+<span class="sd">            Name of the specific correlator. Needed to return a unique config</span>
+<span class="sd">            in some cases.</span>
+<span class="sd">        skip : boolean, optional</span>
+<span class="sd">            Whether to skip non-CHIME antennas. If False, leave them in but</span>
+<span class="sd">            set them to infinite noise (unsupported at the moment).</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tel : CHIME</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">tel</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">()</span>
+
+        <span class="n">tel</span><span class="o">.</span><span class="n">layout</span> <span class="o">=</span> <span class="n">layout</span>
+        <span class="n">tel</span><span class="o">.</span><span class="n">correlator</span> <span class="o">=</span> <span class="n">correlator</span>
+        <span class="n">tel</span><span class="o">.</span><span class="n">read_local_layout</span> <span class="o">=</span> <span class="n">read_local_layout</span>
+        <span class="n">tel</span><span class="o">.</span><span class="n">skip_non_chime</span> <span class="o">=</span> <span class="n">skip</span>
+        <span class="n">tel</span><span class="o">.</span><span class="n">_load_layout</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">tel</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_layout</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the CHIME/Pathfinder layout.</span>
+
+<span class="sd">        Will use a routine to read in a layout from a file saved</span>
+<span class="sd">        to this repository if `read_local_layout` is set to True.</span>
+<span class="sd">        Otherwise, will attempt to query the layout database.</span>
+
+<span class="sd">        Generally this routine shouldn&#39;t be called directly. Use</span>
+<span class="sd">        :method:`CHIME.from_layout` or configure from a YAML file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Layout attributes not set.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_local_layout</span><span class="p">:</span>
+            <span class="c1"># If we&#39;re reading locally, use the pickled layouts file</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_read_local_layout</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># If not, or if the file I/O failed, fetch feed layout from database</span>
+        <span class="k">if</span> <span class="n">feeds</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_correlator_inputs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">correlator</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">feeds</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_non_chime</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Not supported.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_feeds</span> <span class="o">=</span> <span class="n">feeds</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_read_local_layout</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the telescope layout from a file saved to this repository.</span>
+
+<span class="sd">        If the file I/O fails, or if a layout from before the earliest recorded</span>
+<span class="sd">        date is requested, this method returns `None`, triggering a fallback</span>
+<span class="sd">        database query. As with :method:`CHIME._load_layout`, this routine</span>
+<span class="sd">        should not be called directly.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Do I/O, and resolve the layout, only on rank 0</span>
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+
+            <span class="c1"># Get the path of the layout file</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">importlib.resources</span><span class="w"> </span><span class="kn">import</span> <span class="n">files</span>
+
+            <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">telescope_files</span>
+
+            <span class="n">layout_path</span> <span class="o">=</span> <span class="n">files</span><span class="p">(</span><span class="n">telescope_files</span><span class="p">)</span><span class="o">.</span><span class="n">joinpath</span><span class="p">(</span><span class="s2">&quot;layouts.pkl&quot;</span><span class="p">)</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="n">layout_path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">layout_f</span><span class="p">:</span>
+                    <span class="n">layouts</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">layout_f</span><span class="p">)</span>
+
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Failed to load local layout: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">. Will try to &quot;</span>
+                    <span class="s2">&quot;load from the database.&quot;</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="kc">None</span>
+
+            <span class="c1"># Load layout start and end times in arrays for comparisons</span>
+            <span class="n">lay_start</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lay</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">lay</span> <span class="ow">in</span> <span class="n">layouts</span><span class="p">])</span>
+            <span class="n">lay_end</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lay</span><span class="p">[</span><span class="s2">&quot;end&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">lay</span> <span class="ow">in</span> <span class="n">layouts</span><span class="p">])</span>
+
+            <span class="c1"># Handle edge cases, i.e. where requested layout is earlier</span>
+            <span class="c1"># than the earliest saved layout...</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="o">&lt;</span> <span class="n">lay_start</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="s2">&quot;You have requested a layout from before the earliest &quot;</span>
+                    <span class="s2">&quot;recorded layout. Will attempt to query the &quot;</span>
+                    <span class="s2">&quot;database. To avoid this behavior, select a layout &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;after </span><span class="si">{</span><span class="n">lay_start</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%B </span><span class="si">%d</span><span class="s1">, %Y&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span>
+                <span class="p">)</span>
+
+                <span class="n">feeds</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># ... or later than the latest</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="o">&gt;</span> <span class="n">lay_start</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                    <span class="s2">&quot;You have requested the latest locally recorded layout, &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">lay_start</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%B </span><span class="si">%d</span><span class="s1">, %Y&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">. There is &quot;</span>
+                    <span class="s2">&quot;no guarantee this is the latest layout available from &quot;</span>
+                    <span class="s2">&quot;the database. Attempt a database connection if you are &quot;</span>
+                    <span class="s2">&quot;certain you need the latest available layout.&quot;</span>
+                <span class="p">)</span>
+
+                <span class="n">feeds</span> <span class="o">=</span> <span class="n">layouts</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;inputs&quot;</span><span class="p">]</span>
+
+            <span class="c1"># If not, find which layout was in use at the requested time</span>
+            <span class="k">else</span><span class="p">:</span>
+
+                <span class="c1"># The last &#39;end&#39; element is None, change it to today</span>
+                <span class="n">lay_end</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">today</span><span class="p">()</span>
+
+                <span class="n">lay_in_use</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="o">&gt;=</span> <span class="n">lay_start</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="o">&lt;=</span> <span class="n">lay_end</span><span class="p">)</span>
+                <span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+
+                <span class="n">feeds</span> <span class="o">=</span> <span class="n">layouts</span><span class="p">[</span><span class="n">lay_in_use</span><span class="p">][</span><span class="s2">&quot;inputs&quot;</span><span class="p">]</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">return</span> <span class="n">feeds</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finalise_config</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Override base method to implement automatic loading of layout when</span>
+        <span class="c1"># configuring from YAML.</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="s2">&quot;You have not set the layout attribute of the telescope &quot;</span>
+                <span class="s2">&quot;in your config file. The layout will be set to today.&quot;</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">layout</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">today</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Loading layout: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layout</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_load_layout</span><span class="p">()</span>
+
+        <span class="c1"># Set the overall normalization of the beam</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_beam_normalization</span><span class="p">()</span>
+
+    <span class="c1">#</span>
+    <span class="c1"># === Redefine properties of the base class ===</span>
+    <span class="c1">#</span>
+
+    <span class="c1"># Tweak the following two properties to change the beam width</span>
+<div class="viewcode-block" id="CHIME.fwhm_ex">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.fwhm_ex">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fwhm_ex</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Full width half max of the E-plane antenna beam for X polarization.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">polyval</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_exwidth</span><span class="p">)</span> <span class="o">*</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">3.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="CHIME.fwhm_hx">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.fwhm_hx">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fwhm_hx</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Full width half max of the H-plane antenna beam for X polarization.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">polyval</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hxwidth</span><span class="p">)</span> <span class="o">*</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">3.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="CHIME.fwhm_ey">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.fwhm_ey">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fwhm_ey</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Full width half max of the E-plane antenna beam for Y polarization.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">polyval</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_eywidth</span><span class="p">)</span> <span class="o">*</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">3.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="CHIME.fwhm_hy">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.fwhm_hy">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fwhm_hy</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Full width half max of the H-plane antenna beam for Y polarization.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">polyval</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hywidth</span><span class="p">)</span> <span class="o">*</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">3.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span><span class="p">)</span></div>
+
+
+    <span class="c1"># Set the approximate uv feed sizes</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">u_width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The approximate physical width (in the u-direction) of the telescope.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">cylinder_width</span>
+
+    <span class="c1"># v-width property override</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">v_width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The approximate physical length (in the v-direction) of the telescope.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="mf">1.0</span>
+
+    <span class="c1"># Set non-zero rotation angle for pathfinder and chime</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rotation_angle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Rotation from north towards west, in degrees.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">correlator</span> <span class="o">==</span> <span class="s2">&quot;pathfinder&quot;</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">pathfinder</span>
+
+            <span class="k">return</span> <span class="n">pathfinder</span><span class="o">.</span><span class="n">rotation</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">correlator</span> <span class="o">==</span> <span class="s2">&quot;chime&quot;</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+
+            <span class="k">return</span> <span class="n">chime</span><span class="o">.</span><span class="n">rotation</span>
+
+        <span class="k">return</span> <span class="mf">0.0</span>
+
+<div class="viewcode-block" id="CHIME.calculate_frequencies">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.calculate_frequencies">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate_frequencies</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Override default version support specifying by frequency channel number.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_pathfinder_freq</span><span class="p">:</span>
+            <span class="c1"># Use pathfinder channelization of 1024 bins between 400 and 800 MHz.</span>
+            <span class="n">basefreq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">800.0</span><span class="p">,</span> <span class="mf">400.0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+            <span class="c1"># Bin the channels together</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">basefreq</span><span class="p">)</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_bin</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="s2">&quot;Channel binning must exactly divide the total number of channels&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">basefreq</span> <span class="o">=</span> <span class="n">basefreq</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_bin</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># If requested, select subset of frequencies.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">:</span>
+                <span class="n">basefreq</span> <span class="o">=</span> <span class="n">basefreq</span><span class="p">[</span>
+                    <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">basefreq</span> <span class="o">-</span> <span class="n">freq</span><span class="p">))</span> <span class="k">for</span> <span class="n">freq</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">]</span>
+                <span class="p">]</span>
+
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span> <span class="ow">and</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">):</span>
+                <span class="n">basefreq</span> <span class="o">=</span> <span class="n">basefreq</span><span class="p">[</span><span class="nb">slice</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">)]</span>
+
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span><span class="p">:</span>
+                <span class="n">basefreq</span> <span class="o">=</span> <span class="n">basefreq</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span><span class="p">]</span>
+
+            <span class="c1"># Save to object</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_frequencies</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">basefreq</span><span class="p">)[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Otherwise use the standard method</span>
+            <span class="n">telescope</span><span class="o">.</span><span class="n">TransitTelescope</span><span class="o">.</span><span class="n">calculate_frequencies</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">feeds</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a description of the feeds as a list of :class:`tools.CorrInput` instances.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_sel</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feeds</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">feeds</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_feeds</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span> <span class="k">for</span> <span class="n">fi</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_sel</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">feeds</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;An index_map describing the inputs known to the telescope.</span>
+
+<span class="sd">        Useful for generating synthetic datasets.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Extract lists of channel ID and serial numbers</span>
+        <span class="n">channels</span><span class="p">,</span> <span class="n">feed_sn</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span>
+            <span class="nb">zip</span><span class="p">(</span><span class="o">*</span><span class="p">[(</span><span class="n">feed</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="n">feed</span><span class="o">.</span><span class="n">input_sn</span><span class="p">)</span> <span class="k">for</span> <span class="n">feed</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">])</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Create an input index map and return it.</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span>
+
+        <span class="k">return</span> <span class="n">andata</span><span class="o">.</span><span class="n">_generate_input_map</span><span class="p">(</span><span class="n">feed_sn</span><span class="p">,</span> <span class="n">channels</span><span class="p">)</span>
+
+    <span class="n">_pos</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">feedpositions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The set of feed positions on *all* cylinders.</span>
+
+<span class="sd">        This is constructed for the given layout and includes all rotations of</span>
+<span class="sd">        the cylinder axis.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        feedpositions : np.ndarray</span>
+<span class="sd">            The positions in the telescope plane of the receivers. Packed as</span>
+<span class="sd">            [[u1, v1], [u2, v2], ...].</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Fetch cylinder relative positions</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_feed_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">)</span>
+
+            <span class="c1"># The above routine returns NaNs for non CHIME feeds. This is a bit</span>
+            <span class="c1"># messy, so turn them into zeros.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan_to_num</span><span class="p">(</span><span class="n">pos</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pos</span>
+
+<div class="viewcode-block" id="CHIME.beamclass">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.beamclass">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">beamclass</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Beam class definition for the CHIME/Pathfinder.</span>
+
+<span class="sd">        When `self.stack_type` is `redundant`, the X-polarisation feeds get</span>
+<span class="sd">        `beamclass = 0`, and the Y-polarisation gets `beamclass = 1`.</span>
+<span class="sd">        When `self.stack_type` is `redundant_cyl`, feeds of same polarisation</span>
+<span class="sd">        and cylinder have same beam class. The beam class is given by</span>
+<span class="sd">        `beamclass = 2*cyl + pol` where `cyl` is the cylinder number according to</span>
+<span class="sd">        `ch_util.tools` convention and `pol` is the polarisation (0 for X and 1</span>
+<span class="sd">        for Y polarisation)</span>
+<span class="sd">        When `self.stack_type` is `unique`, then the feeds are just given an</span>
+<span class="sd">        increasing unique class.</span>
+<span class="sd">        In all cases, any other type of feed gets set to `-1` and should be</span>
+<span class="sd">        ignored.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Make beam class just channel number.</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">_feedclass</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">redundant_cyl</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_x</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>  <span class="c1"># feed is X polarisation</span>
+                    <span class="n">pol</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">else</span><span class="p">:</span>  <span class="c1"># feed is Y polarisation</span>
+                    <span class="n">pol</span> <span class="o">=</span> <span class="mi">1</span>
+
+                <span class="k">if</span> <span class="n">redundant_cyl</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">f</span><span class="o">.</span><span class="n">cyl</span> <span class="o">+</span> <span class="n">pol</span>
+
+                <span class="k">return</span> <span class="n">pol</span>
+
+            <span class="k">return</span> <span class="o">-</span><span class="mi">1</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_type</span> <span class="o">==</span> <span class="s2">&quot;redundant&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">_feedclass</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">])</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_type</span> <span class="o">==</span> <span class="s2">&quot;redundant_cyl&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">_feedclass</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">redundant_cyl</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">])</span>
+
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">fi</span> <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">feed</span><span class="p">)</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span> <span class="k">for</span> <span class="n">fi</span><span class="p">,</span> <span class="n">feed</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">)]</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="CHIME.polarisation">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.polarisation">[docs]</a>
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">polarisation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Polarisation map.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        pol : np.ndarray</span>
+<span class="sd">            One-dimensional array with the polarization for each feed (&#39;X&#39; or &#39;Y&#39;).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">_pol</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_x</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>  <span class="c1"># feed is X polarisation</span>
+                    <span class="k">return</span> <span class="s2">&quot;X&quot;</span>
+                <span class="c1"># feed is Y polarisation</span>
+                <span class="k">return</span> <span class="s2">&quot;Y&quot;</span>
+            <span class="k">return</span> <span class="s2">&quot;N&quot;</span>
+
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">([</span><span class="n">_pol</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span></div>
+
+
+    <span class="c1">#</span>
+    <span class="c1"># === Setup the primary beams ===</span>
+    <span class="c1">#</span>
+
+<div class="viewcode-block" id="CHIME.beam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIME.beam">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">beam</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feed</span><span class="p">,</span> <span class="n">freq</span><span class="p">,</span> <span class="n">angpos</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Primary beam implementation for the CHIME/Pathfinder.</span>
+
+<span class="sd">        This only supports normal CHIME cylinder antennas. Asking for the beams</span>
+<span class="sd">        for other types of inputs will cause an exception to be thrown. The</span>
+<span class="sd">        beams from this routine are rotated by `self.rotation_angle` to account</span>
+<span class="sd">        for the CHIME/Pathfinder rotation.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        feed : int</span>
+<span class="sd">            Index for the feed.</span>
+<span class="sd">        freq : int</span>
+<span class="sd">            Index for the frequency.</span>
+<span class="sd">        angpos : np.ndarray[nposition, 2], optional</span>
+<span class="sd">            Angular position on the sky (in radians).</span>
+<span class="sd">            If not provided, default to the _angpos</span>
+<span class="sd">            class attribute.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        beam : np.ndarray[nposition, 2]</span>
+<span class="sd">            Amplitude vector of beam at each position on the sky.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># # Fetch beam parameters out of config database.</span>
+
+        <span class="n">feed_obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">feed</span><span class="p">]</span>
+
+        <span class="c1"># Check that feed exists and is a CHIME cylinder antenna</span>
+        <span class="k">if</span> <span class="n">feed_obj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Craziness. The requested feed doesn&#39;t seem to exist.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Requested feed is not a CHIME antenna.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># If the angular position was not provided, then use the values in the</span>
+        <span class="c1"># class attribute.</span>
+        <span class="k">if</span> <span class="n">angpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">angpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_angpos</span>
+
+        <span class="c1"># Get the beam rotation parameters.</span>
+        <span class="n">yaw</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">rotation_angle</span>
+        <span class="n">pitch</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">roll</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+        <span class="n">rot</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">([</span><span class="n">yaw</span><span class="p">,</span> <span class="n">pitch</span><span class="p">,</span> <span class="n">roll</span><span class="p">])</span>
+
+        <span class="c1"># We can only support feeds angled parallel or perp to the cylinder</span>
+        <span class="c1"># axis. Check for these and throw exception for anything else.</span>
+        <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_y</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">beam</span> <span class="o">=</span> <span class="n">cylbeam</span><span class="o">.</span><span class="n">beam_y</span><span class="p">(</span>
+                <span class="n">angpos</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">zenith</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cylinder_width</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">wavelengths</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fwhm_ey</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fwhm_hy</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="n">rot</span><span class="o">=</span><span class="n">rot</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_x</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">beam</span> <span class="o">=</span> <span class="n">cylbeam</span><span class="o">.</span><span class="n">beam_x</span><span class="p">(</span>
+                <span class="n">angpos</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">zenith</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">cylinder_width</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">wavelengths</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fwhm_ex</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fwhm_hx</span><span class="p">[</span><span class="n">freq</span><span class="p">],</span>
+                <span class="n">rot</span><span class="o">=</span><span class="n">rot</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Given polarisation (feed.pol=</span><span class="si">{</span><span class="n">feed_obj</span><span class="o">.</span><span class="n">pol</span><span class="si">}</span><span class="s2">) not supported.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Normalize the beam</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">beam</span> <span class="o">*=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span><span class="p">[</span><span class="n">freq</span><span class="p">,</span> <span class="n">feed</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+        <span class="k">return</span> <span class="n">beam</span></div>
+
+
+    <span class="c1">#</span>
+    <span class="c1"># === Override methods determining the feed pairs we should calculate ===</span>
+    <span class="c1">#</span>
+    <span class="c1"># These should probably get ported back into `driftscan` as options.</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_sort_pairs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Reimplemented sort pairs to ensure that returned array is in</span>
+        <span class="c1"># channel order.</span>
+
+        <span class="c1"># Create mask of included pairs, that are not conjugated</span>
+        <span class="n">tmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_feedmask</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_not</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_feedconj</span><span class="p">))</span>
+        <span class="n">uniq</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">_get_indices</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_feedmap</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">tmask</span><span class="p">)</span>
+
+        <span class="c1"># Get channel id for each feed in the pair, this will be used for the sort</span>
+        <span class="n">ci</span><span class="p">,</span> <span class="n">cj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([(</span><span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">fj</span><span class="p">]</span><span class="o">.</span><span class="n">id</span><span class="p">)</span> <span class="k">for</span> <span class="n">fi</span><span class="p">,</span> <span class="n">fj</span> <span class="ow">in</span> <span class="n">uniq</span><span class="p">])</span><span class="o">.</span><span class="n">T</span>
+
+        <span class="c1"># # Sort by constructing a numpy array with the keys as fields, and use</span>
+        <span class="c1"># # np.argsort to get the indices</span>
+
+        <span class="c1"># Create array of keys to sort</span>
+        <span class="n">dt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;i4,i4&quot;</span><span class="p">)</span>
+        <span class="n">sort_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">ci</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dt</span><span class="p">)</span>
+        <span class="n">sort_arr</span><span class="p">[</span><span class="s2">&quot;f0&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ci</span>
+        <span class="n">sort_arr</span><span class="p">[</span><span class="s2">&quot;f1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cj</span>
+
+        <span class="c1"># Get map which sorts</span>
+        <span class="n">sort_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">sort_arr</span><span class="p">)</span>
+
+        <span class="c1"># Invert mapping</span>
+        <span class="n">tmp_sort_ind</span> <span class="o">=</span> <span class="n">sort_ind</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">sort_ind</span><span class="p">[</span><span class="n">tmp_sort_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">sort_ind</span><span class="o">.</span><span class="n">size</span><span class="p">)</span>
+
+        <span class="c1"># Remap feedmap entries</span>
+        <span class="n">fm_copy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feedmap</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">wmask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_feedmask</span><span class="p">)</span>
+        <span class="n">fm_copy</span><span class="p">[</span><span class="n">wmask</span><span class="p">]</span> <span class="o">=</span> <span class="n">sort_ind</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_feedmap</span><span class="p">[</span><span class="n">wmask</span><span class="p">]]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_feedmap</span> <span class="o">=</span> <span class="n">fm_copy</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_make_ew</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># # Reimplemented to make sure entries we always pick the upper</span>
+        <span class="c1"># # triangle (and do not reorder to make EW baselines)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">stack_type</span> <span class="o">!=</span> <span class="s2">&quot;unique&quot;</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_make_ew</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_unique_baselines</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Reimplement unique baselines in order to mask out either according to total</span>
+        <span class="c1"># baseline length or maximum North-South and East-West baseline seperation.</span>
+
+        <span class="kn">from</span><span class="w"> </span><span class="nn">drift.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">telescope</span>
+
+        <span class="c1"># Construct array of indices</span>
+        <span class="n">fshape</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">nfeed</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">nfeed</span><span class="p">]</span>
+        <span class="n">f_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="n">fshape</span><span class="p">)</span>
+
+        <span class="c1"># Construct array of baseline separations</span>
+        <span class="n">bl1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">feedpositions</span><span class="p">[</span><span class="n">f_ind</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">feedpositions</span><span class="p">[</span><span class="n">f_ind</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+        <span class="n">bl2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">around</span><span class="p">(</span><span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mf">1.0</span><span class="n">j</span> <span class="o">*</span> <span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bl_tol</span><span class="p">)</span>
+
+        <span class="c1"># Construct array of baseline lengths</span>
+        <span class="n">blen</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">bl1</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span> <span class="o">**</span> <span class="mf">0.5</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">baseline_masking_type</span> <span class="o">==</span> <span class="s2">&quot;total_length&quot;</span><span class="p">:</span>
+            <span class="c1"># Create mask of included baselines</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">blen</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">minlength</span><span class="p">,</span> <span class="n">blen</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">maxlength</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mask_ew</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span>
+                <span class="nb">abs</span><span class="p">(</span><span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">minlength_ew</span><span class="p">,</span>
+                <span class="nb">abs</span><span class="p">(</span><span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">maxlength_ew</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">mask_ns</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span>
+                <span class="nb">abs</span><span class="p">(</span><span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">minlength_ns</span><span class="p">,</span>
+                <span class="nb">abs</span><span class="p">(</span><span class="n">bl1</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">maxlength_ns</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">mask_ew</span><span class="p">,</span> <span class="n">mask_ns</span><span class="p">)</span>
+
+        <span class="c1"># Remove the auto correlated baselines between all polarisations</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">auto_correlations</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">blen</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">telescope</span><span class="o">.</span><span class="n">_remap_keyarray</span><span class="p">(</span><span class="n">bl2</span><span class="p">,</span> <span class="n">mask</span><span class="p">),</span> <span class="n">mask</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_unique_beams</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Override to mask out any feed where the beamclass is less than zero.</span>
+        <span class="c1"># This is used to get exclude feeds which are not normal CHIME cylinder</span>
+        <span class="c1"># feeds</span>
+
+        <span class="n">beam_map</span><span class="p">,</span> <span class="n">beam_mask</span> <span class="o">=</span> <span class="n">telescope</span><span class="o">.</span><span class="n">TransitTelescope</span><span class="o">.</span><span class="n">_unique_beams</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+        <span class="c1"># Construct a mask including only the feeds where the beam class is</span>
+        <span class="c1"># greater than zero</span>
+        <span class="n">bc_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">beamclass</span> <span class="o">&gt;=</span> <span class="mi">0</span>
+        <span class="n">bc_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">bc_mask</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span> <span class="n">bc_mask</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:])</span>
+
+        <span class="n">beam_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">beam_mask</span><span class="p">,</span> <span class="n">bc_mask</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">beam_map</span><span class="p">,</span> <span class="n">beam_mask</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_set_beam_normalization</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Determine the beam normalization for each feed and frequency.</span>
+
+<span class="sd">        The beam will be normalized by its value at transit at the declination</span>
+<span class="sd">        provided in the dec_normalized config parameter.  If this config parameter</span>
+<span class="sd">        is set to None, then there is no additional normalization applied.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dec_normalized</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">angpos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                <span class="p">[(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dec_normalized</span><span class="p">)),</span> <span class="mf">0.0</span><span class="p">]</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="n">beam</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">nfreq</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">nfeed</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+
+            <span class="n">beam_lookup</span> <span class="o">=</span> <span class="p">{}</span>
+
+            <span class="k">for</span> <span class="n">fe</span><span class="p">,</span> <span class="n">feed</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">):</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">feed</span><span class="p">):</span>
+                    <span class="k">continue</span>
+
+                <span class="n">beamclass</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">beamclass</span><span class="p">[</span><span class="n">fe</span><span class="p">]</span>
+
+                <span class="k">if</span> <span class="n">beamclass</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">beam_lookup</span><span class="p">:</span>
+                    <span class="n">beam_lookup</span><span class="p">[</span><span class="n">beamclass</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">nfreq</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">fr</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nfreq</span><span class="p">):</span>
+                        <span class="n">beam_lookup</span><span class="p">[</span><span class="n">beamclass</span><span class="p">][</span><span class="n">fr</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">beam</span><span class="p">(</span><span class="n">fe</span><span class="p">,</span> <span class="n">fr</span><span class="p">,</span> <span class="n">angpos</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+                <span class="n">beam</span><span class="p">[:,</span> <span class="n">fe</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">beam_lookup</span><span class="p">[</span><span class="n">beamclass</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">beam</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">))</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_skip_baseline</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bl_ind</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Override to skip baselines based on which polarisation pair they are.&quot;&quot;&quot;</span>
+        <span class="c1"># Pull in baseline skip choice from parent class</span>
+        <span class="n">skip_bl</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_skip_baseline</span><span class="p">(</span><span class="n">bl_ind</span><span class="p">)</span>
+
+        <span class="n">pol_i</span><span class="p">,</span> <span class="n">pol_j</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">polarisation</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">uniquepairs</span><span class="p">[</span><span class="n">bl_ind</span><span class="p">]]</span>
+        <span class="n">pol_pair</span> <span class="o">=</span> <span class="n">pol_i</span> <span class="o">+</span> <span class="n">pol_j</span>
+
+        <span class="n">skip_pol</span> <span class="o">=</span> <span class="n">pol_pair</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_pol_pair</span>
+
+        <span class="k">return</span> <span class="n">skip_bl</span> <span class="ow">or</span> <span class="n">skip_pol</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flat_top_gauss6</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">x0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Flat-top gaussian. Power of 6.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">A</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="nb">abs</span><span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">/</span> <span class="n">sig</span><span class="p">)</span> <span class="o">**</span> <span class="mi">6</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flat_top_gauss3</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">x0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Flat-top gaussian. Power of 3.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">A</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="nb">abs</span><span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">/</span> <span class="n">sig</span><span class="p">)</span> <span class="o">**</span> <span class="mi">3</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CHIMEParameterizedBeam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIMEParameterizedBeam">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CHIMEParameterizedBeam</span><span class="p">(</span><span class="n">CHIME</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;CHIME telescope that uses a parameterized fit to the driftscan beam.</span>
+
+<span class="sd">    This speeds up evaluation of the beam model.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">SIGMA_EW</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">14.87857614</span><span class="p">,</span> <span class="mf">9.95746878</span><span class="p">]</span>
+
+    <span class="n">FUNC_NS</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">list</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">_flat_top_gauss6</span><span class="p">,</span> <span class="n">_flat_top_gauss3</span><span class="p">]</span>
+    <span class="n">PARAM_NS</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+        <span class="p">[[</span><span class="mf">9.97981768e-01</span><span class="p">,</span> <span class="mf">1.29544939e00</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">9.86421047e-01</span><span class="p">,</span> <span class="mf">8.10213326e-01</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]]</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_sigma</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pol_index</span><span class="p">,</span> <span class="n">freq_index</span><span class="p">,</span> <span class="n">dec</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Width of the power beam in the EW direction.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">SIGMA_EW</span><span class="p">[</span><span class="n">pol_index</span><span class="p">]</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span><span class="p">[</span><span class="n">freq_index</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">dec</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_beam_amplitude</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pol_index</span><span class="p">,</span> <span class="n">dec</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Amplitude of the power beam at meridian.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">FUNC_NS</span><span class="p">[</span><span class="n">pol_index</span><span class="p">](</span>
+            <span class="n">dec</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">latitude</span><span class="p">),</span> <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">PARAM_NS</span><span class="p">[</span><span class="n">pol_index</span><span class="p">]</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="CHIMEParameterizedBeam.beam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIMEParameterizedBeam.beam">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">beam</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feed</span><span class="p">,</span> <span class="n">freq</span><span class="p">,</span> <span class="n">angpos</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Parameterized fit to driftscan cylinder beam model for CHIME telescope.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        feed : int</span>
+<span class="sd">            Index for the feed.</span>
+<span class="sd">        freq : int</span>
+<span class="sd">            Index for the frequency.</span>
+<span class="sd">        angpos : np.ndarray[nposition, 2], optional</span>
+<span class="sd">            Angular position on the sky (in radians).</span>
+<span class="sd">            If not provided, default to the _angpos</span>
+<span class="sd">            class attribute.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        beam : np.ndarray[nposition, 2]</span>
+<span class="sd">            Amplitude vector of beam at each position on the sky.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">feed_obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">feed</span><span class="p">]</span>
+
+        <span class="c1"># Check that feed exists and is a CHIME cylinder antenna</span>
+        <span class="k">if</span> <span class="n">feed_obj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Craziness. The requested feed doesn&#39;t seem to exist.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Requested feed is not a CHIME antenna.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># If the angular position was not provided, then use the values in the</span>
+        <span class="c1"># class attribute.</span>
+        <span class="k">if</span> <span class="n">angpos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">angpos</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_angpos</span>
+
+        <span class="n">dec</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">-</span> <span class="n">angpos</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+        <span class="n">ha</span> <span class="o">=</span> <span class="n">angpos</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># We can only support feeds angled parallel or perp to the cylinder</span>
+        <span class="c1"># axis. Check for these and throw exception for anything else.</span>
+        <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_x</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">pol</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">elif</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_y</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">pol</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Given polarisation (feed.pol=</span><span class="si">{</span><span class="n">feed_obj</span><span class="o">.</span><span class="n">pol</span><span class="si">}</span><span class="s2">) not supported.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">beam</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">angpos</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+        <span class="n">beam</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_beam_amplitude</span><span class="p">(</span><span class="n">pol</span><span class="p">,</span> <span class="n">dec</span><span class="p">)</span>
+            <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="p">((</span><span class="n">ha</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sigma</span><span class="p">(</span><span class="n">pol</span><span class="p">,</span> <span class="n">freq</span><span class="p">,</span> <span class="n">dec</span><span class="p">))</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Normalize the beam</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">beam</span> <span class="o">*=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_normalization</span><span class="p">[</span><span class="n">freq</span><span class="p">,</span> <span class="n">feed</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+        <span class="k">return</span> <span class="n">beam</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="CHIMEFitBeam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIMEFitBeam">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CHIMEFitBeam</span><span class="p">(</span><span class="n">CHIME</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Driftscan model with revised FWHM for north-south beam.</span>
+
+<span class="sd">    Point source beam model was fit to a flat Gaussian at each frequency.</span>
+<span class="sd">    Best-fit FWHM as a function of frequency was fit with a cubic</span>
+<span class="sd">    polynomial. This class revises coefficients of FWHM from the</span>
+<span class="sd">    fit. Detailed comparisons are documented in:</span>
+<span class="sd">    https://bao.chimenet.ca/doc/documents/1448</span>
+
+<span class="sd">    Note that the optimization was carried out in 585-800 MHz.</span>
+<span class="sd">    This model will produce large extrapolation errors if used below that.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_eywidth</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="mf">3.0</span>
+        <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+        <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.15310483e-07</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.30462590e-04</span><span class="p">,</span> <span class="mf">1.50451290e-01</span><span class="p">,</span> <span class="o">-</span><span class="mf">3.07440520e01</span><span class="p">])</span>
+    <span class="p">)</span>
+
+    <span class="n">_hxwidth</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="mf">3.0</span>
+        <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+        <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.97495306e-07</span><span class="p">,</span> <span class="o">-</span><span class="mf">6.00582101e-04</span><span class="p">,</span> <span class="mf">3.99949759e-01</span><span class="p">,</span> <span class="o">-</span><span class="mf">8.66733249e01</span><span class="p">])</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="CHIMEExternalBeam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIMEExternalBeam">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CHIMEExternalBeam</span><span class="p">(</span><span class="n">CHIME</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Model telescope for the CHIME.</span>
+
+<span class="sd">    This class uses an external beam model that is read in from a file.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    primary_beam_filename : str</span>
+<span class="sd">        Path to the file containing the primary beam. Can either be a Healpix beam or a</span>
+<span class="sd">        GridBeam.</span>
+<span class="sd">    freq_interp_beam : bool, optional</span>
+<span class="sd">        Interpolate between neighbouring frequencies if we don&#39;t have a beam for every</span>
+<span class="sd">        frequency channel.</span>
+<span class="sd">    force_real_beam : bool, optional</span>
+<span class="sd">        Ensure the output beam is real, regardless of what the datatype of the beam file</span>
+<span class="sd">        is. This can help save memory if the saved beam is complex but you know the</span>
+<span class="sd">        imaginary part is zero.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">primary_beam_filename</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">freq_interp_beam</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">force_real_beam</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finalise_config</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the beam file object.&quot;&quot;&quot;</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reading beam model from </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">primary_beam_filename</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span> <span class="o">=</span> <span class="n">ContainerPrototype</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">primary_beam_filename</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">,</span> <span class="n">distributed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">ondisk</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_grid_beam</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="p">,</span> <span class="n">GridBeam</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_healpix_beam</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="p">,</span> <span class="n">HEALPixBeam</span><span class="p">)</span>
+
+        <span class="c1"># cache axes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_beam_freq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">freq</span><span class="p">[:]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_grid_beam</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">nside</span>
+
+        <span class="c1"># TODO must use bytestring here because conversion doesn&#39;t work with ondisk=True</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_grid_beam</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_beam_pol_map</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;X&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">pol</span><span class="p">[:])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;XX&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;Y&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">pol</span><span class="p">[:])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;YY&quot;</span><span class="p">),</span>
+            <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_beam_pol_map</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;X&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">pol</span><span class="p">[:])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;X&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;Y&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">pol</span><span class="p">[:])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;Y&quot;</span><span class="p">),</span>
+            <span class="p">}</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">input</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Per-feed beam model not supported for now.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># If a HEALPixBeam, must check types of theta and phi fields</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_healpix_beam</span><span class="p">:</span>
+            <span class="n">hpb_types</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">beam</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">fields</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+            <span class="p">]</span>
+
+            <span class="n">complex_beam</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span>
+                <span class="p">[</span><span class="nb">issubclass</span><span class="p">(</span><span class="n">hpbt</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">complexfloating</span><span class="p">)</span> <span class="k">for</span> <span class="n">hpbt</span> <span class="ow">in</span> <span class="n">hpb_types</span><span class="p">]</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">complex_beam</span> <span class="o">=</span> <span class="nb">issubclass</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">beam</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">complexfloating</span>
+            <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_output_dtype</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">complex128</span> <span class="k">if</span> <span class="n">complex_beam</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">force_real_beam</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span>
+        <span class="p">)</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_finalise_config</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CHIMEExternalBeam.beam">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.CHIMEExternalBeam.beam">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">beam</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feed</span><span class="p">,</span> <span class="n">freq_id</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the beam pattern.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        feed : int</span>
+<span class="sd">            Feed index.</span>
+<span class="sd">        freq_id : int</span>
+<span class="sd">            Frequency ID.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        beam : np.ndarray[pixel, pol]</span>
+<span class="sd">            Return the vector beam response at each point in the Healpix grid. This</span>
+<span class="sd">            array is of type `np.float64` if the input beam pattern is real, of</span>
+<span class="sd">            `force_real_beam` is set, otherwise is is on type `np.complex128`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">feed_obj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">feed</span><span class="p">]</span>
+        <span class="n">tel_freq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frequencies</span>
+        <span class="n">nside</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nside</span>
+        <span class="n">npix</span> <span class="o">=</span> <span class="n">healpy</span><span class="o">.</span><span class="n">nside2npix</span><span class="p">(</span><span class="n">nside</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">feed_obj</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;The requested feed doesn&#39;t seem to exist.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_x</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">pol_ind</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_pol_map</span><span class="p">[</span><span class="s2">&quot;X&quot;</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="n">tools</span><span class="o">.</span><span class="n">is_array_y</span><span class="p">(</span><span class="n">feed_obj</span><span class="p">):</span>
+            <span class="n">pol_ind</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_pol_map</span><span class="p">[</span><span class="s2">&quot;Y&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Polarisation not supported by this feed&quot;</span><span class="p">,</span> <span class="n">feed_obj</span><span class="p">)</span>
+
+        <span class="c1"># find nearest frequency</span>
+        <span class="n">freq_sel</span> <span class="o">=</span> <span class="n">_nearest_freq</span><span class="p">(</span>
+            <span class="n">tel_freq</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_freq</span><span class="p">,</span> <span class="n">freq_id</span><span class="p">,</span> <span class="n">single</span><span class="o">=</span><span class="p">(</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_interp_beam</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="c1"># Raise an error if we can&#39;t find any suitable frequency</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">freq_sel</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No beam model spans frequency </span><span class="si">{</span><span class="n">tel_freq</span><span class="p">[</span><span class="n">freq_id</span><span class="p">]</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_grid_beam</span><span class="p">:</span>
+            <span class="c1"># Either we haven&#39;t set up interpolation coords yet, or the nside has</span>
+            <span class="c1"># changed</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span> <span class="o">!=</span> <span class="n">nside</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span> <span class="o">=</span> <span class="n">nside</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_setup_gridbeam_interpolation</span><span class="p">()</span>
+
+            <span class="c1"># interpolate gridbeam onto HEALPix</span>
+            <span class="n">beam_map</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_interpolate_gridbeam</span><span class="p">(</span><span class="n">freq_sel</span><span class="p">,</span> <span class="n">pol_ind</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># Healpix input beam just need to change to the required resolution</span>
+            <span class="n">beam_map</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">beam</span><span class="p">[</span><span class="n">freq_sel</span><span class="p">,</span> <span class="n">pol_ind</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="p">:]</span>
+
+            <span class="c1"># Check resolution and resample to a better resolution if needed</span>
+            <span class="k">if</span> <span class="n">nside</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">nside</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Requested nside=</span><span class="si">{</span><span class="n">nside</span><span class="si">}</span><span class="s2"> higher than that of &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;beam </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="p">)</span>
+
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Resampling external beam from nside </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_beam_nside</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">nside</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+                <span class="n">beam_map_new</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">freq_sel</span><span class="p">),</span> <span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">beam_map</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+                <span class="n">beam_map_new</span><span class="p">[</span><span class="s2">&quot;Et&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">healpy</span><span class="o">.</span><span class="n">ud_grade</span><span class="p">(</span><span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Et&quot;</span><span class="p">],</span> <span class="n">nside</span><span class="p">)</span>
+                <span class="n">beam_map_new</span><span class="p">[</span><span class="s2">&quot;Ep&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">healpy</span><span class="o">.</span><span class="n">ud_grade</span><span class="p">(</span><span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Ep&quot;</span><span class="p">],</span> <span class="n">nside</span><span class="p">)</span>
+                <span class="n">beam_map</span> <span class="o">=</span> <span class="n">beam_map_new</span>
+
+        <span class="n">map_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="n">npix</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_output_dtype</span><span class="p">)</span>
+
+        <span class="c1"># Pull out the real part of the beam if we are forcing a conversion. This should</span>
+        <span class="c1"># do nothing if the array is already real</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_conv_real</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">force_real_beam</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">x</span><span class="o">.</span><span class="n">real</span>
+            <span class="k">return</span> <span class="n">x</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">freq_sel</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># exact match</span>
+            <span class="n">map_out</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">_conv_real</span><span class="p">(</span><span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Et&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">map_out</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">_conv_real</span><span class="p">(</span><span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Ep&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># interpolate between pair of frequencies</span>
+            <span class="n">freq_high</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_freq</span><span class="p">[</span><span class="n">freq_sel</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+            <span class="n">freq_low</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_freq</span><span class="p">[</span><span class="n">freq_sel</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+            <span class="n">freq_int</span> <span class="o">=</span> <span class="n">tel_freq</span><span class="p">[</span><span class="n">freq_id</span><span class="p">]</span>
+
+            <span class="n">alpha</span> <span class="o">=</span> <span class="p">(</span><span class="n">freq_high</span> <span class="o">-</span> <span class="n">freq_int</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">freq_high</span> <span class="o">-</span> <span class="n">freq_low</span><span class="p">)</span>
+            <span class="n">beta</span> <span class="o">=</span> <span class="p">(</span><span class="n">freq_int</span> <span class="o">-</span> <span class="n">freq_low</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">freq_high</span> <span class="o">-</span> <span class="n">freq_low</span><span class="p">)</span>
+
+            <span class="n">map_out</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">_conv_real</span><span class="p">(</span>
+                <span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Et&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">alpha</span> <span class="o">+</span> <span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Et&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">beta</span>
+            <span class="p">)</span>
+            <span class="n">map_out</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">_conv_real</span><span class="p">(</span>
+                <span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Ep&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">alpha</span> <span class="o">+</span> <span class="n">beam_map</span><span class="p">[</span><span class="s2">&quot;Ep&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">beta</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">map_out</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_gridbeam_interpolation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># grid beam coordinates</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_x_grid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">phi</span><span class="p">[:]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_y_grid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">theta</span><span class="p">[:]</span>
+
+        <span class="c1"># celestial coordinates</span>
+        <span class="n">angpos</span> <span class="o">=</span> <span class="n">hputil</span><span class="o">.</span><span class="n">ang_positions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nside</span><span class="p">)</span>
+        <span class="n">x_cel</span> <span class="o">=</span> <span class="n">spherical</span><span class="o">.</span><span class="n">sph_to_cart</span><span class="p">(</span><span class="n">angpos</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+
+        <span class="c1"># rotate to telescope coords</span>
+        <span class="c1"># first align y with N, then polar axis with NCP</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_x_tel</span> <span class="o">=</span> <span class="n">spherical</span><span class="o">.</span><span class="n">rotate_ypr</span><span class="p">(</span>
+            <span class="p">(</span><span class="mf">1.5</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="mf">90.0</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">latitude</span><span class="p">),</span> <span class="mi">0</span><span class="p">),</span> <span class="o">*</span><span class="n">x_cel</span>
+        <span class="p">)</span>
+
+        <span class="c1"># mask any pixels outside grid</span>
+        <span class="n">x_t</span><span class="p">,</span> <span class="n">y_t</span><span class="p">,</span> <span class="n">z_t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_tel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pix_mask</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="n">z_t</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="o">&amp;</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">x_t</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_grid</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+            <span class="o">&amp;</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">y_t</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_y_grid</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+        <span class="p">)</span>
+
+        <span class="c1"># pre-compute polarisation pattern</span>
+        <span class="c1"># taken from driftscan</span>
+        <span class="n">zenith</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">2.0</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">latitude</span><span class="p">),</span> <span class="mf">0.0</span><span class="p">])</span>
+        <span class="n">that</span><span class="p">,</span> <span class="n">phat</span> <span class="o">=</span> <span class="n">spherical</span><span class="o">.</span><span class="n">thetaphi_plane_cart</span><span class="p">(</span><span class="n">zenith</span><span class="p">)</span>
+        <span class="n">xhat</span><span class="p">,</span> <span class="n">yhat</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">spherical</span><span class="o">.</span><span class="n">rotate_ypr</span><span class="p">(</span>
+            <span class="p">[</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">rotation_angle</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span>
+            <span class="n">phat</span><span class="p">,</span>
+            <span class="o">-</span><span class="n">that</span><span class="p">,</span>
+            <span class="n">spherical</span><span class="o">.</span><span class="n">sph_to_cart</span><span class="p">(</span><span class="n">zenith</span><span class="p">),</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pvec_x</span> <span class="o">=</span> <span class="n">cylbeam</span><span class="o">.</span><span class="n">polpattern</span><span class="p">(</span><span class="n">angpos</span><span class="p">,</span> <span class="n">xhat</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pvec_y</span> <span class="o">=</span> <span class="n">cylbeam</span><span class="o">.</span><span class="n">polpattern</span><span class="p">(</span><span class="n">angpos</span><span class="p">,</span> <span class="n">yhat</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_interpolate_gridbeam</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">f_sel</span><span class="p">,</span> <span class="n">p_ind</span><span class="p">):</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_grid</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_y_grid</span>
+        <span class="n">x_t</span><span class="p">,</span> <span class="n">y_t</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_x_tel</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pix_mask</span>
+
+        <span class="c1"># interpolation routine requires increasing axes</span>
+        <span class="n">reverse_x</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_x_grid</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">reverse_x</span><span class="p">:</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">npix</span> <span class="o">=</span> <span class="n">healpy</span><span class="o">.</span><span class="n">nside2npix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nside</span><span class="p">)</span>
+        <span class="n">beam_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+            <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">f_sel</span><span class="p">),</span> <span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">HEALPixBeam</span><span class="o">.</span><span class="n">_dataset_spec</span><span class="p">[</span><span class="s2">&quot;beam&quot;</span><span class="p">][</span><span class="s2">&quot;dtype&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">fi</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">f_sel</span><span class="p">):</span>
+            <span class="c1"># For now we just use the magnitude. Assumes input is power beam</span>
+            <span class="n">beam</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_primary_beam</span><span class="o">.</span><span class="n">beam</span><span class="p">[</span><span class="n">fi</span><span class="p">,</span> <span class="n">p_ind</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">reverse_x</span><span class="p">:</span>
+                <span class="n">beam</span> <span class="o">=</span> <span class="n">beam</span><span class="p">[:,</span> <span class="p">::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">beam_spline</span> <span class="o">=</span> <span class="n">RectBivariateSpline</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">beam</span><span class="p">)))</span>
+
+            <span class="c1"># beam amplitude</span>
+            <span class="n">amp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">npix</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">beam</span><span class="o">.</span><span class="n">real</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">amp</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">beam_spline</span><span class="p">(</span><span class="n">y_t</span><span class="p">[</span><span class="n">mask</span><span class="p">],</span> <span class="n">x_t</span><span class="p">[</span><span class="n">mask</span><span class="p">],</span> <span class="n">grid</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+            <span class="c1"># polarisation projection</span>
+            <span class="n">pvec</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pvec_x</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_beam_pol_map</span><span class="p">[</span><span class="s2">&quot;X&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">p_ind</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pvec_y</span>
+
+            <span class="n">beam_out</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;Et&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">amp</span> <span class="o">*</span> <span class="n">pvec</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+            <span class="n">beam_out</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;Ep&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">amp</span> <span class="o">*</span> <span class="n">pvec</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">beam_out</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_nearest_freq</span><span class="p">(</span><span class="n">tel_freq</span><span class="p">,</span> <span class="n">map_freq</span><span class="p">,</span> <span class="n">freq_id</span><span class="p">,</span> <span class="n">single</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Find nearest neighbor frequencies. Assumes map frequencies are uniformly spaced.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    tel_freq : float</span>
+<span class="sd">        frequencies from telescope object.</span>
+<span class="sd">    map_freq : float</span>
+<span class="sd">        frequencies from beam map file.</span>
+<span class="sd">    freq_id : int</span>
+<span class="sd">        frequency selection.</span>
+<span class="sd">    single : bool</span>
+<span class="sd">        Only return the single nearest neighbour.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    freq_ind : list of neighboring map frequencies matched to tel_freq.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">diff_freq</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">map_freq</span> <span class="o">-</span> <span class="n">tel_freq</span><span class="p">[</span><span class="n">freq_id</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">single</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">diff_freq</span><span class="p">)])</span>
+
+    <span class="n">map_freq_width</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">map_freq</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">map_freq</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">match_mask</span> <span class="o">=</span> <span class="n">diff_freq</span> <span class="o">&lt;</span> <span class="n">map_freq_width</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">match_mask</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="MakeTelescope">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.MakeTelescope">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MakeTelescope</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;A simple task to construct a telescope object.</span>
+
+<span class="sd">    This removes the need to use driftscan to create a saved beam transfer manager</span>
+<span class="sd">    solely for running pipelines that only need the telescope object.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    telescope_type : str</span>
+<span class="sd">        The type of telescope object to create. Generally this must be a fully qualified</span>
+<span class="sd">        Python class name, however, \&quot;chime\&quot; (default) can be used to create a</span>
+<span class="sd">        `ch_pipeline.core.telescope.CHIME` instance.</span>
+<span class="sd">    telescope_config : dict</span>
+<span class="sd">        Configuration passed straight to the telescope class via it&#39;s `from_config`</span>
+<span class="sd">        method.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">telescope_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;chime&quot;</span><span class="p">)</span>
+    <span class="n">telescope_config</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>
+
+<div class="viewcode-block" id="MakeTelescope.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.telescope.html#ch_pipeline.core.telescope.MakeTelescope.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">telescope</span><span class="o">.</span><span class="n">TransitTelescope</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create and return the telescope object.&quot;&quot;&quot;</span>
+        <span class="n">_type_map</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;chime&quot;</span><span class="p">:</span> <span class="n">CHIME</span><span class="p">,</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope_type</span> <span class="ow">in</span> <span class="n">_type_map</span><span class="p">:</span>
+            <span class="n">tel_class</span> <span class="o">=</span> <span class="n">_type_map</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_type</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">tel_class</span> <span class="o">=</span> <span class="n">importtools</span><span class="o">.</span><span class="n">import_class</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_type</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">tel_class</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">telescope_config</span><span class="p">)</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,2200 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.flagging &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.fringestop" href="ch_pipeline.analysis.fringestop.html" />
+    <link rel="prev" title="ch_pipeline.analysis.calibration" href="ch_pipeline.analysis.calibration.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.flagging</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.flagging.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.flagging">
+<span id="ch-pipeline-analysis-flagging"></span><h1>ch_pipeline.analysis.flagging<a class="headerlink" href="#module-ch_pipeline.analysis.flagging" title="Link to this heading"></a></h1>
+<p>Tasks for Flagging Data.</p>
+<p>Tasks for calculating flagging out unwanted data. This includes RFI removal, and
+data quality flagging on timestream data; sun excision on sidereal data; and
+pre-map making flagging on m-modes.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.compute_cumulative_rainfall" title="ch_pipeline.analysis.flagging.compute_cumulative_rainfall"><code class="xref py py-obj docutils literal notranslate"><span class="pre">compute_cumulative_rainfall</span></code></a>(times[, ...])</p></td>
+<td><p>Compute cumulative rainfall for a given set of Unix times.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.daytime_flag" title="ch_pipeline.analysis.flagging.daytime_flag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">daytime_flag</span></code></a>(time)</p></td>
+<td><p>Return a flag that indicates if times occur during the day.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.load_rainfall" title="ch_pipeline.analysis.flagging.load_rainfall"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_rainfall</span></code></a>(start_time, end_time[, node_spoof])</p></td>
+<td><p>Load rainfall measurements in a specific time range.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.search_grid" title="ch_pipeline.analysis.flagging.search_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">search_grid</span></code></a>(xeval, window, x[, wrap])</p></td>
+<td><p>Find indices into a uniformly space grid that extract desired regions.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.taper_mask" title="ch_pipeline.analysis.flagging.taper_mask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">taper_mask</span></code></a>(mask, nwidth[, outer])</p></td>
+<td><p>Apply a taper to a mask via a Hanning window.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.transit_flag" title="ch_pipeline.analysis.flagging.transit_flag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">transit_flag</span></code></a>(body, time[, nsigma, freq])</p></td>
+<td><p>Return a flag that indicates if times occured near transit of a celestial body.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.AccumulateCorrInputMask" title="ch_pipeline.analysis.flagging.AccumulateCorrInputMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">AccumulateCorrInputMask</span></code></a>()</p></td>
+<td><p>Find good correlator inputs over multiple sidereal days.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.ApplyCorrInputMask" title="ch_pipeline.analysis.flagging.ApplyCorrInputMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplyCorrInputMask</span></code></a>()</p></td>
+<td><p>Apply an input mask to a timestream.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.ApplyInputFlag" title="ch_pipeline.analysis.flagging.ApplyInputFlag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplyInputFlag</span></code></a>()</p></td>
+<td><p>Flag bad inputs.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.ApplySiderealDayFlag" title="ch_pipeline.analysis.flagging.ApplySiderealDayFlag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplySiderealDayFlag</span></code></a>()</p></td>
+<td><p>Prevent certain sidereal days from progressing further in the pipeline.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.BadNodeFlagger" title="ch_pipeline.analysis.flagging.BadNodeFlagger"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BadNodeFlagger</span></code></a>()</p></td>
+<td><p>Flag out bad GPU nodes by giving zero weight to their frequencies.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.CatalogBase" title="ch_pipeline.analysis.flagging.CatalogBase"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CatalogBase</span></code></a>()</p></td>
+<td><p>Shared methods for catalog-based masking and tapering.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.ChannelFlagger" title="ch_pipeline.analysis.flagging.ChannelFlagger"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ChannelFlagger</span></code></a>()</p></td>
+<td><p>Mask out channels that appear weird in some way.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.DataFlagger" title="ch_pipeline.analysis.flagging.DataFlagger"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DataFlagger</span></code></a>()</p></td>
+<td><p>Flag data based on DataFlags in database.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.DayMask" title="ch_pipeline.analysis.flagging.DayMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DayMask</span></code></a></p></td>
+<td><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskDay" title="ch_pipeline.analysis.flagging.MaskDay"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskDay</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.ExpandMask" title="ch_pipeline.analysis.flagging.ExpandMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ExpandMask</span></code></a>()</p></td>
+<td><p>Expand a mask along the time/RA axis.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.FlagRainfall" title="ch_pipeline.analysis.flagging.FlagRainfall"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FlagRainfall</span></code></a>()</p></td>
+<td><p>Flag times following periods of heavy rainfall.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskAliasedMap" title="ch_pipeline.analysis.flagging.MaskAliasedMap"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskAliasedMap</span></code></a>()</p></td>
+<td><p>Mask regions of a map that contain north-south aliases.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskBrightSourcePixels" title="ch_pipeline.analysis.flagging.MaskBrightSourcePixels"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskBrightSourcePixels</span></code></a></p></td>
+<td><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSourcePixelsFromCatalog</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskBrightSourceTracks" title="ch_pipeline.analysis.flagging.MaskBrightSourceTracks"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskBrightSourceTracks</span></code></a></p></td>
+<td><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSourceTracksFromCatalog</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskCHIMEData" title="ch_pipeline.analysis.flagging.MaskCHIMEData"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskCHIMEData</span></code></a>()</p></td>
+<td><p>Mask out data ahead of map making.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskCHIMEMisc" title="ch_pipeline.analysis.flagging.MaskCHIMEMisc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskCHIMEMisc</span></code></a>()</p></td>
+<td><p>Some miscellaneous data masking routines.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskDay" title="ch_pipeline.analysis.flagging.MaskDay"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskDay</span></code></a>()</p></td>
+<td><p>Mask out the daytime data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder" title="ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskDecorrelatedCylinder</span></code></a>()</p></td>
+<td><p>Identify and mask frequencies and times where a cylinder decorrelated.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase" title="ch_pipeline.analysis.flagging.MaskFromCatalogBase"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskFromCatalogBase</span></code></a>()</p></td>
+<td><p>Mask regions of a map near bright point sources.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskHighFracLost" title="ch_pipeline.analysis.flagging.MaskHighFracLost"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskHighFracLost</span></code></a>()</p></td>
+<td><p>Mask frequencies and times with significant data loss during integration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskManyBadInputs" title="ch_pipeline.analysis.flagging.MaskManyBadInputs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskManyBadInputs</span></code></a>()</p></td>
+<td><p>Flag spans of time where a large number of inputs were flagged as bad.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskMoon" title="ch_pipeline.analysis.flagging.MaskMoon"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskMoon</span></code></a>()</p></td>
+<td><p>Mask out data near lunar transit.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskRA" title="ch_pipeline.analysis.flagging.MaskRA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskRA</span></code></a>()</p></td>
+<td><p>Mask out a range in right ascension.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSource" title="ch_pipeline.analysis.flagging.MaskSource"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskSource</span></code></a>()</p></td>
+<td><p>Mask out data near source transits.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskSourcePixelsFromCatalog</span></code></a>()</p></td>
+<td><p>Mask regions of a map near bright point sources.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskSourceTracksFromCatalog</span></code></a>()</p></td>
+<td><p>Mask regions of a map near the U-shaped tracks of bright point sources.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSun" title="ch_pipeline.analysis.flagging.MaskSun"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MaskSun</span></code></a>()</p></td>
+<td><p>Mask out data near solar transit.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.MonitorCorrInput" title="ch_pipeline.analysis.flagging.MonitorCorrInput"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MonitorCorrInput</span></code></a>()</p></td>
+<td><p>Monitor good correlator inputs over several sidereal days.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.NanToNum" title="ch_pipeline.analysis.flagging.NanToNum"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NanToNum</span></code></a>()</p></td>
+<td><p>Finds NaN and replaces with 0.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RFIFilter" title="ch_pipeline.analysis.flagging.RFIFilter"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFIFilter</span></code></a>()</p></td>
+<td><p>Identify data contaminated by RFI.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay" title="ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFIMaskChisqHighDelay</span></code></a>()</p></td>
+<td><p>CHIME version of RFIMaskChisqHighDelay.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RFISensitivityMask" title="ch_pipeline.analysis.flagging.RFISensitivityMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFISensitivityMask</span></code></a>()</p></td>
+<td><p>CHIME version of RFISensitivityMask.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RFIStaticMask" title="ch_pipeline.analysis.flagging.RFIStaticMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFIStaticMask</span></code></a>()</p></td>
+<td><p>Get the static mask for the time period covered by the data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RFIStaticVisMask" title="ch_pipeline.analysis.flagging.RFIStaticVisMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFIStaticVisMask</span></code></a>()</p></td>
+<td><p>CHIME version of RFIStaticVisMask.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.RadiometerWeight" title="ch_pipeline.analysis.flagging.RadiometerWeight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RadiometerWeight</span></code></a>()</p></td>
+<td><p>Update vis_weight according to the radiometer equation.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.SetInputFlag" title="ch_pipeline.analysis.flagging.SetInputFlag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SetInputFlag</span></code></a>()</p></td>
+<td><p>Set input flags dataset based on values from the real-time pipeline at the time.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin" title="ch_pipeline.analysis.flagging.SourcePixelsMixin"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SourcePixelsMixin</span></code></a>()</p></td>
+<td><p>Mixin providing coordinates of the transit of sources in a map.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.SourceTracksMixin" title="ch_pipeline.analysis.flagging.SourceTracksMixin"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SourceTracksMixin</span></code></a>()</p></td>
+<td><p>Mixin providing coordinates of the tracks sources take through a map.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase" title="ch_pipeline.analysis.flagging.TaperFromCatalogBase"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TaperFromCatalogBase</span></code></a>()</p></td>
+<td><p>Taper regions of a map near bright point sources.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.TaperSourcePixelsFromCatalog" title="ch_pipeline.analysis.flagging.TaperSourcePixelsFromCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TaperSourcePixelsFromCatalog</span></code></a>()</p></td>
+<td><p>Taper regions of a map near bright point sources.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.TaperSourceTracksFromCatalog" title="ch_pipeline.analysis.flagging.TaperSourceTracksFromCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TaperSourceTracksFromCatalog</span></code></a>()</p></td>
+<td><p>Taper regions of a map near the U-shaped tracks of bright point sources.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.flagging.TestCorrInput" title="ch_pipeline.analysis.flagging.TestCorrInput"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TestCorrInput</span></code></a>()</p></td>
+<td><p>Apply a series of tests to find the good correlator inputs.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.AccumulateCorrInputMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">AccumulateCorrInputMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#AccumulateCorrInputMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.AccumulateCorrInputMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Find good correlator inputs over multiple sidereal days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>n_day_min</strong> (<em>int</em>) – Do not apply a sidereal day flag if the number of days
+in the pass is less than n_day_min.  Default is 3.</p></li>
+<li><p><strong>n_cut</strong> (<em>int</em>) – Flag a sidereal day as bad if the number of correlator
+inputs that are uniquely flagged bad on that day is
+greater than n_cut.  Default is 5.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Create empty lists.</p>
+<p>As we iterate through sidereal days, we will append the corr_input_mask
+from each day to this list.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.AccumulateCorrInputMask.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">corr_input_mask</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#AccumulateCorrInputMask.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.AccumulateCorrInputMask.process" title="Link to this definition"></a></dt>
+<dd><p>Append corr_input_mask to list.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>corr_input_mask</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><em>containers.CorrInputMask</em></a>) – Mask flagging good correlator inputs</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.AccumulateCorrInputMask.process_finish">
+<span class="sig-name descname"><span class="pre">process_finish</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#AccumulateCorrInputMask.process_finish"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.AccumulateCorrInputMask.process_finish" title="Link to this definition"></a></dt>
+<dd><p>Get the product of the input mask for all good days.</p>
+<p>Determine good days as those where the fraction
+of good inputs is above some user specified
+threshold.  Then create accumulated input mask
+by taking the product of the input mask for all
+good days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>corr_input_mask</strong></p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask">containers.CorrInputMask</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplyCorrInputMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">ApplyCorrInputMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplyCorrInputMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplyCorrInputMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Apply an input mask to a timestream.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplyCorrInputMask.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cmask</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplyCorrInputMask.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplyCorrInputMask.process" title="Link to this definition"></a></dt>
+<dd><p>Flag out events by giving them zero weight.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>timestream</strong> (<em>andata.CorrData</em><em> or </em><em>dcontainers.SiderealStream</em>) – timestream data container</p></li>
+<li><p><strong>cmask</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask"><em>containers.RFIMask</em></a><em>, </em><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><em>containers.CorrInputMask</em></a><em>, </em><em>etc.</em>) – input mask container</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData or dcontainers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplyInputFlag">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">ApplyInputFlag</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplyInputFlag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplyInputFlag" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag bad inputs.</p>
+<p>Uses the flaginput acquisition generated by the real-time pipeline.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplyInputFlag.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplyInputFlag.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplyInputFlag.process" title="Link to this definition"></a></dt>
+<dd><p>Lookup and apply the relevant input flags.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>TODContainer</em><em>, </em><em>SiderealStream</em><em>, </em><em>TrackBeam</em>) – Must have <cite>input</cite> axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong> – The input container with the weight dataset
+set to zero for bad inputs.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TODContainer, SiderealStream, TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplyInputFlag.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplyInputFlag.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplyInputFlag.setup" title="Link to this definition"></a></dt>
+<dd><p>Load flaginput files that cover full span of time to be processed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>files</strong> (<em>list</em><em> of </em><em>str</em>) – List of paths to files containing the input flags.</p></li>
+<li><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplySiderealDayFlag">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">ApplySiderealDayFlag</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplySiderealDayFlag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplySiderealDayFlag" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Prevent certain sidereal days from progressing further in the pipeline.</p>
+<p>example: exclude certain sidereal days from the sidereal stack.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplySiderealDayFlag.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplySiderealDayFlag.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplySiderealDayFlag.process" title="Link to this definition"></a></dt>
+<dd><p>Check if this sidereal day should continue processing.</p>
+<p>If this sidereal day is flagged as good or
+if no flag is specified for this sidereal day,
+then return the timestream.  If this sidereal day
+is flagged as bad, then return None.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>timestream</strong> (<em>andata.CorrData / dcontainers.SiderealStream</em>) – timestream data container. Should have a ‘lsd’ or ‘csd’ attribute.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData / dcontainers.SiderealStream or None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ApplySiderealDayFlag.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csd_flag</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ApplySiderealDayFlag.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ApplySiderealDayFlag.setup" title="Link to this definition"></a></dt>
+<dd><p>Create dictionary from input .</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.BadNodeFlagger">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">BadNodeFlagger</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#BadNodeFlagger"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.BadNodeFlagger" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag out bad GPU nodes by giving zero weight to their frequencies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>nodes</strong> (<em>list</em><em> of </em><em>ints</em>) – Indices of bad nodes to flag.</p></li>
+<li><p><strong>nodes_by_acq</strong> (<em>dict</em>) – Dictionary whose entries have the name of the acquisition as keyword
+and a list of the nodes to flag as bad for that acquisition as value.</p></li>
+<li><p><strong>flag_freq_zero</strong> (<em>boolean</em><em>, </em><em>optional</em>) – Whether to flag out frequency zero.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.BadNodeFlagger.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#BadNodeFlagger.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.BadNodeFlagger.process" title="Link to this definition"></a></dt>
+<dd><p>Flag out bad nodes by giving them zero weight.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>timestream</strong> (<em>andata.CorrData</em><em> or </em><em>dcontainers.SiderealStream</em>) – timestream data to process</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>flagged_timestream</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>same type as timestream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.CatalogBase">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">CatalogBase</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#CatalogBase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.CatalogBase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Shared methods for catalog-based masking and tapering.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.CatalogBase.get_source_freq">
+<span class="sig-name descname"><span class="pre">get_source_freq</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#CatalogBase.get_source_freq"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.CatalogBase.get_source_freq" title="Link to this definition"></a></dt>
+<dd><p>Compute the frequency corresponding to each source’s redshift.</p>
+<p>Returns <cite>self.catalog[“frequency”]</cite> if available.  Otherwise the
+redshift of the source will be converted to frequency assuming
+the 21 cm line. Redshift values and their uncertainties taken
+from <cite>self.catalog[“redshift”]</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p><strong>src_freq</strong> (<em>np.ndarray[nsource,]</em>) – Rest-frame frequency in MHz of 21 cm emission or absorption
+for each source, computed as freq_21 / (1 + z), where freq_21 is
+the rest-frame frequency of the 21 cm line.</p></li>
+<li><p><strong>src_freq_err</strong> (<em>np.ndarray[nsource,]</em>) – Uncertainty in source frequency in MHz, propagated from redshift errors.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.CatalogBase.get_z_limit">
+<span class="sig-name descname"><span class="pre">get_z_limit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#CatalogBase.get_z_limit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.CatalogBase.get_z_limit" title="Link to this definition"></a></dt>
+<dd><p>Calculate the z coordinate of the horizon.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>x</strong> (<em>np.ndarray</em><em>[</em><em>ncoord</em><em>,</em><em>]</em>) – Telescope-x coordinate of sources.</p></li>
+<li><p><strong>y</strong> (<em>np.ndarray</em><em>[</em><em>ncoord</em><em>,</em><em>]</em>) – Telescope-y coordinate of sources.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>zlim</strong> – Telescope-z coordinate cooresponding to the horizon
+at the azimuthal angle given by x and y.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[ncoord,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.CatalogBase.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">manager</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">catalog</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">horizon</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#CatalogBase.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.CatalogBase.setup" title="Link to this definition"></a></dt>
+<dd><p>Save the telescope instance and the catalog of bright sources.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>manager</strong> (<em>io.TelescopeConvertible</em>) – Telescope/manager used to determine the location of bright sources.</p></li>
+<li><p><strong>catalog</strong> (<em>subclass</em><em> of </em><em>SourceCatalog</em>) – Catalog containing bright sources to mask.</p></li>
+<li><p><strong>horizon</strong> (<em>HorizonLimit</em>) – Altitude of the horizon as a function of azimuth.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ChannelFlagger">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">ChannelFlagger</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ChannelFlagger"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ChannelFlagger" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask out channels that appear weird in some way.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>test_freq</strong> (<em>list</em>) – Frequencies to test the data at.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ChannelFlagger.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ChannelFlagger.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ChannelFlagger.process" title="Link to this definition"></a></dt>
+<dd><p>Flag bad channels in timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>timestream</strong> (<em>andata.CorrData</em>) – Timestream to flag.</p></li>
+<li><p><strong>inputmap</strong> – associate inputs with CHIME inputs</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong> – Returns the same timestream object with a modified weight dataset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.DataFlagger">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">DataFlagger</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#DataFlagger"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.DataFlagger" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag data based on DataFlags in database.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>flag_type</strong> (<em>list</em>) – List of DataFlagType names to apply. Defaults to the flags representing ranges of time known to be bad
+that may effect the delay spectrum estimate.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.DataFlagger.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#DataFlagger.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.DataFlagger.process" title="Link to this definition"></a></dt>
+<dd><p>Set weight to zero for range of data covered by the database flags.</p>
+<p>Flags are applied based on time, frequency, and (for non-stacked data) input.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>timestream</strong> (<em>andata.CorrData</em><em> or </em><em>dcontainers.SiderealStream</em><em> or </em><em>dcontainers.TimeStream</em>) – Timestream to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong> – Returns the same timestream object with a modified weight dataset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData or dcontainers.SiderealStream or dcontainers.TimeStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.DataFlagger.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#DataFlagger.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.DataFlagger.setup" title="Link to this definition"></a></dt>
+<dd><p>Query the database for flags of the requested types.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.DayMask">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">DayMask</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.DayMask" title="Link to this definition"></a></dt>
+<dd><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskDay" title="ch_pipeline.analysis.flagging.MaskDay"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskDay</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ExpandMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">ExpandMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ExpandMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ExpandMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Expand a mask along the time/RA axis.</p>
+<p>Used to mask the transitional regions between good and bad data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>nexpand</strong> (<em>int</em>) – If a time/RA is within nexpand samples from a masked time/RA,
+then it will be masked in the output.</p></li>
+<li><p><strong>in_place</strong> (<em>bool</em>) – If True, then overwrite the raw mask with the expanded mask.
+If False, then create a new container with the expanded mask.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.ExpandMask.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw_mask</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#ExpandMask.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.ExpandMask.process" title="Link to this definition"></a></dt>
+<dd><p>Mask any times/RAs that neighbor a masked time/RA.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>raw_mask</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask"><em>RFIMask</em></a><em> or </em><em>SiderealRFIMask</em>) – original mask to expand</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>exp_mask</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask">RFIMask</a> or SiderealRFIMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.FlagRainfall">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">FlagRainfall</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#FlagRainfall"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.FlagRainfall" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag times following periods of heavy rainfall.</p>
+<p>This task uses rainfall measurements from the DRAO weather station to compute
+the accumulated rainfall within a given time interval prior to each time sample.
+If the rainfall total exceeds some threshold, the weight dataset is set to zero
+for that time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>accumulation_time</strong> (<em>float</em>) – Number of hours over which to compute accumulated rainfall for each time sample.
+Default: 30.</p></li>
+<li><p><strong>threshold</strong> (<em>float</em>) – Rainfall threshold (in mm) for flagging. Default: 1.0.</p></li>
+<li><p><strong>node_spoof</strong> (<em>dictionary</em>) – Host and directory for finding weather data.
+Default: {‘fir_online’: ‘/project/rpp-chime/chime/chime_online/’}.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.FlagRainfall.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#FlagRainfall.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.FlagRainfall.process" title="Link to this definition"></a></dt>
+<dd><p>Set weight to zero if cumulative rainfall exceeds desired threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>stream</strong> (<em>andata.CorrData</em><em>, </em><em>dcontainers.SiderealStream</em><em>, </em><em>dcontainers.TimeStream</em><em>,</em>) – dcontainers.HybridVisStream, dcontainers.RingMap
+Stream to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>stream</strong> –      dcontainers.HybridVisStream, dcontainers.RingMap
+Returns the same stream object with a modified weight dataset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskAliasedMap">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskAliasedMap</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskAliasedMap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskAliasedMap" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask regions of a map that contain north-south aliases.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>common_freq</strong> (<em>bool</em>) – Generate a common mask for all frequencies, set by the
+maximum frequency in the container.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskAliasedMap.get_horizon_limit">
+<span class="sig-name descname"><span class="pre">get_horizon_limit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">freq</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskAliasedMap.get_horizon_limit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskAliasedMap.get_horizon_limit" title="Link to this definition"></a></dt>
+<dd><p>Calculate the value of sin(za) where the southern horizon aliases.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>freq</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>,</em><em>]</em>) – Frequency in MHz.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>horizon_limit</strong> – This is the value of sin(za) where the southern horizon aliases.
+Regions of sky where <code class="docutils literal notranslate"><span class="pre">|sin(za)|</span></code> is greater than or equal to
+this value will contain aliases.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[nfreq,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskAliasedMap.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ringmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskAliasedMap.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskAliasedMap.process" title="Link to this definition"></a></dt>
+<dd><p>Mask data beamformed to zenith angles beyond the aliased horizon.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ringmap</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>RingMap</em></a>) – Ringmap to be flagged.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ringmap</strong> – Input container with weights set to zero for
+zenith angles beyond the aliased horizon.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap">RingMap</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskAliasedMap.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">manager</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskAliasedMap.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskAliasedMap.setup" title="Link to this definition"></a></dt>
+<dd><p>Extract the minimum baseline separation from the telescope class.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>manager</strong> (<em>io.TelescopeConvertible</em>) – Telescope/manager used to extract the baseline distances
+to calculate the minimum separation in the north-south direction
+needed to compute aliases.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskBrightSourcePixels">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskBrightSourcePixels</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskBrightSourcePixels" title="Link to this definition"></a></dt>
+<dd><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSourcePixelsFromCatalog</span></code></a></p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskBrightSourceTracks">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskBrightSourceTracks</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskBrightSourceTracks" title="Link to this definition"></a></dt>
+<dd><p>alias of <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog" title="ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSourceTracksFromCatalog</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskCHIMEData</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskCHIMEData"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask out data ahead of map making.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData.intra_cylinder">
+<span class="sig-name descname"><span class="pre">intra_cylinder</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData.intra_cylinder" title="Link to this definition"></a></dt>
+<dd><p>Include baselines within the same cylinder (default=True).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData.xx_pol">
+<span class="sig-name descname"><span class="pre">xx_pol</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData.xx_pol" title="Link to this definition"></a></dt>
+<dd><p>Include X-polarisation (default=True).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">yy</span> <span class="pre">no_pol</span></span></dt>
+<dd><p>Include Y-polarisation (default=True).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData.cross_pol">
+<span class="sig-name descname"><span class="pre">cross_pol</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData.cross_pol" title="Link to this definition"></a></dt>
+<dd><p>Include cross-polarisation (default=True).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mmodes</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskCHIMEData.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData.process" title="Link to this definition"></a></dt>
+<dd><p>Mask out unwanted data in the m-modes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>mmodes</strong> (<em>dcontainers.MModes</em>) – mmode dataset to process</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mmodes</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dcontainers.MModes</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEData.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskCHIMEData.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEData.setup" title="Link to this definition"></a></dt>
+<dd><p>Setup the task.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">ch_pipeline.core.pathfinder.CHIME</span></code>) – CHIME telescope class to use to get feed information.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEMisc">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskCHIMEMisc</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskCHIMEMisc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEMisc" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Some miscellaneous data masking routines.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskCHIMEMisc.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ss</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskCHIMEMisc.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskCHIMEMisc.process" title="Link to this definition"></a></dt>
+<dd><p>Mask the 10 MHz clock line, specific nodes, and/or specified freqeuncies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ss</strong> (<em>containers.SiderealStream</em>) – sidereal stream data to mask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDay">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskDay</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskDay"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDay" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask out the daytime data.</p>
+<p>This task can also act as a base class for applying an arbitrary
+mask to the data based on time.  This is achieved by redefining
+the <cite>_flag</cite> method.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDay.zero_data">
+<span class="sig-name descname"><span class="pre">zero_data</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDay.zero_data" title="Link to this definition"></a></dt>
+<dd><p>Zero the data in addition to modifying the noise weights</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDay.taper_width">
+<span class="sig-name descname"><span class="pre">taper_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDay.taper_width" title="Link to this definition"></a></dt>
+<dd><p>Width (in seconds) of the taper applied to the mask.  Creates a smooth transition from
+masked to unmasked regions using a cosine function.  Set to 0.0 for no taper (default).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDay.outer_taper">
+<span class="sig-name descname"><span class="pre">outer_taper</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDay.outer_taper" title="Link to this definition"></a></dt>
+<dd><p>If outer_taper is True, then the taper occurs in the unmasked region.
+If outer_taper is False, then the taper occurs in the masked region.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDay.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskDay.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDay.process" title="Link to this definition"></a></dt>
+<dd><p>Set the weight to zero during day time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>dstream</strong> (<em>dcontainers.SiderealStream</em><em> or </em><em>equivalent</em>) – Data stream to be masked. Must have a time or ra axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mstream</strong> – Masked data stream.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dcontainers.SiderealStream or equivalent</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskDecorrelatedCylinder</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskDecorrelatedCylinder"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Identify and mask frequencies and times where a cylinder decorrelated.</p>
+<p>If the error rate is high on a backplane link in the second stage shuffle
+of the F-engine corner turn, then on rare occassions (few times per year)
+the data streams being handled by that FPGA can become misaligned or
+desynchronized with the rest of the data streams.  The 512 correlator inputs
+on the cylinder corresponding to that pair of FPGA crates will have negligible
+correlation with all other inputs for the 64 frequencies received by that
+FPGA during the second stage shuffle.  This will persist until the data streams
+are re-synchronized with a correlator restart.</p>
+<p>This task identifies times and frequencies affected by these misalignment events
+by examining, for each cylinder, the ratio of 1-cylinder-separation, co-polar
+visibilities acquired by redundant baselines that do not contain the cylinder
+to those that do contain the cylinder.  This ratio will be close to 1 under
+normal operations since the baselines are largely redundant, however it will
+become very large after a cylinder becomes misaligned since there is no
+correlation and the denominator drops to near zero.</p>
+<p>Additionally, if provided the mapping between frequency channel and FPGA,
+this task will ensure that when there is evidence of a decorrelated cylinder,
+all 64 frequencies handled by the problematic FPGA are masked.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>threshold</strong> (<em>int</em>) – Mask frequencies and times where the median ratio of the
+average-without-cylinder to average-with-cylinder visibility
+amplitude is greater than this threshold.</p></li>
+<li><p><strong>max_frac_freq</strong> (<em>float</em>) – Mask any frequency that was transmitted by an FPGA motherboard slot
+with more than this fraction of frequencies masked by the above
+threshold.  Only relevant if the frequency map is provided at setup.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">freqmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskDecorrelatedCylinder.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder.process" title="Link to this definition"></a></dt>
+<dd><p>Create the mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>TimeStream</em>) – Visibilites before averaging over cylinders.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – A list describing the inputs in data.</p></li>
+<li><p><strong>freqmap</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">FrequencyMapSingle</span></code>) – The mapping between frequency bin and [shuffle, crate, slot, link]</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Mask with True indicating that a cylinder decorrelated
+at that frequency and time.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask">RFIMask</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskFromCatalogBase</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskFromCatalogBase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.CatalogBase" title="ch_pipeline.analysis.flagging.CatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">CatalogBase</span></code></a></p>
+<p>Mask regions of a map near bright point sources.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.mask_alias">
+<span class="sig-name descname"><span class="pre">mask_alias</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.mask_alias" title="Link to this definition"></a></dt>
+<dd><p>Mask the frequency-dependent, north-south alias location
+in addition to the true location.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.common_freq">
+<span class="sig-name descname"><span class="pre">common_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.common_freq" title="Link to this definition"></a></dt>
+<dd><p>Ensure the (non-aliased) mask is frequency independent by
+constructing the windows using the minimum frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_ra">
+<span class="sig-name descname"><span class="pre">nsigma_ra</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_ra" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the RA direction specified in
+number of sigma of the primary beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_dec">
+<span class="sig-name descname"><span class="pre">nsigma_dec</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_dec" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the dec direction specified
+in number of sigma of the synthesized beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_freq">
+<span class="sig-name descname"><span class="pre">nsigma_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.nsigma_freq" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the freq direction specified
+in the number of sigma given by the catalog redshift error.
+Only relevant if the catalog provided during setup is a
+SpectroscopicCatalog.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskFromCatalogBase.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskFromCatalogBase.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase.process" title="Link to this definition"></a></dt>
+<dd><p>Generate a mask that excludes pixels near transit of bright point sources.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>RingMap</em></a><em> or </em><em>HybridVisStream</em>) – Beamformed dataset to be flagged. Must have a “ra” axis and
+an “el” axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Boolean mask with True indicating that a pixel is near
+a bright source.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>RingMapMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskHighFracLost">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskHighFracLost</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskHighFracLost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskHighFracLost" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask frequencies and times with significant data loss during integration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>threshold</strong> (<em>int</em>) – Flag frequencies and times if the fraction of data lost
+due to RFI or packet loss exceeds this threshold.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskHighFracLost.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskHighFracLost.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskHighFracLost.process" title="Link to this definition"></a></dt>
+<dd><p>Create mask indicating when frac_lost exceeds desired threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>stream</strong> (<em>andata.CorrData</em>) – Stream to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mask_cont</strong> – Boolean mask where True indicates frac_lost is greater than
+the threshold.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dcontainers.RFIMask or dcontainers.SiderealRFIMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskManyBadInputs">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskManyBadInputs</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskManyBadInputs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskManyBadInputs" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag spans of time where a large number of inputs were flagged as bad.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>threshold</strong> (<em>int</em>) – Flag data if the number of bad inputs exceeds this value.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskManyBadInputs.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskManyBadInputs.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskManyBadInputs.process" title="Link to this definition"></a></dt>
+<dd><p>Set weight to zero if number of bad inputs exceeds desired threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>stream</strong> (<em>andata.CorrData</em><em>, </em><em>dcontainers.SiderealStream</em><em>, </em><em>dcontainers.TimeStream</em><em>,</em>) – dcontainers.HybridVisStream, dcontainers.RingMap
+Stream to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>stream</strong> –      dcontainers.HybridVisStream, dcontainers.RingMap
+Returns the same stream object with a modified weight dataset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData, dcontainers.SiderealStream, dcontainers.TimeStream,</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskMoon">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskMoon</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskMoon"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskMoon" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSource" title="ch_pipeline.analysis.flagging.MaskSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSource</span></code></a></p>
+<p>Mask out data near lunar transit.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskMoon.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskMoon.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskMoon.setup" title="Link to this definition"></a></dt>
+<dd><p>Save the skyfield body for the moon.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskRA">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskRA</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskRA"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskRA" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask out a range in right ascension.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">start,</span> <span class="pre">end</span></span></dt>
+<dd><p>Start and end of masked out region.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskRA.width">
+<span class="sig-name descname"><span class="pre">width</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskRA.width" title="Link to this definition"></a></dt>
+<dd><p>Use a smooth transition of given width between the fully masked and
+unmasked data. This is interior to the region marked by start and end.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskRA.zero_data">
+<span class="sig-name descname"><span class="pre">zero_data</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskRA.zero_data" title="Link to this definition"></a></dt>
+<dd><p>Zero the data in addition to modifying the noise weights
+(default is True).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskRA.remove_average">
+<span class="sig-name descname"><span class="pre">remove_average</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskRA.remove_average" title="Link to this definition"></a></dt>
+<dd><p>Estimate and remove the mean level from each visibilty. This estimate
+does not use data from the masked region.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskRA.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskRA.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskRA.process" title="Link to this definition"></a></dt>
+<dd><p>Apply a day time mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>dcontainers.SiderealStream</em>) – Unmasked sidereal stack.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mstream</strong> – Masked sidereal stream.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dcontainers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSource">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskSource</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSource"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSource" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskDay" title="ch_pipeline.analysis.flagging.MaskDay"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskDay</span></code></a></p>
+<p>Mask out data near source transits.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSource.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSource.source" title="Link to this definition"></a></dt>
+<dd><p>Name of the source(s) in the same format as <cite>ch_ephem.sources.source_dictionary</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str or list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSource.nsigma">
+<span class="sig-name descname"><span class="pre">nsigma</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSource.nsigma" title="Link to this definition"></a></dt>
+<dd><p>Mask this number of sigma on either side of source transit.
+Here sigma is the exepected width of the primary beam for
+an E-W polarisation antenna at 400 MHz as defined by the
+<cite>ch_util.cal_utils.guess_fwhm</cite> function.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSource.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSource.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSource.setup" title="Link to this definition"></a></dt>
+<dd><p>Save the skyfield bodies representing the sources to the <cite>body</cite> attribute.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskSourcePixelsFromCatalog</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSourcePixelsFromCatalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSourcePixelsFromCatalog" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin" title="ch_pipeline.analysis.flagging.SourcePixelsMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourcePixelsMixin</span></code></a>, <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase" title="ch_pipeline.analysis.flagging.MaskFromCatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskFromCatalogBase</span></code></a></p>
+<p>Mask regions of a map near bright point sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskSourceTracksFromCatalog</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSourceTracksFromCatalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSourceTracksFromCatalog" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.SourceTracksMixin" title="ch_pipeline.analysis.flagging.SourceTracksMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourceTracksMixin</span></code></a>, <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskFromCatalogBase" title="ch_pipeline.analysis.flagging.MaskFromCatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskFromCatalogBase</span></code></a></p>
+<p>Mask regions of a map near the U-shaped tracks of bright point sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSun">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MaskSun</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSun"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSun" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.MaskSource" title="ch_pipeline.analysis.flagging.MaskSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">MaskSource</span></code></a></p>
+<p>Mask out data near solar transit.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MaskSun.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MaskSun.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MaskSun.setup" title="Link to this definition"></a></dt>
+<dd><p>Save the skyfield body for the sun.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MonitorCorrInput">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">MonitorCorrInput</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MonitorCorrInput"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MonitorCorrInput" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Monitor good correlator inputs over several sidereal days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>n_day_min</strong> (<em>int</em>) – Do not apply a sidereal day flag if the number of days
+in the pass is less than n_day_min.  Default is 3.</p></li>
+<li><p><strong>n_cut</strong> (<em>int</em>) – Flag a sidereal day as bad if the number of correlator
+inputs that are bad ONLY on this day is greater than n_cut.
+Default is 5.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MonitorCorrInput.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MonitorCorrInput.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MonitorCorrInput.process" title="Link to this definition"></a></dt>
+<dd><p>Calls ch_util.ChanMonitor for each sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p><strong>input_monitor</strong> (<em>containers.CorrInputMonitor</em>) – Saved for each sidereal day.  Contains the
+correlator input mask and frequency mask.
+Note that this is not output to the pipeline.  It is an
+ancillary data product that is saved when one sets the
+‘save’ parameter in the configuration file.</p></li>
+<li><p><strong>csd_flag</strong> (<em>containers.SiderealDayFlag</em>) – Contains a mask that indicates bad sidereal days, determined as
+days that contribute a large number of unique bad correlator
+inputs.  Note that this is not output to the pipeline.
+It is ancillary data product that is saved when one sets the
+‘save’ parameter in the configuration file.</p></li>
+<li><p><strong>input_monitor_all</strong> (<em>containers.CorrInputMask</em>) – Contains the correlator input mask obtained from taking AND
+of the masks from the (good) sidereal days.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.MonitorCorrInput.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#MonitorCorrInput.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.MonitorCorrInput.setup" title="Link to this definition"></a></dt>
+<dd><p>Divide list of files up into sidereal days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> (<em>list</em>) – List of filenames to monitor good correlator inputs.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.NanToNum">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">NanToNum</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#NanToNum"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.NanToNum" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Finds NaN and replaces with 0.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.NanToNum.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#NanToNum.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.NanToNum.process" title="Link to this definition"></a></dt>
+<dd><p>Converts any NaN in the vis dataset and weight dataset to the value 0.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>timestream</strong> (<em>andata.CorrData</em><em> or </em><em>dcontainers.SiderealStream</em>) – timestream container to check</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData or dcontainers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RFIFilter</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIFilter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Identify data contaminated by RFI.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.stack">
+<span class="sig-name descname"><span class="pre">stack</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.stack" title="Link to this definition"></a></dt>
+<dd><p>Average over all autocorrelations before constructing the mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.normalize">
+<span class="sig-name descname"><span class="pre">normalize</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.normalize" title="Link to this definition"></a></dt>
+<dd><p>Normalize by the median value over time prior to stacking.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.flag1d">
+<span class="sig-name descname"><span class="pre">flag1d</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.flag1d" title="Link to this definition"></a></dt>
+<dd><p>Only apply the MAD cut in the time direction.
+Useful if the frequency coverage is sparse.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.rolling">
+<span class="sig-name descname"><span class="pre">rolling</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.rolling" title="Link to this definition"></a></dt>
+<dd><p>Use a rolling window instead of distinct blocks.
+This is slower, but recommended if stack is True
+or the number of feeds is small.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.apply_static_mask">
+<span class="sig-name descname"><span class="pre">apply_static_mask</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.apply_static_mask" title="Link to this definition"></a></dt>
+<dd><p>Mask out frequencies known to be contaminated by persistent
+sources of RFI.  Mask is obtained from <cite>ch_util.rfi.frequency_mask</cite>.
+This is done before computing the median absolute deviation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.keep_auto">
+<span class="sig-name descname"><span class="pre">keep_auto</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.keep_auto" title="Link to this definition"></a></dt>
+<dd><p>Save the autocorrelations that were used to construct
+the mask in the output container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.keep_ndev">
+<span class="sig-name descname"><span class="pre">keep_ndev</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.keep_ndev" title="Link to this definition"></a></dt>
+<dd><p>Save the number of deviations that were used to construct
+the mask in the output container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.freq_width">
+<span class="sig-name descname"><span class="pre">freq_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.freq_width" title="Link to this definition"></a></dt>
+<dd><p>Frequency interval in <em>MHz</em> to compare across.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.time_width">
+<span class="sig-name descname"><span class="pre">time_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.time_width" title="Link to this definition"></a></dt>
+<dd><p>Time interval in <em>seconds</em> to compare across.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.threshold_mad">
+<span class="sig-name descname"><span class="pre">threshold_mad</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.threshold_mad" title="Link to this definition"></a></dt>
+<dd><p>Threshold above which we mask the data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.use_draco_container">
+<span class="sig-name descname"><span class="pre">use_draco_container</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.use_draco_container" title="Link to this definition"></a></dt>
+<dd><p>If True, output container is a nondistributed draco RFIMask.
+Otherwise, return a distributed RFIMask from ch_pipeline</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIFilter.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask"><span class="pre">RFIMask</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">RFIMask</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIFilter.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIFilter.process" title="Link to this definition"></a></dt>
+<dd><p>Create a mask by identifying outliers in the autocorrelation data.</p>
+<p>This mask can be used to zero out frequencies and time samples that are
+contaminated by RFI.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>ch_util.andata.CorrData</em>) – Generate the mask from the autocorrelation data
+in this container.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Boolean mask that can be applied to a timestream container
+with the task <cite>ApplyCorrInputMask</cite> to mask contaminated
+frequencies and time samples.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask">containers.RFIMask</a> or dcontainers.RFIMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RFIMaskChisqHighDelay</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIMaskChisqHighDelay"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RFIMaskChisqHighDelay</span></code></p>
+<p>CHIME version of RFIMaskChisqHighDelay.</p>
+<p>Ignores times that occur during the day or when bright point sources
+or pulsars are transiting through the primary beam.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay.sources">
+<span class="sig-name descname"><span class="pre">sources</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay.sources" title="Link to this definition"></a></dt>
+<dd><p>Bright sources to consider when constructing the mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay.transit_width">
+<span class="sig-name descname"><span class="pre">transit_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay.transit_width" title="Link to this definition"></a></dt>
+<dd><p>Ignore any times that occur within this number of sigma from
+the transit of a bright source.  Here sigma refers to the standard
+deviation of a a Gaussian approximation to the primary beam.
+Default is 1.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFISensitivityMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RFISensitivityMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFISensitivityMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFISensitivityMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RFISensitivityMask</span></code></p>
+<p>CHIME version of RFISensitivityMask.</p>
+<p>This has a static mask for the local environment and will use the MAD
+algorithm (over SumThreshold) when bright sources are visible.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFISensitivityMask.sources">
+<span class="sig-name descname"><span class="pre">sources</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFISensitivityMask.sources" title="Link to this definition"></a></dt>
+<dd><p>Bright sources to consider when constructing the mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFISensitivityMask.transit_width_source">
+<span class="sig-name descname"><span class="pre">transit_width_source</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFISensitivityMask.transit_width_source" title="Link to this definition"></a></dt>
+<dd><p>Use MAD for any times that occur within this number of sigma from
+the transit of a bright source.  Here sigma refers to the standard
+deviation of a a Gaussian approximation to the primary beam.
+Default is 1.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFISensitivityMask.transit_width_sun">
+<span class="sig-name descname"><span class="pre">transit_width_sun</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFISensitivityMask.transit_width_sun" title="Link to this definition"></a></dt>
+<dd><p>Use MAD for any times that occur within this number of sigma from
+the transit of the sun.  Here sigma refers to the standard
+deviation of a a Gaussian approximation to the primary beam.
+Default is 3.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFISensitivityMask.include_static_mask">
+<span class="sig-name descname"><span class="pre">include_static_mask</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFISensitivityMask.include_static_mask" title="Link to this definition"></a></dt>
+<dd><p>If True, use the static mask hook. Default is True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIStaticMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RFIStaticMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIStaticMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIStaticMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Get the static mask for the time period covered by the data.</p>
+<p>This is the same static mask used in <a class="reference internal" href="#ch_pipeline.analysis.flagging.RFIFilter" title="ch_pipeline.analysis.flagging.RFIFilter"><code class="xref py py-class docutils literal notranslate"><span class="pre">RFIFilter</span></code></a> and
+<a class="reference internal" href="#ch_pipeline.analysis.flagging.RFISensitivityMask" title="ch_pipeline.analysis.flagging.RFISensitivityMask"><code class="xref py py-class docutils literal notranslate"><span class="pre">RFISensitivityMask</span></code></a>.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIStaticMask.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIStaticMask.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIStaticMask.process" title="Link to this definition"></a></dt>
+<dd><p>Create a mask with all static frequency bands for a given day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> – container with data to mask. Should have either a time-like axis
+or a <cite>lsd</cite> attribute which can be converted to a UNIX timestamp.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>boolean mask that can be applied to the input container</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>mask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RFIStaticVisMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RFIStaticVisMask</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RFIStaticVisMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RFIStaticVisMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RFIStaticVisMask</span></code></p>
+<p>CHIME version of RFIStaticVisMask.</p>
+<p>Includes an accurate daytime flag.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RadiometerWeight">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">RadiometerWeight</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RadiometerWeight"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RadiometerWeight" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Update vis_weight according to the radiometer equation.</p>
+<p>vis_weight_ij = Nsamples / V_ii V_jj</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.RadiometerWeight.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#RadiometerWeight.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.RadiometerWeight.process" title="Link to this definition"></a></dt>
+<dd><p>Update the <cite>vis_weight</cite> dataset.</p>
+<p>Takes the input timestream.flags[‘vis_weight’], recasts it from uint8 to float32,
+multiplies by the total number of samples, and divides by the autocorrelations of the
+two feeds that form each baseline.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>timestream</strong> (<em>andata.CorrData</em>) – timestream data to process</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>timestream</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SetInputFlag">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">SetInputFlag</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SetInputFlag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SetInputFlag" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.ApplyInputFlag" title="ch_pipeline.analysis.flagging.ApplyInputFlag"><code class="xref py py-class docutils literal notranslate"><span class="pre">ApplyInputFlag</span></code></a></p>
+<p>Set input flags dataset based on values from the real-time pipeline at the time.</p>
+<p>This is useful for holographic observations or SiderealStreams, neither of which
+have their input_flags dataset populated.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SetInputFlag.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SetInputFlag.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SetInputFlag.process" title="Link to this definition"></a></dt>
+<dd><p>Lookup and save the input flags based on the time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>TODContainer</em><em>, </em><em>SiderealStream</em><em>, </em><em>TrackBeam</em>) – Must have <cite>input_flags</cite> dataset.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong> – The input container with the input_flags dataset
+set to 1.0 for good inputs and 0.0 for bad inputs.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TODContainer, SiderealStream, TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourcePixelsMixin">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">SourcePixelsMixin</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SourcePixelsMixin"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Mixin providing coordinates of the transit of sources in a map.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourcePixelsMixin.get_source_coordinates">
+<span class="sig-name descname"><span class="pre">get_source_coordinates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SourcePixelsMixin.get_source_coordinates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin.get_source_coordinates" title="Link to this definition"></a></dt>
+<dd><p>Determine the coordinates of bright sources in a beamformed dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>RingMap</em></a><em> or </em><em>HybridVisStream</em>) – Beamformed dataset to be flagged. Must have a “ra” axis and
+an “el” axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>ind</strong> (<em>np.ndarray[nsource,]</em>) – Index of the source in the catalog.</p></li>
+<li><p><strong>src_ra</strong> (<em>np.ndarray[nsource,]</em>) – Right ascension of the sources in the catalog.</p></li>
+<li><p><strong>src_dec</strong> (<em>np.ndarray[nsource,]</em>) – Declination of the sources in the catalog.</p></li>
+<li><p><strong>src_y</strong> (<em>np.ndarray[nsource,]</em>) – Telescope-y coordinate of the sources in the catalog
+at transit.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourceTracksMixin">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">SourceTracksMixin</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SourceTracksMixin"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourceTracksMixin" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin" title="ch_pipeline.analysis.flagging.SourcePixelsMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourcePixelsMixin</span></code></a></p>
+<p>Mixin providing coordinates of the tracks sources take through a map.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourceTracksMixin.max_ha">
+<span class="sig-name descname"><span class="pre">max_ha</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourceTracksMixin.max_ha" title="Link to this definition"></a></dt>
+<dd><p>Do not consider sources beyond this hour angle in degrees.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourceTracksMixin.upsample">
+<span class="sig-name descname"><span class="pre">upsample</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourceTracksMixin.upsample" title="Link to this definition"></a></dt>
+<dd><p>Upsample the tracks this factor relative to the native resolution
+of the maps in RA.  This will result in a smoother mask or taper.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.SourceTracksMixin.get_source_coordinates">
+<span class="sig-name descname"><span class="pre">get_source_coordinates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#SourceTracksMixin.get_source_coordinates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.SourceTracksMixin.get_source_coordinates" title="Link to this definition"></a></dt>
+<dd><p>Determine the coordinates of bright source tracks in a beamformed dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>RingMap</em></a><em> or </em><em>HybridVisStream</em>) – Beamformed dataset to be flagged. Must have a “ra” axis and
+an “el” axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>ind</strong> (<em>np.ndarray[ncoord,]</em>) – Index of the source in the catalog for each coordinate
+in the flattened array.</p></li>
+<li><p><strong>ra</strong> (<em>np.ndarray[ncoord,]</em>) – Right ascension of the U-shaped tracks of sources
+in the catalog.  Flattened into a 1-d array.</p></li>
+<li><p><strong>dec</strong> (<em>np.ndarray[ncoord,]</em>) – Declination of the sources in the catalog.  This is
+replicated nra times for each source and flattened
+into a 1-d array.</p></li>
+<li><p><strong>y</strong> (<em>np.ndarray[ncoord,]</em>) – Telescope-y coordinate of the U-shaped tracks of
+sources in the catalog.  Flattened into a 1-d array.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">TaperFromCatalogBase</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TaperFromCatalogBase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.CatalogBase" title="ch_pipeline.analysis.flagging.CatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">CatalogBase</span></code></a></p>
+<p>Taper regions of a map near bright point sources.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.mask_alias">
+<span class="sig-name descname"><span class="pre">mask_alias</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.mask_alias" title="Link to this definition"></a></dt>
+<dd><p>Mask the frequency-dependent, north-south alias location
+in addition to the true location.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.common_freq">
+<span class="sig-name descname"><span class="pre">common_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.common_freq" title="Link to this definition"></a></dt>
+<dd><p>Ensure the (non-aliased) mask is frequency independent by
+constructing the windows using the minimum frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_ra">
+<span class="sig-name descname"><span class="pre">nsigma_ra</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_ra" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the RA direction specified in
+number of sigma of the primary beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_dec">
+<span class="sig-name descname"><span class="pre">nsigma_dec</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_dec" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the dec direction specified
+in number of sigma of the synthesized beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_freq">
+<span class="sig-name descname"><span class="pre">nsigma_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.nsigma_freq" title="Link to this definition"></a></dt>
+<dd><p>Width of the window to mask in the freq direction specified
+in the number of sigma given by the catalog redshift error.
+Only relevant if the catalog provided during setup has
+redshift information</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.spatial_taper">
+<span class="sig-name descname"><span class="pre">spatial_taper</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.spatial_taper" title="Link to this definition"></a></dt>
+<dd><p>Extent over which the taper transitions from 0 to 1 in
+units of normalized spatial coordinates.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.spectral_taper">
+<span class="sig-name descname"><span class="pre">spectral_taper</span></span><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.spectral_taper" title="Link to this definition"></a></dt>
+<dd><p>Extent over which the taper transitions from 0 to 1 in
+the normalized spectral coordinates.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperFromCatalogBase.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TaperFromCatalogBase.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase.process" title="Link to this definition"></a></dt>
+<dd><p>Generate a mask that excludes pixels near transit of bright point sources.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>RingMap</em></a><em> or </em><em>HybridVisStream</em>) – Beamformed dataset to be flagged. Must have a “ra” axis and
+an “el” axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Boolean mask with True indicating that a pixel is near
+a bright source.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>RingMapMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperSourcePixelsFromCatalog">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">TaperSourcePixelsFromCatalog</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TaperSourcePixelsFromCatalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperSourcePixelsFromCatalog" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.SourcePixelsMixin" title="ch_pipeline.analysis.flagging.SourcePixelsMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourcePixelsMixin</span></code></a>, <a class="reference internal" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase" title="ch_pipeline.analysis.flagging.TaperFromCatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">TaperFromCatalogBase</span></code></a></p>
+<p>Taper regions of a map near bright point sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TaperSourceTracksFromCatalog">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">TaperSourceTracksFromCatalog</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TaperSourceTracksFromCatalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TaperSourceTracksFromCatalog" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.flagging.SourceTracksMixin" title="ch_pipeline.analysis.flagging.SourceTracksMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourceTracksMixin</span></code></a>, <a class="reference internal" href="#ch_pipeline.analysis.flagging.TaperFromCatalogBase" title="ch_pipeline.analysis.flagging.TaperFromCatalogBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">TaperFromCatalogBase</span></code></a></p>
+<p>Taper regions of a map near the U-shaped tracks of bright point sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TestCorrInput">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">TestCorrInput</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TestCorrInput"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TestCorrInput" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Apply a series of tests to find the good correlator inputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>test_freq</strong> (<em>list</em>) – Physical frequencies (in MHz) to examine.</p></li>
+<li><p><strong>ignore_gain</strong> (<em>bool</em>) – Do not apply the test that checks for excessively high digital gains.</p></li>
+<li><p><strong>ignore_noise</strong> (<em>bool</em>) – Do not apply the test that checks for compliance of noise
+to radiometer equation.</p></li>
+<li><p><strong>ignore_fit</strong> (<em>bool</em>) – Do not apply the test that checks the goodness of the fit
+to a template Tsky.</p></li>
+<li><p><strong>threshold</strong> (<em>float</em>) – Fraction of frequencies that must pass all requested
+tests in order for input to be flagged as good.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Set up variables that gives names to tests and specify tests to be applied.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.TestCorrInput.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#TestCorrInput.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.TestCorrInput.process" title="Link to this definition"></a></dt>
+<dd><p>Find good inputs using timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>timestream</strong> (<em>andata.CorrData</em>) – Apply series of tests to this timestream.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – A list of describing the inputs as they are in timestream.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>corr_input_test</strong> – Container with the results of all tests and a
+input mask that combines all tests and frequencies.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputTest" title="ch_pipeline.core.containers.CorrInputTest">containers.CorrInputTest</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.compute_cumulative_rainfall">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">compute_cumulative_rainfall</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">times</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">accumulation_time</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">30.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_spoof</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{'fir_online':</span> <span class="pre">'/project/rpp-chime/chime/chime_online/'}</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#compute_cumulative_rainfall"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.compute_cumulative_rainfall" title="Link to this definition"></a></dt>
+<dd><p>Compute cumulative rainfall for a given set of Unix times.</p>
+<p>The cumulative rainfall total is computed over the previous
+accumulation_time seconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>times</strong> (<em>np.ndarray</em>) – Unix times to compute cumulative rainfall for. Assumed to be sorted
+chronologically.</p></li>
+<li><p><strong>accumulation_time</strong> (<em>float</em>) – Number of hours over which to compute accumulated rainfall for each time sample.
+Default: 30.</p></li>
+<li><p><strong>node_spoof</strong> (<em>dictionary</em>) – Host and directory for finding weather data.
+Default: {‘fir_online’: ‘/project/rpp-chime/chime/chime_online/’}.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>rainfall</strong> – Cumulative rainfall totals, in mm.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.daytime_flag">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">daytime_flag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">time</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#daytime_flag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.daytime_flag" title="Link to this definition"></a></dt>
+<dd><p>Return a flag that indicates if times occur during the day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>time</strong> (<em>np.ndarray</em><em>[</em><em>ntime</em><em>,</em><em>]</em>) – Unix timestamps.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>flag</strong> – Boolean flag that is True if the time occured during the day and False otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[ntime,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.load_rainfall">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">load_rainfall</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_spoof</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{'fir_online':</span> <span class="pre">'/project/rpp-chime/chime/chime_online/'}</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#load_rainfall"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.load_rainfall" title="Link to this definition"></a></dt>
+<dd><p>Load rainfall measurements in a specific time range.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start_time</strong> (<em>float</em>) – Unix times denoting beginning and end of time range.</p></li>
+<li><p><strong>end_time</strong> (<em>float</em>) – Unix times denoting beginning and end of time range.</p></li>
+<li><p><strong>node_spoof</strong> (<em>dictionary</em>) – Host and directory for finding weather data.
+Default: {‘fir_online’: ‘/project/rpp-chime/chime/chime_online/’}</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>times, rainfall</strong> – Arrays of Unix timestamps and rainfall measurements (in mm).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.search_grid">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">search_grid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">xeval</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">window</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wrap</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#search_grid"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.search_grid" title="Link to this definition"></a></dt>
+<dd><p>Find indices into a uniformly space grid that extract desired regions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>xeval</strong> (<em>np.ndarray</em>) – Coordinate of the centre of each region.</p></li>
+<li><p><strong>window</strong> (<em>np.ndarray</em>) – Half-width of each region.  Must broadcast against xeval.</p></li>
+<li><p><strong>x</strong> (<em>np.ndarray</em><em>[</em><em>nsample</em><em>,</em><em>]</em>) – Coordinate grid.  Must be uniformly spaced and monotonically increasing.</p></li>
+<li><p><strong>wrap</strong> (<em>bool</em>) – Wrap around if a region exceeds the first or last point in the grid.
+Otherwise the region will be restricted in size to remain in the grid.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>xlb</strong> (<em>np.ndarray</em>) – The index into the grid the defines the lower bound of each region.</p></li>
+<li><p><strong>xub</strong> (<em>np.ndarray</em>) – The index into the grid the defines the upper bound of each region.
+Each region can be selected with slice(xlb, xub).</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.taper_mask">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">taper_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nwidth</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#taper_mask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.taper_mask" title="Link to this definition"></a></dt>
+<dd><p>Apply a taper to a mask via a Hanning window.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.flagging.transit_flag">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.flagging.</span></span><span class="sig-name descname"><span class="pre">transit_flag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">body</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nsigma</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">freq</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">400.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/flagging.html#transit_flag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.flagging.transit_flag" title="Link to this definition"></a></dt>
+<dd><p>Return a flag that indicates if times occured near transit of a celestial body.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>body</strong> (<em>skyfield.starlib.Star</em>) – Skyfield representation of a celestial body.</p></li>
+<li><p><strong>time</strong> (<em>np.ndarray</em><em>[</em><em>ntime</em><em>]</em>) – Unix timestamps.</p></li>
+<li><p><strong>nsigma</strong> (<em>float</em>) – Number of sigma to flag on either side of transit.</p></li>
+<li><p><strong>freq</strong> (<em>float</em><em> or </em><em>np.ndarray</em><em>[</em><em>nfreq</em><em>]</em>) – Evaluate the beam width at this frequency in MHz.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>flag</strong> – Boolean flag that is True if the times occur within nsigma of transit
+and False otherwise.  This will have a single dimension if freq is a scalar.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[ntime] or np.ndarray[nfreq, ntime]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.calibration.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.calibration" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.fringestop.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.fringestop" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

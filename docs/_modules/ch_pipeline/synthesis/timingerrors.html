@@ -1,0 +1,310 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.synthesis.timingerrors &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.synthesis.timingerrors</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.synthesis.timingerrors</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for simulating timing distribution errors.&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span><span class="p">,</span> <span class="n">mpiarray</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">mpitools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.synthesis</span><span class="w"> </span><span class="kn">import</span> <span class="n">gain</span>
+
+
+<div class="viewcode-block" id="TimingErrors">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.synthesis.timingerrors.html#ch_pipeline.synthesis.timingerrors.TimingErrors">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TimingErrors</span><span class="p">(</span><span class="n">gain</span><span class="o">.</span><span class="n">BaseGains</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Simulate timing distribution errors and propagate them to gain errors.</span>
+
+<span class="sd">    This task simulates errors in the delay and calculates the errors in the</span>
+<span class="sd">    phase of the gain according to</span>
+
+<span class="sd">    .. math::</span>
+<span class="sd">        \delta \phi_i = 2 \pi \nu \delta \tau_i</span>
+
+<span class="sd">    The phase errors are generated for times matching the input timestream file.</span>
+
+<span class="sd">    There are severeal options to run the timing distribution simulations.</span>
+<span class="sd">    Choosing a `sim_type` defines if the delay errors are non common-mode or</span>
+<span class="sd">    common-mode within a cylinder or iceboard.</span>
+
+<span class="sd">    Furthermore there are two different options to simulate delay errors that</span>
+<span class="sd">    are common-mode within a cylinder (`common_mode_cyl`). `Random` generates</span>
+<span class="sd">    random fluctuations in phase whereas &#39;sinusoidal&#39; as the name suggests</span>
+<span class="sd">    simulates sinusoids for each cylinder with frequencies specified in</span>
+<span class="sd">    the attribute `sinusoidal_period`.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    corr_length_delay : float</span>
+<span class="sd">        Correlation length for delay fluctuations in seconds.</span>
+<span class="sd">    sigma_delay : float</span>
+<span class="sd">        Size of fluctuations for delay fluctuations (s).</span>
+<span class="sd">    sim_type: string, optional</span>
+<span class="sd">        Timing error simulation type. List of allowed options are `relative`</span>
+<span class="sd">        (non common-mode delay errors), `common_mode_cyl` (common-mode within</span>
+<span class="sd">        a cylinder) and `common_mode_iceboard` (common-mode within an iceboard)</span>
+<span class="sd">    common_mode_type : string, optional</span>
+<span class="sd">        Options are &#39;random&#39; and &#39;sinusoidal&#39; if sim_type `common_mode_cyl` is chosen.</span>
+<span class="sd">    sinusoidal_period : list, optional</span>
+<span class="sd">        Specify the periods of the sinusoids for each cylinder. Needs to be specified</span>
+<span class="sd">        when simulating `sinusoidal` `common_mode_cyl` timing errors.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">ndays</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">733</span><span class="p">)</span>
+    <span class="n">corr_length_delay</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">3600</span><span class="p">)</span>
+    <span class="n">sigma_delay</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1e-12</span><span class="p">)</span>
+
+    <span class="n">sim_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">enum</span><span class="p">(</span>
+        <span class="p">[</span><span class="s2">&quot;relative&quot;</span><span class="p">,</span> <span class="s2">&quot;common_mode_cyl&quot;</span><span class="p">,</span> <span class="s2">&quot;common_mode_iceboard&quot;</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;relative&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">common_mode_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">enum</span><span class="p">([</span><span class="s2">&quot;random&quot;</span><span class="p">,</span> <span class="s2">&quot;sinusoidal&quot;</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;random&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Default periods of chime specific timing jitter with the clock</span>
+    <span class="c1"># distribution system informed by data see doclib 704</span>
+    <span class="n">sinusoidal_period</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mi">333</span><span class="p">,</span> <span class="mi">500</span><span class="p">])</span>
+
+    <span class="n">_prev_delay</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">_prev_time</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">amp</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">nchannel</span> <span class="o">=</span> <span class="mi">16</span>
+    <span class="n">ncyl</span> <span class="o">=</span> <span class="mi">2</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_generate_phase</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">time</span><span class="p">):</span>
+        <span class="n">ntime</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq</span>
+        <span class="n">nfreq</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">freq</span><span class="p">)</span>
+
+        <span class="c1"># Generate the correlation function</span>
+        <span class="n">cf_delay</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_corr_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">corr_length_delay</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sigma_delay</span><span class="p">)</span>
+
+        <span class="c1"># Check if we are simulating relative delays or common mode delays</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">sim_type</span> <span class="o">==</span> <span class="s2">&quot;relative&quot;</span><span class="p">:</span>
+            <span class="n">n_realisations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ninput_local</span>
+
+            <span class="c1"># Generate delay fluctuations</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span> <span class="o">=</span> <span class="n">gain</span><span class="o">.</span><span class="n">generate_fluctuations</span><span class="p">(</span>
+                <span class="n">time</span><span class="p">,</span> <span class="n">cf_delay</span><span class="p">,</span> <span class="n">n_realisations</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_delay</span>
+            <span class="p">)</span>
+
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="mf">2.0</span>
+                <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span>
+                <span class="o">*</span> <span class="n">freq</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+                <span class="o">*</span> <span class="mf">1e6</span>
+                <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+                <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ndays</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">sim_type</span> <span class="o">==</span> <span class="s2">&quot;common_mode_cyl&quot;</span><span class="p">:</span>
+            <span class="n">n_realisations</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="n">ninput</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ninput_global</span>
+
+            <span class="c1"># Generates as many random delay errors as there are cylinders</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">common_mode_type</span> <span class="o">==</span> <span class="s2">&quot;sinusoidal&quot;</span><span class="p">:</span>
+                    <span class="n">P1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sinusoidal_period</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">P2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sinusoidal_period</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                    <span class="n">omega1</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="n">P1</span>
+                    <span class="n">omega2</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="n">P2</span>
+
+                    <span class="n">delay_error</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">sigma_delay</span>
+                        <span class="o">*</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">omega1</span> <span class="o">*</span> <span class="n">time</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">omega2</span> <span class="o">*</span> <span class="n">time</span><span class="p">))[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+                    <span class="p">)</span>
+
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">common_mode_type</span> <span class="o">==</span> <span class="s2">&quot;random&quot;</span><span class="p">:</span>
+                    <span class="n">delay_error</span> <span class="o">=</span> <span class="n">gain</span><span class="o">.</span><span class="n">generate_fluctuations</span><span class="p">(</span>
+                        <span class="n">time</span><span class="p">,</span>
+                        <span class="n">cf_delay</span><span class="p">,</span>
+                        <span class="n">n_realisations</span><span class="p">,</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_time</span><span class="p">,</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_delay</span><span class="p">,</span>
+                    <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">delay_error</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># Broadcast to other ranks</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">delay_error</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="c1"># Split frequencies to processes.</span>
+            <span class="n">lfreq</span><span class="p">,</span> <span class="n">sfreq</span><span class="p">,</span> <span class="n">efreq</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">split_local</span><span class="p">(</span><span class="n">nfreq</span><span class="p">)</span>
+
+            <span class="c1"># Create an array to hold all inputs, which are common-mode within</span>
+            <span class="c1"># a cylinder</span>
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">lfreq</span><span class="p">,</span> <span class="n">ninput</span><span class="p">,</span> <span class="n">ntime</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">complex</span><span class="p">)</span>
+            <span class="c1"># Since we have 2 cylinders populate half of them with a delay)</span>
+            <span class="c1"># TODO: generalize this for 3 or even 4 cylinders in the future.</span>
+            <span class="n">gain_phase</span><span class="p">[:,</span> <span class="n">ninput</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">ncyl</span> <span class="p">:,</span> <span class="p">:]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="mf">2.0</span>
+                <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span>
+                <span class="o">*</span> <span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+                <span class="o">*</span> <span class="mf">1e6</span>
+                <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+                <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ndays</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">mpiarray</span><span class="o">.</span><span class="n">MPIArray</span><span class="o">.</span><span class="n">wrap</span><span class="p">(</span><span class="n">gain_phase</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="p">)</span>
+            <span class="c1"># Redistribute over input to match rest of the code</span>
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">gain_phase</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">gain_phase</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">sim_type</span> <span class="o">==</span> <span class="s2">&quot;common_mode_iceboard&quot;</span><span class="p">:</span>
+            <span class="n">nchannel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nchannel</span>
+            <span class="n">ninput</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ninput_global</span>
+            <span class="c1"># Number of channels on a board</span>
+            <span class="n">nboards</span> <span class="o">=</span> <span class="n">ninput</span> <span class="o">//</span> <span class="n">nchannel</span>
+
+            <span class="c1"># Generates as many random delay errors as there are iceboards</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">delay_error</span> <span class="o">=</span> <span class="n">gain</span><span class="o">.</span><span class="n">generate_fluctuations</span><span class="p">(</span>
+                    <span class="n">time</span><span class="p">,</span> <span class="n">cf_delay</span><span class="p">,</span> <span class="n">nboards</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prev_delay</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">delay_error</span> <span class="o">=</span> <span class="kc">None</span>
+
+            <span class="c1"># Broadcast to other ranks</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">delay_error</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="c1"># Calculate the corresponding phase by multiplying with frequencies</span>
+            <span class="n">phase</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="mf">2.0</span>
+                <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span>
+                <span class="o">*</span> <span class="n">freq</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+                <span class="o">*</span> <span class="mf">1e6</span>
+                <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+                <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ndays</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Create an array to hold all inputs, which are common-mode within</span>
+            <span class="c1"># one iceboard</span>
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">mpiarray</span><span class="o">.</span><span class="n">MPIArray</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">ninput</span><span class="p">,</span> <span class="n">ntime</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span> <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span>
+            <span class="p">)</span>
+            <span class="n">gain_phase</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+            <span class="c1"># Loop over inputs and and group common-mode phases on every board</span>
+            <span class="k">for</span> <span class="n">il</span><span class="p">,</span> <span class="n">ig</span> <span class="ow">in</span> <span class="n">gain_phase</span><span class="o">.</span><span class="n">enumerate</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+                <span class="c1"># Get the board number bi</span>
+                <span class="n">bi</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">ig</span> <span class="o">/</span> <span class="n">nchannel</span><span class="p">)</span>
+                <span class="n">gain_phase</span><span class="p">[:,</span> <span class="n">il</span><span class="p">]</span> <span class="o">=</span> <span class="n">phase</span><span class="p">[:,</span> <span class="n">bi</span><span class="p">]</span>
+
+            <span class="n">gain_phase</span> <span class="o">=</span> <span class="n">gain_phase</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_delay</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_error</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prev_time</span> <span class="o">=</span> <span class="n">time</span>
+
+        <span class="k">return</span> <span class="n">gain_phase</span></div>
+
+
+
+<div class="viewcode-block" id="SiderealTimingErrors">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.synthesis.timingerrors.html#ch_pipeline.synthesis.timingerrors.SiderealTimingErrors">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SiderealTimingErrors</span><span class="p">(</span><span class="n">TimingErrors</span><span class="p">,</span> <span class="n">gain</span><span class="o">.</span><span class="n">SiderealGains</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate sidereal timing errors gains on a sidereal grid.</span>
+
+<span class="sd">    See the documentation for `TimingErrors` and `SiderealGains` for more detail.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">pass</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

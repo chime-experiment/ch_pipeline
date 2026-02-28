@@ -1,0 +1,2106 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.calibration &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.flagging" href="ch_pipeline.analysis.flagging.html" />
+    <link rel="prev" title="ch_pipeline.analysis.beam" href="ch_pipeline.analysis.beam.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.calibration</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.calibration.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.calibration">
+<span id="ch-pipeline-analysis-calibration"></span><h1>ch_pipeline.analysis.calibration<a class="headerlink" href="#module-ch_pipeline.analysis.calibration" title="Link to this heading"></a></h1>
+<p>Tasks for calibrating the data.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.find_contiguous_time_ranges" title="ch_pipeline.analysis.calibration.find_contiguous_time_ranges"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_contiguous_time_ranges</span></code></a>(timestamp[, dt])</p></td>
+<td><p>Find contiguous ranges within an array of unix timestamps.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.interp_gains" title="ch_pipeline.analysis.calibration.interp_gains"><code class="xref py py-obj docutils literal notranslate"><span class="pre">interp_gains</span></code></a>(trans_times, gain_mat, times[, ...])</p></td>
+<td><p>Linearly interpolates gain solutions in sidereal day.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.solve_gain" title="ch_pipeline.analysis.calibration.solve_gain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">solve_gain</span></code></a>(data[, feeds, norm])</p></td>
+<td><p>Calculate gain from largest eigenvector.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain" title="ch_pipeline.analysis.calibration.ApplyDigitalGain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplyDigitalGain</span></code></a>()</p></td>
+<td><p>Multiply calibration gains by the digital gains.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.BaseCommonMode" title="ch_pipeline.analysis.calibration.BaseCommonMode"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BaseCommonMode</span></code></a>()</p></td>
+<td><p>Base class for calculating the common-mode gain.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CalibrationCorrection</span></code></a>()</p></td>
+<td><p>Base class for applying multiplicative corrections based on a DataFlag.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CollapseGainError" title="ch_pipeline.analysis.calibration.CollapseGainError"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CollapseGainError</span></code></a>()</p></td>
+<td><p>Average gain errors over all pairs of feeds.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ComputeCommonMode" title="ch_pipeline.analysis.calibration.ComputeCommonMode"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ComputeCommonMode</span></code></a>()</p></td>
+<td><p>Compute the common-mode gain amplitude.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ConcatenateGains" title="ch_pipeline.analysis.calibration.ConcatenateGains"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConcatenateGains</span></code></a>()</p></td>
+<td><p>Repackage a list of StaticGainData/GainData into a single GainData container.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CorrectGainError" title="ch_pipeline.analysis.calibration.CorrectGainError"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrectGainError</span></code></a>()</p></td>
+<td><p>Correct stacked visibilities for errors in the gains applied in real-time.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CorrectTelescopeRotation" title="ch_pipeline.analysis.calibration.CorrectTelescopeRotation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrectTelescopeRotation</span></code></a>()</p></td>
+<td><p>Correct stacked visibilities for a different telescope rotation used during calibration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.CorrectTimeOffset" title="ch_pipeline.analysis.calibration.CorrectTimeOffset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrectTimeOffset</span></code></a>()</p></td>
+<td><p>Correct stacked visibilities for a different time standard used during calibration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit" title="ch_pipeline.analysis.calibration.DetermineSourceTransit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DetermineSourceTransit</span></code></a>()</p></td>
+<td><p>Determine the sources that are transiting within time range covered by container.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.EigenCalibration" title="ch_pipeline.analysis.calibration.EigenCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EigenCalibration</span></code></a>()</p></td>
+<td><p>Deteremine response of each feed to a point source.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.EstimateNarrowbandGainError" title="ch_pipeline.analysis.calibration.EstimateNarrowbandGainError"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EstimateNarrowbandGainError</span></code></a>()</p></td>
+<td><p>Estimate error in gains due to narrowband features.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ExpandCommonMode" title="ch_pipeline.analysis.calibration.ExpandCommonMode"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ExpandCommonMode</span></code></a>()</p></td>
+<td><p>Expand the common mode so that it can be applied to the original input axis.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.FlagAmplitude" title="ch_pipeline.analysis.calibration.FlagAmplitude"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FlagAmplitude</span></code></a>()</p></td>
+<td><p>Flag feeds and frequencies with outlier gain amplitude.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError" title="ch_pipeline.analysis.calibration.FlagNarrowbandGainError"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FlagNarrowbandGainError</span></code></a>()</p></td>
+<td><p>Mask frequencies and times where narrowband gain errors were identified.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.GainFromTransitFit" title="ch_pipeline.analysis.calibration.GainFromTransitFit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GainFromTransitFit</span></code></a>()</p></td>
+<td><p>Determine gain by evaluating the best-fit model for the point source transit.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="ch_pipeline.analysis.calibration.GatedNoiseCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GatedNoiseCalibration</span></code></a>()</p></td>
+<td><p>Calibration using noise injection.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures" title="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures"><code class="xref py py-obj docutils literal notranslate"><span class="pre">IdentifyNarrowbandFeatures</span></code></a>()</p></td>
+<td><p>Identify and flag narrowband features in gains.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency" title="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency"><code class="xref py py-obj docutils literal notranslate"><span class="pre">InterpolateGainOverFrequency</span></code></a>()</p></td>
+<td><p>Replace gain at flagged frequencies with interpolated values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.InvertGain" title="ch_pipeline.analysis.calibration.InvertGain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">InvertGain</span></code></a>()</p></td>
+<td><p>Invert gains.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration" title="ch_pipeline.analysis.calibration.NoiseInjectionCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NoiseInjectionCalibration</span></code></a>()</p></td>
+<td><p>Calibration using noise injection.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.NoiseSourceFold" title="ch_pipeline.analysis.calibration.NoiseSourceFold"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NoiseSourceFold</span></code></a>()</p></td>
+<td><p>Fold the noise source for synced data.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ReconstructGainError" title="ch_pipeline.analysis.calibration.ReconstructGainError"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ReconstructGainError</span></code></a>()</p></td>
+<td><p>Estimate the fractional error in the calibration gain.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.SiderealCalibration" title="ch_pipeline.analysis.calibration.SiderealCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealCalibration</span></code></a>()</p></td>
+<td><p>Use point source as a calibrator for a sidereal stack.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.ThermalCalibration" title="ch_pipeline.analysis.calibration.ThermalCalibration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ThermalCalibration</span></code></a>()</p></td>
+<td><p>Use weather temperature to correct calibration in between point source transits.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.calibration.TransitFit" title="ch_pipeline.analysis.calibration.TransitFit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitFit</span></code></a>()</p></td>
+<td><p>Fit model to the transit of a point source.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ApplyDigitalGain">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ApplyDigitalGain</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ApplyDigitalGain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Multiply calibration gains by the digital gains.</p>
+<p>This yields the complex number that was applied
+to the voltage data by the real-time pipeline.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ApplyDigitalGain.invert">
+<span class="sig-name descname"><span class="pre">invert</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain.invert" title="Link to this definition"></a></dt>
+<dd><p>Multiply calibration gains by the <em>inverse</em> of the
+digital gains.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ApplyDigitalGain.normalize">
+<span class="sig-name descname"><span class="pre">normalize</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain.normalize" title="Link to this definition"></a></dt>
+<dd><p>Normalize the digital gains by the median value over
+input and frequency, so that the overall magnitude of
+the calibration gains does not change.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ApplyDigitalGain.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ApplyDigitalGain.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain.process" title="Link to this definition"></a></dt>
+<dd><p>Lookup and apply the relevant digital gain update.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>StaticGainData</em>) – The calibration gains at a particular time.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – The input container with the gain and weight dataset
+scaled by the appropriate digital gains.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ApplyDigitalGain.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ApplyDigitalGain.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ApplyDigitalGain.setup" title="Link to this definition"></a></dt>
+<dd><p>Load digital gain files that cover full span of time to be processed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> (<em>list</em><em> of </em><em>str</em>) – List of paths to files containing the digital gains.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.BaseCommonMode">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">BaseCommonMode</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#BaseCommonMode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.BaseCommonMode" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Base class for calculating the common-mode gain.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.BaseCommonMode.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pm</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#BaseCommonMode.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.BaseCommonMode.setup" title="Link to this definition"></a></dt>
+<dd><p>Use telescope instance to identify groups of similar feeds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>pm</strong> (<em>ProductManager</em>) – Object describing the telescope.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CalibrationCorrection">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">CalibrationCorrection</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Base class for applying multiplicative corrections based on a DataFlag.</p>
+<p>This task is not functional.  It simply defines <cite>setup</cite> and <cite>process</cite>
+methods that are common to several subclasses.  All subclasses must
+define the <cite>_get_correction</cite> and <cite>_correction_is_nonzero</cite> methods.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>rotation</strong> (<em>float</em>) – Current best estimate of telescope rotation.</p></li>
+<li><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CalibrationCorrection.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection.process" title="Link to this definition"></a></dt>
+<dd><p>Apply a multiplicative correction to visiblities during range of time covered by flags.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>andata.CorrData</em><em>, </em><em>containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – Apply a correction to the <cite>vis</cite> dataset in this container.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – List describing the inputs as they are in the file, output from
+<cite>tools.get_correlator_inputs()</cite></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>sstream_out</strong> – The input container with the correction applied.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>same as sstream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CalibrationCorrection.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CalibrationCorrection.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CalibrationCorrection.setup" title="Link to this definition"></a></dt>
+<dd><p>Query the database for all DataFlags with name equal to the <cite>name_of_flag</cite> property.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CollapseGainError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">CollapseGainError</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CollapseGainError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CollapseGainError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Average gain errors over all pairs of feeds.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CollapseGainError.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CollapseGainError.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CollapseGainError.process" title="Link to this definition"></a></dt>
+<dd><p>Calculate the baseline-averaged gain error.</p>
+<p>Approximates the effect of the gain errors on
+the frequency dependence of a ringmap.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>StaticGainData</em>) – Ratio of the applied gain to the “true” gain.
+The “true” gain is usually estimated by
+low-pass filtering along the frequency axis.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Baseline-averaged gain error placed into a
+StaticGainData container with a size 1
+input axis.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ComputeCommonMode">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ComputeCommonMode</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ComputeCommonMode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ComputeCommonMode" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.BaseCommonMode" title="ch_pipeline.analysis.calibration.BaseCommonMode"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCommonMode</span></code></a></p>
+<p>Compute the common-mode gain amplitude.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ComputeCommonMode.use_amplitude">
+<span class="sig-name descname"><span class="pre">use_amplitude</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ComputeCommonMode.use_amplitude" title="Link to this definition"></a></dt>
+<dd><p>Take the absolute value before calculating the
+average/percentile over inputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ComputeCommonMode.use_percentile">
+<span class="sig-name descname"><span class="pre">use_percentile</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ComputeCommonMode.use_percentile" title="Link to this definition"></a></dt>
+<dd><p>If False, then calculate the average over inputs.
+If True, then calculate a percentile over inputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ComputeCommonMode.percentile">
+<span class="sig-name descname"><span class="pre">percentile</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ComputeCommonMode.percentile" title="Link to this definition"></a></dt>
+<dd><p>Percentile over inputs to calculate.
+Only used if use_percentile is True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ComputeCommonMode.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ComputeCommonMode.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ComputeCommonMode.process" title="Link to this definition"></a></dt>
+<dd><p>Calculate the common-mode gain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>StaticGainData</em><em> or </em><em>GainData</em>) – gain data container</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>group</strong> – The common-mode gain <em>amplitude</em> for the different
+groups of inputs.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData or GainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ConcatenateGains">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ConcatenateGains</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ConcatenateGains"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ConcatenateGains" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Repackage a list of StaticGainData/GainData into a single GainData container.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ConcatenateGains.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gains</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ConcatenateGains.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ConcatenateGains.process" title="Link to this definition"></a></dt>
+<dd><p>Concatenate gain updates.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gains</strong> (<em>list</em><em> of </em><em>GainData</em><em> or </em><em>StaticGainData</em>) – List of gain updates.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – The list of gain updates sorted by time and
+placed in a single container with a time axis.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>GainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectGainError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">CorrectGainError</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectGainError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectGainError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Correct stacked visibilities for errors in the gains applied in real-time.</p>
+<p>This correction is imperfect because the redundant baselines are not actually
+redundant.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectGainError.ignore_input_flags">
+<span class="sig-name descname"><span class="pre">ignore_input_flags</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectGainError.ignore_input_flags" title="Link to this definition"></a></dt>
+<dd><p>When calculating the correction, do not exclude
+feeds that were identified as bad and excluded
+from the stacked visibilities (faster).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectGainError.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectGainError.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectGainError.process" title="Link to this definition"></a></dt>
+<dd><p>Look up gain errors, stack over baselines, and apply to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>TimeStream</em><em> or </em><em>SiderealStream</em>) – Visibilities.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong> – Visibilities with the gain errors removed.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TimeStream or SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectGainError.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gains</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectGainError.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectGainError.setup" title="Link to this definition"></a></dt>
+<dd><p>Prepare the gain errors as a function of time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gains</strong> (<em>containers.GainData</em>) – Narrowband gain errors generated by the
+ReconstructGainError task.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectTelescopeRotation">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">CorrectTelescopeRotation</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectTelescopeRotation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectTelescopeRotation" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-class docutils literal notranslate"><span class="pre">CalibrationCorrection</span></code></a></p>
+<p>Correct stacked visibilities for a different telescope rotation used during calibration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag that contains the telescope rotation
+used was during calibration.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.CorrectTimeOffset">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">CorrectTimeOffset</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#CorrectTimeOffset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.CorrectTimeOffset" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.CalibrationCorrection" title="ch_pipeline.analysis.calibration.CalibrationCorrection"><code class="xref py py-class docutils literal notranslate"><span class="pre">CalibrationCorrection</span></code></a></p>
+<p>Correct stacked visibilities for a different time standard used during calibration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name_of_flag</strong> (<em>str</em>) – The name of the DataFlag that contains the time offset.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">DetermineSourceTransit</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Determine the sources that are transiting within time range covered by container.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit.source_list">
+<span class="sig-name descname"><span class="pre">source_list</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.source_list" title="Link to this definition"></a></dt>
+<dd><p>List of source names to consider.  If not specified, all sources
+contained in <cite>ch_ephem.sources.source_dictionary</cite> will be considered.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit.freq">
+<span class="sig-name descname"><span class="pre">freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.freq" title="Link to this definition"></a></dt>
+<dd><p>Frequency in MHz.  Sort the sources by the flux at this frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit.require_transit">
+<span class="sig-name descname"><span class="pre">require_transit</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.require_transit" title="Link to this definition"></a></dt>
+<dd><p>If this is True and a source transit is not found in the container,
+then the task will return None.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.process" title="Link to this definition"></a></dt>
+<dd><p>Add attributes to container describing source transit contained within.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>containers.SiderealStream</em><em>, </em><em>containers.TimeStream</em><em>, or </em><em>equivalent</em>) – Container covering the source transit.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>sstream</strong> – Container covering the source transit, now with <cite>source_name</cite> and
+<cite>transit_time</cite> attributes.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.SiderealStream, containers.TimeStream, or equivalent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.DetermineSourceTransit.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#DetermineSourceTransit.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.DetermineSourceTransit.setup" title="Link to this definition"></a></dt>
+<dd><p>Set list of sources, sorted by flux in descending order.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">EigenCalibration</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EigenCalibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Deteremine response of each feed to a point source.</p>
+<p>Extract the feed response from the real-time eigendecomposition
+of the N2 visibility matrix.  Flag frequencies that have low dynamic
+range, orthogonalize the polarizations, fringestop, and reference
+the phases appropriately.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.source" title="Link to this definition"></a></dt>
+<dd><p>Name of the source (same format as <cite>sources.source_dictionary</cite>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.eigen_ref">
+<span class="sig-name descname"><span class="pre">eigen_ref</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.eigen_ref" title="Link to this definition"></a></dt>
+<dd><p>Index of the feed that is current phase reference of the eigenvectors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.phase_ref">
+<span class="sig-name descname"><span class="pre">phase_ref</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.phase_ref" title="Link to this definition"></a></dt>
+<dd><p>Two element list that indicates the chan_id of the feeds to use
+as phase reference for the [Y, X] polarisation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.med_phase_ref">
+<span class="sig-name descname"><span class="pre">med_phase_ref</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.med_phase_ref" title="Link to this definition"></a></dt>
+<dd><p>Overides <cite>phase_ref</cite>, instead referencing the phase with respect
+to the median value over feeds of a given polarisation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.neigen">
+<span class="sig-name descname"><span class="pre">neigen</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.neigen" title="Link to this definition"></a></dt>
+<dd><p>Number of eigenvalues to include in the orthogonalization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.max_hour_angle">
+<span class="sig-name descname"><span class="pre">max_hour_angle</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.max_hour_angle" title="Link to this definition"></a></dt>
+<dd><p>The maximum hour angle in degrees to consider in the analysis.
+Hour angles between [window * max_hour_angle, max_hour_angle] will
+be used for the determination of the off source eigenvalue.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.window">
+<span class="sig-name descname"><span class="pre">window</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.window" title="Link to this definition"></a></dt>
+<dd><p>Fraction of the maximum hour angle considered still on source.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.dyn_rng_threshold">
+<span class="sig-name descname"><span class="pre">dyn_rng_threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.dyn_rng_threshold" title="Link to this definition"></a></dt>
+<dd><p>Ratio of the second largest eigenvalue on source to the largest eigenvalue
+off source below which frequencies and times will be considered contaminated
+and discarded from further analysis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.telescope_rotation">
+<span class="sig-name descname"><span class="pre">telescope_rotation</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.telescope_rotation" title="Link to this definition"></a></dt>
+<dd><p>Rotation of the telescope from true north in degrees.  A positive rotation is
+anti-clockwise when looking down at the telescope from the sky.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EigenCalibration.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EigenCalibration.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EigenCalibration.process" title="Link to this definition"></a></dt>
+<dd><p>Determine feed response from eigendecomposition.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>andata.CorrData</em>) – CorrData object that contains the chimecal acquisition datasets,
+specifically vis, weight, erms, evec, and eval.</p></li>
+<li><p><strong>inputmap</strong> (<em>list</em><em> of </em><em>CorrInput's</em>) – List describing the inputs as ordered in data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>response</strong> – Response of each feed to the point source.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EstimateNarrowbandGainError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">EstimateNarrowbandGainError</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EstimateNarrowbandGainError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EstimateNarrowbandGainError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Estimate error in gains due to narrowband features.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EstimateNarrowbandGainError.ignore_rfi">
+<span class="sig-name descname"><span class="pre">ignore_rfi</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.EstimateNarrowbandGainError.ignore_rfi" title="Link to this definition"></a></dt>
+<dd><p>Ignore the persistent RFI bands when calculating
+the gain error.  These bands are specified in
+ch_util.rfi.frequency_mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.EstimateNarrowbandGainError.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gain_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gain_smooth</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#EstimateNarrowbandGainError.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.EstimateNarrowbandGainError.process" title="Link to this definition"></a></dt>
+<dd><p>Construct the correction for narrowband gain errors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gain</strong> (<em>StaticGainData</em>) – Original (unmasked) gains.</p></li>
+<li><p><strong>gain_mask</strong> (<em>StaticGainData</em>) – Gains after masking.</p></li>
+<li><p><strong>gain_smooth</strong> (<em>StaticGainData</em>) – Gains after masking and interpolating
+over the narrowband features.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Here the gain dataset is the ratio of the original gain
+and a version of the gain where all narrowband feature have
+been flagged and smoothly interpolated over.  The weight
+dataset is 1.0 if a narrowband feature was identified at
+that (freq, input, time) and 0.0 otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ExpandCommonMode">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ExpandCommonMode</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ExpandCommonMode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ExpandCommonMode" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.calibration.BaseCommonMode" title="ch_pipeline.analysis.calibration.BaseCommonMode"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCommonMode</span></code></a></p>
+<p>Expand the common mode so that it can be applied to the original input axis.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ExpandCommonMode.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cmn</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ExpandCommonMode.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ExpandCommonMode.process" title="Link to this definition"></a></dt>
+<dd><p>Expand the common mode gain amplitude.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cmn</strong> (<em>StaticGainData</em><em> or </em><em>GainData</em>) – The common-mode gain <em>amplitude</em> for the different
+groups of inputs.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – The common-mode gain amplitude replicated for all inputs
+in a group.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData or GainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">FlagAmplitude</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagAmplitude"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag feeds and frequencies with outlier gain amplitude.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.min_amp_scale_factor">
+<span class="sig-name descname"><span class="pre">min_amp_scale_factor</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.min_amp_scale_factor" title="Link to this definition"></a></dt>
+<dd><p>Flag feeds and frequencies where the amplitude of the gain
+is less than <cite>min_amp_scale_factor</cite> times the median amplitude
+over all feeds and frequencies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.max_amp_scale_factor">
+<span class="sig-name descname"><span class="pre">max_amp_scale_factor</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.max_amp_scale_factor" title="Link to this definition"></a></dt>
+<dd><p>Flag feeds and frequencies where the amplitude of the gain
+is greater than <cite>max_amp_scale_factor</cite> times the median amplitude
+over all feeds and frequencies.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_outlier">
+<span class="sig-name descname"><span class="pre">nsigma_outlier</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_outlier" title="Link to this definition"></a></dt>
+<dd><p>Flag a feed at a particular frequency if the gain amplitude
+is greater than <cite>nsigma_outlier</cite> from the median value over
+all feeds of the same polarisation at that frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_med_outlier">
+<span class="sig-name descname"><span class="pre">nsigma_med_outlier</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.nsigma_med_outlier" title="Link to this definition"></a></dt>
+<dd><p>Flag a frequency if the median gain amplitude over all feeds of a
+given polarisation is <cite>nsigma_med_outlier</cite> away from the local median.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.window_med_outlier">
+<span class="sig-name descname"><span class="pre">window_med_outlier</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.window_med_outlier" title="Link to this definition"></a></dt>
+<dd><p>Number of frequency bins to use to determine the local median for
+the test outlined in the description of <cite>nsigma_med_outlier</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_freq">
+<span class="sig-name descname"><span class="pre">threshold_good_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_freq" title="Link to this definition"></a></dt>
+<dd><p>If a frequency has less than this fraction of good inputs, then
+it is considered bad and the data for all inputs is flagged.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_input">
+<span class="sig-name descname"><span class="pre">threshold_good_input</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.threshold_good_input" title="Link to this definition"></a></dt>
+<dd><p>If an input has less than this fraction of good frequencies, then
+it is considered bad and the data for all frequencies is flagged.
+Note that the fraction is relative to the number of frequencies
+that pass the test described in <cite>threshold_good_freq</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.valid_gains_frac_good_freq">
+<span class="sig-name descname"><span class="pre">valid_gains_frac_good_freq</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.valid_gains_frac_good_freq" title="Link to this definition"></a></dt>
+<dd><p>If the fraction of frequencies that remain after flagging is less than
+this value, then the task will return None and the processing of the
+sidereal day will not proceed further.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagAmplitude.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagAmplitude.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagAmplitude.process" title="Link to this definition"></a></dt>
+<dd><p>Set weight to zero for feeds and frequencies with outlier gain amplitude.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gain</strong> (<em>containers.StaticGainData</em>) – Gain derived from point source transit.</p></li>
+<li><p><strong>inputmap</strong> (<em>list</em><em> of </em><em>CorrInput's</em>) – List describing the inputs as ordered in gain.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – The input gain container with modified weights.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">FlagNarrowbandGainError</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagNarrowbandGainError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Mask frequencies and times where narrowband gain errors were identified.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError.transition">
+<span class="sig-name descname"><span class="pre">transition</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError.transition" title="Link to this definition"></a></dt>
+<dd><p>Duration in seconds over which we transitioned between gains in the
+real-time pipeline.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError.threshold">
+<span class="sig-name descname"><span class="pre">threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError.threshold" title="Link to this definition"></a></dt>
+<dd><p>Mask any frequency and time where the fractional gain error is larger
+than this threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError.ignore_input_flags">
+<span class="sig-name descname"><span class="pre">ignore_input_flags</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError.ignore_input_flags" title="Link to this definition"></a></dt>
+<dd><p>Ignore the input flags when calculating the average gain error.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagNarrowbandGainError.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError.process" title="Link to this definition"></a></dt>
+<dd><p>Look up appropriate gain errors, construct flag, and apply to weights.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>TimeStream</em><em> or </em><em>SiderealStream</em>) – Data to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Mask that removes frequencies and times.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask">RFIMask</a> or SiderealRFIMask</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.FlagNarrowbandGainError.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gains</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#FlagNarrowbandGainError.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.FlagNarrowbandGainError.setup" title="Link to this definition"></a></dt>
+<dd><p>Prepare the gain errors as a function of time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gains</strong> (<em>containers.GainData</em>) – Narrowband gain errors generated by the
+EstimateNarrowbandGainError task.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GainFromTransitFit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">GainFromTransitFit</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GainFromTransitFit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Determine gain by evaluating the best-fit model for the point source transit.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GainFromTransitFit.evaluate">
+<span class="sig-name descname"><span class="pre">evaluate</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.evaluate" title="Link to this definition"></a></dt>
+<dd><p>Evaluate the model at this location, either ‘transit’ or ‘peak’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GainFromTransitFit.chisq_per_dof_threshold">
+<span class="sig-name descname"><span class="pre">chisq_per_dof_threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.chisq_per_dof_threshold" title="Link to this definition"></a></dt>
+<dd><p>Set gain and weight to zero if the chisq per degree of freedom
+of the fit is less than this threshold.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GainFromTransitFit.alpha">
+<span class="sig-name descname"><span class="pre">alpha</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.alpha" title="Link to this definition"></a></dt>
+<dd><p>Use confidence level 1 - alpha for the uncertainty on the gain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GainFromTransitFit.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fit</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GainFromTransitFit.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GainFromTransitFit.process" title="Link to this definition"></a></dt>
+<dd><p>Determine gain from best-fit model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>fit</strong> (<em>ccontainers.TransitFitParams</em>) – Parameters of the model fit and their covariance.
+Must also contain ‘model_class’ and ‘model_kwargs’
+attributes that can be used to evaluate the model.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – Gain and uncertainty on the gain.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GatedNoiseCalibration">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">GatedNoiseCalibration</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GatedNoiseCalibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Calibration using noise injection.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GatedNoiseCalibration.norm">
+<span class="sig-name descname"><span class="pre">norm</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration.norm" title="Link to this definition"></a></dt>
+<dd><p>Specify what to use to normalise the matrix.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>[‘gated’, ‘off’, ‘identity’]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.GatedNoiseCalibration.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#GatedNoiseCalibration.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration.process" title="Link to this definition"></a></dt>
+<dd><p>Find gains from noise injection data and apply them to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ts</strong> (<em>andata.CorrData</em>) – Parallel timestream class containing noise injection data.</p></li>
+<li><p><strong>inputmap</strong> (<em>list</em><em> of </em><em>CorrInputs</em>) – List describing the inputs to the correlator.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ts</strong> – Timestream with calibrated (decimated) visibilities, gains and
+respective timestamps.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">IdentifyNarrowbandFeatures</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#IdentifyNarrowbandFeatures"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Identify and flag narrowband features in gains.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.tau_cut">
+<span class="sig-name descname"><span class="pre">tau_cut</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.tau_cut" title="Link to this definition"></a></dt>
+<dd><p>Cutoff of the high-pass filter in microseconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.epsilon">
+<span class="sig-name descname"><span class="pre">epsilon</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.epsilon" title="Link to this definition"></a></dt>
+<dd><p>Stop-band rejection of the filter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.window">
+<span class="sig-name descname"><span class="pre">window</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.window" title="Link to this definition"></a></dt>
+<dd><p>Width of the window, in number of frequency channnels,
+used to estimate the noise by calculating a local
+median absolute deviation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.threshold">
+<span class="sig-name descname"><span class="pre">threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.threshold" title="Link to this definition"></a></dt>
+<dd><p>Number of median absolute deviations beyond which
+a frequency channel is considered an outlier.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.nperiter">
+<span class="sig-name descname"><span class="pre">nperiter</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.nperiter" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of frequency channels to flag
+on any iteration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.niter">
+<span class="sig-name descname"><span class="pre">niter</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.niter" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of iterations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#IdentifyNarrowbandFeatures.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.IdentifyNarrowbandFeatures.process" title="Link to this definition"></a></dt>
+<dd><p>Identify and flag narrowband features in the gain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>StaticGainData</em>) – Gain applied to the voltage data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Copy of the input container with the weight
+dataset set to zero if a narrowband feature
+has been identified for that frequency and input.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">InterpolateGainOverFrequency</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InterpolateGainOverFrequency"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Replace gain at flagged frequencies with interpolated values.</p>
+<p>Uses a gaussian process regression to perform the interpolation
+with a Matern function describing the covariance between frequencies.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.interp_scale">
+<span class="sig-name descname"><span class="pre">interp_scale</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.interp_scale" title="Link to this definition"></a></dt>
+<dd><p>Correlation length of the gain with frequency in MHz.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.in_place">
+<span class="sig-name descname"><span class="pre">in_place</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.in_place" title="Link to this definition"></a></dt>
+<dd><p>Save the interpolated gains to the input container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InterpolateGainOverFrequency.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InterpolateGainOverFrequency.process" title="Link to this definition"></a></dt>
+<dd><p>Interpolate the gain over the frequency axis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>containers.StaticGainData</em>) – Complex gains at single time.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – Complex gains with flagged frequencies (<cite>weight = 0.0</cite>)
+replaced with interpolated values and <cite>weight</cite> dataset
+updated to reflect the uncertainty on the interpolation.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InvertGain">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">InvertGain</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InvertGain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InvertGain" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Invert gains.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.InvertGain.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#InvertGain.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.InvertGain.process" title="Link to this definition"></a></dt>
+<dd><p>Invert gains.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>StaticGainData</em><em> or </em><em>GainData</em>) – gain data container</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – The input container with the gain dataset
+inverted and the uncertainty contained
+in the weight dataset propagated appropriately.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>StaticGainData or GainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">NoiseInjectionCalibration</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Calibration using noise injection.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.nchannels">
+<span class="sig-name descname"><span class="pre">nchannels</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.nchannels" title="Link to this definition"></a></dt>
+<dd><p>Number of channels (default 16).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.ch_ref">
+<span class="sig-name descname"><span class="pre">ch_ref</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.ch_ref" title="Link to this definition"></a></dt>
+<dd><p>Reference channel (default 0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int in the range 0 &lt;= ch_ref &lt;= Nchannels-1, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.fbin_ref">
+<span class="sig-name descname"><span class="pre">fbin_ref</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.fbin_ref" title="Link to this definition"></a></dt>
+<dd><p>Reference frequency bin</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.decimate_only">
+<span class="sig-name descname"><span class="pre">decimate_only</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.decimate_only" title="Link to this definition"></a></dt>
+<dd><p>If set (not default), then we do not apply the gain solution
+and return a decimated but uncalibrated timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">..</span> <span class="pre">deprecated::</span> <span class="pre">pass1G</span></span></dt>
+<dd><p>This calibration technique only works on old data from before Pass 1G.
+For more recent data, look at <a class="reference internal" href="#ch_pipeline.analysis.calibration.GatedNoiseCalibration" title="ch_pipeline.analysis.calibration.GatedNoiseCalibration"><code class="xref py py-class docutils literal notranslate"><span class="pre">GatedNoiseCalibration</span></code></a>.</p>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.next" title="Link to this definition"></a></dt>
+<dd><p>Find gains from noise injection data and apply them to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> (<em>containers.TimeStream</em>) – Parallel timestream class containing noise injection data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>cts</strong> – Timestream with calibrated (decimated) visibilities, gains and
+respective timestamps.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>containers.CalibratedTimeStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseInjectionCalibration.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseInjectionCalibration.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseInjectionCalibration.setup" title="Link to this definition"></a></dt>
+<dd><p>Use the input map to set up the calibrator.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">tools.CorrInputs</span></code>) – Describing the inputs to the correlator.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseSourceFold">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">NoiseSourceFold</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseSourceFold"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Fold the noise source for synced data.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseSourceFold.period">
+<span class="sig-name descname"><span class="pre">period</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.period" title="Link to this definition"></a></dt>
+<dd><p>Period of the noise source in integration samples.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseSourceFold.phase">
+<span class="sig-name descname"><span class="pre">phase</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.phase" title="Link to this definition"></a></dt>
+<dd><p>Phase of noise source on sample.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.NoiseSourceFold.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#NoiseSourceFold.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.NoiseSourceFold.process" title="Link to this definition"></a></dt>
+<dd><p>Fold on the noise source and generate a gated dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> (<em>andata.CorrData object</em>) – Timestream to fold on.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>folded_ts</strong> – Timestream with a gated_vis0 dataset containing the noise
+source data.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ReconstructGainError</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ReconstructGainError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Estimate the fractional error in the calibration gain.</p>
+<p>The “true” gain is estimated by low-pass filtering the
+applied gain along the frequency axis.  The ratio of the
+applied gain to the true gain is then output.</p>
+<p>The low-pass filtering is sensitive to narrowband features in
+the gain due to RFI.  An iterative algorithm is used to
+identify these narrowband features by low-pass filtering,
+taking the ratio, averaging over all baselines, masking the
+<cite>nperiter</cite> largest absolute deviations relative to the
+median absolute deviation, and then repeating the procedure.
+The frequencies identified as containing narrowband features
+should be masked in the visibility dataset.</p>
+<p>This procedure requires access to all frequencies and inputs.
+For this reason, it is recommended to provide the gain over
+many nights so that the procedure can be distributed over time.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.full_output">
+<span class="sig-name descname"><span class="pre">full_output</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.full_output" title="Link to this definition"></a></dt>
+<dd><p>If False, then only output the fractional error in the
+calibration gains.  If True, then the low-pass filtered gains,
+frequency-time mask, and an archive of the baseline-averaged
+fractional error at each iteration will be output as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.simple_lpf">
+<span class="sig-name descname"><span class="pre">simple_lpf</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.simple_lpf" title="Link to this definition"></a></dt>
+<dd><p>If True, then use a simple FIR low-pass filter.  If False,
+then use the DAYENUREST technique to construct the filter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.numtaps">
+<span class="sig-name descname"><span class="pre">numtaps</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.numtaps" title="Link to this definition"></a></dt>
+<dd><p>Number of taps in the FIR low-pass filter if simple_lpf is True.
+Note this is specified in MHz with the actual number of taps
+obtained by dividing this number by the frequency channel width.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.remove_hpf">
+<span class="sig-name descname"><span class="pre">remove_hpf</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.remove_hpf" title="Link to this definition"></a></dt>
+<dd><p>Remove a high-pass filtered version of the gains using DAYENU
+prior to fitting DPSS modes to obtain the low-pass filtered version.
+Can suffer from numerical issues when inverting the signal covariance.
+Only relevant if simple_lpf is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.rcond">
+<span class="sig-name descname"><span class="pre">rcond</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.rcond" title="Link to this definition"></a></dt>
+<dd><p>The condition number used to calculate the pseudo-inverse of the masked
+frequency-frequency covariance matrix when using DAYENU.  Only relevant
+if remove_hpf is True and simple_lpf is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.niter">
+<span class="sig-name descname"><span class="pre">niter</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.niter" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of iterations used to mask narrowband features in the gains.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.window">
+<span class="sig-name descname"><span class="pre">window</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.window" title="Link to this definition"></a></dt>
+<dd><p>Width of the window, in number of frequency channnels, used to estimate
+the noise by calculating a local median absolute deviation. If not provided,
+then will use the entire band.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.nsigma_outlier">
+<span class="sig-name descname"><span class="pre">nsigma_outlier</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.nsigma_outlier" title="Link to this definition"></a></dt>
+<dd><p>Number of median absolute deviations beyond which a frequency channel
+is considered an outlier.  The algorithm terminates when there are
+no longer any frequency channels that exceed this threshold
+or the maximum number of iterations is reached.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.nperiter">
+<span class="sig-name descname"><span class="pre">nperiter</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.nperiter" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of frequency channels to flag on any iteration. Note that
+the low-pass filtering will leak power from outliers to neighboring
+frequencies, so it is recommended to keep this number small in order to
+avoid accidentally masking good frequencies contaminated by a neighbor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.mask_rfi_bands">
+<span class="sig-name descname"><span class="pre">mask_rfi_bands</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.mask_rfi_bands" title="Link to this definition"></a></dt>
+<dd><p>Ignore the persistent RFI bands when calculating the gain error.
+These bands are specified in ch_util.rfi.frequency_mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.tau_centre">
+<span class="sig-name descname"><span class="pre">tau_centre</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.tau_centre" title="Link to this definition"></a></dt>
+<dd><p>The centre of the pass-band regions in micro-seconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float or np.ndarray[nstopband,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.tau_width">
+<span class="sig-name descname"><span class="pre">tau_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.tau_width" title="Link to this definition"></a></dt>
+<dd><p>The half width of the pass-band regions in micro-seconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float or np.ndarray[nstopband,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.epsilon">
+<span class="sig-name descname"><span class="pre">epsilon</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.epsilon" title="Link to this definition"></a></dt>
+<dd><p>Stop-band rejection of the filter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.threshold">
+<span class="sig-name descname"><span class="pre">threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.threshold" title="Link to this definition"></a></dt>
+<dd><p>Filter is constructed from eigenmodes of the signal covariance whose
+eigenvalue is larger than this factor times the maximum eigenvalue.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ReconstructGainError.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.process" title="Link to this definition"></a></dt>
+<dd><p>Identify features in the gains at high delay.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>gain</strong> (<em>GainData</em>) – Original gain data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>out_err</strong> (<em>GainData</em>) – Ratio of the original gain and a low-pass filtered version of the gain.</p></li>
+<li><p><strong>out_lpf</strong> (<em>GainData</em>) – Low-pass filtered version of the gain.  Only output if full_output is True.</p></li>
+<li><p><strong>out_mask</strong> (<em>RFIMask</em>) – Frequencies and times that were identified as outliers by the iterative
+high-pass-filter masking algorithm.  Only output if full_output is True.</p></li>
+<li><p><strong>archive</strong> (<em>GainData</em>) – The gain error averaged over all baselines for each iteration of the
+high-pass-filter masking algorithm.  The input axis of this container is
+used to accomodate iteration number.  Only output if full_output is True.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ReconstructGainError.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ReconstructGainError.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ReconstructGainError.setup" title="Link to this definition"></a></dt>
+<dd><p>Determine the frequency axis.</p>
+<p>This is necessary because the frequency axis in the gains is saved
+as float32 instead of float64, which causes issues when constructing
+the delay filter.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">SiderealCalibration</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#SiderealCalibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Use point source as a calibrator for a sidereal stack.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.source" title="Link to this definition"></a></dt>
+<dd><p>Name of the point source to use as calibrator.
+Default CygA.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration.model_fit">
+<span class="sig-name descname"><span class="pre">model_fit</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.model_fit" title="Link to this definition"></a></dt>
+<dd><p>Fit a model to the point source transit.
+Default False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration.use_peak">
+<span class="sig-name descname"><span class="pre">use_peak</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.use_peak" title="Link to this definition"></a></dt>
+<dd><p>Relevant if model_fit is True.  If set to True,
+estimate the gain as the response at the
+actual peak location. If set to False, estimate
+the gain as the response at the expected peak location.
+Default False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration.threshold">
+<span class="sig-name descname"><span class="pre">threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.threshold" title="Link to this definition"></a></dt>
+<dd><p>Relevant if model_fit is True.  The model is only fit to
+time samples with dynamic range greater than threshold.
+Default is 3.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.SiderealCalibration.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmask</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#SiderealCalibration.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.SiderealCalibration.process" title="Link to this definition"></a></dt>
+<dd><p>Determine calibration from a sidereal stream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – Rigidized sidereal timestream to calibrate.</p></li>
+<li><p><strong>inputmap</strong> (list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code>) – List describing the inputs as they are in the file.</p></li>
+<li><p><strong>inputmask</strong> (<em>ccontainers.CorrInputMask</em>) – Mask indicating which correlator inputs to use in the
+eigenvalue decomposition.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gains</strong> – Response of each feed to the point source and best-fit model
+(model_fit is True), or gains at the expected peak location
+(model_fit is False).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.PointSourceTransit" title="ch_pipeline.core.containers.PointSourceTransit">containers.PointSourceTransit</a> or containers.StaticGainData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ThermalCalibration">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">ThermalCalibration</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ThermalCalibration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Use weather temperature to correct calibration in between point source transits.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ThermalCalibration.caltime_path">
+<span class="sig-name descname"><span class="pre">caltime_path</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.caltime_path" title="Link to this definition"></a></dt>
+<dd><p>Full path to file describing the calibration times.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ThermalCalibration.node_spoof">
+<span class="sig-name descname"><span class="pre">node_spoof</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.node_spoof" title="Link to this definition"></a></dt>
+<dd><p>(default: {‘fir_online’: ‘/project/rpp-chime/chime/chime_online/’} )
+host and directory in which to find data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.ThermalCalibration.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#ThermalCalibration.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.ThermalCalibration.process" title="Link to this definition"></a></dt>
+<dd><p>Determine thermal calibration for a sidereal stream or time stream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<cite>containers.SiderealStream</cite> or <cite>containers.TimeStream</cite>) – Data to generate calibration for.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>gain</strong> – The type depends on the type of <cite>data</cite>. Returns <cite>None</cite> if a thermal
+correction could not be determined.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Either <cite>containers.SiderealGainData</cite> or <cite>containers.GainData</cite></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">TransitFit</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Fit model to the transit of a point source.</p>
+<p>Multiple model choices are available and can be specified through the <cite>model</cite>
+config property.  Default is <cite>gauss_amp_poly_phase</cite>, a nonlinear fit
+of a gaussian in amplitude and a polynomial in phase to the complex data.
+There is also <cite>poly_log_amp_poly_phase</cite>, an iterative weighted least squares
+fit of a polynomial to log amplitude and phase.  The type of polynomial can be
+chosen through the <cite>poly_type</cite>, <cite>poly_deg_amp</cite>, and <cite>poly_deg_phi</cite> config properties.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.model">
+<span class="sig-name descname"><span class="pre">model</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.model" title="Link to this definition"></a></dt>
+<dd><p>Name of the model to fit.  One of ‘gauss_amp_poly_phase’ or
+‘poly_log_amp_poly_phase’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.nsigma">
+<span class="sig-name descname"><span class="pre">nsigma</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.nsigma" title="Link to this definition"></a></dt>
+<dd><p>Number of standard deviations away from transit to fit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.absolute_sigma">
+<span class="sig-name descname"><span class="pre">absolute_sigma</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.absolute_sigma" title="Link to this definition"></a></dt>
+<dd><p>Set to True if the errors provided are absolute.  Set to False if
+the errors provided are relative, in which case the parameter covariance
+will be scaled by the chi-squared per degree-of-freedom.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.poly_type">
+<span class="sig-name descname"><span class="pre">poly_type</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_type" title="Link to this definition"></a></dt>
+<dd><p>Type of polynomial.  Either ‘standard’, ‘hermite’, or ‘chebychev’.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.poly_deg_amp">
+<span class="sig-name descname"><span class="pre">poly_deg_amp</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_deg_amp" title="Link to this definition"></a></dt>
+<dd><p>Degree of the polynomial to fit to amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.poly_deg_phi">
+<span class="sig-name descname"><span class="pre">poly_deg_phi</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.poly_deg_phi" title="Link to this definition"></a></dt>
+<dd><p>Degree of the polynomial to fit to phase.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.niter">
+<span class="sig-name descname"><span class="pre">niter</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.niter" title="Link to this definition"></a></dt>
+<dd><p>Number of times to update the errors using model amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.moving_window">
+<span class="sig-name descname"><span class="pre">moving_window</span></span><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.moving_window" title="Link to this definition"></a></dt>
+<dd><p>Number of standard deviations away from peak to fit.
+The peak location is updated with each iteration.
+Must be less than <cite>nsigma</cite>.  Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">response</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.process" title="Link to this definition"></a></dt>
+<dd><p>Fit model to the point source response for each feed and frequency.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>response</strong> (<em>containers.SiderealStream</em>) – SiderealStream covering the source transit.  Must contain
+<cite>source_name</cite> and <cite>transit_time</cite> attributes.</p></li>
+<li><p><strong>inputmap</strong> (<em>list</em><em> of </em><em>CorrInput's</em>) – List describing the inputs as ordered in response.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>fit</strong> – Parameters of the model fit and their covariance.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ccontainers.TransitFitParams</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.TransitFit.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#TransitFit.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.TransitFit.setup" title="Link to this definition"></a></dt>
+<dd><p>Define model to fit to transit.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.find_contiguous_time_ranges">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">find_contiguous_time_ranges</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestamp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dt</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3600.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#find_contiguous_time_ranges"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.find_contiguous_time_ranges" title="Link to this definition"></a></dt>
+<dd><p>Find contiguous ranges within an array of unix timestamps.</p>
+<p>Used by ThermalCalibration to determine the ranges of time
+to load temperature data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>timestamp</strong> (<em>np.ndarray</em><em>[</em><em>ntime</em><em>,</em><em>]</em>) – Unix timestamps.</p></li>
+<li><p><strong>dt</strong> (<em>float</em>) – Maximum time difference in seconds.
+If consecutive timestamps are separated
+by more than 2 * dt, then they will be
+placed into separate time ranges. Note that
+each time range will be expanded by dt
+on either end.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>time_ranges</strong> – List of 2 element tuples, which each tuple
+containing the start and stop time covering
+a contiguous range of timestamps.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>[(start_time, stop_time), …]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.interp_gains">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">interp_gains</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trans_times</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gain_mat</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">times</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#interp_gains"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.interp_gains" title="Link to this definition"></a></dt>
+<dd><p>Linearly interpolates gain solutions in sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>trans_times</strong> (<em>array_like</em>) – Unix time of object transit</p></li>
+<li><p><strong>gain_mat</strong> (<em>array_like</em>) – Array of gains shaped (freq, ncorr, ndays)</p></li>
+<li><p><strong>times</strong> (<em>array_like</em>) – Timestamps onto which gain solution is interpolated</p></li>
+<li><p><strong>axis</strong> (<em>int</em>) – Axis along which to interpolate.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Array of interpolated gains</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.calibration.solve_gain">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.calibration.</span></span><span class="sig-name descname"><span class="pre">solve_gain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">feeds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">norm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/calibration.html#solve_gain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.calibration.solve_gain" title="Link to this definition"></a></dt>
+<dd><p>Calculate gain from largest eigenvector.</p>
+<p>Step through each time/freq pixel, generate a Hermitian matrix,
+perform eigendecomposition, iteratively replacing the diagonal
+elements with a low-rank approximation, and calculate complex gains
+from the largest eigenvector.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>, </em><em>nprod</em><em>, </em><em>ntime</em><em>]</em>) – Visibility array to be decomposed</p></li>
+<li><p><strong>feeds</strong> (<em>list</em>) – Which feeds to include. If <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code> include all feeds.</p></li>
+<li><p><strong>norm</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>, </em><em>nfeed</em><em>, </em><em>ntime</em><em>]</em><em>, </em><em>optional</em>) – Array to use for weighting.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>evalue</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Eigenvalues obtained from eigenvalue decomposition
+of the visibility matrix.</p></li>
+<li><p><strong>gain</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Gain solution for each feed, time, and frequency</p></li>
+<li><p><strong>gain_error</strong> (<em>np.ndarray[nfreq, nfeed, ntime]</em>) – Error on the gain solution for each feed, time, and frequency</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.beam.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.beam" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.flagging.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.flagging" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

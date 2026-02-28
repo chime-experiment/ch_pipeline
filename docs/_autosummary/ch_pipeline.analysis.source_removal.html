@@ -1,0 +1,751 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.source_removal &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.timing" href="ch_pipeline.analysis.timing.html" />
+    <link rel="prev" title="ch_pipeline.analysis.solar" href="ch_pipeline.analysis.solar.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.source_removal</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.source_removal.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.source_removal">
+<span id="ch-pipeline-analysis-source-removal"></span><h1>ch_pipeline.analysis.source_removal<a class="headerlink" href="#module-ch_pipeline.analysis.source_removal" title="Link to this heading"></a></h1>
+<p>Tasks for removing bright sources from the data.</p>
+<p>Tasks for constructing models for bright sources and subtracting them from the data.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.apply_kz_lpf_2d" title="ch_pipeline.analysis.source_removal.apply_kz_lpf_2d"><code class="xref py py-obj docutils literal notranslate"><span class="pre">apply_kz_lpf_2d</span></code></a>(y, flag[, window, niter, ...])</p></td>
+<td><p>Apply a 2D Kolmogorov-Zurbenko (KZ) filter.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.kz_coeffs" title="ch_pipeline.analysis.source_removal.kz_coeffs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">kz_coeffs</span></code></a>(m, k)</p></td>
+<td><p>Compute the coefficients for a Kolmogorov-Zurbenko (KZ) filter.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.model_extended_sources" title="ch_pipeline.analysis.source_removal.model_extended_sources"><code class="xref py py-obj docutils literal notranslate"><span class="pre">model_extended_sources</span></code></a>(freq, distance, ...)</p></td>
+<td><p>Generate a model for the visibilities.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.solve_multiple_times" title="ch_pipeline.analysis.source_removal.solve_multiple_times"><code class="xref py py-obj docutils literal notranslate"><span class="pre">solve_multiple_times</span></code></a>(vis, weight, source_model)</p></td>
+<td><p>Fit source model to the visibilities at all times.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.solve_single_time" title="ch_pipeline.analysis.source_removal.solve_single_time"><code class="xref py py-obj docutils literal notranslate"><span class="pre">solve_single_time</span></code></a>(vis, weight, source_model)</p></td>
+<td><p>Fit source model to the visibilities, treating each time independently.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.AccumulateBeam" title="ch_pipeline.analysis.source_removal.AccumulateBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">AccumulateBeam</span></code></a>()</p></td>
+<td><p>Accumulate the stacked beam for each source.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude" title="ch_pipeline.analysis.source_removal.LPFSourceAmplitude"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LPFSourceAmplitude</span></code></a>()</p></td>
+<td><p>Apply a 2D low-pass filter in (freq, time) to the measured source amplitude.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.SolveSources" title="ch_pipeline.analysis.source_removal.SolveSources"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolveSources</span></code></a>()</p></td>
+<td><p>Fit source model to the visibilities.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam" title="ch_pipeline.analysis.source_removal.SolveSourcesWithBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SolveSourcesWithBeam</span></code></a>()</p></td>
+<td><p>Fit a source model to the visibilities using external measurements of the beam.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.SubtractSources" title="ch_pipeline.analysis.source_removal.SubtractSources"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SubtractSources</span></code></a>()</p></td>
+<td><p>Subtract a source model from the visibilities.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam" title="ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SubtractSourcesWithBeam</span></code></a>()</p></td>
+<td><p>Subtract a source model from the visibilities.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.AccumulateBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">AccumulateBeam</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#AccumulateBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.AccumulateBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Accumulate the stacked beam for each source.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.AccumulateBeam.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">beam_stack</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#AccumulateBeam.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.AccumulateBeam.process" title="Link to this definition"></a></dt>
+<dd><p>Add the beam for this source to the class dictionary.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.AccumulateBeam.process_finish">
+<span class="sig-name descname"><span class="pre">process_finish</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#AccumulateBeam.process_finish"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.AccumulateBeam.process_finish" title="Link to this definition"></a></dt>
+<dd><p>Return the class dictionary containing the beam for all sources.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.AccumulateBeam.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#AccumulateBeam.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.AccumulateBeam.setup" title="Link to this definition"></a></dt>
+<dd><p>Create a class dictionary to hold the beam for each source.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">LPFSourceAmplitude</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#LPFSourceAmplitude"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Apply a 2D low-pass filter in (freq, time) to the measured source amplitude.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.window">
+<span class="sig-name descname"><span class="pre">window</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.window" title="Link to this definition"></a></dt>
+<dd><p>The size of the moving average window along the
+[freq, time] axis.  This sets the cutoff scale of
+the low-pass filter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.niter">
+<span class="sig-name descname"><span class="pre">niter</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.niter" title="Link to this definition"></a></dt>
+<dd><p>Number of iterations of the moving average filter
+along the [freq, time] axis.  The peak-to-sidelobe
+ratio of the filter’s transfer function scales
+roughly as 0.05^niter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.frac_required">
+<span class="sig-name descname"><span class="pre">frac_required</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.frac_required" title="Link to this definition"></a></dt>
+<dd><p>The fraction of samples within a window that must be
+valid (unmasked) in order for the filtered data point
+to be considered valid.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.ignore_main_lobe">
+<span class="sig-name descname"><span class="pre">ignore_main_lobe</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.ignore_main_lobe" title="Link to this definition"></a></dt>
+<dd><p>Do not apply the filter within the main lobe of the
+primary beam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>boolean</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.main_lobe_threshold">
+<span class="sig-name descname"><span class="pre">main_lobe_threshold</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.main_lobe_threshold" title="Link to this definition"></a></dt>
+<dd><p>If the source amplitude is greater than this fraction
+of the source flux than than [freq, RA] is considered
+within main lobe.  Only relevant when ignore_main_lobe
+is True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.LPFSourceAmplitude.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#LPFSourceAmplitude.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.LPFSourceAmplitude.process" title="Link to this definition"></a></dt>
+<dd><p>Low-pass filter the provided source amplitudes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>model</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel"><em>containers.SourceModel</em></a>) – Best-fit parameters of the source model.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>model</strong> – The input container with the amplitude dataset
+filtered.  Note that amplitudes that were previously
+zero will be interpolated to a non-zero value if more than
+frac_required of the nearby data points are non-zero.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel">containers.SourceModel</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">SolveSources</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSources"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Fit source model to the visibilities.</p>
+<p>Model consists of the sum of the signal from multiple (possibly extended) sources.
+Note that the extended source option is still in development.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.sources">
+<span class="sig-name descname"><span class="pre">sources</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.sources" title="Link to this definition"></a></dt>
+<dd><p>Names of the sources that will be included in the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>nsource element list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.degree_x">
+<span class="sig-name descname"><span class="pre">degree_x</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.degree_x" title="Link to this definition"></a></dt>
+<dd><p>The degree of the polynomial used to model the extended emission
+of each source in the W-E direction.  Set to zero for point source (default).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>nsource element list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.degree_y">
+<span class="sig-name descname"><span class="pre">degree_y</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.degree_y" title="Link to this definition"></a></dt>
+<dd><p>The degree of the polynomial used to model the extended emission
+of each source in the S-N direction.  Set to zero for point source (default).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>nsource element list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.extent">
+<span class="sig-name descname"><span class="pre">extent</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.extent" title="Link to this definition"></a></dt>
+<dd><p>Angular extent of each source in arcmin.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>nsource element list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.min_altitude">
+<span class="sig-name descname"><span class="pre">min_altitude</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.min_altitude" title="Link to this definition"></a></dt>
+<dd><p>Do not include a source in the model if its altitude is less than
+this value in degrees.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.min_ha">
+<span class="sig-name descname"><span class="pre">min_ha</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.min_ha" title="Link to this definition"></a></dt>
+<dd><p>Do not include a source in the model if it has an hour angle less than
+this value in degrees.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.max_ha">
+<span class="sig-name descname"><span class="pre">max_ha</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.max_ha" title="Link to this definition"></a></dt>
+<dd><p>Do not include a source in the model if it has an hour angle greater than
+this value in degrees.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.min_distance">
+<span class="sig-name descname"><span class="pre">min_distance</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.min_distance" title="Link to this definition"></a></dt>
+<dd><p>Do not include baselines in the fit with a distance less than
+this value in meters.  If the list contains a single element,
+then the cut is placed on the total baseline distance.  If the list
+contains two or more elements, then the cut is placed on the
+[W-E, N-S, …] component.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.telescope_rotation">
+<span class="sig-name descname"><span class="pre">telescope_rotation</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.telescope_rotation" title="Link to this definition"></a></dt>
+<dd><p>Rotation of the telescope from true north in degrees.  A positive rotation is
+anti-clockwise when looking down at the telescope from the sky.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.max_iter">
+<span class="sig-name descname"><span class="pre">max_iter</span></span><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.max_iter" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of iterations to perform for extended sources.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSources.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.process" title="Link to this definition"></a></dt>
+<dd><p>Fit source model to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>andata.CorrData</em><em>, </em><em>core.containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – Timestream or Sidereal stream with visibilities</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Best-fit parameters of the source model.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel">core.containers.SourceModel</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSources.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSources.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSources.setup" title="Link to this definition"></a></dt>
+<dd><p>Set up the source model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>analysis.telescope.CHIMETelescope</em>) – telescope model to use</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSourcesWithBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">SolveSourcesWithBeam</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSourcesWithBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.source_removal.SolveSources" title="ch_pipeline.analysis.source_removal.SolveSources"><code class="xref py py-class docutils literal notranslate"><span class="pre">SolveSources</span></code></a></p>
+<p>Fit a source model to the visibilities using external measurements of the beam.</p>
+<p>Model consists of the sum of the signal from multiple (possibly extended) sources.
+The signal from each source is modelled as a static 2D hermite polynomial in (u, v)
+modulated by three factors: the external beam measurement, the geometric phase,
+and a hermite polynomial in time to account for common mode drift in the gain.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beams</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSourcesWithBeam.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.process" title="Link to this definition"></a></dt>
+<dd><p>Fit source model to visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>andata.CorrData</em><em>, </em><em>core.containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – timestream or sidereal stream with visibilities</p></li>
+<li><p><strong>beams</strong> (<em>dict</em><em> of </em><em>andata.CorrData</em><em>, </em><em>core.containers.SiderealSteam</em><em>, or </em><em>equivalent</em>) – Dictionary containing the beam measurements.  The keys must be
+the souce names and the values must be containers of the same type as the
+input data, which contain the holographic measurements of that source
+averaged over all pairs of feeds in the stacked baselines.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>out</strong> – Best-fit parameters of the source model.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel">core.containers.SourceModel</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SolveSourcesWithBeam.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SolveSourcesWithBeam.setup" title="Link to this definition"></a></dt>
+<dd><p>Set up the source model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>analysis.telescope.CHIMETelescope</em>) – telescpe model to use</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSources">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">SubtractSources</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSources"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSources" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Subtract a source model from the visibilities.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSources.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSources.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSources.process" title="Link to this definition"></a></dt>
+<dd><p>Subtract a source model from the visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>andata.CorrData</em><em>, </em><em>core.containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – timestream or sidereal stream with visibilities</p></li>
+<li><p><strong>model</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel"><em>core.containers.SourceModel</em></a>) – Best-fit parameters of the source model.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData, core.containers.SiderealStream, or equivalent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSources.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSources.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSources.setup" title="Link to this definition"></a></dt>
+<dd><p>Extract inputmap from the telescope instance provided.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>analysis.telescope.CHIMETelescope</em>) – telescope model to use</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">SubtractSourcesWithBeam</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSourcesWithBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Subtract a source model from the visibilities.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beams</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSourcesWithBeam.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.process" title="Link to this definition"></a></dt>
+<dd><p>Subtract a source model from the visibilities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>andata.CorrData</em><em>, </em><em>core.containers.SiderealStream</em><em>, or </em><em>equivalent</em>) – timestream or sidereal stream with visibilities</p></li>
+<li><p><strong>model</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel"><em>core.containers.SourceModel</em></a>) – Best-fit parameters of the source model.</p></li>
+<li><p><strong>beams</strong> (<em>dict</em><em> of </em><em>andata.CorrData</em><em>, </em><em>core.containers.SiderealSteam</em><em>, or </em><em>equivalent</em>) – Dictionary containing the beam measurements.  The keys must be
+the souce names and the values must be containers of the same type as the
+input data, which contain the holographic measurements of that source
+averaged over all pairs of feeds in the stacked baselines.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData, core.containers.SiderealStream, or equivalent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#SubtractSourcesWithBeam.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.SubtractSourcesWithBeam.setup" title="Link to this definition"></a></dt>
+<dd><p>Extract inputmap from the telescope instance provided.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>analysis.telescope.CHIMETelescope</em>) – telescope model to use</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.apply_kz_lpf_2d">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">apply_kz_lpf_2d</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">y</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flag</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">niter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'wrap'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frac_required</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.8</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#apply_kz_lpf_2d"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.apply_kz_lpf_2d" title="Link to this definition"></a></dt>
+<dd><p>Apply a 2D Kolmogorov-Zurbenko (KZ) filter.</p>
+<p>The KZ filter is an FIR filter that is equivalent to repeated application
+of a moving average.  The “window” parameter is the size of the moving
+average window and determines the cut off for the low-pass filter.  The
+“niter” parameter is the number of times that the moving average is applied
+and controls the peak-to-sidelobe ratio of the transfer function of the filter.
+This method pre-computes the coefficients for a given “window” and “niter”,
+and then convolves once with the data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>y</strong> (<em>np.ndarray</em>) – The data to filter.  Must be two dimensional.</p></li>
+<li><p><strong>flag</strong> (<em>np.ndarray</em>) – Boolean array with the same shape as y where True
+indicates valid data and False indicates invalid data</p></li>
+<li><p><strong>window</strong> (<em>int</em><em> or </em><em>list</em><em> of </em><em>int</em>) – The size of the moving average window.  This can either be
+a 2 element list, in which case a different window size
+will be used for each dimension, or a single number, in which
+case the same value will be used for both dimensions.</p></li>
+<li><p><strong>niter</strong> (<em>int</em><em> or </em><em>list</em><em> of </em><em>int</em>) – Number of iterations of the moving average filter.  This can
+either be a 2 element list, in which case a  different number of
+iterations will be used for each dimension, or a single number,
+in which case the same value will be used for both dimensions.</p></li>
+<li><p><strong>mode</strong> (<em>str</em><em> or </em><em>list</em><em> of </em><em>str</em>) – The method used to pad the edges of the array.  This can
+either be a 2 element list, in which case a  different method
+will be used for each dimension, or a single string, in which
+case the same method will be used for both dimensions.</p></li>
+<li><p><strong>frac_required</strong> (<em>float</em>) – The fraction of samples within a window that must be valid in
+order for the filtered data point to be considered valid.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>y_lpf</strong> – The low-pass filtered data.  The value of the array is set to zero
+if the data is determined invalid based on frac_required argument.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.kz_coeffs">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">kz_coeffs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">k</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#kz_coeffs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.kz_coeffs" title="Link to this definition"></a></dt>
+<dd><p>Compute the coefficients for a Kolmogorov-Zurbenko (KZ) filter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>m</strong> (<em>int</em>) – Size of the moving average window.</p></li>
+<li><p><strong>k</strong> (<em>int</em>) – Number of iterations.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>coeff</strong> – Array of size k * (m - 1) + 1 containing the filter coefficients.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.model_extended_sources">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">model_extended_sources</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">freq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">distance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bodies</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_altitude</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_ha</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_ha</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#model_extended_sources"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.model_extended_sources" title="Link to this definition"></a></dt>
+<dd><p>Generate a model for the visibilities.</p>
+<p>Model consists of the sum of the signal from multiple (possibly extended) sources.
+For extended sources, the dependence of the signal on (W-E, S-N) baseline is described
+by a 2D hermite polynomial.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>freq</strong> (<em>np.ndarray</em><em>[</em><em>nfreq</em><em>,</em><em>]</em>) – Frequencies in MHz.</p></li>
+<li><p><strong>distance</strong> (<em>np.ndarray</em><em>[</em><em>2</em><em>, </em><em>nbaseline</em><em>]</em>) – The S-N and W-E distance for each baseline.</p></li>
+<li><p><strong>timestamp</strong> (<em>np.ndarray</em><em>[</em><em>ntime</em><em>,</em><em>]</em>) – Unix timestamp.</p></li>
+<li><p><strong>bodies</strong> (<em>nsource element list</em>) – List of <cite>skyfield.api.Star</cite> (or equivalent) for the sources being modelled.</p></li>
+<li><p><strong>min_altitude</strong> (<em>float</em>) – Do not include a source in the model if it has an altitude less than
+this value in degrees.</p></li>
+<li><p><strong>min_ha</strong> (<em>float</em>) – Do not include a source in the model if it has an hour angle less than
+this value in degrees.</p></li>
+<li><p><strong>max_ha</strong> (<em>float</em>) – Do not include a source in the model if it has an hour angle greater than
+this value in degrees.</p></li>
+<li><p><strong>kwargs</strong> (<em>dict</em>) – Additional optional arguments shown below</p></li>
+<li><p><strong>scale_x</strong> (<em>nsource element list</em>) – Angular extent of each source in arcmin in the W-E direction</p></li>
+<li><p><strong>scale_y</strong> (<em>nsource element list</em>) – Angular extent of each source in arcmin in the S-N direction</p></li>
+<li><p><strong>degree_x</strong> (<em>nsource element list</em>) – The degree of the polynomial used to model the extend emission
+of each source in the W-E direction.</p></li>
+<li><p><strong>degree_y</strong> (<em>nsource element list</em>) – The degree of the polynomial used to model the extend emission
+of each source in the S-N direction.</p></li>
+<li><p><strong>degree_t</strong> (<em>nsource element list</em>) – The degree of the polynomial used to model time-dependent,
+common-mode variations in the gain.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>S</strong> (<em>np.ndarray[nfreq, nbaseline, ntime, nparam]</em>) – Model for the visibilities.</p></li>
+<li><p><strong>source_bound</strong> (<em>np.ndarray[nsource+1,]</em>) – Indices into the param axis of the source model.
+The model for source <cite>i</cite> is given by the parameters
+between <cite>source_bound[i]</cite> and <cite>source_bound[i+1]</cite>.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.solve_multiple_times">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">solve_multiple_times</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_model</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#solve_multiple_times"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.solve_multiple_times" title="Link to this definition"></a></dt>
+<dd><p>Fit source model to the visibilities at all times.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>vis</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>]</em>) – Measured visibilities.</p></li>
+<li><p><strong>weight</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>]</em>) – 1/sigma^2 uncertainty on the visibilities.</p></li>
+<li><p><strong>source_model</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>, </em><em>nparam</em><em>]</em>) – Model for the visibilities generated by the
+<cite>model_extended_sources</cite> method.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>coeff</strong> – Best-fit coefficients of the model.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[nparam,]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.source_removal.solve_single_time">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.source_removal.</span></span><span class="sig-name descname"><span class="pre">solve_single_time</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_model</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/source_removal.html#solve_single_time"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.source_removal.solve_single_time" title="Link to this definition"></a></dt>
+<dd><p>Fit source model to the visibilities, treating each time independently.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>vis</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>]</em>) – Measured visibilities.</p></li>
+<li><p><strong>weight</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>]</em>) – 1/sigma^2 uncertainty on the visibilities.</p></li>
+<li><p><strong>source_model</strong> (<em>np.ndarray</em><em>[</em><em>nbaseline</em><em>, </em><em>ntime</em><em>, </em><em>nparam</em><em>]</em>) – Model for the visibilities generated by the
+<cite>model_extended_sources</cite> method.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>coeff</strong> – Best-fit coefficients of the model for each time.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[ntime, nparam]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.solar.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.solar" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.timing.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.timing" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

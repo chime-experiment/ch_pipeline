@@ -1,0 +1,1066 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.base &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.base</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.processing.base</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Base class for a pipeline processing type.</span>
+
+<span class="sd">The base class is inherited by specific pipeline processing types and handles</span>
+<span class="sd">most steps in setting up and running the processing type.</span>
+
+<span class="sd">Classes</span>
+<span class="sd">=======</span>
+<span class="sd">- :py:class:`ProcessingType`</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">yaml</span>
+
+<span class="n">DEFAULT_SCRIPT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">cluster:</span>
+<span class="s2">  name: </span><span class="si">{jobname}</span>
+
+<span class="s2">  directory: </span><span class="si">{dir}</span>
+<span class="s2">  temp_directory: </span><span class="si">{tempdir}</span>
+
+<span class="s2">  venv: </span><span class="si">{venv}</span>
+<span class="s2">  module_path: </span><span class="si">{modpath}</span>
+<span class="s2">  module_list: </span><span class="si">{modlist}</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">DEFAULT_ROOT</span> <span class="o">=</span> <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/&quot;</span>
+
+<span class="n">DESC_HEAD</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;# Revision `</span><span class="si">{}</span><span class="s2">` of type `</span><span class="si">{}</span><span class="s2">`</span>
+<span class="s2">Please describe the purpose/changes of this revision here.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="ProcessingType">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ProcessingType</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Baseclass for a pipeline processing type.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    revision : str</span>
+<span class="sd">        Revision to use.</span>
+<span class="sd">    create : bool, optional</span>
+<span class="sd">        Create the revision if it isn&#39;t found.</span>
+<span class="sd">    root_path : str, optional</span>
+<span class="sd">        Override the path to the processing root.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Must be set externally before using</span>
+    <span class="n">root_path</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="c1"># Defined in sub-classses</span>
+    <span class="n">default_params</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">default_script</span> <span class="o">=</span> <span class="n">DEFAULT_SCRIPT</span>
+    <span class="n">daemon_config</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">revision</span><span class="p">,</span> <span class="n">create</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">root_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">revision</span> <span class="o">=</span> <span class="n">revision</span>
+
+        <span class="k">if</span> <span class="n">root_path</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">root_path</span> <span class="o">=</span> <span class="n">root_path</span>
+
+        <span class="c1"># Run the create hook if specified</span>
+        <span class="k">if</span> <span class="n">create</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_create</span><span class="p">()</span>
+
+        <span class="c1"># Run the load hook if specified</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_load</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_create</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Save default parameters and pipeline config for this revision.&quot;&quot;&quot;</span>
+        <span class="c1"># Subclass hook</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_create_hook</span><span class="p">()</span>
+
+        <span class="c1"># Write default configuration into directory</span>
+        <span class="k">with</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">revconfig_path</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">yaml</span><span class="o">.</span><span class="n">safe_dump</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">,</span>
+                <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span>
+                <span class="n">allow_unicode</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">sort_keys</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">stream</span><span class="o">=</span><span class="n">fh</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">with</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">jobtemplate_path</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">default_script</span><span class="p">)</span>
+
+        <span class="c1"># Ensure working directory and venv paths are created</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">workdir_path</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">venv_path</span>
+
+        <span class="c1"># Open description file in editor</span>
+        <span class="n">desc_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;description.md&quot;</span>
+        <span class="k">with</span> <span class="n">desc_path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">DESC_HEAD</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">revision</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">type_name</span><span class="p">))</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">system</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;${EDITOR:-vi} &quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">desc_path</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_create_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Implement to add custom behaviour when a revision is created.</span>
+
+<span class="sd">        This is called *before* the revision configuration is written out.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load default parameters and pipeline config for this revision.&quot;&quot;&quot;</span>
+        <span class="c1"># Load config from file</span>
+        <span class="k">with</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">revconfig_path</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">()</span> <span class="k">as</span> <span class="n">fc</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">fc</span><span class="p">)</span>
+
+        <span class="c1"># Load the jobscript</span>
+        <span class="k">with</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">jobtemplate_path</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">()</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_jobconfig</span> <span class="o">=</span> <span class="n">fp</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+
+        <span class="c1"># Subclass hook</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_load_hook</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Implement to add custom behaviour when a revision is loaded.</span>
+
+<span class="sd">        This is called *after* the object has had it&#39;s configuration loaded.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+<div class="viewcode-block" id="ProcessingType.job_script">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.job_script">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">job_script</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The slurm job script to queue up.&quot;&quot;&quot;</span>
+        <span class="n">jobparams</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">)</span>
+        <span class="n">jobparams</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;jobname&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">job_name</span><span class="p">(</span><span class="n">tag</span><span class="p">),</span>
+                <span class="s2">&quot;dir&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="n">tag</span><span class="p">),</span>
+                <span class="s2">&quot;tempdir&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">workdir_path</span> <span class="o">/</span> <span class="n">tag</span><span class="p">),</span>
+                <span class="s2">&quot;tag&quot;</span><span class="p">:</span> <span class="n">tag</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+
+        <span class="n">jobparams</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_finalise_jobparams</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">venv_path</span> <span class="o">/</span> <span class="s2">&quot;bin/activate&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Couldn&#39;t find a virtualenv script in </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">venv_path</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+        <span class="n">jobparams</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;venv&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">venv_path</span><span class="p">})</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_jobconfig</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">**</span><span class="n">jobparams</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finalise_jobparams</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Implement to edit job params based on the given tag before they are submitted.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">jobparams</span>
+
+<div class="viewcode-block" id="ProcessingType.ls">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.ls">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ls</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">time_sort</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Find all matching data.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        time_sort</span>
+<span class="sd">            true if tags should be sorted by time (newest first)</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tags</span>
+<span class="sd">            Return the tags of all outputs found.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">base</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Base path </span><span class="si">{</span><span class="n">base</span><span class="si">}</span><span class="s2"> does not exist.&quot;</span><span class="p">)</span>
+
+        <span class="n">file_regex</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;^</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">tag_pattern</span><span class="si">}</span><span class="s2">$&quot;</span><span class="p">)</span>
+
+        <span class="n">entries</span> <span class="o">=</span> <span class="p">[</span><span class="n">path</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">base</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">file_regex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">time_sort</span><span class="p">:</span>
+            <span class="c1"># Return the entries reverse sorted by time</span>
+            <span class="n">tags</span><span class="p">,</span> <span class="n">times</span> <span class="o">=</span> <span class="nb">zip</span><span class="p">(</span>
+                <span class="o">*</span><span class="p">[</span>
+                    <span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">path</span> <span class="o">/</span> <span class="s2">&quot;job/STATUS&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">entries</span>
+                <span class="p">]</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">times</span><span class="p">,</span> <span class="n">tags</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)]</span>
+
+        <span class="k">return</span> <span class="nb">sorted</span><span class="p">([</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.ls_type">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.ls_type">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ls_type</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">existing</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;List all processing types found.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        existing</span>
+<span class="sd">            Only return types that have existing data.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        type_names</span>
+<span class="sd">            list of processing types found</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">type_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span><span class="o">.</span><span class="n">type_name</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">all_subclasses</span><span class="p">(</span><span class="bp">cls</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">existing</span><span class="p">:</span>
+            <span class="n">base</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">root_path</span><span class="p">)</span>
+            <span class="k">return</span> <span class="nb">sorted</span><span class="p">([</span><span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">base</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">type_names</span><span class="p">])</span>
+
+        <span class="k">return</span> <span class="n">type_names</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.ls_rev">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.ls_rev">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ls_rev</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;List all existing revisions of this type.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        rev</span>
+<span class="sd">            List of revision names</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">root_path</span><span class="p">)</span> <span class="o">/</span> <span class="bp">cls</span><span class="o">.</span><span class="n">type_name</span>
+
+        <span class="c1"># Revisions are labelled by a two digit code</span>
+        <span class="c1"># TODO: decide if two digits (i.e. 100 revisions max is enough)</span>
+        <span class="n">rev_regex</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^rev_\d</span><span class="si">{2}</span><span class="s2">$&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="nb">sorted</span><span class="p">([</span><span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">base</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">rev_regex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">name</span><span class="p">)])</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.create_rev">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.create_rev">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">create_rev</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a new revision of this type.&quot;&quot;&quot;</span>
+        <span class="n">revisions</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">ls_rev</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">revisions</span><span class="p">:</span>
+            <span class="n">last_rev</span> <span class="o">=</span> <span class="n">revisions</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">new_rev</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;rev_</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">last_rev</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">new_rev</span> <span class="o">=</span> <span class="s2">&quot;rev_00&quot;</span>
+
+        <span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">root_path</span><span class="p">)</span> <span class="o">/</span> <span class="bp">cls</span><span class="o">.</span><span class="n">type_name</span> <span class="o">/</span> <span class="n">new_rev</span><span class="p">)</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">new_rev</span><span class="p">,</span> <span class="n">create</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.queued">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.queued">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">queued</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the queued and running jobs of this type.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        user</span>
+<span class="sd">            user to find running jobs for. If not provided, this</span>
+<span class="sd">            will default to the current user</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        waiting</span>
+<span class="sd">            List of jobs that are waiting to run.</span>
+<span class="sd">        running</span>
+<span class="sd">            List of running jobs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">job_regex</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;^</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">job_name</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tag_pattern</span><span class="p">)</span><span class="si">}</span><span class="s2">$&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Find matching jobs</span>
+        <span class="n">jobs</span> <span class="o">=</span> <span class="p">[</span><span class="n">job</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">slurm_jobs</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)</span> <span class="k">if</span> <span class="n">job_regex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">])]</span>
+
+        <span class="n">running</span> <span class="o">=</span> <span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span> <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;ST&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;R&quot;</span><span class="p">]</span>
+        <span class="n">waiting</span> <span class="o">=</span> <span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span> <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;ST&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;PD&quot;</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">waiting</span><span class="p">,</span> <span class="n">running</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.job_name">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.job_name">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">job_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The job name used to run the tag.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tag</span>
+<span class="sd">            Tag for the job.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        jobname</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;chp/</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">type_name</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">revision</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">&quot;</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">base_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Base path for this processed data type.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">root_path</span><span class="p">)</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">type_name</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">revision</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">workdir_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Path to the working directory.&quot;&quot;&quot;</span>
+        <span class="n">workdir_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;working&quot;</span>
+        <span class="n">workdir_path</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">workdir_path</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">revconfig_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Path to default config for this revision.&quot;&quot;&quot;</span>
+        <span class="n">config_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;config&quot;</span>
+        <span class="n">config_path</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">config_path</span> <span class="o">/</span> <span class="s2">&quot;revconfig.yaml&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">jobtemplate_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Path to template pipeline job config for this revision.&quot;&quot;&quot;</span>
+        <span class="n">config_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;config&quot;</span>
+        <span class="n">config_path</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">config_path</span> <span class="o">/</span> <span class="s2">&quot;jobtemplate.yaml&quot;</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">venv_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Path to virtual environment for this revision.&quot;&quot;&quot;</span>
+        <span class="n">venv_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;venv&quot;</span>
+        <span class="n">venv_path</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">venv_path</span>
+
+<div class="viewcode-block" id="ProcessingType.available">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.available">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">available</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the list of tags that we can generate given current data.</span>
+
+<span class="sd">        This can (and should) include tags that have already been processed</span>
+<span class="sd">        if the prerequites are still available, but will exclude any tags</span>
+<span class="sd">        currently present in the working directory.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tags</span>
+<span class="sd">            A list of all the tags that could be generated.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_available_tags</span><span class="p">()</span>
+
+        <span class="c1"># Filter out entries that already exist in the working directory</span>
+        <span class="n">working_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">workdir_path</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)]</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">tag</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span> <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">working_tags</span><span class="p">]</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_available_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the list of tags available for processing.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_config_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the list of tags requested by the config.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+<div class="viewcode-block" id="ProcessingType.latest">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.latest">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">latest</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create an instance to manage the latest revision.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        pt : cls</span>
+<span class="sd">            An instance of the processing type for the latest revision.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">rev</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">ls_rev</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">rev</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No revisions of type </span><span class="si">{</span><span class="bp">cls</span><span class="o">.</span><span class="n">type_name</span><span class="si">}</span><span class="s2"> exist.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Create instance and set the revision</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="n">rev</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.generate">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.generate">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="nb">max</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span>
+        <span class="n">submit</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">priority_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">check_failed</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Queue up jobs that are available to run.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        max</span>
+<span class="sd">            The maximum number of jobs to submit at once.</span>
+<span class="sd">        submit</span>
+<span class="sd">            Submit the jobs to the queue.</span>
+<span class="sd">        user</span>
+<span class="sd">            user to find running jobs for. If not provided, this</span>
+<span class="sd">            will default to the current user</span>
+<span class="sd">        priority_only</span>
+<span class="sd">            If true, only submit priority jobs</span>
+<span class="sd">        check_failed</span>
+<span class="sd">            If true, check for a specific set of failures and include those</span>
+<span class="sd">            jobs in the queue list</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_generate_hook</span><span class="p">(</span>
+            <span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">,</span> <span class="n">priority_only</span><span class="o">=</span><span class="n">priority_only</span><span class="p">,</span> <span class="n">check_failed</span><span class="o">=</span><span class="n">check_failed</span>
+        <span class="p">)[:</span><span class="nb">max</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">to_run</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">queue_job</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">job_script</span><span class="p">(</span><span class="n">tag</span><span class="p">),</span> <span class="n">submit</span><span class="o">=</span><span class="n">submit</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># noqa: BLE001</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Exception occured while queuing tag [</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">].</span><span class="se">\n</span><span class="s2">&quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+
+        <span class="c1"># Check if any duplicate jobs have been submitted and cancel them</span>
+        <span class="n">check_duplicates</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">,</span> <span class="n">cancel</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_generate_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Override to add custom behaviour when jobs are queued.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)[</span><span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="ProcessingType.update_files">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.update_files">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update_files</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Overwrite to implement functionality to update required files.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.failed">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.failed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">failed</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">time_sort</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Categorize failed jobs.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        user</span>
+<span class="sd">            user to find running jobs for. If not provided, this</span>
+<span class="sd">            will default to the current user</span>
+<span class="sd">        time_sort</span>
+<span class="sd">            true if tags should be sorted by time (newest first)</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        crashed</span>
+<span class="sd">            tags associated with each category</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Get a set of all tags to check for cause of failure</span>
+        <span class="n">failed_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="p">,</span> <span class="n">time_sort</span><span class="p">)[</span><span class="s2">&quot;failed&quot;</span><span class="p">]</span>
+        <span class="c1"># Regex patterns associated with common sources of failure</span>
+        <span class="c1"># Keys can be inserted in order of priority/specificity</span>
+        <span class="c1"># as of Python 3.7+, as dicts will preserve insertion order.</span>
+        <span class="c1"># This could be buggy on versions of python below 3.7, as the</span>
+        <span class="c1"># broad &#39;unknown&#39; key could match before a more specfic one</span>
+        <span class="n">patterns</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="c1"># Find crashes due to unwanted NaN/Inf values</span>
+            <span class="s2">&quot;nan_or_inf&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;ValueError(.*?)infs(.*?)NaNs&quot;</span><span class="p">),</span>
+            <span class="p">],</span>
+            <span class="c1"># Find out of memory errors</span>
+            <span class="s2">&quot;out_of_memory&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;numpy.core._exceptions._ArrayMemoryError&quot;</span><span class="p">)],</span>
+            <span class="c1"># Error connecting to chimedb database</span>
+            <span class="s2">&quot;chimedb_error&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;chimedb.core.exceptions.ConnectionError&quot;</span><span class="p">)],</span>
+            <span class="c1"># Find crashes due to job timeout</span>
+            <span class="s2">&quot;time_limit&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;slurmstepd: error:(.*?)CANCELLED(.*?)TIME LIMIT&quot;</span><span class="p">),</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;mpi_error&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;draco.core.misc.CheckMPIEnvironment: MPI test failed&quot;</span><span class="p">)</span>
+            <span class="p">],</span>
+            <span class="c1"># Match anything else</span>
+            <span class="s2">&quot;unknown&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(.*?)&quot;</span><span class="p">)],</span>
+        <span class="p">}</span>
+        <span class="c1"># Return all tags which match the listed patterns</span>
+        <span class="k">return</span> <span class="n">classify_failed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">workdir_path</span><span class="p">,</span> <span class="n">failed_tags</span><span class="p">,</span> <span class="n">patterns</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ProcessingType.status">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType.status">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">status</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">time_sort</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Find the status of existing jobs.</span>
+
+<span class="sd">        This duplicates some other methods for individual status values, but</span>
+<span class="sd">        reduces repeated method (and slurm) calls.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        user</span>
+<span class="sd">            user to find running jobs for. If not provided, this</span>
+<span class="sd">            will default to the current user</span>
+<span class="sd">        time_sort</span>
+<span class="sd">            true if tags should be sorted by time (newest first)</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        status</span>
+<span class="sd">            A dict of statuses: available, not_available, not_yet_submitted, pending,</span>
+<span class="sd">            running, successful, failed. The value for each status key is a list of tags</span>
+<span class="sd">            with that status.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">file_regex</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;^</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">tag_pattern</span><span class="si">}</span><span class="s2">$&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Get available, finished, pending, and running jobs</span>
+        <span class="n">available_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">available</span><span class="p">()</span>
+        <span class="n">finished_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ls</span><span class="p">(</span><span class="n">time_sort</span><span class="p">)</span>
+        <span class="n">pending_tags</span><span class="p">,</span> <span class="n">running_tags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">queued</span><span class="p">(</span><span class="n">user</span><span class="p">)</span>
+
+        <span class="c1"># Get all tag paths in working directory</span>
+        <span class="n">working_tags</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">path</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">workdir_path</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">file_regex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="c1"># Get the tags for each path in the working directory</span>
+        <span class="n">working_tags_set</span> <span class="o">=</span> <span class="p">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">working_tags</span><span class="p">}</span>
+
+        <span class="c1"># Get jobs which have not yet been submitted</span>
+        <span class="n">submitted_tags</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">finished_tags</span><span class="p">)</span> <span class="o">|</span> <span class="nb">set</span><span class="p">(</span><span class="n">pending_tags</span><span class="p">)</span> <span class="o">|</span> <span class="nb">set</span><span class="p">(</span><span class="n">running_tags</span><span class="p">)</span>
+        <span class="n">not_submitted_tags</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">job</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">available_tags</span> <span class="k">if</span> <span class="n">job</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">submitted_tags</span>
+        <span class="p">]</span>
+        <span class="c1"># Any tag in the working directory that is not running or</span>
+        <span class="c1"># waiting should be considered as crashed. Also consider</span>
+        <span class="c1"># finished tags to catch edge case where a tag is in the</span>
+        <span class="c1"># process of being moved.</span>
+        <span class="n">crashed_tags</span> <span class="o">=</span> <span class="n">working_tags_set</span><span class="o">.</span><span class="n">difference</span><span class="p">(</span>
+            <span class="n">pending_tags</span> <span class="o">+</span> <span class="n">running_tags</span> <span class="o">+</span> <span class="n">finished_tags</span>
+        <span class="p">)</span>
+        <span class="c1"># This is a workaround for an extra directory manually</span>
+        <span class="c1"># created in some revision. It contains job directories</span>
+        <span class="c1"># that have previously crashed. These jobs may be re-run</span>
+        <span class="c1"># without being removed, so we have to check to include</span>
+        <span class="c1"># only the tags that do not exist elsewhere.</span>
+        <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;crashed&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="c1"># Recursively search the crashed directory. Must</span>
+            <span class="c1"># be recursive as there can sometims be sub-folders</span>
+            <span class="n">crashed_dir</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">path</span>
+                <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="s2">&quot;crashed&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">rglob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">file_regex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+            <span class="p">]</span>
+            <span class="n">crashed_dir_tags</span> <span class="o">=</span> <span class="p">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">crashed_dir</span><span class="p">}</span>
+            <span class="c1"># Get tags in crashed folder that are not also found completed or running</span>
+            <span class="n">unique_crashed_dir</span> <span class="o">=</span> <span class="n">crashed_dir_tags</span><span class="o">.</span><span class="n">difference</span><span class="p">(</span>
+                <span class="nb">set</span><span class="p">(</span><span class="n">working_tags_set</span><span class="p">)</span> <span class="o">|</span> <span class="nb">set</span><span class="p">(</span><span class="n">finished_tags</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">time_sort</span><span class="p">:</span>
+                <span class="c1"># Append any extra tag paths that need to be time sorted</span>
+                <span class="n">working_tags</span> <span class="o">+=</span> <span class="p">[</span>
+                    <span class="n">path</span>
+                    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">crashed_dir</span>
+                    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">unique_crashed_dir</span> <span class="o">-</span> <span class="n">crashed_tags</span>
+                <span class="p">]</span>
+
+            <span class="c1"># take union of these sets in place</span>
+            <span class="n">crashed_tags</span> <span class="o">|=</span> <span class="n">unique_crashed_dir</span>
+
+        <span class="k">if</span> <span class="n">time_sort</span><span class="p">:</span>
+            <span class="c1"># Get the tag and associated completed time</span>
+            <span class="c1"># There&#39;s always a chance that a failed job won&#39;t have a STATUS file,</span>
+            <span class="c1"># in which case we assume that it failed at the time of creation</span>
+            <span class="n">tags</span><span class="p">,</span> <span class="n">times</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">working_tags</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">crashed_tags</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">tags</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="c1"># Stat the last time the STATUS was updated, which should</span>
+                    <span class="c1"># correspond to the time of failure</span>
+                    <span class="n">times</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">path</span> <span class="o">/</span> <span class="s2">&quot;job/STATUS&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+                    <span class="c1"># Stat the time that this job was created</span>
+                    <span class="n">times</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">path</span> <span class="o">/</span> <span class="s2">&quot;job/config.yaml&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span>
+
+            <span class="c1"># Get the tags sorted by completion time</span>
+            <span class="n">crashed_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">times</span><span class="p">,</span> <span class="n">tags</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">crashed_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">crashed_tags</span><span class="p">)</span>
+
+        <span class="c1"># Return a dict of all status values</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;available&quot;</span><span class="p">:</span> <span class="n">available_tags</span><span class="p">,</span>
+            <span class="s2">&quot;not_available&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="n">tag</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config_tags</span> <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">available_tags</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">:</span> <span class="n">not_submitted_tags</span><span class="p">,</span>
+            <span class="s2">&quot;pending&quot;</span><span class="p">:</span> <span class="n">pending_tags</span><span class="p">,</span>
+            <span class="s2">&quot;running&quot;</span><span class="p">:</span> <span class="n">running_tags</span><span class="p">,</span>
+            <span class="s2">&quot;successful&quot;</span><span class="p">:</span> <span class="n">finished_tags</span><span class="p">,</span>
+            <span class="s2">&quot;failed&quot;</span><span class="p">:</span> <span class="n">crashed_tags</span><span class="p">,</span>
+        <span class="p">}</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="find_venv">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.find_venv">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_venv</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the path of the current virtual environment.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    path : str</span>
+<span class="sd">        Path to the venv, or `None` if we are not in a virtual environment.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;VIRTUAL_ENV&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="queue_job">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.queue_job">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">queue_job</span><span class="p">(</span><span class="n">script</span><span class="p">,</span> <span class="n">submit</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Queue a pipeline script given as a string.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="s2">&quot;w+&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">script</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+
+        <span class="c1"># TODO: do this in a better way</span>
+        <span class="k">if</span> <span class="n">submit</span><span class="p">:</span>
+            <span class="n">cmd</span> <span class="o">=</span> <span class="s2">&quot;caput-pipeline queue --overwrite failed </span><span class="si">%s</span><span class="s2">&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cmd</span> <span class="o">=</span> <span class="s2">&quot;caput-pipeline queue --nosubmit </span><span class="si">%s</span><span class="s2">&quot;</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">system</span><span class="p">(</span><span class="n">cmd</span> <span class="o">%</span> <span class="n">fh</span><span class="o">.</span><span class="n">name</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="classify_failed">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.classify_failed">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">classify_failed</span><span class="p">(</span>
+    <span class="nb">dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="nb">str</span><span class="p">,</span> <span class="n">tags</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">patterns</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Analyze the cause of crashed jobs.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    dir</span>
+<span class="sd">        directory to find tags</span>
+<span class="sd">    tags</span>
+<span class="sd">        tags to check</span>
+<span class="sd">    patterns</span>
+<span class="sd">        dictionary of patterns to check for. Keys are expected</span>
+<span class="sd">        categories and values are lists of regex patterns to</span>
+<span class="sd">        check for.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    crashed</span>
+<span class="sd">        tags associated with each pattern. Any unmatched tags are</span>
+<span class="sd">        added with the key &quot;other&quot;</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">failed</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="p">[]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">patterns</span><span class="o">.</span><span class="n">keys</span><span class="p">())}</span>
+
+    <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span><span class="p">:</span>
+        <span class="n">fpath</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="nb">dir</span><span class="p">)</span> <span class="o">/</span> <span class="n">tag</span> <span class="o">/</span> <span class="s2">&quot;job&quot;</span>
+        <span class="c1"># Look at the job file first, but also check any slurm-generated</span>
+        <span class="c1"># output files</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">fpath</span> <span class="o">/</span> <span class="s2">&quot;jobout.log&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">fpath</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;slurm*&quot;</span><span class="p">)]</span>
+
+        <span class="n">tail</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+
+        <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">file</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+                <span class="k">continue</span>
+            <span class="c1"># Get the end of the file. Assume an average of 100 characters</span>
+            <span class="c1"># per line.</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="o">-</span><span class="mi">300</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">SEEK_END</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                    <span class="c1"># Assume that this is just a small file, so read</span>
+                    <span class="c1"># the entire thing</span>
+                    <span class="k">pass</span>
+
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">tail</span> <span class="o">+=</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                    <span class="c1"># There was an issue reading the file, so just assume</span>
+                    <span class="c1"># that there&#39;s nothing there and classify this tag accordingly</span>
+                    <span class="k">pass</span>
+
+        <span class="c1"># See if any of the patterns that we are looking for</span>
+        <span class="c1"># exist in the stdout</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">regex_patterns</span> <span class="ow">in</span> <span class="n">patterns</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">tail</span><span class="p">))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">regex_patterns</span><span class="p">):</span>
+                <span class="n">failed</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+                <span class="k">break</span>
+
+    <span class="k">return</span> <span class="n">failed</span></div>
+
+
+
+<div class="viewcode-block" id="slurm_jobs">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.slurm_jobs">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">slurm_jobs</span><span class="p">(</span><span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the jobs of the given user.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    user</span>
+<span class="sd">        User to fetch the slurm jobs of. If not set, use the current user.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    jobs</span>
+<span class="sd">        List of dictionaries giving the jobs state.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">user</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">getpass</span>
+
+        <span class="n">user</span> <span class="o">=</span> <span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span>
+
+    <span class="c1"># Call squeue to get the users jobs and get it&#39;s stdout</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">process</span> <span class="o">=</span> <span class="n">sp</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+            <span class="p">[</span><span class="s2">&quot;squeue&quot;</span><span class="p">,</span> <span class="s2">&quot;-u&quot;</span><span class="p">,</span> <span class="n">user</span><span class="p">,</span> <span class="s2">&quot;-o&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%a</span><span class="s2">ll&quot;</span><span class="p">],</span>
+            <span class="n">stdout</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+            <span class="n">stderr</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+            <span class="n">shell</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">universal_newlines</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">proc_stdout</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">proc_stdout</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Failure running &quot;squeue&quot;.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="c1"># Extract the headers</span>
+    <span class="n">header_line</span> <span class="o">=</span> <span class="n">lines</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">header_cols</span> <span class="o">=</span> <span class="n">header_line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">slurm_split</span><span class="p">(</span><span class="n">line</span><span class="p">):</span>
+        <span class="c1"># Split an squeue line accounting for the partitions</span>
+
+        <span class="n">tokens</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span>
+
+        <span class="n">fields</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">t</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">:</span>
+            <span class="n">t</span> <span class="o">=</span> <span class="n">token</span> <span class="k">if</span> <span class="n">t</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">t</span> <span class="o">+</span> <span class="s2">&quot;|&quot;</span> <span class="o">+</span> <span class="n">token</span>
+
+            <span class="c1"># Check if the token is balanced with square brackets</span>
+            <span class="n">br</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">&quot;[&quot;</span><span class="p">)</span> <span class="o">-</span> <span class="n">t</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">&quot;]&quot;</span><span class="p">)</span>
+
+            <span class="c1"># If balanced keep the whole token, otherwise we keep will just</span>
+            <span class="c1"># continue to see if the next token balances it</span>
+            <span class="k">if</span> <span class="n">br</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">fields</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">return</span> <span class="n">fields</span>
+
+    <span class="c1"># Iterate over the following entries and parse them into queue jobs</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">error_lines</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># do something with this later</span>
+    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">:</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">slurm_split</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">header_cols</span><span class="p">):</span>
+            <span class="n">error_lines</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">),</span> <span class="n">line</span><span class="p">,</span> <span class="n">parts</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">header_cols</span><span class="p">):</span>
+                <span class="n">d</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">entries</span></div>
+
+
+
+<div class="viewcode-block" id="check_duplicates">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.check_duplicates">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">check_duplicates</span><span class="p">(</span><span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">cancel</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a list of job IDs corresponding to duplicate jobs.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    user</span>
+<span class="sd">        The user account to check</span>
+<span class="sd">    cancel</span>
+<span class="sd">        If True, cancel duplicate jobs. If any jobs are running, the most</span>
+<span class="sd">        most recently started job is kept. Otherwise, the most recently queued</span>
+<span class="sd">        job is kept. The most recent job is kept rather than the oldest to avoid</span>
+<span class="sd">        cases where a file has been modified by the newer job.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    duplicates</span>
+<span class="sd">        List of JOBIDs corresponding to duplicate pipeline jobs. If `cancel` is</span>
+<span class="sd">        True, these jobs will be cancelled.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">jobs</span> <span class="o">=</span> <span class="n">slurm_jobs</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)</span>
+
+    <span class="n">names</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">duplicates</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">]</span>
+        <span class="nb">id</span> <span class="o">=</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;JOBID&quot;</span><span class="p">]</span>
+        <span class="n">status</span> <span class="o">=</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;ST&quot;</span><span class="p">]</span>
+        <span class="n">runtime</span> <span class="o">=</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;TIME_LEFT&quot;</span><span class="p">]</span>
+        <span class="n">subtime</span> <span class="o">=</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;SUBMIT_TIME&quot;</span><span class="p">]</span>
+
+        <span class="n">existing</span> <span class="o">=</span> <span class="n">names</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">existing</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># First time we&#39;ve seen this job name</span>
+            <span class="n">names</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">runtime</span><span class="p">,</span> <span class="n">subtime</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="k">if</span> <span class="n">existing</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;R&quot;</span><span class="p">:</span>
+            <span class="c1"># Both jobs are running. Keep the one that</span>
+            <span class="c1"># started most recently</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;R&quot;</span><span class="p">:</span>
+                <span class="c1"># Compare time left</span>
+                <span class="n">h</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">s</span> <span class="o">=</span> <span class="n">existing</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+                <span class="n">rte</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">h</span><span class="p">)</span> <span class="o">*</span> <span class="mi">3600</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="o">*</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+                <span class="n">h</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">s</span> <span class="o">=</span> <span class="n">runtime</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+                <span class="n">rtn</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">h</span><span class="p">)</span> <span class="o">*</span> <span class="mi">3600</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="o">*</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">rte</span> <span class="o">&gt;</span> <span class="n">rtn</span><span class="p">:</span>
+                    <span class="c1"># Existing job has been running for longer.</span>
+                    <span class="c1"># Keep the newer job</span>
+                    <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                    <span class="n">names</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">runtime</span><span class="p">,</span> <span class="n">subtime</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span>
+            <span class="c1"># The existing job is running but this one isn&#39;t.</span>
+            <span class="c1"># Keep the existing job</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># This job is running but the existing one isn&#39;t</span>
+            <span class="c1"># Cancel the existing one</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;R&quot;</span><span class="p">:</span>
+                <span class="c1"># Keep this job and cancel the existing one</span>
+                <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">names</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">runtime</span><span class="p">,</span> <span class="n">subtime</span><span class="p">)</span>
+            <span class="c1"># Both jobs are queued but not running, so keep the</span>
+            <span class="c1"># more recently queued job</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Compare submit time</span>
+                <span class="n">fmt</span> <span class="o">=</span> <span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2">T%H:%M:%S&quot;</span>
+                <span class="n">ste</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">fmt</span><span class="p">)</span><span class="o">.</span><span class="n">timestamp</span><span class="p">()</span>
+                <span class="n">stn</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">subtime</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span><span class="o">.</span><span class="n">timestamp</span><span class="p">()</span>
+
+                <span class="k">if</span> <span class="n">ste</span> <span class="o">&gt;</span> <span class="n">stn</span><span class="p">:</span>
+                    <span class="c1"># Existing job has been queued for longer</span>
+                    <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                    <span class="n">names</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">runtime</span><span class="p">,</span> <span class="n">subtime</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">duplicates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">cancel</span><span class="p">:</span>
+        <span class="c1"># Try to cancel these jobs</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">process</span> <span class="o">=</span> <span class="n">sp</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+                <span class="p">[</span><span class="s2">&quot;scancel&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">duplicates</span><span class="p">],</span>
+                <span class="n">stdout</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                <span class="n">stderr</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                <span class="n">shell</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">universal_newlines</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failure running &#39;scancel&#39;:</span><span class="se">\n</span><span class="si">{</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">duplicates</span></div>
+
+
+
+<div class="viewcode-block" id="slurm_fairshare">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.slurm_fairshare">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">slurm_fairshare</span><span class="p">(</span><span class="n">account</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the LevelFS for the current user and account.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    account</span>
+<span class="sd">        The account to check.</span>
+<span class="sd">    user</span>
+<span class="sd">        The user on the account to check for.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    account_fs</span>
+<span class="sd">        The LevelFS for the whole account, i.e. the priority relative to all other</span>
+<span class="sd">        accounts on the cluster.</span>
+<span class="sd">    user_fs</span>
+<span class="sd">        The LevelFS for the user, i.e. the priority compared to all other users on</span>
+<span class="sd">        the account.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cmd</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;sshare&quot;</span><span class="p">,</span> <span class="s2">&quot;-A&quot;</span><span class="p">,</span> <span class="n">account</span><span class="p">,</span> <span class="s2">&quot;-o&quot;</span><span class="p">,</span> <span class="s2">&quot;LevelFS&quot;</span><span class="p">,</span> <span class="s2">&quot;-n&quot;</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">user</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">cmd</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;-u&quot;</span><span class="p">,</span> <span class="n">user</span><span class="p">]</span>
+
+    <span class="c1"># Call sshare to get the level fairshares</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">process</span> <span class="o">=</span> <span class="n">sp</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+            <span class="n">cmd</span><span class="p">,</span>
+            <span class="n">stdout</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+            <span class="n">stderr</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+            <span class="n">shell</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">universal_newlines</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">proc_stdout</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">proc_stdout</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Failure running &quot;sshare&quot;.&#39;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+
+    <span class="c1"># Filter empty lines</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span> <span class="k">if</span> <span class="n">line</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Could not parse output from &quot;sshare&quot;.&#39;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="all_subclasses">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.base.html#ch_pipeline.processing.base.all_subclasses">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">all_subclasses</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Recursively find all subclasses of cls.&quot;&quot;&quot;</span>
+    <span class="n">subclasses</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">stack</span> <span class="o">=</span> <span class="p">[</span><span class="bp">cls</span><span class="p">]</span>
+    <span class="k">while</span> <span class="n">stack</span><span class="p">:</span>
+        <span class="bp">cls</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="bp">cls</span><span class="o">.</span><span class="n">__subclasses__</span><span class="p">():</span>
+            <span class="n">subclasses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
+            <span class="n">stack</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">subclasses</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

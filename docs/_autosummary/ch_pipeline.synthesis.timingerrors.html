@@ -1,0 +1,229 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.synthesis.timingerrors &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="ch_pipeline.synthesis" href="ch_pipeline.synthesis.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a><ul class="current">
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.synthesis.timingerrors</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.synthesis.timingerrors</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.synthesis.timingerrors.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.synthesis.timingerrors">
+<span id="ch-pipeline-synthesis-timingerrors"></span><h1>ch_pipeline.synthesis.timingerrors<a class="headerlink" href="#module-ch_pipeline.synthesis.timingerrors" title="Link to this heading"></a></h1>
+<p>Tasks for simulating timing distribution errors.</p>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.synthesis.timingerrors.SiderealTimingErrors" title="ch_pipeline.synthesis.timingerrors.SiderealTimingErrors"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealTimingErrors</span></code></a>()</p></td>
+<td><p>Generate sidereal timing errors gains on a sidereal grid.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.synthesis.timingerrors.TimingErrors" title="ch_pipeline.synthesis.timingerrors.TimingErrors"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TimingErrors</span></code></a>()</p></td>
+<td><p>Simulate timing distribution errors and propagate them to gain errors.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.SiderealTimingErrors">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.synthesis.timingerrors.</span></span><span class="sig-name descname"><span class="pre">SiderealTimingErrors</span></span><a class="reference internal" href="../_modules/ch_pipeline/synthesis/timingerrors.html#SiderealTimingErrors"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.SiderealTimingErrors" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.synthesis.timingerrors.TimingErrors" title="ch_pipeline.synthesis.timingerrors.TimingErrors"><code class="xref py py-class docutils literal notranslate"><span class="pre">TimingErrors</span></code></a>, <code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealGains</span></code></p>
+<p>Generate sidereal timing errors gains on a sidereal grid.</p>
+<p>See the documentation for <cite>TimingErrors</cite> and <cite>SiderealGains</cite> for more detail.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.synthesis.timingerrors.</span></span><span class="sig-name descname"><span class="pre">TimingErrors</span></span><a class="reference internal" href="../_modules/ch_pipeline/synthesis/timingerrors.html#TimingErrors"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseGains</span></code></p>
+<p>Simulate timing distribution errors and propagate them to gain errors.</p>
+<p>This task simulates errors in the delay and calculates the errors in the
+phase of the gain according to</p>
+<div class="math notranslate nohighlight">
+\[\delta \phi_i = 2 \pi \nu \delta \tau_i\]</div>
+<p>The phase errors are generated for times matching the input timestream file.</p>
+<p>There are severeal options to run the timing distribution simulations.
+Choosing a <cite>sim_type</cite> defines if the delay errors are non common-mode or
+common-mode within a cylinder or iceboard.</p>
+<p>Furthermore there are two different options to simulate delay errors that
+are common-mode within a cylinder (<cite>common_mode_cyl</cite>). <cite>Random</cite> generates
+random fluctuations in phase whereas ‘sinusoidal’ as the name suggests
+simulates sinusoids for each cylinder with frequencies specified in
+the attribute <cite>sinusoidal_period</cite>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors.corr_length_delay">
+<span class="sig-name descname"><span class="pre">corr_length_delay</span></span><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors.corr_length_delay" title="Link to this definition"></a></dt>
+<dd><p>Correlation length for delay fluctuations in seconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors.sigma_delay">
+<span class="sig-name descname"><span class="pre">sigma_delay</span></span><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors.sigma_delay" title="Link to this definition"></a></dt>
+<dd><p>Size of fluctuations for delay fluctuations (s).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors.sim_type">
+<span class="sig-name descname"><span class="pre">sim_type</span></span><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors.sim_type" title="Link to this definition"></a></dt>
+<dd><p>Timing error simulation type. List of allowed options are <cite>relative</cite>
+(non common-mode delay errors), <cite>common_mode_cyl</cite> (common-mode within
+a cylinder) and <cite>common_mode_iceboard</cite> (common-mode within an iceboard)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors.common_mode_type">
+<span class="sig-name descname"><span class="pre">common_mode_type</span></span><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors.common_mode_type" title="Link to this definition"></a></dt>
+<dd><p>Options are ‘random’ and ‘sinusoidal’ if sim_type <cite>common_mode_cyl</cite> is chosen.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.synthesis.timingerrors.TimingErrors.sinusoidal_period">
+<span class="sig-name descname"><span class="pre">sinusoidal_period</span></span><a class="headerlink" href="#ch_pipeline.synthesis.timingerrors.TimingErrors.sinusoidal_period" title="Link to this definition"></a></dt>
+<dd><p>Specify the periods of the sinusoids for each cylinder. Needs to be specified
+when simulating <cite>sinusoidal</cite> <cite>common_mode_cyl</cite> timing errors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.synthesis.html" class="btn btn-neutral float-left" title="ch_pipeline.synthesis" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,289 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.mapmaker &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.sidereal" href="ch_pipeline.analysis.sidereal.html" />
+    <link rel="prev" title="ch_pipeline.analysis.fringestop" href="ch_pipeline.analysis.fringestop.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.mapmaker</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.mapmaker.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.mapmaker">
+<span id="ch-pipeline-analysis-mapmaker"></span><h1>ch_pipeline.analysis.mapmaker<a class="headerlink" href="#module-ch_pipeline.analysis.mapmaker" title="Link to this heading"></a></h1>
+<p>Map making tasks.</p>
+<p>Tools for making maps from CHIME data.</p>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.mapmaker.ConvertRingMap" title="ch_pipeline.analysis.mapmaker.ConvertRingMap"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConvertRingMap</span></code></a>()</p></td>
+<td><p>Covert a ch_pipeline RingMap to a draco RingMap.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.mapmaker.RingMapMaker" title="ch_pipeline.analysis.mapmaker.RingMapMaker"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RingMapMaker</span></code></a>()</p></td>
+<td><p>A simple and quick map-maker that forms a series of beams on the meridian.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.ConvertRingMap">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.mapmaker.</span></span><span class="sig-name descname"><span class="pre">ConvertRingMap</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#ConvertRingMap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.ConvertRingMap" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Covert a ch_pipeline RingMap to a draco RingMap.</p>
+<p>The ch_pipeline RingMap container has an rms dataset instead of
+a weight dataset. This task converts rms to weight and stores the
+result in a draco RingMap container.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.ConvertRingMap.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rmap_in</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#ConvertRingMap.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.ConvertRingMap.process" title="Link to this definition"></a></dt>
+<dd><p>Convert a ch_pipline RingMap to a draco RingMap.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>rmap_in</strong> (<a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><em>ch_pipeline.core.containers.RingMap</em></a>) – input map to convert</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>rmap_out</strong> – converted ringmap.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>draco.core.containers.RingMap</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.mapmaker.</span></span><span class="sig-name descname"><span class="pre">RingMapMaker</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>A simple and quick map-maker that forms a series of beams on the meridian.</p>
+<p>This is designed to run on data after it has been collapsed down to
+non-redundant baselines only.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.npix">
+<span class="sig-name descname"><span class="pre">npix</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.npix" title="Link to this definition"></a></dt>
+<dd><p>Number of map pixels in the declination dimension.  Default is 512.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.span">
+<span class="sig-name descname"><span class="pre">span</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.span" title="Link to this definition"></a></dt>
+<dd><p>Span of map in the declination dimension. Value of 1.0 generates a map
+that spans from horizon-to-horizon.  Default is 1.0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.weight">
+<span class="sig-name descname"><span class="pre">weight</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.weight" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>How to weight the non-redundant baselines:</dt><dd><p>‘natural’ - each baseline weighted by its redundancy (default)
+‘uniform’ - each baseline given equal weight
+‘inverse_variance’ - each baseline weighted by the weight attribute</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (‘natural’, ‘uniform’, or ‘inverse_variance’)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.exclude_intracyl">
+<span class="sig-name descname"><span class="pre">exclude_intracyl</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.exclude_intracyl" title="Link to this definition"></a></dt>
+<dd><p>Exclude intracylinder baselines from the calculation.  Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.include_auto">
+<span class="sig-name descname"><span class="pre">include_auto</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.include_auto" title="Link to this definition"></a></dt>
+<dd><p>Include autocorrelations in the calculation.  Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.single_beam">
+<span class="sig-name descname"><span class="pre">single_beam</span></span><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.single_beam" title="Link to this definition"></a></dt>
+<dd><p>Only calculate the map for the central beam. Default is False.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.process" title="Link to this definition"></a></dt>
+<dd><p>Computes the ringmap.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>containers.SiderealStream</em>) – The input sidereal stream.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>rm</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap">containers.RingMap</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.mapmaker.RingMapMaker.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/mapmaker.html#RingMapMaker.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.mapmaker.RingMapMaker.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the Telescope instance to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>TransitTelescope</em>) – telescope/observer object</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.fringestop.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.fringestop" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.sidereal.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.sidereal" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

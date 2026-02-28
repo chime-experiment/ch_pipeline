@@ -1,0 +1,897 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.dataquery &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.core.io" href="ch_pipeline.core.io.html" />
+    <link rel="prev" title="ch_pipeline.core.containers" href="ch_pipeline.core.containers.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a><ul class="current">
+<li class="toctree-l4 current"><a class="reference internal" href="ch_pipeline.core.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.dataquery</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.core.dataquery.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.core.dataquery">
+<span id="ch-pipeline-core-dataquery"></span><h1>ch_pipeline.core.dataquery<a class="headerlink" href="#module-ch_pipeline.core.dataquery" title="Link to this heading"></a></h1>
+<p>Dataset Specification.</p>
+<p>Lookup information from the database about the data, particularly which files
+are contained in a specific dataset (defined by a <cite>run</cite> global flag) and what
+each correlator input is connected to.</p>
+<section id="dataspec-format">
+<h2>Dataspec Format<a class="headerlink" href="#dataspec-format" title="Link to this heading"></a></h2>
+<div class="deprecated">
+<p><span class="versionmodified deprecated">Deprecated since version pass1: </span>Use <cite>run</cite> global flag instead.</p>
+</div>
+<p>A dataspec is just a dictionary with three required keys.</p>
+<dl class="field-list simple">
+<dt class="field-odd">name<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A short name given to the dataset.</p>
+</dd>
+<dt class="field-even">instrument<span class="colon">:</span></dt>
+<dd class="field-even"><p>The name of the instrument that took the data.</p>
+</dd>
+<dt class="field-odd">timerange<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A specification of the time range, or ranges that make up the dataset.</p>
+</dd>
+</dl>
+<p>The time range is specified either as a dictionary with <cite>start</cite> and <cite>end</cite>
+keys, containing datetime objects (in UTC). Or it can be a list of such
+ditionaries, to specify multiple time ranges to include. This can be contained
+in a dataspec YAML file, and loaded using <code class="xref py py-class docutils literal notranslate"><span class="pre">LoadDataspec</span></code>. Example:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">datasets</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="nt">name</span><span class="p">:</span><span class="w">       </span><span class="l l-Scalar l-Scalar-Plain">A</span>
+<span class="w">        </span><span class="nt">instrument</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blanchard</span>
+<span class="w">        </span><span class="nt">timerange</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="nt">start</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">2014-07-26 03:00:00</span>
+<span class="w">                </span><span class="nt">end</span><span class="p">:</span><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">2014-07-28 01:00:00</span>
+
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w">   </span><span class="nt">start</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">2014-07-28 11:00:00</span>
+<span class="w">                </span><span class="nt">end</span><span class="p">:</span><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">2014-07-31 00:00:00</span>
+</pre></div>
+</div>
+</section>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.files_from_spec" title="ch_pipeline.core.dataquery.files_from_spec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">files_from_spec</span></code></a>(spec[, node_spoof])</p></td>
+<td><p>Get the names of files in a dataset.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.finder_from_spec" title="ch_pipeline.core.dataquery.finder_from_spec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">finder_from_spec</span></code></a>(spec[, node_spoof])</p></td>
+<td><p>Get a <cite>Finder</cite> object from the dataspec.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.ConnectDatabase" title="ch_pipeline.core.dataquery.ConnectDatabase"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConnectDatabase</span></code></a>()</p></td>
+<td><p>Establish an initial connection to the chimedb database.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryAcquisitions" title="ch_pipeline.core.dataquery.QueryAcquisitions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryAcquisitions</span></code></a>()</p></td>
+<td><p>Iterate over acquisitions.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryDatabase" title="ch_pipeline.core.dataquery.QueryDatabase"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryDatabase</span></code></a>()</p></td>
+<td><p>Find files from specified database queries.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryDataspec" title="ch_pipeline.core.dataquery.QueryDataspec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryDataspec</span></code></a>()</p></td>
+<td><p>Find the available files given a dataspec in the config file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryDataspecFile" title="ch_pipeline.core.dataquery.QueryDataspecFile"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryDataspecFile</span></code></a>()</p></td>
+<td><p>Find the available files given a dataspec from a file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryFrequencyMap" title="ch_pipeline.core.dataquery.QueryFrequencyMap"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryFrequencyMap</span></code></a>()</p></td>
+<td><p>Get the CHIME frequency map that was active when this data was collected.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryInputs" title="ch_pipeline.core.dataquery.QueryInputs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryInputs</span></code></a>()</p></td>
+<td><p>From a dataspec describing the data create a list of objects describing the inputs in the files.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.dataquery.QueryRun" title="ch_pipeline.core.dataquery.QueryRun"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QueryRun</span></code></a>()</p></td>
+<td><p>Find the files belonging to a specific <cite>run</cite>.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.ConnectDatabase">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">ConnectDatabase</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#ConnectDatabase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.ConnectDatabase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Establish an initial connection to the chimedb database.</p>
+<p>This is useful when running pipelines on machines with poor
+network I/O.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.ConnectDatabase.timeout">
+<span class="sig-name descname"><span class="pre">timeout</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.ConnectDatabase.timeout" title="Link to this definition"></a></dt>
+<dd><p>Connection timeout in seconds</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.ConnectDatabase.ntries">
+<span class="sig-name descname"><span class="pre">ntries</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.ConnectDatabase.ntries" title="Link to this definition"></a></dt>
+<dd><p>Number of times to retry if connection fails</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.ConnectDatabase.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#ConnectDatabase.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.ConnectDatabase.setup" title="Link to this definition"></a></dt>
+<dd><p>Establish a database connection.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryAcquisitions</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryAcquisitions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Iterate over acquisitions.</p>
+<p>This routine will query the database as specified in the runtime
+configuration file.  It will iterate over the returned acquisitions
+in chronological order, outputing a list of the corresponding files.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.node_spoof">
+<span class="sig-name descname"><span class="pre">node_spoof</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.node_spoof" title="Link to this definition"></a></dt>
+<dd><p>Host and directory in which to find data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">start_time,</span> <span class="pre">end_time</span></span></dt>
+<dd><p>Find all acquisitions between this start and end time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.instrument">
+<span class="sig-name descname"><span class="pre">instrument</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.instrument" title="Link to this definition"></a></dt>
+<dd><p>Find all acquisitions from this instrument.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.accept_all_global_flags">
+<span class="sig-name descname"><span class="pre">accept_all_global_flags</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.accept_all_global_flags" title="Link to this definition"></a></dt>
+<dd><p>Accept all global flags.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.min_num_files">
+<span class="sig-name descname"><span class="pre">min_num_files</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.min_num_files" title="Link to this definition"></a></dt>
+<dd><p>Do not process acquisitions that contain less than this number of files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.max_num_files">
+<span class="sig-name descname"><span class="pre">max_num_files</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.max_num_files" title="Link to this definition"></a></dt>
+<dd><p>Maximum number of files to return at once.  If an acquisition
+contains more than this number of files, then it will be split
+up into multiple blocks (pipeline iterations) of size roughly
+equal to max_num_files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryAcquisitions.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.next" title="Link to this definition"></a></dt>
+<dd><p>Return the files from the next acquisition.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> – List of files to load</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryAcquisitions.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryAcquisitions.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryAcquisitions.setup" title="Link to this definition"></a></dt>
+<dd><p>Query the database, fetch the files, and save to attribute.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryDatabase</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDatabase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Find files from specified database queries.</p>
+<p>This routine will query the database as specified in the runtime
+configuration file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.node_spoof">
+<span class="sig-name descname"><span class="pre">node_spoof</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.node_spoof" title="Link to this definition"></a></dt>
+<dd><p>(default: {‘fir_online’: ‘/project/rpp-chime/chime/chime_online/’} )
+host and directory in which to find data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">start_time,</span> <span class="pre">end_time</span></span></dt>
+<dd><p>start and end times to restrict the database search to
+can be in any format ensure_unix will support, including e.g.
+20190116T150323 and 2019-1-16 08:03:23 -7</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.acqtype">
+<span class="sig-name descname"><span class="pre">acqtype</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.acqtype" title="Link to this definition"></a></dt>
+<dd><p>Type of acquisition. Options for acqtype are: ‘corr’, ‘hk’, ‘weather’,
+‘rawadc’, ‘gain’, ‘flaginput’, ‘digitalgain’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (default: ‘corr’)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.instrument">
+<span class="sig-name descname"><span class="pre">instrument</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.instrument" title="Link to this definition"></a></dt>
+<dd><p>Set the instrument name. Common ArchiveInst names are: ‘chimeN2’,
+‘chimestack’, ‘chime26m’, ‘chimetiming’, ‘chimecal’, ‘mingun’ etc.
+While acqtype returns all ‘corr’ data, one must specify the instrument
+to get e.g. only stacked data (i.e. instrument = ‘chimestack’)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (optional)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.source_26m">
+<span class="sig-name descname"><span class="pre">source_26m</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.source_26m" title="Link to this definition"></a></dt>
+<dd><p>holography source to include. If None, do not include holography data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_daytime">
+<span class="sig-name descname"><span class="pre">exclude_daytime</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_daytime" title="Link to this definition"></a></dt>
+<dd><p>exclude daytime data</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_nighttime">
+<span class="sig-name descname"><span class="pre">exclude_nighttime</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_nighttime" title="Link to this definition"></a></dt>
+<dd><p>exclude nighttime data</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_sun">
+<span class="sig-name descname"><span class="pre">exclude_sun</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_sun" title="Link to this definition"></a></dt>
+<dd><p>exclude data around Sun</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_sun_time_delta">
+<span class="sig-name descname"><span class="pre">exclude_sun_time_delta</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_sun_time_delta" title="Link to this definition"></a></dt>
+<dd><p>time_delta parameter passed to exclude_sun()</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_sun_time_delta_rise_set">
+<span class="sig-name descname"><span class="pre">exclude_sun_time_delta_rise_set</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_sun_time_delta_rise_set" title="Link to this definition"></a></dt>
+<dd><p>time_delta_rise_set parameter passed to exclude_sun()</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_transits">
+<span class="sig-name descname"><span class="pre">exclude_transits</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_transits" title="Link to this definition"></a></dt>
+<dd><p>if set, call exclude_transits(). Pass list of sources or RA to exclude.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of string or float (default: [])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_transits_time_delta">
+<span class="sig-name descname"><span class="pre">exclude_transits_time_delta</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_transits_time_delta" title="Link to this definition"></a></dt>
+<dd><p>time in seconds to exclude around each source transit given in <cite>exclude_transits</cite>.
+if single value is passed, then that value will be applied to all source transits.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of float (default : [])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.include_transits">
+<span class="sig-name descname"><span class="pre">include_transits</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.include_transits" title="Link to this definition"></a></dt>
+<dd><p>if set, call include_transits(). Pass list of sources or RA to include.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of string or float (default : [])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.include_transits_time_delta">
+<span class="sig-name descname"><span class="pre">include_transits_time_delta</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.include_transits_time_delta" title="Link to this definition"></a></dt>
+<dd><p>time in seconds to include around each source transit given in <cite>include_transits</cite>.
+if single value is passed, then that value will be applied to all source transits.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of float (default : [])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">start_RA,</span> <span class="pre">end_RA</span></span></dt>
+<dd><p>starting and ending RA to include. Both values must be included or
+no effect</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.run_name">
+<span class="sig-name descname"><span class="pre">run_name</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.run_name" title="Link to this definition"></a></dt>
+<dd><p>run name to include. If used, all other parameters will be ignored.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.accept_all_global_flags">
+<span class="sig-name descname"><span class="pre">accept_all_global_flags</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.accept_all_global_flags" title="Link to this definition"></a></dt>
+<dd><p>Accept all global flags. Due to a bug as of 2019-1-16, this may need to
+be set to True</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.exclude_data_flag_types">
+<span class="sig-name descname"><span class="pre">exclude_data_flag_types</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.exclude_data_flag_types" title="Link to this definition"></a></dt>
+<dd><p>Reject time intervals that overlap with DataFlags of these types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of string</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.return_intervals">
+<span class="sig-name descname"><span class="pre">return_intervals</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.return_intervals" title="Link to this definition"></a></dt>
+<dd><p>Return the full interval from the Finder. Otherwise only a list of file names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.hfb_compression">
+<span class="sig-name descname"><span class="pre">hfb_compression</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.hfb_compression" title="Link to this definition"></a></dt>
+<dd><p>If True or False, select only compressed/uncompressed HFB files.  Setting this
+to either value will also implicitly limit the search to the absorber data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDatabase.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDatabase.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDatabase.setup" title="Link to this definition"></a></dt>
+<dd><p>Query the database and fetch the files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> – List of files to load</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspec">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryDataspec</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDataspec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspec" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Find the available files given a dataspec in the config file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspec.instrument">
+<span class="sig-name descname"><span class="pre">instrument</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspec.instrument" title="Link to this definition"></a></dt>
+<dd><p>Name of the instrument.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspec.timerange">
+<span class="sig-name descname"><span class="pre">timerange</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspec.timerange" title="Link to this definition"></a></dt>
+<dd><p>List of time ranges as documented above.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspec.node_spoof">
+<span class="sig-name descname"><span class="pre">node_spoof</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspec.node_spoof" title="Link to this definition"></a></dt>
+<dd><p>Optional node spoof argument.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspec.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDataspec.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspec.setup" title="Link to this definition"></a></dt>
+<dd><p>Fetch the files in the given dataspec.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> – List of files to load</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspecFile">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryDataspecFile</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDataspecFile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspecFile" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Find the available files given a dataspec from a file.</p>
+<div class="deprecated">
+<p><span class="versionmodified deprecated">Deprecated since version pass1: </span>Use the <cite>run</cite> global flag in the database,
+combined with <code class="xref py py-class docutils literal notranslate"><span class="pre">LoadRun</span></code> instead.</p>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspecFile.dataset_file">
+<span class="sig-name descname"><span class="pre">dataset_file</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspecFile.dataset_file" title="Link to this definition"></a></dt>
+<dd><p>YAML file containing dataset specification. If not specified, use the
+one contained within the ch_pipeline repository.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspecFile.dataset_name">
+<span class="sig-name descname"><span class="pre">dataset_name</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspecFile.dataset_name" title="Link to this definition"></a></dt>
+<dd><p>Name of dataset to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspecFile.archive_root">
+<span class="sig-name descname"><span class="pre">archive_root</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspecFile.archive_root" title="Link to this definition"></a></dt>
+<dd><p>Root of archive to add to file paths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryDataspecFile.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryDataspecFile.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryDataspecFile.setup" title="Link to this definition"></a></dt>
+<dd><p>Fetch the files in the given dataspec.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> – List of files to load</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryFrequencyMap">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryFrequencyMap</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryFrequencyMap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryFrequencyMap" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Get the CHIME frequency map that was active when this data was collected.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryFrequencyMap.cache">
+<span class="sig-name descname"><span class="pre">cache</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryFrequencyMap.cache" title="Link to this definition"></a></dt>
+<dd><p>Only query for the inputs for the first container received. For all
+subsequent files just return the initial set of inputs. This can help
+minimise the number of potentially fragile database operations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryFrequencyMap.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">CorrData</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.CHIMETimeStream" title="ch_pipeline.core.containers.CHIMETimeStream"><span class="pre">CHIMETimeStream</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.FrequencyMapSingle" title="ch_pipeline.core.containers.FrequencyMapSingle"><span class="pre">FrequencyMapSingle</span></a></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryFrequencyMap.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryFrequencyMap.next" title="Link to this definition"></a></dt>
+<dd><p>Generate an input description from the timestream passed in.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> – Timestream container.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Frequency slot map container</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>freq_map</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryInputs">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryInputs</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryInputs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryInputs" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>From a dataspec describing the data create a list of objects describing the inputs in the files.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryInputs.cache">
+<span class="sig-name descname"><span class="pre">cache</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryInputs.cache" title="Link to this definition"></a></dt>
+<dd><p>Only query for the inputs for the first container received. For all
+subsequent files just return the initial set of inputs. This can help
+minimise the number of potentially fragile database operations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryInputs.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryInputs.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryInputs.next" title="Link to this definition"></a></dt>
+<dd><p>Generate an input description from the timestream passed in.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> (<em>andata.CorrData</em>) – Timestream container.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>inputs</strong> – A list of describing the inputs as they are in the file.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of <code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInput</span></code></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryRun">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">QueryRun</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryRun"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryRun" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Find the files belonging to a specific <cite>run</cite>.</p>
+<p>This routine will query the database for the global flag corresponding to
+the given run, and will use the start and end times (as well as the
+instrument) to return a list of the contained files.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryRun.run_name">
+<span class="sig-name descname"><span class="pre">run_name</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryRun.run_name" title="Link to this definition"></a></dt>
+<dd><p>Name of the <cite>run</cite> defined in the database.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryRun.node_spoof">
+<span class="sig-name descname"><span class="pre">node_spoof</span></span><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryRun.node_spoof" title="Link to this definition"></a></dt>
+<dd><p>Node spoof argument. See documentation of <code class="xref py py-class docutils literal notranslate"><span class="pre">ch_util.finder.Finder</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.QueryRun.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#QueryRun.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.QueryRun.setup" title="Link to this definition"></a></dt>
+<dd><p>Fetch the files in the specified run.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> – List of files to load</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.files_from_spec">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">files_from_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_spoof</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#files_from_spec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.files_from_spec" title="Link to this definition"></a></dt>
+<dd><p>Get the names of files in a dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>spec</strong> (<em>dict</em>) – Dataspec dictionary.</p></li>
+<li><p><strong>node_spoof</strong> (<em>dict</em><em> or </em><em>None</em>) – Host and directory in which to find data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>files</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.core.dataquery.finder_from_spec">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.dataquery.</span></span><span class="sig-name descname"><span class="pre">finder_from_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">node_spoof</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/dataquery.html#finder_from_spec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.dataquery.finder_from_spec" title="Link to this definition"></a></dt>
+<dd><p>Get a <cite>Finder</cite> object from the dataspec.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>spec</strong> (<em>dict</em>) – Dataspec dictionary.</p></li>
+<li><p><strong>node_spoof</strong> (<em>dict</em><em> or </em><em>None</em>) – Host and directory in which to find data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>fi</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ch_util.finder.Finder</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.core.containers.html" class="btn btn-neutral float-left" title="ch_pipeline.core.containers" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.core.io.html" class="btn btn-neutral float-right" title="ch_pipeline.core.io" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

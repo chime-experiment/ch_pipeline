@@ -1,0 +1,883 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.beam &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.calibration" href="ch_pipeline.analysis.calibration.html" />
+    <link rel="prev" title="ch_pipeline.analysis" href="ch_pipeline.analysis.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.beam</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.beam.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.beam">
+<span id="ch-pipeline-analysis-beam"></span><h1>ch_pipeline.analysis.beam<a class="headerlink" href="#module-ch_pipeline.analysis.beam" title="Link to this heading"></a></h1>
+<p>Tasks for beam measurement processing.</p>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.get_holography_obs" title="ch_pipeline.analysis.beam.get_holography_obs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_holography_obs</span></code></a>(src)</p></td>
+<td><p>Query database for list of all holography observations for the given source.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.unwrap_lha" title="ch_pipeline.analysis.beam.unwrap_lha"><code class="xref py py-obj docutils literal notranslate"><span class="pre">unwrap_lha</span></code></a>(lsa, src_ra)</p></td>
+<td><p>Convert LSA into HA for a source's RA.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.ApplyHolographyGains" title="ch_pipeline.analysis.beam.ApplyHolographyGains"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplyHolographyGains</span></code></a>()</p></td>
+<td><p>Apply gains to a holography transit.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.ConstructStackedBeam" title="ch_pipeline.analysis.beam.ConstructStackedBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConstructStackedBeam</span></code></a>()</p></td>
+<td><p>Construct the effective beam for stacked baselines.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.EdgeFlagger" title="ch_pipeline.analysis.beam.EdgeFlagger"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EdgeFlagger</span></code></a>()</p></td>
+<td><p>Flag the edges of the transit.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed" title="ch_pipeline.analysis.beam.FilterHolographyProcessed"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FilterHolographyProcessed</span></code></a>()</p></td>
+<td><p>Filter holography transit DataIntervals produced by <cite>dataquery.QueryDatabase</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.HolographyTransitFit" title="ch_pipeline.analysis.beam.HolographyTransitFit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">HolographyTransitFit</span></code></a>()</p></td>
+<td><p>Fit a model to the transit.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.MakeHolographyBeam" title="ch_pipeline.analysis.beam.MakeHolographyBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MakeHolographyBeam</span></code></a>()</p></td>
+<td><p>Repackage a holography transit into a beam container.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.TransitGrouper" title="ch_pipeline.analysis.beam.TransitGrouper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitGrouper</span></code></a>()</p></td>
+<td><p>Group transits from a sequence of TimeStream objects.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.TransitRegridder" title="ch_pipeline.analysis.beam.TransitRegridder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitRegridder</span></code></a>()</p></td>
+<td><p>Interpolate TimeStream transits onto a regular grid in hour angle.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.TransitResampler" title="ch_pipeline.analysis.beam.TransitResampler"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitResampler</span></code></a>()</p></td>
+<td><p>Resample the beam at specific RAs.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.beam.TransitStacker" title="ch_pipeline.analysis.beam.TransitStacker"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitStacker</span></code></a>()</p></td>
+<td><p>Stack a number of transits together.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ApplyHolographyGains">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">ApplyHolographyGains</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#ApplyHolographyGains"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.ApplyHolographyGains" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Apply gains to a holography transit.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ApplyHolographyGains.overwrite">
+<span class="sig-name descname"><span class="pre">overwrite</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.ApplyHolographyGains.overwrite" title="Link to this definition"></a></dt>
+<dd><p>If True, overwrite the input TrackBeam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool (default: False)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ApplyHolographyGains.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">track_in</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gain</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#ApplyHolographyGains.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.ApplyHolographyGains.process" title="Link to this definition"></a></dt>
+<dd><p>Apply gain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>track_in</strong> (<em>draco.core.containers.TrackBeam</em>) – Holography track to apply gains to. Will apply gains to
+track[‘beam’], expecting axes to be freq, pol, input, ha</p></li>
+<li><p><strong>gain</strong> (<em>np.array</em>) – Gain to apply. Expected axes are freq, pol, and input</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>track</strong> – Holography track with gains applied.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>draco.core.containers.TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ConstructStackedBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">ConstructStackedBeam</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#ConstructStackedBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.ConstructStackedBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Construct the effective beam for stacked baselines.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>weight</strong> (<em>string</em><em> (</em><em>'uniform'</em><em> or </em><em>'inverse_variance'</em><em>)</em>) – <dl class="simple">
+<dt>How to weight the baselines when stacking:</dt><dd><p>’uniform’ - each baseline given equal weight
+‘inverse_variance’ - each baseline weighted by the weight attribute</p>
+</dd>
+</dl>
+</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ConstructStackedBeam.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">beam</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#ConstructStackedBeam.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.ConstructStackedBeam.process" title="Link to this definition"></a></dt>
+<dd><p>Stack.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>beam</strong> (<em>TrackBeam</em>) – The beam that will be stacked.</p></li>
+<li><p><strong>data</strong> (<em>VisContainer</em>) – Must contain <cite>prod</cite> index map and <cite>stack</cite> reverse map
+that will be used to stack the beam.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>stacked_beam</strong> – The input <cite>beam</cite> stacked in the same manner as</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>VisContainer</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.ConstructStackedBeam.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tel</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#ConstructStackedBeam.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.ConstructStackedBeam.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the Telescope instance to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tel</strong> (<em>TransitTelescope</em>) – telescope object to use</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.EdgeFlagger">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">EdgeFlagger</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#EdgeFlagger"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.EdgeFlagger" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Flag the edges of the transit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num_begin</strong> (<em>int</em>) – Number of samples to flag at the start of the transit.</p></li>
+<li><p><strong>num_end</strong> (<em>int</em>) – Number of samples to flag at the end of the transit.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.EdgeFlagger.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">track</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#EdgeFlagger.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.EdgeFlagger.process" title="Link to this definition"></a></dt>
+<dd><p>Extend the region that has weight set to zero.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>track</strong> (<em>draco.core.containers.TrackBeam</em>) – Holography track to flag.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>track</strong> – Holography track with weight set to zero for
+<cite>num_begin</cite> samples at the start of the transit
+and <cite>num_end</cite> samples at the end.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>draco.core.containers.TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.FilterHolographyProcessed">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">FilterHolographyProcessed</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#FilterHolographyProcessed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>Filter holography transit DataIntervals produced by <cite>dataquery.QueryDatabase</cite>.</p>
+<p>Excludes DataIntervals which are already processed.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.FilterHolographyProcessed.processed_dir">
+<span class="sig-name descname"><span class="pre">processed_dir</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed.processed_dir" title="Link to this definition"></a></dt>
+<dd><p>Directory or list of directories to look in for processed files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str or list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.FilterHolographyProcessed.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed.source" title="Link to this definition"></a></dt>
+<dd><p>The name of the holography source (as used in the holography database).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.FilterHolographyProcessed.next">
+<span class="sig-name descname"><span class="pre">next</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">intervals</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#FilterHolographyProcessed.next"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed.next" title="Link to this definition"></a></dt>
+<dd><p>Filter input files to exclude those already processed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>intervals</strong> (<em>list</em><em> of </em><em>chimedb.data_index.DataInterval</em>) – List intervals to filter.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>files</strong> – List of files to be processed.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.FilterHolographyProcessed.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#FilterHolographyProcessed.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.FilterHolographyProcessed.setup" title="Link to this definition"></a></dt>
+<dd><p>Get a list of existing processed files.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">HolographyTransitFit</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#HolographyTransitFit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="ch_pipeline.analysis.calibration.html#ch_pipeline.analysis.calibration.TransitFit" title="ch_pipeline.analysis.calibration.TransitFit"><code class="xref py py-class docutils literal notranslate"><span class="pre">TransitFit</span></code></a></p>
+<p>Fit a model to the transit.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.model">
+<span class="sig-name descname"><span class="pre">model</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.model" title="Link to this definition"></a></dt>
+<dd><p>Name of the model to fit.  One of ‘gauss_amp_poly_phase’ or
+‘poly_log_amp_poly_phase’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.nsigma">
+<span class="sig-name descname"><span class="pre">nsigma</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.nsigma" title="Link to this definition"></a></dt>
+<dd><p>Number of standard deviations away from transit to fit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.absolute_sigma">
+<span class="sig-name descname"><span class="pre">absolute_sigma</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.absolute_sigma" title="Link to this definition"></a></dt>
+<dd><p>Set to True if the errors provided are absolute.  Set to False if
+the errors provided are relative, in which case the parameter covariance
+will be scaled by the chi-squared per degree-of-freedom.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.poly_type">
+<span class="sig-name descname"><span class="pre">poly_type</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.poly_type" title="Link to this definition"></a></dt>
+<dd><p>Type of polynomial.  Either ‘standard’, ‘hermite’, or ‘chebychev’.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.poly_deg_amp">
+<span class="sig-name descname"><span class="pre">poly_deg_amp</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.poly_deg_amp" title="Link to this definition"></a></dt>
+<dd><p>Degree of the polynomial to fit to amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.poly_deg_phi">
+<span class="sig-name descname"><span class="pre">poly_deg_phi</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.poly_deg_phi" title="Link to this definition"></a></dt>
+<dd><p>Degree of the polynomial to fit to phase.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.niter">
+<span class="sig-name descname"><span class="pre">niter</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.niter" title="Link to this definition"></a></dt>
+<dd><p>Number of times to update the errors using model amplitude.
+Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.moving_window">
+<span class="sig-name descname"><span class="pre">moving_window</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.moving_window" title="Link to this definition"></a></dt>
+<dd><p>Number of standard deviations away from peak to fit.
+The peak location is updated with each iteration.
+Must be less than <cite>nsigma</cite>.  Relevant if <cite>poly = True</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.HolographyTransitFit.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">transit</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#HolographyTransitFit.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.HolographyTransitFit.process" title="Link to this definition"></a></dt>
+<dd><p>Perform the fit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>transit</strong> (<em>TrackBeam</em>) – Transit to be fit.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>fit</strong> – Fit parameters.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="ch_pipeline.core.containers.html#ch_pipeline.core.containers.TransitFitParams" title="ch_pipeline.core.containers.TransitFitParams">TransitFitParams</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.MakeHolographyBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">MakeHolographyBeam</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#MakeHolographyBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.MakeHolographyBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Repackage a holography transit into a beam container.</p>
+<p>The visibilities will be grouped according to their respective 26 m
+input (along the <cite>pol</cite> axis, labelled by the 26 m polarisation of that input).</p>
+<p>The form of the beam dataset is A_{i} = &lt; E_{i} * E_{26m}^{*} &gt;, i.e. the 26m
+input is the conjugate part of the visbility.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.MakeHolographyBeam.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#MakeHolographyBeam.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.MakeHolographyBeam.process" title="Link to this definition"></a></dt>
+<dd><p>Package a holography transit into a beam container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> (<em>SiderealStream</em>) – Transit observation as generated by <cite>TransitRegridder</cite>.</p></li>
+<li><p><strong>inputmap</strong> (list of <cite>CorrInput</cite>) – A list describing the inputs as they are in the file, output from
+<cite>ch_util.tools.get_correlator_inputs()</cite></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>track</strong> – The transit in a beam container.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">TransitGrouper</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitGrouper"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Group transits from a sequence of TimeStream objects.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.ha_span">
+<span class="sig-name descname"><span class="pre">ha_span</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.ha_span" title="Link to this definition"></a></dt>
+<dd><p>Span in degrees surrounding transit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.min_span">
+<span class="sig-name descname"><span class="pre">min_span</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.min_span" title="Link to this definition"></a></dt>
+<dd><p>Minimum span (deg) of a transit to accept.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.source" title="Link to this definition"></a></dt>
+<dd><p>Name of the transiting source. (Must match what is used in <cite>ch_ephem.sources</cite>.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.db_source">
+<span class="sig-name descname"><span class="pre">db_source</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.db_source" title="Link to this definition"></a></dt>
+<dd><p>Name of the transiting source as listed in holography database.
+This is a hack until a better solution is implemented.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.append">
+<span class="sig-name descname"><span class="pre">append</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitGrouper.append"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.append" title="Link to this definition"></a></dt>
+<dd><p>Append a timestream to the buffer list.</p>
+<p>This will strip eigenvector datasets if they are present.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitGrouper.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.process" title="Link to this definition"></a></dt>
+<dd><p>Take in a timestream and accumulate, group into whole transits.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tstream</strong> (<em>TimeStream</em>) – timestream data container</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ts</strong> – Timestream with containing transits of specified length.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>TimeStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.process_finish">
+<span class="sig-name descname"><span class="pre">process_finish</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitGrouper.process_finish"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.process_finish" title="Link to this definition"></a></dt>
+<dd><p>Return the current transit before finishing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> – Last (possibly incomplete) transit.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>TimeStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitGrouper.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitGrouper.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitGrouper.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the local observers position if not using CHIME.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/CaputConfigError.html#caput.config.CaputConfigError" title="(in caput v26.2.1.post3+git.90f7a360)"><strong>caput.config.CaputConfigError</strong></a> – If config value <code class="docutils literal notranslate"><span class="pre">source</span></code> doesn’t match any in <cite>ch_ephem.sources</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">TransitRegridder</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitRegridder"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">LanczosRegridder</span></code></p>
+<p>Interpolate TimeStream transits onto a regular grid in hour angle.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.samples">
+<span class="sig-name descname"><span class="pre">samples</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.samples" title="Link to this definition"></a></dt>
+<dd><p>Number of samples to interpolate onto.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.ha_span">
+<span class="sig-name descname"><span class="pre">ha_span</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.ha_span" title="Link to this definition"></a></dt>
+<dd><p>Span in degrees surrounding transit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.lanczos_width">
+<span class="sig-name descname"><span class="pre">lanczos_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.lanczos_width" title="Link to this definition"></a></dt>
+<dd><p>Width of the Lanczos interpolation kernel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.snr_cov">
+<span class="sig-name descname"><span class="pre">snr_cov</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.snr_cov" title="Link to this definition"></a></dt>
+<dd><p>Ratio of signal covariance to noise covariance (used for Wiener filter).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.source">
+<span class="sig-name descname"><span class="pre">source</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.source" title="Link to this definition"></a></dt>
+<dd><p>Name of the transiting source. (Must match what is used in <cite>ch_ephem.sources</cite>.)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitRegridder.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.process" title="Link to this definition"></a></dt>
+<dd><p>Regrid visibility data onto a regular grid in hour angle.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>TimeStream</em>) – Time-ordered data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>new_data</strong> – The regridded data centered on the source RA.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>SiderealStream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitRegridder.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitRegridder.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitRegridder.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the local observers position if not using CHIME.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/CaputConfigError.html#caput.config.CaputConfigError" title="(in caput v26.2.1.post3+git.90f7a360)"><strong>caput.config.CaputConfigError</strong></a> – If config value <code class="docutils literal notranslate"><span class="pre">source</span></code> doesn’t match any in <cite>ch_ephem.sources</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitResampler">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">TransitResampler</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitResampler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitResampler" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Resample the beam at specific RAs.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitResampler.lanczos_width">
+<span class="sig-name descname"><span class="pre">lanczos_width</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitResampler.lanczos_width" title="Link to this definition"></a></dt>
+<dd><p>Width of the Lanczos kernel in number of samples.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitResampler.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">beam</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitResampler.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitResampler.process" title="Link to this definition"></a></dt>
+<dd><p>Resample the measured beam at arbitrary RA by convolving with a Lanczos kernel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>beam</strong> (<em>draco.core.containers.TrackBeam</em>) – The beam that will be resampled.</p></li>
+<li><p><strong>data</strong> (<em>draco.core.containers.VisContainer</em>) – Must contain a <cite>time</cite> or <cite>ra</cite> axis that defines
+the RAs to sample.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>new_beam</strong> – The input <cite>beam</cite> re-sampled at the RAs contained in <cite>data</cite>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>draco.core.containers.TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitResampler.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitResampler.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitResampler.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the local observers position if not using CHIME.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitStacker">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">TransitStacker</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitStacker"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitStacker" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Stack a number of transits together.</p>
+<p>The weights will be inverted and stacked as variances. The variance
+between transits is evaluated and recorded in the output container.</p>
+<p>All transits should be on a common grid in hour angle.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitStacker.weight">
+<span class="sig-name descname"><span class="pre">weight</span></span><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitStacker.weight" title="Link to this definition"></a></dt>
+<dd><p>The weighting to use in the stack. One of <cite>uniform</cite> or <cite>inverse_variance</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str (default: uniform)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitStacker.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">transit</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitStacker.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitStacker.process" title="Link to this definition"></a></dt>
+<dd><p>Add a transit to the stack.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>transit</strong> (<em>draco.core.containers.TrackBeam</em>) – A holography transit.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitStacker.process_finish">
+<span class="sig-name descname"><span class="pre">process_finish</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitStacker.process_finish"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitStacker.process_finish" title="Link to this definition"></a></dt>
+<dd><p>Normalise the stack and return the result.</p>
+<p>Includes the sample variance over transits within the stack.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>stack</strong> – Stacked transits.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>draco.core.containers.TrackBeam</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.TransitStacker.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#TransitStacker.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.TransitStacker.setup" title="Link to this definition"></a></dt>
+<dd><p>Initialise internal variables.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.get_holography_obs">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">get_holography_obs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">src</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#get_holography_obs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.get_holography_obs" title="Link to this definition"></a></dt>
+<dd><p>Query database for list of all holography observations for the given source.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>src</strong> (<em>str</em>) – Source name.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>db_obs</strong> – Observations of this source.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of ch_util.holography.HolographyObservation</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.beam.unwrap_lha">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.beam.</span></span><span class="sig-name descname"><span class="pre">unwrap_lha</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lsa</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_ra</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/beam.html#unwrap_lha"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.beam.unwrap_lha" title="Link to this definition"></a></dt>
+<dd><p>Convert LSA into HA for a source’s RA. Ensures HA is monotonically increasing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>lsa</strong> (<em>array</em>) – Local sidereal angle.</p></li>
+<li><p><strong>src_ra</strong> (<em>float</em>) – The RA of the source.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ha</strong> – Hour angle.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>array</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.calibration.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.calibration" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

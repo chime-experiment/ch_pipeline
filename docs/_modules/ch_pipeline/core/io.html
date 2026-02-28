@@ -1,0 +1,721 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.io &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.io</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.core.io</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for IO.</span>
+
+<span class="sd">Tasks for calculating IO. Notably a task which will write out the parallel</span>
+<span class="sd">MPIDataset classes.</span>
+
+<span class="sd">File Groups</span>
+<span class="sd">===========</span>
+
+<span class="sd">Several tasks accept groups of files as arguments. These are specified in the YAML file as a dictionary like below.</span>
+
+<span class="sd">.. code-block:: yaml</span>
+
+<span class="sd">    list_of_file_groups:</span>
+<span class="sd">        -   tag: first_group  # An optional tag naming the group</span>
+<span class="sd">            files:</span>
+<span class="sd">                -   &#39;file1.h5&#39;</span>
+<span class="sd">                -   &#39;file[3-4].h5&#39;  # Globs are processed</span>
+<span class="sd">                -   &#39;file7.h5&#39;</span>
+
+<span class="sd">        -   files:  # No tag specified, implicitly gets the tag &#39;group_2&#39;</span>
+<span class="sd">                -   &#39;another_file1.h5&#39;</span>
+<span class="sd">                -   &#39;another_file2.h5&#39;</span>
+
+
+<span class="sd">    single_group:</span>
+<span class="sd">        files: [&#39;file1.h5&#39;, &#39;file2.h5&#39;]</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os.path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">exceptions</span><span class="p">,</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">containers</span>
+
+
+<div class="viewcode-block" id="LoadCorrDataFiles">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadCorrDataFiles">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadCorrDataFiles</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">,</span> <span class="n">tasklib</span><span class="o">.</span><span class="n">io</span><span class="o">.</span><span class="n">SelectionsMixin</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load CHIME correlator data from a file list passed into the setup routine.</span>
+
+<span class="sd">    File must be a serialised subclass of :class:`ch_util.andata.CorrData`.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    freq_physical : list</span>
+<span class="sd">        List of physical frequencies in MHz. Given highest priority.</span>
+<span class="sd">    channel_range : list</span>
+<span class="sd">        Range of frequency channel indices, either `[start, stop, step]`, `[start,</span>
+<span class="sd">        stop]`, or `[stop]` is acceptable. Given second priority.</span>
+<span class="sd">    channel_index : list</span>
+<span class="sd">        List of frequency channel indices. Given third priority.</span>
+<span class="sd">    datasets : list</span>
+<span class="sd">        List of datasets to load. Defaults to all available datasets.</span>
+<span class="sd">    only_autos : bool</span>
+<span class="sd">        Only load the autocorrelations.</span>
+<span class="sd">    use_draco_container : bool</span>
+<span class="sd">        Load the data into a draco compatible container rather than CorrData. Defaults</span>
+<span class="sd">        to True.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">_file_ptr</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="n">freq_physical</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_range</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_index</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="n">datasets</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">only_autos</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">use_draco_container</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<div class="viewcode-block" id="LoadCorrDataFiles.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadCorrDataFiles.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the list of files to load.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            list of correlator data file paths</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Argument must be list of files.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span> <span class="o">=</span> <span class="n">files</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_sel</span><span class="p">()</span>
+
+        <span class="c1"># Set up frequency selection.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">:</span>
+            <span class="n">basefreq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">800.0</span><span class="p">,</span> <span class="mf">400.0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">freq_sel</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+                <span class="p">{</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">basefreq</span> <span class="o">-</span> <span class="n">freq</span><span class="p">))</span> <span class="k">for</span> <span class="n">freq</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">}</span>
+            <span class="p">)</span>
+
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span> <span class="ow">and</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="n">freq_sel</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span><span class="p">:</span>
+            <span class="n">freq_sel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">freq_sel</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sel</span><span class="p">[</span><span class="s2">&quot;freq_sel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">freq_sel</span></div>
+
+
+<div class="viewcode-block" id="LoadCorrDataFiles.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadCorrDataFiles.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load in each sidereal day.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        ts : andata.CorrData or containers.CHIMETimeStream</span>
+<span class="sd">            The timestream file. Return type depends on the value of</span>
+<span class="sd">            `use_draco_container`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">)</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">PipelineStopIteration</span>
+
+        <span class="c1"># Collect garbage to remove any prior CorrData objects</span>
+        <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+
+        <span class="c1"># Fetch and remove the first item in the list</span>
+        <span class="n">file_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># Set up product selection</span>
+        <span class="c1"># NOTE: this probably doesn&#39;t work with stacked data</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">only_autos</span><span class="p">:</span>
+            <span class="n">rd</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrReader</span><span class="p">(</span><span class="n">file_</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_sel</span><span class="p">[</span><span class="s2">&quot;prod_sel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">ii</span> <span class="k">for</span> <span class="p">(</span><span class="n">ii</span><span class="p">,</span> <span class="n">pp</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">rd</span><span class="o">.</span><span class="n">prod</span><span class="p">)</span> <span class="k">if</span> <span class="n">pp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">pp</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Load file</span>
+        <span class="n">fast_sel</span> <span class="o">=</span> <span class="nb">all</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">sel</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="p">(</span><span class="n">axis</span> <span class="o">==</span> <span class="s2">&quot;freq_sel&quot;</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sel</span><span class="p">,</span> <span class="nb">slice</span><span class="p">)))</span>
+            <span class="k">for</span> <span class="n">axis</span><span class="p">,</span> <span class="n">sel</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sel</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">fast_sel</span> <span class="ow">and</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">datasets</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s2">&quot;Reading file </span><span class="si">%i</span><span class="s2"> of </span><span class="si">%i</span><span class="s2">. (</span><span class="si">%s</span><span class="s2">) [fast io]&quot;</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="p">,</span>
+                <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">),</span>
+                <span class="n">file_</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">ts</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="o">.</span><span class="n">from_acq_h5_fast</span><span class="p">(</span>
+                <span class="n">file_</span><span class="p">,</span>
+                <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+                <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_sel</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s2">&quot;Reading file </span><span class="si">%i</span><span class="s2"> of </span><span class="si">%i</span><span class="s2">. (</span><span class="si">%s</span><span class="s2">) [slow io]&quot;</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="p">,</span>
+                <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">),</span>
+                <span class="n">file_</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">ts</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="o">.</span><span class="n">from_acq_h5</span><span class="p">(</span>
+                <span class="n">file_</span><span class="p">,</span>
+                <span class="n">datasets</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">,</span>
+                <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+                <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_sel</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Store file name</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;filename&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">file_</span>
+
+        <span class="c1"># Use a simple incrementing string as the tag</span>
+        <span class="k">if</span> <span class="s2">&quot;tag&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">:</span>
+            <span class="n">tag</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;file</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="si">:</span><span class="s2">03d</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tag</span>
+
+        <span class="c1"># Add a weight dataset if needed</span>
+        <span class="k">if</span> <span class="s2">&quot;vis_weight&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ts</span><span class="o">.</span><span class="n">flags</span><span class="p">:</span>
+            <span class="n">weight_dset</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">create_flag</span><span class="p">(</span>
+                <span class="s2">&quot;vis_weight&quot;</span><span class="p">,</span>
+                <span class="n">shape</span><span class="o">=</span><span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">,</span>
+                <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">distributed_axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">weight_dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span>
+
+            <span class="c1"># Set weight to maximum value (255), unless the vis value is</span>
+            <span class="c1"># zero which presumably came from missing data. NOTE: this may have</span>
+            <span class="c1"># a small bias</span>
+            <span class="n">weight_dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span> <span class="o">==</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+
+        <span class="c1"># Return timestream</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_draco_container</span><span class="p">:</span>
+            <span class="n">ts</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">CHIMETimeStream</span><span class="o">.</span><span class="n">from_corrdata</span><span class="p">(</span><span class="n">ts</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">ts</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="LoadDataFiles">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadDataFiles">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadDataFiles</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load general CHIME data from files passed into the setup routine.</span>
+
+<span class="sd">    This does *not* support correlator data. Use `LoadCorrDataFiles` instead.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">files</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">_file_ptr</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="n">acqtype</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;weather&quot;</span><span class="p">)</span>
+
+    <span class="n">_acqtype_reader</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;hk&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">HKReader</span><span class="p">,</span>
+        <span class="s2">&quot;hkp&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">HKPReader</span><span class="p">,</span>
+        <span class="s2">&quot;weather&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">WeatherReader</span><span class="p">,</span>
+        <span class="s2">&quot;rawadc&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">RawADCReader</span><span class="p">,</span>
+        <span class="s2">&quot;gain&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">CalibrationGainReader</span><span class="p">,</span>
+        <span class="s2">&quot;digitalgain&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">DigitalGainReader</span><span class="p">,</span>
+        <span class="s2">&quot;flaginput&quot;</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">FlagInputReader</span><span class="p">,</span>
+    <span class="p">}</span>
+
+<div class="viewcode-block" id="LoadDataFiles.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadDataFiles.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the list of files to load.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            list of chime data file paths to load, EXCLUDING correlator data</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">acqtype</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_acqtype_reader</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Specified acqtype &quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">acqtype</span><span class="si">}</span><span class="s1">&quot; is not supported.&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="nb">list</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Argument must be list of files.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span> <span class="o">=</span> <span class="n">files</span></div>
+
+
+<div class="viewcode-block" id="LoadDataFiles.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadDataFiles.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load and return the next available file.</span>
+
+<span class="sd">        Raises a PipelineStopIteration if there are no more files to load.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        data : subclass of andata.BaseData</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_next_file</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_next_file</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the next available file into memory.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">PipelineStopIteration</span>
+
+        <span class="c1"># Collect garbage to remove any prior data objects</span>
+        <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+
+        <span class="c1"># Fetch and remove the next item in the list</span>
+        <span class="n">file_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># Set up a Reader class</span>
+        <span class="n">rd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_acqtype_reader</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">acqtype</span><span class="p">](</span><span class="n">file_</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reading file </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_file_ptr</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">)</span><span class="si">}</span><span class="s2">. (</span><span class="si">{</span><span class="n">file_</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">rd</span><span class="o">.</span><span class="n">read</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="LoadGainUpdates">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadGainUpdates">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadGainUpdates</span><span class="p">(</span><span class="n">LoadDataFiles</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Iterate over gain updates.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    acqtype: {&quot;gain&quot;|&quot;digitalgain&quot;}</span>
+<span class="sd">        Type of acquisition.</span>
+<span class="sd">    keep_transition: bool</span>
+<span class="sd">        If this is True, then gain updates that were transitional</span>
+<span class="sd">        in nature -- i.e., they executed a smooth transition to</span>
+<span class="sd">        new gains -- will be loaded. By default, transitional</span>
+<span class="sd">        gain updates are ignored.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">gains</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">acqtype</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">enum</span><span class="p">([</span><span class="s2">&quot;gain&quot;</span><span class="p">,</span> <span class="s2">&quot;digitalgain&quot;</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;gain&quot;</span><span class="p">)</span>
+    <span class="n">keep_transition</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="LoadGainUpdates.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadGainUpdates.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the next available gain update.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        out: StaticGainUpdate</span>
+<span class="sd">            The next gain update, packaged into a pipeline container.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># If there are no gains available, then load the next file.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">gains</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_next_file</span><span class="p">()</span>
+
+        <span class="c1"># Make sure we are not dealing with a transitional gain update</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">keep_transition</span><span class="p">:</span>
+            <span class="k">while</span> <span class="s2">&quot;transition&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">update_id</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">():</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span> <span class="o">+=</span> <span class="mi">1</span>
+
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">ntime</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">gains</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_next_file</span><span class="p">()</span>
+
+        <span class="c1"># Create output container</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">StaticGainData</span><span class="p">(</span>
+            <span class="n">axes_from</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="p">,</span>
+            <span class="n">attrs_from</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="p">,</span>
+            <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;weight&quot;</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Save the update_time and update_id as attributes</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span><span class="p">]</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;update_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">update_id</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;update_id&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Find the local frequencies</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">gain</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">out</span><span class="o">.</span><span class="n">gain</span><span class="o">.</span><span class="n">local_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">fsel</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="n">sfreq</span><span class="p">,</span> <span class="n">efreq</span><span class="p">)</span>
+
+        <span class="c1"># Transfer over the gains and weights for the local frequencies</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">gain</span><span class="p">[:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">gain</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span><span class="p">][</span><span class="n">fsel</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="s2">&quot;weight&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">weight</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span><span class="p">][</span><span class="n">fsel</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">1.0</span>
+
+        <span class="c1"># Increment the time pointer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># Determine if we need to load a new file on the next iteration</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">gains</span><span class="o">.</span><span class="n">ntime</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">gains</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Output the static gain container</span>
+        <span class="k">return</span> <span class="n">out</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_next_file</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the next available file into memory.&quot;&quot;&quot;</span>
+        <span class="n">gains</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_load_next_file</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_time_ptr</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">return</span> <span class="n">gains</span></div>
+
+
+
+<div class="viewcode-block" id="LoadSetupFile">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadSetupFile">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadSetupFile</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">io</span><span class="o">.</span><span class="n">BaseLoadFiles</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Loads a file from disk into a memdata container during setup.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    filename : str</span>
+<span class="sd">        Path to a saved container.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+
+<div class="viewcode-block" id="LoadSetupFile.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadSetupFile.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load the file into a container.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cont : subclass of `memdata.Container`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Call the baseclass setup to resolve any selections</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
+
+        <span class="c1"># Load the requested file</span>
+        <span class="n">cont</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_file</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span>
+
+        <span class="c1"># Set the done attribute so the pipeline recognizes this task is finished</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">done</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">return</span> <span class="n">cont</span></div>
+
+
+<div class="viewcode-block" id="LoadSetupFile.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadSetupFile.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Override parent process method to do nothing.&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="LoadFileFromTag">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadFileFromTag">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadFileFromTag</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">io</span><span class="o">.</span><span class="n">BaseLoadFiles</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Loads a file from disk into a memdata container.</span>
+
+<span class="sd">    The suffix of the filename is extracted from the tag of the input container.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    prefix : str</span>
+<span class="sd">        Filename is assumed to have the format: &quot;{prefix}{incont.attrs[&#39;tag&#39;]}.h5&quot;</span>
+<span class="sd">    only_prefix : bool</span>
+<span class="sd">        If True, then the class will return the same container at each iteration.</span>
+<span class="sd">        The filename is assumed to have the format: &quot;{prefix}.h5&quot;</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">prefix</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">only_prefix</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="LoadFileFromTag.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadFileFromTag.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Determine filename convention.</span>
+
+<span class="sd">        If only_prefix is True, then load the file into a container.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Call the baseclass setup to resolve any selections</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">setup</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">outcont</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># If we are returning the same file for every iteration,</span>
+        <span class="c1"># then load that file now.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">only_prefix</span><span class="p">:</span>
+            <span class="n">filename</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">prefix</span>
+
+            <span class="n">split_ext</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">split_ext</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;.h5&quot;</span><span class="p">,</span> <span class="s2">&quot;.hdf5&quot;</span><span class="p">]:</span>
+                <span class="n">filename</span> <span class="o">=</span> <span class="n">split_ext</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.h5&quot;</span>
+
+            <span class="c1"># Load file into outcont attribute</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">outcont</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_file</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">prefix</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">prefix</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="LoadFileFromTag.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.LoadFileFromTag.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">incont</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Determine filename from input container.  Load file into output container.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        incont : subclass of `memdata.Container`</span>
+<span class="sd">            get the `tag` attribute from this container</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        outcont : subclass of `memdata.Container`</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">only_prefix</span><span class="p">:</span>
+            <span class="n">filename</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">prefix</span> <span class="o">+</span> <span class="n">incont</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.h5&quot;</span>
+
+            <span class="c1"># Load file into outcont attribute</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">outcont</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_load_file</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+
+        <span class="c1"># Return the outcont attribute</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">outcont</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="FilterExisting">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.FilterExisting">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FilterExisting</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Filter out files from any list that have already been processed.</span>
+
+<span class="sd">    Each file is found in the database and is compared against given</span>
+<span class="sd">    criteria to see if has already been processed.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    regex_csd : str</span>
+<span class="sd">        A regular expression to find processed CSDs. Compared to filenames</span>
+<span class="sd">        in the current directory.</span>
+<span class="sd">    min_files_csd : int</span>
+<span class="sd">        The minimum number of files on a CSD for it to be processed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">existing_csd_regex</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">skip_csd</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">min_files_in_csd</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+
+        <span class="kn">from</span><span class="w"> </span><span class="nn">caput.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">mpitools</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+            <span class="c1"># Look for CSDs in the current directory</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+
+            <span class="n">files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">existing_csd_regex</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">file_</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+                    <span class="n">mo</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">existing_csd_regex</span><span class="p">,</span> <span class="n">file_</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">mo</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">mo</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span>
+
+            <span class="c1"># Search the database to get the start and end times of all correlation files</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">data_index</span> <span class="k">as</span> <span class="n">di</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">chimedb.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect</span>
+
+            <span class="n">connect</span><span class="p">()</span>
+            <span class="n">query</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="o">.</span><span class="n">select</span><span class="p">(</span>
+                    <span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                    <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                    <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span>
+                    <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">finish_time</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">switch</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">acq</span><span class="p">,</span> <span class="n">fname</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">finish</span> <span class="ow">in</span> <span class="n">query</span><span class="o">.</span><span class="n">tuples</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">finish</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">continue</span>
+
+                <span class="n">start_csd</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">start</span><span class="p">)</span>
+                <span class="n">finish_csd</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">finish</span><span class="p">)</span>
+
+                <span class="n">name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">acq</span><span class="p">,</span> <span class="n">fname</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">start_csd</span><span class="p">,</span> <span class="n">finish_csd</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Skipping existing CSDs </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="nb">repr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span><span class="p">))</span>
+
+        <span class="c1"># Broadcast results to other ranks</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<div class="viewcode-block" id="FilterExisting.next">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.io.html#ch_pipeline.core.io.FilterExisting.next">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Filter the incoming file lists.&quot;&quot;&quot;</span>
+        <span class="n">csd_list</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">acq</span><span class="p">,</span> <span class="n">fname</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">2</span><span class="p">:]</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">acq</span><span class="p">,</span> <span class="n">fname</span><span class="p">)</span>
+
+            <span class="c1"># Always include non corr files</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Non time stream file encountered </span><span class="si">%s</span><span class="s2">.&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Figure out which CSD the file starts and ends on</span>
+            <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">corr_files</span><span class="p">[</span><span class="n">name</span><span class="p">])</span>
+
+            <span class="c1"># Add this file to the set of files for the relevant days</span>
+            <span class="n">csd_list</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="n">csd_list</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">end</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+        <span class="n">new_files</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">csd</span><span class="p">,</span> <span class="n">csd_files</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">csd_list</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="k">if</span> <span class="n">csd</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">csd_list</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Skipping existing CSD=</span><span class="si">%i</span><span class="s2">, files: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">csd</span><span class="p">,</span> <span class="n">csd_files</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="k">if</span> <span class="n">csd</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_csd</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Skipping specified CSD=</span><span class="si">%i</span><span class="s2">, files: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">csd</span><span class="p">,</span> <span class="n">csd_files</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">csd_files</span><span class="p">)</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_files_in_csd</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Skipping CSD=</span><span class="si">%i</span><span class="s2"> with too few files: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">csd</span><span class="p">,</span> <span class="n">csd_files</span><span class="p">)</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># Great, we passed the cut, add to the final set</span>
+            <span class="n">new_files</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">csd_files</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+            <span class="s2">&quot;Input list </span><span class="si">%i</span><span class="s2"> files, after filtering </span><span class="si">%i</span><span class="s2"> files.&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">files</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_files</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">new_files</span><span class="p">)</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

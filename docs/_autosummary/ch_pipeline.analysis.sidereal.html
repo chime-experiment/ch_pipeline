@@ -1,0 +1,449 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.sidereal &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.analysis.solar" href="ch_pipeline.analysis.solar.html" />
+    <link rel="prev" title="ch_pipeline.analysis.mapmaker" href="ch_pipeline.analysis.mapmaker.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.timing.html">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.sidereal</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.sidereal.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.sidereal">
+<span id="ch-pipeline-analysis-sidereal"></span><h1>ch_pipeline.analysis.sidereal<a class="headerlink" href="#module-ch_pipeline.analysis.sidereal" title="Link to this heading"></a></h1>
+<p>Tasks for sidereal regridding.</p>
+<p>Tasks for taking the timestream data and regridding it into sidereal days
+which can be stacked.</p>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Link to this heading"></a></h2>
+<p>Generally you would want to use these tasks together. Starting with a
+<a class="reference internal" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal" title="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal"><code class="xref py py-class docutils literal notranslate"><span class="pre">LoadTimeStreamSidereal</span></code></a>, then feeding that into
+<a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealRegridder" title="ch_pipeline.analysis.sidereal.SiderealRegridder"><code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealRegridder</span></code></a> to grid onto each sidereal day, and then into
+<code class="xref py py-class docutils literal notranslate"><span class="pre">draco.analysis.SiderealStacker</span></code> if you want to combine the different days.</p>
+</section>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.get_times" title="ch_pipeline.analysis.sidereal.get_times"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_times</span></code></a>(acq_files)</p></td>
+<td><p>Extract the start and end times of a list of acquisition files.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.ChangeSiderealMean" title="ch_pipeline.analysis.sidereal.ChangeSiderealMean"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ChangeSiderealMean</span></code></a>()</p></td>
+<td><p>Subtract or add an overall offset (over time) to each visibility.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal" title="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LoadTimeStreamSidereal</span></code></a>()</p></td>
+<td><p>Load data in sidereal days.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealGrouper" title="ch_pipeline.analysis.sidereal.SiderealGrouper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealGrouper</span></code></a>()</p></td>
+<td><p>SiderealGrouper that automatically uses the location of CHIME.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealMean" title="ch_pipeline.analysis.sidereal.SiderealMean"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealMean</span></code></a>()</p></td>
+<td><p>Calculate the weighted mean(median) over time.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealRegridder" title="ch_pipeline.analysis.sidereal.SiderealRegridder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealRegridder</span></code></a>()</p></td>
+<td><p>SiderealRegridder that automatically uses the location of CHIME.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.sidereal.WeatherGrouper" title="ch_pipeline.analysis.sidereal.WeatherGrouper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">WeatherGrouper</span></code></a>()</p></td>
+<td><p>Group Weather files together within the sidereal day.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.ChangeSiderealMean">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">ChangeSiderealMean</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#ChangeSiderealMean"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.ChangeSiderealMean" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Subtract or add an overall offset (over time) to each visibility.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>add</strong> (<em>bool</em>) – Add the value instead of subtracting.</p>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.ChangeSiderealMean.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mustream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#ChangeSiderealMean.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.ChangeSiderealMean.process" title="Link to this definition"></a></dt>
+<dd><p>Add or subtract mustream from the sidereal stream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>sstream</strong> (<em>andata.CorrData</em><em> or </em><em>containers.SiderealStream</em>) – Timestream or sidereal stream.</p></li>
+<li><p><strong>mustream</strong> (<em>andata.CorrData</em><em> or </em><em>containers.SiderealStream</em>) – Timestream or sidereal stream with 1 element in the time axis
+that contains the value to add or subtract.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>sstream</strong> – Timestream or sidereal stream with value added or subtracted.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>same as input</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">LoadTimeStreamSidereal</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#LoadTimeStreamSidereal"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Load data in sidereal days.</p>
+<p>This task takes an input list of data, and loads in a sidereal day at a
+time, and passes it on.</p>
+<div class="deprecated">
+<p><span class="versionmodified deprecated">Deprecated since version pass1: </span>The preferred option now is to load a whole range of files one at a time
+and feed them into the <a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealGrouper" title="ch_pipeline.analysis.sidereal.SiderealGrouper"><code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealGrouper</span></code></a>.</p>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.padding">
+<span class="sig-name descname"><span class="pre">padding</span></span><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.padding" title="Link to this definition"></a></dt>
+<dd><p>Extra amount of a sidereal day to pad each timestream by. Useful for
+getting rid of interpolation artifacts.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.freq_physical">
+<span class="sig-name descname"><span class="pre">freq_physical</span></span><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.freq_physical" title="Link to this definition"></a></dt>
+<dd><p>List of physical frequencies in MHz.
+Given first priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.channel_range">
+<span class="sig-name descname"><span class="pre">channel_range</span></span><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.channel_range" title="Link to this definition"></a></dt>
+<dd><p>Range of frequency channel indices, either
+[start, stop, step], [start, stop], or [stop]
+is acceptable.  Given second priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.channel_index">
+<span class="sig-name descname"><span class="pre">channel_index</span></span><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.channel_index" title="Link to this definition"></a></dt>
+<dd><p>List of frequency channel indices.
+Given third priority.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.only_autos">
+<span class="sig-name descname"><span class="pre">only_autos</span></span><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.only_autos" title="Link to this definition"></a></dt>
+<dd><p>Only load the autocorrelations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#LoadTimeStreamSidereal.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.process" title="Link to this definition"></a></dt>
+<dd><p>Load in each sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ts</strong> – The timestream of each sidereal day.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#LoadTimeStreamSidereal.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.setup" title="Link to this definition"></a></dt>
+<dd><p>Divide the list of files up into sidereal days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>files</strong> (<em>list</em>) – List of files to load.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealGrouper">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">SiderealGrouper</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealGrouper"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealGrouper" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealGrouper</span></code></p>
+<p>SiderealGrouper that automatically uses the location of CHIME.</p>
+<p>See <cite>draco.analysis.sidereal.SiderealGrouper</cite> for extended documentation.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealGrouper.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealGrouper.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealGrouper.setup" title="Link to this definition"></a></dt>
+<dd><p>Setup the SiderealGrouper task.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealMean">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">SiderealMean</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealMean"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealMean" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Calculate the weighted mean(median) over time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>median</strong> (<em>bool</em>) – Calculate weighted median instead of the weighted mean.</p></li>
+<li><p><strong>inverse_variance</strong> (<em>bool</em>) – Use inverse variance weights.  If this is False, then use uniform
+weighting of timesamples where the <cite>weight</cite> dataset is greater than zero.</p></li>
+<li><p><strong>mask_day</strong> (<em>bool</em>) – Mask out daytime data prior to calculating the mean(median).
+Note that timestamps where the weight dataset is equal to zero will be excluded
+from the calculation regardless.</p></li>
+<li><p><strong>mask_ra</strong> (<em>list</em><em> of </em><em>two element lists</em>) – Only use data within these ranges of right ascension (in degrees) to calculate
+the mean(median).</p></li>
+<li><p><strong>mask_sources</strong> (<em>bool</em>) – Mask out the transit of bright sources prior to calculating the mean(median).
+The set of sources that are masked is determined by the <cite>flux_threshold</cite> and
+<cite>dec_threshold</cite> parameters, with values of 400 Jy and 5 deg masking out
+the big 4 (CygA, CasA, TauA, VirA).</p></li>
+<li><p><strong>flux_threshold</strong> (<em>float</em>) – Only mask sources with flux above this threshold in Jansky.</p></li>
+<li><p><strong>dec_threshold</strong> (<em>float</em>) – Only mask sources with declination above this threshold in degrees.</p></li>
+<li><p><strong>nsigma</strong> (<em>float</em>) – Mask this number of sigma on either side of the source transits.
+Here sigma is the expected width of the primary beam for an E-W
+polarisation antenna at 400 MHz as defined by
+<code class="xref py py-func docutils literal notranslate"><span class="pre">ch_util.cal_utils.guess_fwhm()</span></code>.</p></li>
+<li><p><strong>missing_threshold</strong> (<em>float</em>) – If less than this fraction of data remains within the regions included by the
+specified masks, then all the data is counted as missing (per baseline and
+frequency). Default is 0.0, i.e. this is not applied.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealMean.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealMean.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealMean.process" title="Link to this definition"></a></dt>
+<dd><p>Calculate the mean (median) over the sidereal day.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>sstream</strong> (<em>andata.CorrData</em><em>, </em><em>containers.TimeStream</em><em>, </em><em>containers.SiderealStream</em><em>,</em>) – containers.HybridVisStream, containers.RingMap</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mustream</strong> – Same type of container as the input but with a singleton time axis
+that contains the mean (or median) value.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>same as sstream</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealMean.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealMean.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealMean.setup" title="Link to this definition"></a></dt>
+<dd><p>Determine which sources will be masked, if any.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealRegridder">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">SiderealRegridder</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealRegridder"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealRegridder" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealRegridder</span></code></p>
+<p>SiderealRegridder that automatically uses the location of CHIME.</p>
+<p>See <cite>draco.analysis.sidereal.SiderealRegridder</cite> for extended documentation.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.SiderealRegridder.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#SiderealRegridder.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.SiderealRegridder.setup" title="Link to this definition"></a></dt>
+<dd><p>Setup the SiderealRegridder task.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>observer</strong> (<em>caput.time.Observer</em><em>, </em><em>optional</em>) – Details of the observer, if not set default to CHIME.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.WeatherGrouper">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">WeatherGrouper</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#WeatherGrouper"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.WeatherGrouper" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.analysis.sidereal.SiderealGrouper" title="ch_pipeline.analysis.sidereal.SiderealGrouper"><code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealGrouper</span></code></a></p>
+<p>Group Weather files together within the sidereal day.</p>
+<p>This is just a weather file specific version of <cite>SiderealGrouper</cite>.</p>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.sidereal.get_times">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.sidereal.</span></span><span class="sig-name descname"><span class="pre">get_times</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acq_files</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/sidereal.html#get_times"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.sidereal.get_times" title="Link to this definition"></a></dt>
+<dd><p>Extract the start and end times of a list of acquisition files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>acq_files</strong> (<em>list</em>) – List of filenames.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>times</strong> – Start and end times.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[nfiles, 2]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.mapmaker.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.mapmaker" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.analysis.solar.html" class="btn btn-neutral float-right" title="ch_pipeline.analysis.solar" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,712 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.telescope &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.processing" href="ch_pipeline.processing.html" />
+    <link rel="prev" title="ch_pipeline.core.pathfinder" href="ch_pipeline.core.pathfinder.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a><ul class="current">
+<li class="toctree-l4 current"><a class="reference internal" href="ch_pipeline.core.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.telescope</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.core.telescope.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.core.telescope">
+<span id="ch-pipeline-core-telescope"></span><h1>ch_pipeline.core.telescope<a class="headerlink" href="#module-ch_pipeline.core.telescope" title="Link to this heading"></a></h1>
+<p>Pathfinder/CHIME Telescope Model.</p>
+<p>A model for both CHIME and Pathfinder telescopes. This attempts to query the
+configuration db (<code class="xref py py-mod docutils literal notranslate"><span class="pre">configdb</span></code>) for the details of
+the feeds and their positions.</p>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.telescope.CHIME" title="ch_pipeline.core.telescope.CHIME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHIME</span></code></a>([feeds])</p></td>
+<td><p>Model telescope for the CHIME/Pathfinder.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.telescope.CHIMEExternalBeam" title="ch_pipeline.core.telescope.CHIMEExternalBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHIMEExternalBeam</span></code></a>([feeds])</p></td>
+<td><p>Model telescope for the CHIME.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.telescope.CHIMEFitBeam" title="ch_pipeline.core.telescope.CHIMEFitBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHIMEFitBeam</span></code></a>([feeds])</p></td>
+<td><p>Driftscan model with revised FWHM for north-south beam.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.telescope.CHIMEParameterizedBeam" title="ch_pipeline.core.telescope.CHIMEParameterizedBeam"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHIMEParameterizedBeam</span></code></a>([feeds])</p></td>
+<td><p>CHIME telescope that uses a parameterized fit to the driftscan beam.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.telescope.MakeTelescope" title="ch_pipeline.core.telescope.MakeTelescope"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MakeTelescope</span></code></a>()</p></td>
+<td><p>A simple task to construct a telescope object.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.telescope.</span></span><span class="sig-name descname"><span class="pre">CHIME</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feeds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">PolarisedTelescope</span></code></p>
+<p>Model telescope for the CHIME/Pathfinder.</p>
+<p>This class currently uses a simple Gaussian model for the primary beams.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.layout">
+<span class="sig-name descname"><span class="pre">layout</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.layout" title="Link to this definition"></a></dt>
+<dd><p>Specify which layout to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>datetime or int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.correlator">
+<span class="sig-name descname"><span class="pre">correlator</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.correlator" title="Link to this definition"></a></dt>
+<dd><p>Restrict to a specific correlator.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.skip_non_chime">
+<span class="sig-name descname"><span class="pre">skip_non_chime</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.skip_non_chime" title="Link to this definition"></a></dt>
+<dd><p>Ignore non CHIME feeds in the BeamTransfers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>boolean</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.read_local_layout">
+<span class="sig-name descname"><span class="pre">read_local_layout</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.read_local_layout" title="Link to this definition"></a></dt>
+<dd><p>Read in the layout of the CHIME telescope from a file, saved to this
+repository, rather than attempting to connect and read the layout from
+the database. Default is True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>boolean</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.stack_type">
+<span class="sig-name descname"><span class="pre">stack_type</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.stack_type" title="Link to this definition"></a></dt>
+<dd><p>Stacking type.
+<cite>redundant</cite>: feeds of same polarization have same beam class (default).
+<cite>redundant_cyl</cite>: feeds of same polarization and cylinder have same beam
+class.
+<cite>unique</cite>: Each feed has a unique beam class.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.use_pathfinder_freq">
+<span class="sig-name descname"><span class="pre">use_pathfinder_freq</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.use_pathfinder_freq" title="Link to this definition"></a></dt>
+<dd><p>Use the pathfinder channelization of 1024 frequencies between 400 and
+800 MHz.  Setting this to True also enables the specification of a
+subset of these frequencies through the four attributes below.  Default
+is True.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>boolean</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.channel_bin">
+<span class="sig-name descname"><span class="pre">channel_bin</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.channel_bin" title="Link to this definition"></a></dt>
+<dd><p>Number of channels to bin together. Must exactly divide the total
+number. Binning is performed prior to selection of any subset. Default
+is 1.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.freq_physical">
+<span class="sig-name descname"><span class="pre">freq_physical</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.freq_physical" title="Link to this definition"></a></dt>
+<dd><p>Select subset of frequencies using a list of physical frequencies in
+MHz. Finds the closests pathfinder channel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.channel_range">
+<span class="sig-name descname"><span class="pre">channel_range</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.channel_range" title="Link to this definition"></a></dt>
+<dd><p>Select subset of frequencies using a range of frequency channel indices,
+either [start, stop, step], [start, stop], or [stop] is acceptable.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.channel_index">
+<span class="sig-name descname"><span class="pre">channel_index</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.channel_index" title="Link to this definition"></a></dt>
+<dd><p>Select subset of frequencies using a list of frequency channel indices.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.input_sel">
+<span class="sig-name descname"><span class="pre">input_sel</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.input_sel" title="Link to this definition"></a></dt>
+<dd><p>Select a reduced set of feeds to use. Useful for generating small
+subsets of the data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.baseline_masking_type">
+<span class="sig-name descname"><span class="pre">baseline_masking_type</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.baseline_masking_type" title="Link to this definition"></a></dt>
+<dd><p>Select a subset of baselines.  <cite>total_length</cite> selects baselines according to
+their total length. Need to specify <cite>minlength</cite> and <cite>maxlength</cite> properties
+(defined in baseclass).  <cite>individual_length</cite> selects baselines according to
+their seperation in the North-South (specify <cite>minlength_ns</cite> and <cite>maxlength_ns</cite>)
+or the East-West (specify <cite>minlength_ew</cite> and <cite>maxlength_ew</cite>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>string, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">minlength_ns,</span> <span class="pre">maxlength_ns</span></span></dt>
+<dd><p>Minimum and maximum North-South baseline lengths to include (in metres)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">minlength_ew,</span> <span class="pre">maxlength_ew</span></span></dt>
+<dd><p>Minimum and maximum East-West baseline lengths to include (in metres)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.dec_normalized">
+<span class="sig-name descname"><span class="pre">dec_normalized</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.dec_normalized" title="Link to this definition"></a></dt>
+<dd><p>Normalize the beam by its magnitude at transit at this declination
+in degrees.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.skip_pol_pair">
+<span class="sig-name descname"><span class="pre">skip_pol_pair</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.skip_pol_pair" title="Link to this definition"></a></dt>
+<dd><p>List of antenna polarisation pairs to skip. Valid entries are “XX”, “XY”, “YX”
+or “YY”. Like the skipped frequencies these pol pairs will have entries
+generated but their beam transfer matrices are implicitly zero and thus not
+calculated.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialise a telescope object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>latitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+<li><p><strong>longitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.beam">
+<span class="sig-name descname"><span class="pre">beam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">freq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">angpos</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.beam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.beam" title="Link to this definition"></a></dt>
+<dd><p>Primary beam implementation for the CHIME/Pathfinder.</p>
+<p>This only supports normal CHIME cylinder antennas. Asking for the beams
+for other types of inputs will cause an exception to be thrown. The
+beams from this routine are rotated by <cite>self.rotation_angle</cite> to account
+for the CHIME/Pathfinder rotation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>feed</strong> (<em>int</em>) – Index for the feed.</p></li>
+<li><p><strong>freq</strong> (<em>int</em>) – Index for the frequency.</p></li>
+<li><p><strong>angpos</strong> (<em>np.ndarray</em><em>[</em><em>nposition</em><em>, </em><em>2</em><em>]</em><em>, </em><em>optional</em>) – Angular position on the sky (in radians).
+If not provided, default to the _angpos
+class attribute.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>beam</strong> – Amplitude vector of beam at each position on the sky.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[nposition, 2]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.beamclass">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">beamclass</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.beamclass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.beamclass" title="Link to this definition"></a></dt>
+<dd><p>Beam class definition for the CHIME/Pathfinder.</p>
+<p>When <cite>self.stack_type</cite> is <cite>redundant</cite>, the X-polarisation feeds get
+<cite>beamclass = 0</cite>, and the Y-polarisation gets <cite>beamclass = 1</cite>.
+When <cite>self.stack_type</cite> is <cite>redundant_cyl</cite>, feeds of same polarisation
+and cylinder have same beam class. The beam class is given by
+<cite>beamclass = 2*cyl + pol</cite> where <cite>cyl</cite> is the cylinder number according to
+<cite>ch_util.tools</cite> convention and <cite>pol</cite> is the polarisation (0 for X and 1
+for Y polarisation)
+When <cite>self.stack_type</cite> is <cite>unique</cite>, then the feeds are just given an
+increasing unique class.
+In all cases, any other type of feed gets set to <cite>-1</cite> and should be
+ignored.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.calculate_frequencies">
+<span class="sig-name descname"><span class="pre">calculate_frequencies</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.calculate_frequencies"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.calculate_frequencies" title="Link to this definition"></a></dt>
+<dd><p>Override default version support specifying by frequency channel number.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.feedpositions">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">feedpositions</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.feedpositions" title="Link to this definition"></a></dt>
+<dd><p>The set of feed positions on <em>all</em> cylinders.</p>
+<p>This is constructed for the given layout and includes all rotations of
+the cylinder axis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>feedpositions</strong> – The positions in the telescope plane of the receivers. Packed as
+[[u1, v1], [u2, v2], …].</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.feeds">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">feeds</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.feeds" title="Link to this definition"></a></dt>
+<dd><p>Return a description of the feeds as a list of <code class="xref py py-class docutils literal notranslate"><span class="pre">tools.CorrInput</span></code> instances.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.from_layout">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_layout</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">layout</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">read_local_layout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">correlator</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.from_layout"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.from_layout" title="Link to this definition"></a></dt>
+<dd><p>Create a CHIME/Pathfinder telescope description for the specified layout.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>layout</strong> (<em>integer</em><em> or </em><em>datetime</em>) – Layout id number (corresponding to one in database), or datetime</p></li>
+<li><p><strong>read_local_layout</strong> (<em>boolean</em><em>, </em><em>optional</em>) – Read the feed layout from a file saved to this repository, rather
+than connecting to the database. Default is True.</p></li>
+<li><p><strong>correlator</strong> (<em>string</em><em>, </em><em>optional</em>) – Name of the specific correlator. Needed to return a unique config
+in some cases.</p></li>
+<li><p><strong>skip</strong> (<em>boolean</em><em>, </em><em>optional</em>) – Whether to skip non-CHIME antennas. If False, leave them in but
+set them to infinite noise (unsupported at the moment).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>tel</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#ch_pipeline.core.telescope.CHIME" title="ch_pipeline.core.telescope.CHIME">CHIME</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.fwhm_ex">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fwhm_ex</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.fwhm_ex"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.fwhm_ex" title="Link to this definition"></a></dt>
+<dd><p>Full width half max of the E-plane antenna beam for X polarization.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.fwhm_ey">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fwhm_ey</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.fwhm_ey"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.fwhm_ey" title="Link to this definition"></a></dt>
+<dd><p>Full width half max of the E-plane antenna beam for Y polarization.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.fwhm_hx">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fwhm_hx</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.fwhm_hx"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.fwhm_hx" title="Link to this definition"></a></dt>
+<dd><p>Full width half max of the H-plane antenna beam for X polarization.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.fwhm_hy">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fwhm_hy</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.fwhm_hy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.fwhm_hy" title="Link to this definition"></a></dt>
+<dd><p>Full width half max of the H-plane antenna beam for Y polarization.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.input_index">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">input_index</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.input_index" title="Link to this definition"></a></dt>
+<dd><p>An index_map describing the inputs known to the telescope.</p>
+<p>Useful for generating synthetic datasets.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.polarisation">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">polarisation</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIME.polarisation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.polarisation" title="Link to this definition"></a></dt>
+<dd><p>Polarisation map.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>pol</strong> – One-dimensional array with the polarization for each feed (‘X’ or ‘Y’).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.rotation_angle">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">rotation_angle</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.rotation_angle" title="Link to this definition"></a></dt>
+<dd><p>Rotation from north towards west, in degrees.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.u_width">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">u_width</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.u_width" title="Link to this definition"></a></dt>
+<dd><p>The approximate physical width (in the u-direction) of the telescope.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIME.v_width">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">v_width</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIME.v_width" title="Link to this definition"></a></dt>
+<dd><p>The approximate physical length (in the v-direction) of the telescope.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEExternalBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.telescope.</span></span><span class="sig-name descname"><span class="pre">CHIMEExternalBeam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feeds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIMEExternalBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEExternalBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.core.telescope.CHIME" title="ch_pipeline.core.telescope.CHIME"><code class="xref py py-class docutils literal notranslate"><span class="pre">CHIME</span></code></a></p>
+<p>Model telescope for the CHIME.</p>
+<p>This class uses an external beam model that is read in from a file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEExternalBeam.primary_beam_filename">
+<span class="sig-name descname"><span class="pre">primary_beam_filename</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEExternalBeam.primary_beam_filename" title="Link to this definition"></a></dt>
+<dd><p>Path to the file containing the primary beam. Can either be a Healpix beam or a
+GridBeam.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEExternalBeam.freq_interp_beam">
+<span class="sig-name descname"><span class="pre">freq_interp_beam</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEExternalBeam.freq_interp_beam" title="Link to this definition"></a></dt>
+<dd><p>Interpolate between neighbouring frequencies if we don’t have a beam for every
+frequency channel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEExternalBeam.force_real_beam">
+<span class="sig-name descname"><span class="pre">force_real_beam</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEExternalBeam.force_real_beam" title="Link to this definition"></a></dt>
+<dd><p>Ensure the output beam is real, regardless of what the datatype of the beam file
+is. This can help save memory if the saved beam is complex but you know the
+imaginary part is zero.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool, optional</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialise a telescope object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>latitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+<li><p><strong>longitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEExternalBeam.beam">
+<span class="sig-name descname"><span class="pre">beam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">freq_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIMEExternalBeam.beam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEExternalBeam.beam" title="Link to this definition"></a></dt>
+<dd><p>Get the beam pattern.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>feed</strong> (<em>int</em>) – Feed index.</p></li>
+<li><p><strong>freq_id</strong> (<em>int</em>) – Frequency ID.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>beam</strong> – Return the vector beam response at each point in the Healpix grid. This
+array is of type <cite>np.float64</cite> if the input beam pattern is real, of
+<cite>force_real_beam</cite> is set, otherwise is is on type <cite>np.complex128</cite>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[pixel, pol]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEFitBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.telescope.</span></span><span class="sig-name descname"><span class="pre">CHIMEFitBeam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feeds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIMEFitBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEFitBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.core.telescope.CHIME" title="ch_pipeline.core.telescope.CHIME"><code class="xref py py-class docutils literal notranslate"><span class="pre">CHIME</span></code></a></p>
+<p>Driftscan model with revised FWHM for north-south beam.</p>
+<p>Point source beam model was fit to a flat Gaussian at each frequency.
+Best-fit FWHM as a function of frequency was fit with a cubic
+polynomial. This class revises coefficients of FWHM from the
+fit. Detailed comparisons are documented in:
+<a class="reference external" href="https://bao.chimenet.ca/doc/documents/1448">https://bao.chimenet.ca/doc/documents/1448</a></p>
+<p>Note that the optimization was carried out in 585-800 MHz.
+This model will produce large extrapolation errors if used below that.</p>
+<p>Initialise a telescope object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>latitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+<li><p><strong>longitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEParameterizedBeam">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.telescope.</span></span><span class="sig-name descname"><span class="pre">CHIMEParameterizedBeam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feeds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIMEParameterizedBeam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEParameterizedBeam" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.core.telescope.CHIME" title="ch_pipeline.core.telescope.CHIME"><code class="xref py py-class docutils literal notranslate"><span class="pre">CHIME</span></code></a></p>
+<p>CHIME telescope that uses a parameterized fit to the driftscan beam.</p>
+<p>This speeds up evaluation of the beam model.</p>
+<p>Initialise a telescope object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>latitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+<li><p><strong>longitude</strong> (<em>scalar</em>) – Position on the Earths surface of the telescope (in degrees).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEParameterizedBeam.PARAM_NS">
+<span class="sig-name descname"><span class="pre">PARAM_NS</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">array([[0.99798177,</span> <span class="pre">1.29544939,</span> <span class="pre">0.</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">],</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">[0.98642105,</span> <span class="pre">0.81021333,</span> <span class="pre">0.</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">]])</span></em><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEParameterizedBeam.PARAM_NS" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.CHIMEParameterizedBeam.beam">
+<span class="sig-name descname"><span class="pre">beam</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feed</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">freq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">angpos</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#CHIMEParameterizedBeam.beam"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.CHIMEParameterizedBeam.beam" title="Link to this definition"></a></dt>
+<dd><p>Parameterized fit to driftscan cylinder beam model for CHIME telescope.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>feed</strong> (<em>int</em>) – Index for the feed.</p></li>
+<li><p><strong>freq</strong> (<em>int</em>) – Index for the frequency.</p></li>
+<li><p><strong>angpos</strong> (<em>np.ndarray</em><em>[</em><em>nposition</em><em>, </em><em>2</em><em>]</em><em>, </em><em>optional</em>) – Angular position on the sky (in radians).
+If not provided, default to the _angpos
+class attribute.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>beam</strong> – Amplitude vector of beam at each position on the sky.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray[nposition, 2]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.MakeTelescope">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.telescope.</span></span><span class="sig-name descname"><span class="pre">MakeTelescope</span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#MakeTelescope"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.MakeTelescope" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/MPILoggedTask.html#caput.pipeline.tasklib.base.MPILoggedTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">MPILoggedTask</span></code></a></p>
+<p>A simple task to construct a telescope object.</p>
+<p>This removes the need to use driftscan to create a saved beam transfer manager
+solely for running pipelines that only need the telescope object.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.MakeTelescope.telescope_type">
+<span class="sig-name descname"><span class="pre">telescope_type</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.MakeTelescope.telescope_type" title="Link to this definition"></a></dt>
+<dd><p>The type of telescope object to create. Generally this must be a fully qualified
+Python class name, however, &quot;chime&quot; (default) can be used to create a
+<cite>ch_pipeline.core.telescope.CHIME</cite> instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.MakeTelescope.telescope_config">
+<span class="sig-name descname"><span class="pre">telescope_config</span></span><a class="headerlink" href="#ch_pipeline.core.telescope.MakeTelescope.telescope_config" title="Link to this definition"></a></dt>
+<dd><p>Configuration passed straight to the telescope class via it’s <cite>from_config</cite>
+method.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.telescope.MakeTelescope.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">TransitTelescope</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/telescope.html#MakeTelescope.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.telescope.MakeTelescope.setup" title="Link to this definition"></a></dt>
+<dd><p>Create and return the telescope object.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.core.pathfinder.html" class="btn btn-neutral float-left" title="ch_pipeline.core.pathfinder" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.processing.html" class="btn btn-neutral float-right" title="ch_pipeline.processing" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

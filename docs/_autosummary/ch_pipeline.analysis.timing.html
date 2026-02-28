@@ -1,0 +1,270 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.timing &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.core" href="ch_pipeline.core.html" />
+    <link rel="prev" title="ch_pipeline.analysis.source_removal" href="ch_pipeline.analysis.source_removal.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.beam.html">ch_pipeline.analysis.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.calibration.html">ch_pipeline.analysis.calibration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.flagging.html">ch_pipeline.analysis.flagging</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.fringestop.html">ch_pipeline.analysis.fringestop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.mapmaker.html">ch_pipeline.analysis.mapmaker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.sidereal.html">ch_pipeline.analysis.sidereal</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.solar.html">ch_pipeline.analysis.solar</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.analysis.source_removal.html">ch_pipeline.analysis.source_removal</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.analysis.timing</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.timing</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.analysis.timing.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.analysis.timing">
+<span id="ch-pipeline-analysis-timing"></span><h1>ch_pipeline.analysis.timing<a class="headerlink" href="#module-ch_pipeline.analysis.timing" title="Link to this heading"></a></h1>
+<p>Tasks for constructing timing corrections and applying them to data.</p>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.analysis.timing.ApplyTimingCorrection" title="ch_pipeline.analysis.timing.ApplyTimingCorrection"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ApplyTimingCorrection</span></code></a>()</p></td>
+<td><p>Apply a timing correction to the visibilities.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.analysis.timing.ConstructTimingCorrection" title="ch_pipeline.analysis.timing.ConstructTimingCorrection"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConstructTimingCorrection</span></code></a>()</p></td>
+<td><p>Generate a timing correction from the cross correlation of noise source inputs.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ApplyTimingCorrection">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.timing.</span></span><span class="sig-name descname"><span class="pre">ApplyTimingCorrection</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ApplyTimingCorrection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ApplyTimingCorrection" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Apply a timing correction to the visibilities.</p>
+<p>Only runs on days flagged by needs_timing_correction.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>use_input_flags</strong> (<em>bool</em>) – Account for bad inputs when determining a stacked timing correction.
+Takes roughly twice as long.</p></li>
+<li><p><strong>refer_to_transit</strong> (<em>bool</em>) – Reference the timing correction to the time of source transit.
+Useful for applying the timing correction to holography data that has
+already been calibrated to have zero phase at transit.</p></li>
+<li><p><strong>transit_window</strong> (<em>float</em>) – Reference the timing correction to the median value over a window (in seconds)
+around the time of source transit.</p></li>
+<li><p><strong>pass_if_missing</strong> (<em>bool</em><em> (</em><em>default False</em><em>)</em>) – If a timing correction cannot be found for the time range do not raise an exception
+and just pass the data on.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ApplyTimingCorrection.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tstream</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ApplyTimingCorrection.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ApplyTimingCorrection.process" title="Link to this definition"></a></dt>
+<dd><p>Apply the timing correction to the input timestream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tstream</strong> (<em>andata.CorrData</em><em>, </em><em>containers.TimeStream</em><em>, or </em><em>containers.SiderealStream</em>) – Apply the timing correction to the visibilities stored in this container.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>tstream_corr</strong> – Timestream with corrected visibilities.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>same as <cite>tstream</cite></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ApplyTimingCorrection.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tcorr</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ApplyTimingCorrection.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ApplyTimingCorrection.setup" title="Link to this definition"></a></dt>
+<dd><p>Set the timing correction to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tcorr</strong> (<em>ch_util.timing.TimingCorrection</em><em> or </em><em>list of</em>) – Timing correction that is relevant for the range of time being processed.
+Note that the timing correction must <em>already</em> be referenced with respect
+to the times that were used to calibrate if processing stacked data.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ConstructTimingCorrection">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.analysis.timing.</span></span><span class="sig-name descname"><span class="pre">ConstructTimingCorrection</span></span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ConstructTimingCorrection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ConstructTimingCorrection" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/tasklib/base/ContainerTask.html#caput.pipeline.tasklib.base.ContainerTask" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerTask</span></code></a></p>
+<p>Generate a timing correction from the cross correlation of noise source inputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>min_frac_kept</strong> (<em>float</em>) – Do not include frequencies and times where the fraction
+of data that remains is less than this threshold.</p></li>
+<li><p><strong>threshold</strong> (<em>float</em>) – A (frequency, input) must pass the checks specified above
+more than this fraction of the time,  otherwise it will be
+flaged as bad for all times.</p></li>
+<li><p><strong>min_freq</strong> (<em>float</em>) – Minimum frequency in MHz to include in the fit.</p></li>
+<li><p><strong>max_freq</strong> (<em>float</em>) – Maximum frequency in MHz to include in the fit.</p></li>
+<li><p><strong>mask_rfi</strong> (<em>bool</em>) – Mask frequencies that occur within known RFI bands.  Note that the
+noise source data does not contain RFI, however the real-time pipeline
+does not distinguish between noise source inputs and sky inputs, and as
+a result will discard large amounts of data in these bands.</p></li>
+<li><p><strong>max_iter_weight</strong> (<em>int</em>) – The weight for each frequency is estimated from the variance of the
+residuals of the template fit from the previous iteration.  Outliers
+are also flagged at each iteration with an increasingly aggresive threshold.
+This is the total number of times to iterate.  Setting to 1 corresponds
+to linear least squares.  Default is 1, unless check_amp or check_phi is True,
+in which case this defaults to the maximum number of thresholds provided.</p></li>
+<li><p><strong>check_amp</strong> (<em>bool</em>) – Do not fit frequencies and times where the residual amplitude is an outlier.</p></li>
+<li><p><strong>nsigma_amp</strong> (<em>list</em><em> of </em><em>float</em>) – If check_amp is True, then residuals greater than this number of sigma
+will be considered an outlier.  Provide a list containing the value to be used
+at each iteration.  If the length of the list is less than max_iter_weight,
+then the last value in the list will be repeated for the remaining iterations.</p></li>
+<li><p><strong>check_phi</strong> (<em>bool</em>) – Do not fit frequencies and times where the residual phase is an outlier.</p></li>
+<li><p><strong>nsigma_phi</strong> (<em>list</em><em> of </em><em>float</em>) – If check_phi is True, then residuals greater than this number of sigma
+will be considered an outlier.  Provide a list containing the value to be used
+at each iteration.  If the length of the list is less than max_iter_weight,
+then the last value in the list will be repeated for the remaining iterations.</p></li>
+<li><p><strong>input_sel</strong> (<em>list</em>) – Generate the timing correction from inputs with these chan_id’s.</p></li>
+<li><p><strong>output_suffix</strong> (<em>str</em>) – The suffix to append to the end of the name of the output files.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Initialize pipeline task.</p>
+<p>May be overridden with no arguments.  Will be called after any
+<a class="reference external" href="https://caput.readthedocs.io/en/latest/autoapi/caput/config/Property.html#caput.config.Property" title="(in caput v26.2.1.post3+git.90f7a360)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Property</span></code></a> attributes are set and after
+<code class="docutils literal notranslate"><span class="pre">input</span></code> and <code class="docutils literal notranslate"><span class="pre">requires</span></code> keys are set up.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ConstructTimingCorrection.process">
+<span class="sig-name descname"><span class="pre">process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filelist</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ConstructTimingCorrection.process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ConstructTimingCorrection.process" title="Link to this definition"></a></dt>
+<dd><p>Generate timing correction from an input list of files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filelist</strong> (<em>list</em><em> of </em><em>files</em>) – Path to file(s) containing the timing data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>tcorr</strong> – Timing correction derived from noise source data.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ch_util.timing.TimingCorrection</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.analysis.timing.ConstructTimingCorrection.setup">
+<span class="sig-name descname"><span class="pre">setup</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/analysis/timing.html#ConstructTimingCorrection.setup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.analysis.timing.ConstructTimingCorrection.setup" title="Link to this definition"></a></dt>
+<dd><p>Get ready to generate timing corrections.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.analysis.source_removal.html" class="btn btn-neutral float-left" title="ch_pipeline.analysis.source_removal" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.core.html" class="btn btn-neutral float-right" title="ch_pipeline.core" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

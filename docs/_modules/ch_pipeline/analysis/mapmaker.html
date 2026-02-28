@@ -1,0 +1,419 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.mapmaker &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.mapmaker</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.analysis.mapmaker</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Map making tasks.</span>
+
+<span class="sd">Tools for making maps from CHIME data.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">scipy.constants</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">io</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">tools</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">..core</span><span class="w"> </span><span class="kn">import</span> <span class="n">containers</span>
+
+
+<div class="viewcode-block" id="RingMapMaker">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.mapmaker.html#ch_pipeline.analysis.mapmaker.RingMapMaker">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">RingMapMaker</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A simple and quick map-maker that forms a series of beams on the meridian.</span>
+
+<span class="sd">    This is designed to run on data after it has been collapsed down to</span>
+<span class="sd">    non-redundant baselines only.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    npix : int</span>
+<span class="sd">        Number of map pixels in the declination dimension.  Default is 512.</span>
+
+<span class="sd">    span : float</span>
+<span class="sd">        Span of map in the declination dimension. Value of 1.0 generates a map</span>
+<span class="sd">        that spans from horizon-to-horizon.  Default is 1.0.</span>
+
+<span class="sd">    weight : string (&#39;natural&#39;, &#39;uniform&#39;, or &#39;inverse_variance&#39;)</span>
+<span class="sd">        How to weight the non-redundant baselines:</span>
+<span class="sd">            &#39;natural&#39; - each baseline weighted by its redundancy (default)</span>
+<span class="sd">            &#39;uniform&#39; - each baseline given equal weight</span>
+<span class="sd">            &#39;inverse_variance&#39; - each baseline weighted by the weight attribute</span>
+
+<span class="sd">    exclude_intracyl : bool</span>
+<span class="sd">        Exclude intracylinder baselines from the calculation.  Default is False.</span>
+
+<span class="sd">    include_auto: bool</span>
+<span class="sd">        Include autocorrelations in the calculation.  Default is False.</span>
+
+<span class="sd">    single_beam: bool</span>
+<span class="sd">        Only calculate the map for the central beam. Default is False.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">npix</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">512</span><span class="p">)</span>
+    <span class="n">span</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">weight</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;natural&quot;</span><span class="p">)</span>
+    <span class="n">exclude_intracyl</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">include_auto</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">single_beam</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="RingMapMaker.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.mapmaker.html#ch_pipeline.analysis.mapmaker.RingMapMaker.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tel</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the Telescope instance to use.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tel : TransitTelescope</span>
+<span class="sd">            telescope/observer object</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;This task is deprecated.  Please use &quot;</span>
+            <span class="s2">&quot;draco.analysis.ringmapmaker.RingMapMaker instead.&quot;</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;natural&quot;</span><span class="p">,</span> <span class="s2">&quot;uniform&quot;</span><span class="p">,</span> <span class="s2">&quot;inverse_variance&quot;</span><span class="p">]:</span>
+            <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Do not recognize weight = </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">weight</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">telescope</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">get_telescope</span><span class="p">(</span><span class="n">tel</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RingMapMaker.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.mapmaker.html#ch_pipeline.analysis.mapmaker.RingMapMaker.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Computes the ringmap.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : containers.SiderealStream</span>
+<span class="sd">            The input sidereal stream.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        rm : containers.RingMap</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Redistribute over frequency</span>
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">nfreq</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># Extract the right ascension (or calculate from timestamp)</span>
+        <span class="n">ra</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">sstream</span><span class="o">.</span><span class="n">ra</span> <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span> <span class="k">else</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsa</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">time</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">nra</span> <span class="o">=</span> <span class="n">ra</span><span class="o">.</span><span class="n">size</span>
+
+        <span class="c1"># Construct mapping from vis array to unpacked 2D grid</span>
+        <span class="n">nprod</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">prodstack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">pind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">nprod</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">xind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">nprod</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">ysep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">nprod</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">pp</span><span class="p">,</span> <span class="p">(</span><span class="n">ii</span><span class="p">,</span> <span class="n">jj</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">prodstack</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope</span><span class="o">.</span><span class="n">feedconj</span><span class="p">[</span><span class="n">ii</span><span class="p">,</span> <span class="n">jj</span><span class="p">]:</span>
+                <span class="n">ii</span><span class="p">,</span> <span class="n">jj</span> <span class="o">=</span> <span class="n">jj</span><span class="p">,</span> <span class="n">ii</span>
+
+            <span class="n">fi</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span>
+            <span class="n">fj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">telescope</span><span class="o">.</span><span class="n">feeds</span><span class="p">[</span><span class="n">jj</span><span class="p">]</span>
+
+            <span class="n">pind</span><span class="p">[</span><span class="n">pp</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="nb">int</span><span class="p">(</span><span class="n">fi</span><span class="o">.</span><span class="n">pol</span> <span class="o">==</span> <span class="s2">&quot;S&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">fj</span><span class="o">.</span><span class="n">pol</span> <span class="o">==</span> <span class="s2">&quot;S&quot;</span><span class="p">)</span>
+            <span class="n">xind</span><span class="p">[</span><span class="n">pp</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">fi</span><span class="o">.</span><span class="n">cyl</span> <span class="o">-</span> <span class="n">fj</span><span class="o">.</span><span class="n">cyl</span><span class="p">)</span>
+
+            <span class="c1"># TODO: don&#39;t use this internal property. This can probably wait</span>
+            <span class="c1"># until the RingMapMaker gets completely moved into draco</span>
+            <span class="n">ysep</span><span class="p">[</span><span class="n">pp</span><span class="p">]</span> <span class="o">=</span> <span class="n">fi</span><span class="o">.</span><span class="n">_pos</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">fj</span><span class="o">.</span><span class="n">_pos</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">abs_ysep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">ysep</span><span class="p">)</span>
+        <span class="n">min_ysep</span><span class="p">,</span> <span class="n">max_ysep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">abs_ysep</span><span class="p">[</span><span class="n">abs_ysep</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">])</span>
+
+        <span class="n">yind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">ysep</span> <span class="o">/</span> <span class="n">min_ysep</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+
+        <span class="n">grid_index</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">pind</span><span class="p">,</span> <span class="n">xind</span><span class="p">,</span> <span class="n">yind</span><span class="p">))</span>
+
+        <span class="c1"># Define several variables describing the baseline configuration.</span>
+        <span class="n">nfeed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">max_ysep</span> <span class="o">/</span> <span class="n">min_ysep</span><span class="p">))</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">nvis_1d</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">nfeed</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">ncyl</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">xind</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">nbeam</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">single_beam</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">ncyl</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Define polarisation axis</span>
+        <span class="n">pol</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;XX&quot;</span><span class="p">,</span> <span class="s2">&quot;reXY&quot;</span><span class="p">,</span> <span class="s2">&quot;imXY&quot;</span><span class="p">,</span> <span class="s2">&quot;YY&quot;</span><span class="p">])</span>
+        <span class="n">npol</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pol</span><span class="p">)</span>
+
+        <span class="c1"># Create empty array for output</span>
+        <span class="n">vis</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">ncyl</span><span class="p">,</span> <span class="n">nvis_1d</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+        <span class="n">invvar</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">ncyl</span><span class="p">,</span> <span class="n">nvis_1d</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+        <span class="n">weight</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">ncyl</span><span class="p">,</span> <span class="n">nvis_1d</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+
+        <span class="c1"># If natural or uniform weighting was chosen, then calculate the</span>
+        <span class="c1"># redundancy of the collated visibilities.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">!=</span> <span class="s2">&quot;inverse_variance&quot;</span><span class="p">:</span>
+            <span class="n">redundancy</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">calculate_redundancy</span><span class="p">(</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">input_flags</span><span class="p">[:],</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:],</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">][</span><span class="s2">&quot;stack&quot;</span><span class="p">][:],</span>
+                <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">==</span> <span class="s2">&quot;uniform&quot;</span><span class="p">:</span>
+                <span class="n">redundancy</span> <span class="o">=</span> <span class="p">(</span><span class="n">redundancy</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># De-reference distributed arrays outside loop to save repeated MPI calls</span>
+        <span class="n">ssv</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span>
+        <span class="n">ssw</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span>
+
+        <span class="c1"># Unpack visibilities into new array</span>
+        <span class="k">for</span> <span class="n">vis_ind</span><span class="p">,</span> <span class="p">(</span><span class="n">p_ind</span><span class="p">,</span> <span class="n">x_ind</span><span class="p">,</span> <span class="n">y_ind</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">grid_index</span><span class="p">):</span>
+            <span class="c1"># Handle different options for weighting baselines</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">==</span> <span class="s2">&quot;inverse_variance&quot;</span><span class="p">:</span>
+                <span class="n">w</span> <span class="o">=</span> <span class="n">ssw</span><span class="p">[:,</span> <span class="n">vis_ind</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">w</span> <span class="o">=</span> <span class="p">(</span><span class="n">ssw</span><span class="p">[:,</span> <span class="n">vis_ind</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+                <span class="n">w</span> <span class="o">*=</span> <span class="n">redundancy</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">vis_ind</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">x_ind</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">or</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_intracyl</span><span class="p">:</span>
+                <span class="n">vis</span><span class="p">[:,</span> <span class="n">p_ind</span><span class="p">,</span> <span class="p">:,</span> <span class="n">x_ind</span><span class="p">,</span> <span class="n">y_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">ssv</span><span class="p">[:,</span> <span class="n">vis_ind</span><span class="p">]</span>
+                <span class="n">invvar</span><span class="p">[:,</span> <span class="n">p_ind</span><span class="p">,</span> <span class="p">:,</span> <span class="n">x_ind</span><span class="p">,</span> <span class="n">y_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">ssw</span><span class="p">[:,</span> <span class="n">vis_ind</span><span class="p">]</span>
+                <span class="n">weight</span><span class="p">[:,</span> <span class="n">p_ind</span><span class="p">,</span> <span class="p">:,</span> <span class="n">x_ind</span><span class="p">,</span> <span class="n">y_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">w</span>
+
+        <span class="c1"># Remove auto-correlations</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">include_auto</span><span class="p">:</span>
+            <span class="n">weight</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="c1"># Autos get double-counted at the end</span>
+        <span class="n">weight</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>
+
+        <span class="c1"># Normalize the weighting function</span>
+        <span class="c1"># Multiply by 2 here to count negative baselines</span>
+        <span class="n">norm</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">weight</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">weight</span> <span class="o">*=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">norm</span><span class="p">)[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+
+        <span class="c1"># Construct phase array</span>
+        <span class="n">el</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">span</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">npix</span><span class="p">)</span>
+
+        <span class="n">vis_pos_1d</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">fftfreq</span><span class="p">(</span><span class="n">nvis_1d</span><span class="p">,</span> <span class="n">d</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="n">nvis_1d</span> <span class="o">*</span> <span class="n">min_ysep</span><span class="p">)))</span>
+
+        <span class="c1"># Create empty ring map</span>
+        <span class="n">rm</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">RingMap</span><span class="p">(</span>
+            <span class="n">beam</span><span class="o">=</span><span class="n">nbeam</span><span class="p">,</span> <span class="n">el</span><span class="o">=</span><span class="n">el</span><span class="p">,</span> <span class="n">pol</span><span class="o">=</span><span class="n">pol</span><span class="p">,</span> <span class="n">ra</span><span class="o">=</span><span class="n">ra</span><span class="p">,</span> <span class="n">axes_from</span><span class="o">=</span><span class="n">sstream</span><span class="p">,</span> <span class="n">attrs_from</span><span class="o">=</span><span class="n">sstream</span>
+        <span class="p">)</span>
+        <span class="c1"># Add datasets</span>
+        <span class="n">rm</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;rms&quot;</span><span class="p">)</span>
+        <span class="n">rm</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;dirty_beam&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Make sure ring map is distributed over frequency</span>
+        <span class="n">rm</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Estimate rms noise in the ring map by propagating estimates</span>
+        <span class="c1"># of the variance in the visibilities</span>
+        <span class="n">rm</span><span class="o">.</span><span class="n">rms</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span>
+            <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">invvar</span><span class="p">)</span> <span class="o">*</span> <span class="n">weight</span><span class="o">**</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="c1"># Dereference datasets</span>
+        <span class="n">rmm</span> <span class="o">=</span> <span class="n">rm</span><span class="o">.</span><span class="n">map</span><span class="p">[:]</span>
+        <span class="n">rmb</span> <span class="o">=</span> <span class="n">rm</span><span class="o">.</span><span class="n">dirty_beam</span><span class="p">[:]</span>
+
+        <span class="c1"># Pre-allocate arrays that will be reused inside loop</span>
+        <span class="n">save_nb</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">single_beam</span> <span class="k">else</span> <span class="n">nbeam</span>
+        <span class="n">pa</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">vis_pos_1d</span><span class="o">.</span><span class="n">shape</span> <span class="o">+</span> <span class="n">el</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vis</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">bfm_y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">ncyl</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vis</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">sb_y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">ncyl</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vis</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">bfm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">save_nb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vis</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">sb</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">npol</span><span class="p">,</span> <span class="n">nra</span><span class="p">,</span> <span class="n">save_nb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">npix</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">vis</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+
+        <span class="c1"># Loop over local frequencies and fill ring map</span>
+        <span class="k">for</span> <span class="n">lfi</span><span class="p">,</span> <span class="n">fi</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">enumerate</span><span class="p">(</span><span class="mi">0</span><span class="p">):</span>
+            <span class="c1"># Get the current frequency and wavelength</span>
+            <span class="n">fr</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span>
+
+            <span class="n">wv</span> <span class="o">=</span> <span class="n">scipy</span><span class="o">.</span><span class="n">constants</span><span class="o">.</span><span class="n">c</span> <span class="o">*</span> <span class="mf">1e-6</span> <span class="o">/</span> <span class="n">fr</span>
+
+            <span class="c1"># Inverse discrete Fourier transform in y-direction</span>
+            <span class="n">pa</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span>
+                <span class="p">(</span><span class="o">-</span><span class="mf">2.0</span><span class="n">j</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="n">wv</span> <span class="o">*</span> <span class="n">vis_pos_1d</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">])</span> <span class="o">*</span> <span class="n">el</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Perform inverse discrete fourier transform in y-direction</span>
+            <span class="c1"># and inverse fast fourier transform in x-direction</span>
+            <span class="n">bfm_y</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">weight</span><span class="p">[</span><span class="n">lfi</span><span class="p">]</span> <span class="o">*</span> <span class="n">vis</span><span class="p">[</span><span class="n">lfi</span><span class="p">],</span> <span class="n">pa</span><span class="p">)</span>
+            <span class="n">sb_y</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">weight</span><span class="p">[</span><span class="n">lfi</span><span class="p">],</span> <span class="n">pa</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">single_beam</span><span class="p">:</span>
+                <span class="c1"># Only need the 0th term if the irfft, equivalent to adding in EW</span>
+                <span class="c1"># direction</span>
+                <span class="n">bfm</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">bfm_y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">)[:,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+                <span class="n">sb</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">sb_y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">)[:,</span> <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">bfm</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">ifft</span><span class="p">(</span><span class="n">bfm_y</span><span class="p">,</span> <span class="n">nbeam</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">nbeam</span>
+                <span class="n">sb</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">ifft</span><span class="p">(</span><span class="n">sb_y</span><span class="p">,</span> <span class="n">nbeam</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">nbeam</span>
+
+            <span class="c1"># Save to container (shifting to the final axis ordering)</span>
+            <span class="c1"># for co-pol we take twice the real part</span>
+            <span class="c1"># to complete sum over negative baselines</span>
+            <span class="n">copol_ind</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+            <span class="n">rmm</span><span class="p">[:,</span> <span class="n">copol_ind</span><span class="p">,</span> <span class="n">lfi</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">bfm</span><span class="p">[</span><span class="n">copol_ind</span><span class="p">]</span><span class="o">.</span><span class="n">real</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="n">rmb</span><span class="p">[:,</span> <span class="n">copol_ind</span><span class="p">,</span> <span class="n">lfi</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">sb</span><span class="p">[</span><span class="n">copol_ind</span><span class="p">]</span><span class="o">.</span><span class="n">real</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="c1"># for cross-pol we save real and imaginary parts of complex map formed</span>
+            <span class="c1"># by combining positive and negative baselines (which are in the other index)</span>
+            <span class="n">xpol_ind</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+            <span class="n">rmm</span><span class="p">[:,</span> <span class="n">xpol_ind</span><span class="p">,</span> <span class="n">lfi</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="p">(</span><span class="n">bfm</span><span class="p">[</span><span class="n">xpol_ind</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">+</span> <span class="n">bfm</span><span class="p">[</span><span class="n">xpol_ind</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">conj</span><span class="p">())</span>
+                <span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="s2">&quot;(2,)float&quot;</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="n">rmb</span><span class="p">[:,</span> <span class="n">xpol_ind</span><span class="p">,</span> <span class="n">lfi</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="p">(</span><span class="n">sb</span><span class="p">[</span><span class="n">xpol_ind</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">+</span> <span class="n">sb</span><span class="p">[</span><span class="n">xpol_ind</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">conj</span><span class="p">())</span>
+                <span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="s2">&quot;(2,)float&quot;</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">rm</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="ConvertRingMap">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.mapmaker.html#ch_pipeline.analysis.mapmaker.ConvertRingMap">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ConvertRingMap</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Covert a ch_pipeline RingMap to a draco RingMap.</span>
+
+<span class="sd">    The ch_pipeline RingMap container has an rms dataset instead of</span>
+<span class="sd">    a weight dataset. This task converts rms to weight and stores the</span>
+<span class="sd">    result in a draco RingMap container.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="ConvertRingMap.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.mapmaker.html#ch_pipeline.analysis.mapmaker.ConvertRingMap.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rmap_in</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Convert a ch_pipline RingMap to a draco RingMap.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        rmap_in : ch_pipeline.core.containers.RingMap</span>
+<span class="sd">            input map to convert</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        rmap_out : draco.core.containers.RingMap</span>
+<span class="sd">            converted ringmap.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">draco.core.containers</span><span class="w"> </span><span class="kn">import</span> <span class="n">RingMap</span>
+
+        <span class="n">rmap_in</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="n">rmap_out</span> <span class="o">=</span> <span class="n">RingMap</span><span class="p">(</span>
+            <span class="n">axes_from</span><span class="o">=</span><span class="n">rmap_in</span><span class="p">,</span>
+            <span class="n">attrs_from</span><span class="o">=</span><span class="n">rmap_in</span><span class="p">,</span>
+            <span class="n">distributed</span><span class="o">=</span><span class="n">rmap_in</span><span class="o">.</span><span class="n">distributed</span><span class="p">,</span>
+            <span class="n">comm</span><span class="o">=</span><span class="n">rmap_in</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">rmap_out</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="n">rmap_out</span><span class="o">.</span><span class="n">map</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">rmap_in</span><span class="o">.</span><span class="n">map</span><span class="p">[:]</span>
+        <span class="n">rmap_out</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">rmap_in</span><span class="o">.</span><span class="n">rms</span><span class="p">[:][</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s2">&quot;dirty_beam&quot;</span> <span class="ow">in</span> <span class="n">rmap_in</span><span class="o">.</span><span class="n">datasets</span><span class="p">:</span>
+            <span class="n">rmap_out</span><span class="o">.</span><span class="n">add_dataset</span><span class="p">(</span><span class="s2">&quot;dirty_beam&quot;</span><span class="p">)</span>
+            <span class="n">rmap_out</span><span class="o">.</span><span class="n">dirty_beam</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">rmap_in</span><span class="o">.</span><span class="n">dirty_beam</span><span class="p">[:]</span>
+
+        <span class="k">return</span> <span class="n">rmap_out</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
