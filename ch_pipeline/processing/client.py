@@ -303,7 +303,8 @@ def update_files(revision, clear, retrieve):
         "running, successful, failed"
     ),
 )
-def status(revision, user, verbose, time, category):
+@click.option("--json", is_flag=True, help="Dump json representation of status info.")
+def status(revision, user, verbose, time, category, json):
     """Show metrics about currently running jobs for REVISION.
 
     Given as (type:revision)
@@ -319,13 +320,21 @@ def status(revision, user, verbose, time, category):
     else:
         category = tag_status.keys()
 
-    click.echo(f"fairshare: {fs[0]}")
-    for c in category:
-        tags = tag_status[c]
-        click.echo(f"{c}: {len(tags)}")
-        if verbose:
-            for tag in tags:
-                click.echo(tag)
+    if json:
+        import json
+
+        status = {c: k for c, k in tag_status.items() if c in category}
+        status["fairshare"] = fs[0]
+
+        click.echo(json.dumps(status, indent=4))
+    else:
+        click.echo(f"fairshare: {fs[0]}")
+        for c in category:
+            tags = tag_status[c]
+            click.echo(f"{c}: {len(tags)}")
+            if verbose:
+                for tag in tags:
+                    click.echo(tag)
 
 
 @item.command("failed")
@@ -343,19 +352,25 @@ def status(revision, user, verbose, time, category):
     is_flag=True,
 )
 @click.option("-t", "--time", is_flag=True)
-def crashed(revision, user, verbose, time):
+@click.option("--json", is_flag=True, help="Dump json representation of crashed tags.")
+def crashed(revision, user, verbose, time, json):
     """List crashed tags for REVISION, associated with available category matches."""
     failed = revision.failed(user, time)
 
-    for k, tags in failed.items():
-        if not tags:
-            continue
+    if json:
+        import json
 
-        click.echo(f"{len(tags)} job(s) failed for reason: {k.upper()}")
+        click.echo(json.dumps(failed, indent=4))
+    else:
+        for k, tags in failed.items():
+            if not tags:
+                continue
 
-        if verbose:
-            for tag in tags:
-                click.echo(tag)
+            click.echo(f"{len(tags)} job(s) failed for reason: {k.upper()}")
+
+            if verbose:
+                for tag in tags:
+                    click.echo(tag)
 
 
 @item.command("run")
