@@ -1,0 +1,502 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.timing &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.timing</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.analysis.timing</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for constructing timing corrections and applying them to data.&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.astro</span><span class="w"> </span><span class="kn">import</span> <span class="n">time</span> <span class="k">as</span> <span class="n">ctime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">exceptions</span><span class="p">,</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem</span><span class="w"> </span><span class="kn">import</span> <span class="n">sources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">timing</span>
+
+<span class="c1"># For querying DataFlag database</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataflag</span> <span class="k">as</span> <span class="n">df</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect</span> <span class="k">as</span> <span class="n">connect_database</span>
+
+
+<div class="viewcode-block" id="ApplyTimingCorrection">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ApplyTimingCorrection">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ApplyTimingCorrection</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Apply a timing correction to the visibilities.</span>
+
+<span class="sd">    Only runs on days flagged by needs_timing_correction.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    use_input_flags : bool</span>
+<span class="sd">        Account for bad inputs when determining a stacked timing correction.</span>
+<span class="sd">        Takes roughly twice as long.</span>
+<span class="sd">    refer_to_transit : bool</span>
+<span class="sd">        Reference the timing correction to the time of source transit.</span>
+<span class="sd">        Useful for applying the timing correction to holography data that has</span>
+<span class="sd">        already been calibrated to have zero phase at transit.</span>
+<span class="sd">    transit_window: float</span>
+<span class="sd">        Reference the timing correction to the median value over a window (in seconds)</span>
+<span class="sd">        around the time of source transit.</span>
+<span class="sd">    pass_if_missing: bool (default False)</span>
+<span class="sd">        If a timing correction cannot be found for the time range do not raise an exception</span>
+<span class="sd">        and just pass the data on.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">use_input_flags</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">refer_to_transit</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">transit_window</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="n">pass_if_missing</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ApplyTimingCorrection.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ApplyTimingCorrection.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tcorr</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set the timing correction to use.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tcorr : ch_util.timing.TimingCorrection or list of</span>
+<span class="sd">            Timing correction that is relevant for the range of time being processed.</span>
+<span class="sd">            Note that the timing correction must *already* be referenced with respect</span>
+<span class="sd">            to the times that were used to calibrate if processing stacked data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Query flag database for date ranges that need timing correction</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">connect_database</span><span class="p">()</span>
+
+            <span class="n">needs_timing_correction_type</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">DataFlagType</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;needs_timing_correction&quot;</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">needs_timing_correction_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="s2">&quot;Could not find data flag type `needs_timing_correction`&quot;</span>
+                <span class="p">)</span>
+
+            <span class="c1"># We are extracting the time ranges here from the DataFlag objects</span>
+            <span class="c1"># to avoid potential issues with non-0 ranks accidentally doing database queries later on</span>
+            <span class="n">flags</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span>
+                <span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span> <span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">finish_time</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">needs_timing_correction_type</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">dicts</span><span class="p">()</span>
+            <span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Queried database and received </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span><span class="si">}</span><span class="s2"> needs_timing_correction flags.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Share timing correction flags with other nodes</span>
+        <span class="c1"># Save flags to class attribute</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flags</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tcorr</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="n">tcorr</span> <span class="o">=</span> <span class="p">[</span><span class="n">tcorr</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tcorr</span> <span class="o">=</span> <span class="n">tcorr</span></div>
+
+
+<div class="viewcode-block" id="ApplyTimingCorrection.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ApplyTimingCorrection.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tstream</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply the timing correction to the input timestream.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        tstream : andata.CorrData, containers.TimeStream, or containers.SiderealStream</span>
+<span class="sd">            Apply the timing correction to the visibilities stored in this container.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tstream_corr : same as `tstream`</span>
+<span class="sd">            Timestream with corrected visibilities.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Determine times</span>
+        <span class="k">if</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">tstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">time</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">csd</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">tstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">tstream</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">tstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+            <span class="p">)</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="n">tstream</span><span class="o">.</span><span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span>
+
+        <span class="c1"># Extract local frequencies</span>
+        <span class="n">tstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="n">nfreq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">sfreq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">local_offset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">efreq</span> <span class="o">=</span> <span class="n">sfreq</span> <span class="o">+</span> <span class="n">nfreq</span>
+
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">freq</span><span class="p">[</span><span class="n">sfreq</span><span class="p">:</span><span class="n">efreq</span><span class="p">]</span>
+
+        <span class="c1"># If requested, extract the input flags</span>
+        <span class="n">input_flags</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">input_flags</span><span class="p">[:]</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_input_flags</span> <span class="k">else</span> <span class="kc">None</span>
+
+        <span class="c1"># Check needs_timing_correction flags time ranges to see if input timestream</span>
+        <span class="c1"># falls within the interval</span>
+        <span class="n">needs_timing_correction</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">flag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">flags</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">flag</span><span class="p">[</span><span class="s2">&quot;start_time&quot;</span><span class="p">]</span>
+                <span class="ow">and</span> <span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">flag</span><span class="p">[</span><span class="s2">&quot;finish_time&quot;</span><span class="p">]</span>
+            <span class="p">):</span>
+                <span class="k">if</span> <span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">flag</span><span class="p">[</span><span class="s2">&quot;finish_time&quot;</span><span class="p">]:</span>
+                    <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">PipelineRuntimeError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Data covering </span><span class="si">{</span><span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2"> partially overlaps &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;needs_timing_correction DataFlag covering </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">flag</span><span class="p">[</span><span class="s1">&#39;start_time&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;to </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">flag</span><span class="p">[</span><span class="s1">&#39;finish_time&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">.&quot;</span>
+                    <span class="p">)</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Data covering </span><span class="si">{</span><span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2"> flagged by &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;needs_timing_correction DataFlag covering </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">flag</span><span class="p">[</span><span class="s1">&#39;start_time&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;to </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">flag</span><span class="p">[</span><span class="s1">&#39;finish_time&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">. Timing correction will be applied.&quot;</span>
+                <span class="p">)</span>
+                <span class="n">needs_timing_correction</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">break</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">needs_timing_correction</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Data in span </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> does not need timing correction&quot;</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="n">tstream</span>
+
+        <span class="c1"># Find the right timing correction</span>
+        <span class="k">for</span> <span class="n">tcorr</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">tcorr</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">and</span> <span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+                <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ts_</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">([</span><span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]]))</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="s2">&quot;Could not find timing correction file covering &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;range of timestream data (</span><span class="si">{</span><span class="n">ts_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">ts_</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">).&quot;</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pass_if_missing</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="n">msg</span> <span class="o">+</span> <span class="s2">&quot; Doing nothing.&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">tstream</span>
+
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using correction file </span><span class="si">{</span><span class="n">tcorr</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;tag&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># If requested, reference the timing correct with respect to source transit time</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">refer_to_transit</span><span class="p">:</span>
+            <span class="c1"># First check for transit_time attribute in file</span>
+            <span class="n">ttrans</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;transit_time&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ttrans</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">source</span> <span class="o">=</span> <span class="n">tstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;source_name&quot;</span><span class="p">]</span>
+                <span class="n">ttrans</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">transit_times</span><span class="p">(</span>
+                    <span class="n">sources</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">source</span><span class="p">],</span>
+                    <span class="n">tstream</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                    <span class="n">tstream</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">ttrans</span><span class="o">.</span><span class="n">size</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="n">ttrans</span><span class="o">.</span><span class="n">size</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2"> transits of </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2"> in timestream.  &quot;</span>
+                        <span class="s2">&quot;Require single transit.&quot;</span>
+                    <span class="p">)</span>
+
+                <span class="n">ttrans</span> <span class="o">=</span> <span class="n">ttrans</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s2">&quot;Referencing timing correction to &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">ttrans</span><span class="p">)</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y%m</span><span class="si">%d</span><span class="s1">T%H%M%SZ&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;(RA=</span><span class="si">{</span><span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsa</span><span class="p">(</span><span class="n">ttrans</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> deg).&quot;</span>
+            <span class="p">)</span>
+
+            <span class="n">tcorr</span><span class="o">.</span><span class="n">set_global_reference_time</span><span class="p">(</span>
+                <span class="n">ttrans</span><span class="p">,</span> <span class="n">window</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">transit_window</span><span class="p">,</span> <span class="n">interpolate</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">interp</span><span class="o">=</span><span class="s2">&quot;linear&quot;</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Apply the timing correction</span>
+        <span class="n">tcorr</span><span class="o">.</span><span class="n">apply_timing_correction</span><span class="p">(</span>
+            <span class="n">tstream</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="n">timestamp</span><span class="p">,</span> <span class="n">freq</span><span class="o">=</span><span class="n">freq</span><span class="p">,</span> <span class="n">input_flags</span><span class="o">=</span><span class="n">input_flags</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">tstream</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="ConstructTimingCorrection">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ConstructTimingCorrection">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ConstructTimingCorrection</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate a timing correction from the cross correlation of noise source inputs.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    min_frac_kept: float</span>
+<span class="sd">        Do not include frequencies and times where the fraction</span>
+<span class="sd">        of data that remains is less than this threshold.</span>
+<span class="sd">    threshold: float</span>
+<span class="sd">        A (frequency, input) must pass the checks specified above</span>
+<span class="sd">        more than this fraction of the time,  otherwise it will be</span>
+<span class="sd">        flaged as bad for all times.</span>
+<span class="sd">    min_freq: float</span>
+<span class="sd">        Minimum frequency in MHz to include in the fit.</span>
+<span class="sd">    max_freq: float</span>
+<span class="sd">        Maximum frequency in MHz to include in the fit.</span>
+<span class="sd">    mask_rfi: bool</span>
+<span class="sd">        Mask frequencies that occur within known RFI bands.  Note that the</span>
+<span class="sd">        noise source data does not contain RFI, however the real-time pipeline</span>
+<span class="sd">        does not distinguish between noise source inputs and sky inputs, and as</span>
+<span class="sd">        a result will discard large amounts of data in these bands.</span>
+<span class="sd">    max_iter_weight: int</span>
+<span class="sd">        The weight for each frequency is estimated from the variance of the</span>
+<span class="sd">        residuals of the template fit from the previous iteration.  Outliers</span>
+<span class="sd">        are also flagged at each iteration with an increasingly aggresive threshold.</span>
+<span class="sd">        This is the total number of times to iterate.  Setting to 1 corresponds</span>
+<span class="sd">        to linear least squares.  Default is 1, unless check_amp or check_phi is True,</span>
+<span class="sd">        in which case this defaults to the maximum number of thresholds provided.</span>
+<span class="sd">    check_amp: bool</span>
+<span class="sd">        Do not fit frequencies and times where the residual amplitude is an outlier.</span>
+<span class="sd">    nsigma_amp: list of float</span>
+<span class="sd">        If check_amp is True, then residuals greater than this number of sigma</span>
+<span class="sd">        will be considered an outlier.  Provide a list containing the value to be used</span>
+<span class="sd">        at each iteration.  If the length of the list is less than max_iter_weight,</span>
+<span class="sd">        then the last value in the list will be repeated for the remaining iterations.</span>
+<span class="sd">    check_phi: bool</span>
+<span class="sd">        Do not fit frequencies and times where the residual phase is an outlier.</span>
+<span class="sd">    nsigma_phi: list of float</span>
+<span class="sd">        If check_phi is True, then residuals greater than this number of sigma</span>
+<span class="sd">        will be considered an outlier.  Provide a list containing the value to be used</span>
+<span class="sd">        at each iteration.  If the length of the list is less than max_iter_weight,</span>
+<span class="sd">        then the last value in the list will be repeated for the remaining iterations.</span>
+<span class="sd">    input_sel : list</span>
+<span class="sd">        Generate the timing correction from inputs with these chan_id&#39;s.</span>
+<span class="sd">    output_suffix: str</span>
+<span class="sd">        The suffix to append to the end of the name of the output files.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">min_frac_kept</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.85</span><span class="p">)</span>
+    <span class="n">threshold</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+    <span class="n">min_freq</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">420.0</span><span class="p">)</span>
+    <span class="n">max_freq</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">600.0</span><span class="p">)</span>
+    <span class="n">mask_rfi</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">max_iter_weight</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span>
+        <span class="n">proptype</span><span class="o">=</span><span class="p">(</span><span class="k">lambda</span> <span class="n">val</span><span class="p">:</span> <span class="n">val</span> <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="n">val</span><span class="p">)),</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span>
+    <span class="p">)</span>
+    <span class="n">check_amp</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">nsigma_amp</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span>
+        <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mf">1000.0</span><span class="p">,</span> <span class="mf">500.0</span><span class="p">,</span> <span class="mf">200.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">check_phi</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">nsigma_phi</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span>
+        <span class="n">default</span><span class="o">=</span><span class="p">[</span><span class="mf">1000.0</span><span class="p">,</span> <span class="mf">500.0</span><span class="p">,</span> <span class="mf">200.0</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">nparam</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">input_sel</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span>
+        <span class="n">proptype</span><span class="o">=</span><span class="p">(</span><span class="k">lambda</span> <span class="n">val</span><span class="p">:</span> <span class="n">val</span> <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">val</span><span class="p">)),</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span>
+    <span class="p">)</span>
+    <span class="n">output_suffix</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;chimetiming_delay&quot;</span><span class="p">)</span>
+
+    <span class="n">_parameters</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;min_frac_kept&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;threshold&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;min_freq&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_freq&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;mask_rfi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;max_iter_weight&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;check_amp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nsigma_amp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;check_phi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nsigma_phi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nparam&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;input_sel&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="n">_datasets_fixed_for_acq</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;static_phi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;weight_static_phi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;static_phi_fit&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;static_amp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;weight_static_amp&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+<div class="viewcode-block" id="ConstructTimingCorrection.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ConstructTimingCorrection.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get ready to generate timing corrections.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parameters</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">[</span><span class="n">param</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">param</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_acq</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="ConstructTimingCorrection.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.timing.html#ch_pipeline.analysis.timing.ConstructTimingCorrection.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filelist</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generate timing correction from an input list of files.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        filelist : list of files</span>
+<span class="sd">            Path to file(s) containing the timing data.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        tcorr : ch_util.timing.TimingCorrection</span>
+<span class="sd">            Timing correction derived from noise source data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Determine the acquisition</span>
+        <span class="n">new_acq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">([</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">ff</span><span class="p">))</span> <span class="k">for</span> <span class="n">ff</span> <span class="ow">in</span> <span class="n">filelist</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">new_acq</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Cannot process multiple acquisitions.  Received </span><span class="si">{</span><span class="n">new_acq</span><span class="o">.</span><span class="n">size</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">new_acq</span> <span class="o">=</span> <span class="n">new_acq</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># If this is a new acquisition, then ensure the</span>
+        <span class="c1"># static phase and amplitude are recalculated</span>
+        <span class="k">if</span> <span class="n">new_acq</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_acq</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">current_acq</span> <span class="o">=</span> <span class="n">new_acq</span>
+
+            <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_datasets_fixed_for_acq</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Process the chimetiming data</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">filelist</span><span class="p">)</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2"> files from </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">current_acq</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+
+        <span class="n">tcorr</span> <span class="o">=</span> <span class="n">timing</span><span class="o">.</span><span class="n">TimingData</span><span class="o">.</span><span class="n">from_acq_h5</span><span class="p">(</span>
+            <span class="n">filelist</span><span class="p">,</span>
+            <span class="n">only_correction</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">distributed</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="n">comm</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+            <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Finished processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">filelist</span><span class="p">)</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2"> files from </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">current_acq</span><span class="si">}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Save the static phase and amplitude to be used on subsequent iterations</span>
+        <span class="c1"># within this acquisition</span>
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_datasets_fixed_for_acq</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">datasets</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="n">key</span><span class="p">][:]</span>
+            <span class="k">elif</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">flags</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">tcorr</span><span class="o">.</span><span class="n">flags</span><span class="p">[</span><span class="n">key</span><span class="p">][:]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Dataset </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2"> could not be found in timing correction object.&quot;</span>
+                <span class="p">)</span>
+
+        <span class="c1"># Save the names of the files used to construct the correction</span>
+        <span class="n">tcorr</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;archive_files&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">filelist</span><span class="p">)</span>
+
+        <span class="c1"># Create a tag indicating the range of time processed</span>
+        <span class="n">tfmt</span> <span class="o">=</span> <span class="s2">&quot;%Y%m</span><span class="si">%d</span><span class="s2">T%H%M%SZ&quot;</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">tcorr</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="n">tfmt</span><span class="p">)</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">tcorr</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="n">tfmt</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">=</span> <span class="p">[</span><span class="n">start_time</span><span class="p">,</span> <span class="s2">&quot;to&quot;</span><span class="p">,</span> <span class="n">end_time</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_suffix</span><span class="p">:</span>
+            <span class="n">tag</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_suffix</span><span class="p">)</span>
+
+        <span class="n">tcorr</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;_&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+        <span class="c1"># Return timing correction</span>
+        <span class="k">return</span> <span class="n">tcorr</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

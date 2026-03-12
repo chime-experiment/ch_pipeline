@@ -1,0 +1,1481 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.containers &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.containers</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.core.containers</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Parallel data containers.</span>
+
+<span class="sd">Containers for holding various types of CHIME specific analysis data in a</span>
+<span class="sd">distributed fashion. The module `draco.core.containers` contains general data</span>
+<span class="sd">containers which are imported into this module.</span>
+
+<span class="sd">Containers</span>
+<span class="sd">==========</span>
+<span class="sd">- :py:class:`FrequencyMap`</span>
+<span class="sd">- :py:class:`RFIMask`</span>
+<span class="sd">- :py:class:`CorrInputMask`</span>
+<span class="sd">- :py:class:`CorrInputTest`</span>
+<span class="sd">- :py:class:`CorrInputMonitor`</span>
+<span class="sd">- :py:class:`SiderealDayFlag`</span>
+<span class="sd">- :py:class:`TransitFitParams`</span>
+<span class="sd">- :py:class:`PointSourceTransit`</span>
+<span class="sd">- :py:class:`SourceModel`</span>
+<span class="sd">- :py:class:`SunTransit`</span>
+<span class="sd">- :py:class:`RingMap`</span>
+<span class="sd">- :py:class:`Photometry`</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="c1"># Ignore missing docstrings in container @property methods.</span>
+<span class="c1"># These are generally just convenience methods for datasets</span>
+<span class="c1"># ruff: noqa: D102</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">posixpath</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">memdata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.containers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Container</span><span class="p">,</span> <span class="n">ContainerPrototype</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">typeutils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.core.containers</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">FormedBeam</span><span class="p">,</span>
+    <span class="n">FreqContainer</span><span class="p">,</span>
+    <span class="n">SpectroscopicCatalog</span><span class="p">,</span>
+    <span class="n">StaticGainData</span><span class="p">,</span>
+    <span class="n">TimeStream</span><span class="p">,</span>
+    <span class="n">TODContainer</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="FrequencyMapSingle">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.FrequencyMapSingle">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FrequencyMapSingle</span><span class="p">(</span><span class="n">FreqContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map between frequency bin and FPGA [crate, slot, link].</span>
+
+<span class="sd">    This container holds a map between the frequency bins and stream ids.</span>
+<span class="sd">    A stream id is encoded based on the shuffle, crate, slot, and link values</span>
+<span class="sd">    as follows:</span>
+
+<span class="sd">    stream_id = shuffle*2**12 + crate*2**8 + slot*2**4 + link</span>
+
+<span class="sd">    The value of shuffle is always 3.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">,)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;stream&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;stream_id&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;level&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">:</span>
+            <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;shuffle&quot;</span><span class="p">,</span> <span class="s2">&quot;crate&quot;</span><span class="p">,</span> <span class="s2">&quot;slot&quot;</span><span class="p">,</span> <span class="s2">&quot;link&quot;</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shuffle</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">crate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">slot</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">link</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stream</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;stream&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stream_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;stream_id&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">level</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="FrequencyMap">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.FrequencyMap">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FrequencyMap</span><span class="p">(</span><span class="n">FreqContainer</span><span class="p">,</span> <span class="n">TODContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map between frequency bin and FPGA stream (GPU node) as a function of time.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">,)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;stream&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;node&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="s2">&quot;&lt;U5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">level</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stream</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;stream&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;node&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="RFIMask">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RFIMask">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">RFIMask</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding a mask that indicates data that is free of RFI events.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;mask&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;auto&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;ndev&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;mask&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">auto</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;auto&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ndev</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;ndev&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="CorrInputMask">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMask">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CorrInputMask</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding mask indicating good correlator inputs.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;input_mask&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;input_mask&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="CorrInputTest">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputTest">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CorrInputTest</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding results of tests for good correlator inputs.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;test&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;input_mask&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;passed_test&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;test&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;test&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">:</span>
+            <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;test&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                <span class="p">[</span><span class="s2">&quot;is_chime&quot;</span><span class="p">,</span> <span class="s2">&quot;not_known_bad&quot;</span><span class="p">,</span> <span class="s2">&quot;digital_gain&quot;</span><span class="p">,</span> <span class="s2">&quot;radiometer&quot;</span><span class="p">,</span> <span class="s2">&quot;sky_fit&quot;</span><span class="p">]</span>
+            <span class="p">)</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;input_mask&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">passed_test</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;passed_test&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;test&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="CorrInputMonitor">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.CorrInputMonitor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CorrInputMonitor</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding results of good correlator inputs monitor.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;coord&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;input_mask&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;input_powered&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;freq_mask&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;freq_powered&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;coord&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;expected_position&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;coord&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;coord&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">:</span>
+            <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;east_west&quot;</span><span class="p">,</span> <span class="s2">&quot;north_south&quot;</span><span class="p">])</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;input_mask&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input_powered</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;input_powered&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">expected_position</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;expected_position&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;freq_mask&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq_powered</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;freq_powered&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coord</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="SiderealDayFlag">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.SiderealDayFlag">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SiderealDayFlag</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding flag that indicates good chime sidereal days.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;csd&quot;</span><span class="p">,)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;csd_flag&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">csd_flag</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;csd_flag&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">csd</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="TransitFitParams">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.TransitFitParams">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TransitFitParams</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parallel container for holding the results of fitting a model to a point source transit.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;component&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;parameter&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter_cov&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;chisq&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;component&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;ndof&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;component&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter_cov</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter_cov&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">chisq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;chisq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ndof</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;ndof&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">][</span><span class="s2">&quot;centre&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">component</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;component&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="PointSourceTransit">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.PointSourceTransit">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PointSourceTransit</span><span class="p">(</span><span class="n">StaticGainData</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parallel container for holding sidereal calibration.</span>
+
+<span class="sd">    Contains the response of each feed to the source inferred from the eigendecomposition,</span>
+<span class="sd">    the largest eigenvalues, the parameters of a model fit to the response, and the gain</span>
+<span class="sd">    obtained by evaluating that model at transit.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;input&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;ra&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pol_x&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pol_y&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;param&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;param_cov1&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;param_cov2&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;gain&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;weight&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;evalue_x&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol_x&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;evalue_y&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol_y&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;response&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;response_error&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;flag&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter_cov&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param_cov1&quot;</span><span class="p">,</span> <span class="s2">&quot;param_cov2&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="s2">&quot;peak_amplitude&quot;</span><span class="p">,</span> <span class="s2">&quot;centroid&quot;</span><span class="p">,</span> <span class="s2">&quot;fwhm&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_intercept&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_slope&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;param_cov1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="s2">&quot;peak_amplitude&quot;</span><span class="p">,</span> <span class="s2">&quot;centroid&quot;</span><span class="p">,</span> <span class="s2">&quot;fwhm&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_intercept&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_slope&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;param_cov2&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span><span class="s2">&quot;peak_amplitude&quot;</span><span class="p">,</span> <span class="s2">&quot;centroid&quot;</span><span class="p">,</span> <span class="s2">&quot;fwhm&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_intercept&quot;</span><span class="p">,</span> <span class="s2">&quot;phase_slope&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">gain</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;gain&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">weight</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue_x</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue_x&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue_y</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue_y&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">response</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;response&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">response_error</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;response_error&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flag</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;flag&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter_cov</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter_cov&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param_cov1</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param_cov1&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param_cov2</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param_cov2&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="SourceModel">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.SourceModel">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SourceModel</span><span class="p">(</span><span class="n">FreqContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding model for visiblities.</span>
+
+<span class="sd">    Model consists of the sum of the signal from</span>
+<span class="sd">    multiple (possibly extended) sources.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;amplitude&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;coeff&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">amplitude</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;amplitude&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coeff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coeff&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">source</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">source_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">src</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">par</span><span class="p">)</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">param</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]])</span></div>
+
+
+
+<div class="viewcode-block" id="SunTransit">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.SunTransit">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SunTransit</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parallel container for holding the results of a fit to a point source transit.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;input&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;time&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pol&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;eigen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;good_input1&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;good_input2&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;udegree&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;vdegree&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;coord&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;param&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;coord&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;coord&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;evalue1&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;good_input1&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;evalue2&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;good_input2&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;response&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;eigen&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;response_error&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;eigen&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;coeff&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="s2">&quot;udegree&quot;</span><span class="p">,</span> <span class="s2">&quot;vdegree&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;is_sun&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;flag&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter_cov&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+            <span class="p">[</span>
+                <span class="s2">&quot;peak_amplitude&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;centroid&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;fwhm&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_intercept&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_slope&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_quad&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_cube&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_quart&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;phase_quint&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;ha&quot;</span><span class="p">,</span> <span class="s2">&quot;dec&quot;</span><span class="p">,</span> <span class="s2">&quot;alt&quot;</span><span class="p">,</span> <span class="s2">&quot;az&quot;</span><span class="p">])</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coord</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue1</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue1&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue2</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue2&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue_x</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue1&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">evalue_y</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;evalue2&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">response</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;response&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">response_error</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;response_error&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">coeff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coeff&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">is_sun</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;is_sun&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flag</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;flag&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter_cov</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter_cov&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">input</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">time</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ha</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ind</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;ha&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][:,</span> <span class="n">ind</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dec</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ind</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;dec&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][:,</span> <span class="n">ind</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">alt</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ind</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;alt&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][:,</span> <span class="n">ind</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">az</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">ind</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;az&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][:,</span> <span class="n">ind</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="FormedBeamTime">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.FormedBeamTime">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FormedBeamTime</span><span class="p">(</span><span class="n">FormedBeam</span><span class="p">,</span> <span class="n">TODContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for formed beams with a time axis.&quot;&quot;&quot;</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;beam&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;object_id&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;weight&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;object_id&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span></div>
+
+
+
+<div class="viewcode-block" id="RingMap">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RingMap">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">RingMap</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Container for holding multifrequency ring maps.</span>
+
+<span class="sd">    The maps are packed in format `[freq, pol, ra, EW beam, el]` where</span>
+<span class="sd">    the polarisations are Stokes I, Q, U and V.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    nside : int</span>
+<span class="sd">        The nside of the Healpix maps.</span>
+<span class="sd">    polarisation : bool, optional</span>
+<span class="sd">        If `True` all Stokes parameters are stored, if `False` only Stokes I is</span>
+<span class="sd">        stored.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">,</span> <span class="s2">&quot;beam&quot;</span><span class="p">,</span> <span class="s2">&quot;el&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;map&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;beam&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">,</span> <span class="s2">&quot;el&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;dirty_beam&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;beam&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">,</span> <span class="s2">&quot;el&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;rms&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;ra&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pol</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;pol&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">ra</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;ra&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">el</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;el&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">map</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;map&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rms</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;rms&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dirty_beam</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;dirty_beam&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="Photometry">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.Photometry">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Photometry</span><span class="p">(</span><span class="n">ContainerPrototype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parallel container for holding photometry extracted from a map.&quot;&quot;&quot;</span>
+
+    <span class="n">_axes</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">)</span>
+
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;parameter&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;parameter_cov&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;param&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;rms&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;pol&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;distributed_axis&quot;</span><span class="p">:</span> <span class="s2">&quot;freq&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">parameter_cov</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;parameter_cov&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rms</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="s2">&quot;rms&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">freq</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;param&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">source</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="SpectralLineCatalog">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.SpectralLineCatalog">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SpectralLineCatalog</span><span class="p">(</span><span class="n">SpectroscopicCatalog</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A container for spectral line sources.&quot;&quot;&quot;</span>
+
+    <span class="n">_table_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;frequency&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;columns&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;freq_error&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">]],</span>
+            <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="s2">&quot;object_id&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;flux&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;columns&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="s2">&quot;line_depth&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;continuum&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">]],</span>
+            <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="s2">&quot;object_id&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;significance&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;columns&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="s2">&quot;signal_to_noise&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;npixels&quot;</span><span class="p">,</span> <span class="nb">int</span><span class="p">]],</span>
+            <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="s2">&quot;object_id&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span></div>
+
+
+
+<div class="viewcode-block" id="RawContainer">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RawContainer">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">RawContainer</span><span class="p">(</span><span class="n">TODContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base class for using raw CHIME data via the draco containers API.</span>
+
+<span class="sd">    This modifies the set of allowed group/dataset names to allow access to the</span>
+<span class="sd">    flags group.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_allowed_groups</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="RawContainer.group_name_allowed">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RawContainer.group_name_allowed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">group_name_allowed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Allow access to the flags group.&quot;&quot;&quot;</span>
+        <span class="c1"># Strip leading and trailing &quot;/&quot;</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_allowed_groups</span></div>
+
+
+<div class="viewcode-block" id="RawContainer.dataset_name_allowed">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RawContainer.dataset_name_allowed">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dataset_name_allowed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Allow access to datasets under both / and /flags.&quot;&quot;&quot;</span>
+        <span class="n">parent_name</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="n">posixpath</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">parent_name</span> <span class="o">==</span> <span class="s2">&quot;/&quot;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">group_name_allowed</span><span class="p">(</span><span class="n">parent_name</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RawContainer.from_acq_h5">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.RawContainer.from_acq_h5">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_acq_h5</span><span class="p">(</span>
+        <span class="bp">cls</span><span class="p">,</span>
+        <span class="n">acq_files</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">start</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">stop</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;RawContainer&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load from an HDF5 file on disk.</span>
+
+<span class="sd">        This is a thin wrapper around `from_file` to support the</span>
+<span class="sd">        `andata.BaseData.from_acq_h5` API. The main difference is supporting</span>
+<span class="sd">        the `start` and `stop` parameters. All other parameters are passed</span>
+<span class="sd">        straight into `from_file`.</span>
+
+<span class="sd">        .. note:: This does not support loading in a distributed manner as the archive</span>
+<span class="sd">            files don&#39;t have the correct hints set, but that should be added into this</span>
+<span class="sd">            routine by using the information given in the `_dataset_spec` of derived</span>
+<span class="sd">            classes.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        acq_files</span>
+<span class="sd">            Path or glob to files (or list of).</span>
+<span class="sd">        start, stop</span>
+<span class="sd">            Indices into the full set of files to select.</span>
+<span class="sd">        **kwargs</span>
+<span class="sd">            Additional keyword arguments to pass to `from_file`</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        cont</span>
+<span class="sd">            A single container instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stop</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">elif</span> <span class="n">start</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stop</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;time_sel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Got mixed types for start (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">start</span><span class="p">)</span><span class="si">}</span><span class="s2">) and stop (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">stop</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="n">acq_files</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="CHIMETimeStream">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.CHIMETimeStream">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CHIMETimeStream</span><span class="p">(</span><span class="n">TimeStream</span><span class="p">,</span> <span class="n">RawContainer</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A container for CHIME visibility data.</span>
+
+<span class="sd">    This provides a close analog of the CorrData container but implemented via the draco</span>
+<span class="sd">    containers API.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Add in the extra datasets contained within the CHIME corrdata time streams</span>
+    <span class="n">_dataset_spec</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;flags/dataset_id&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="s2">&quot;S32&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;flags/frac_lost&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;axes&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;dtype&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+            <span class="s2">&quot;initialise&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;distributed&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+
+<div class="viewcode-block" id="CHIMETimeStream.from_corrdata">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.CHIMETimeStream.from_corrdata">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_corrdata</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;CHIMETimeStream&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Turn a CorrData container into a CHIMETimeStream.</span>
+
+<span class="sd">        This makes a shallow copy of the input `data`. The internals of `data` will be</span>
+<span class="sd">        destroyed during this process and so the container should be discarded.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data</span>
+<span class="sd">            A CorrData instance to clone. This instance should be discarded after this</span>
+<span class="sd">            call.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        newdata</span>
+<span class="sd">            The correlator data as a CHIMETimeStream object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Copy over all the internal data store</span>
+        <span class="n">newdata</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span><span class="n">data_group</span><span class="o">=</span><span class="n">data</span><span class="p">,</span> <span class="n">distributed</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">distributed</span><span class="p">,</span> <span class="n">comm</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">comm</span><span class="p">)</span>
+
+        <span class="c1"># Manipulate location of weights as this is the one dataset that has a different</span>
+        <span class="c1"># location in CHIMETimeStream compared to CorrData</span>
+        <span class="n">storage</span> <span class="o">=</span> <span class="n">newdata</span><span class="o">.</span><span class="n">_storage_root</span><span class="o">.</span><span class="n">_get_storage</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="s2">&quot;/flags/vis_weight&quot;</span> <span class="ow">in</span> <span class="n">newdata</span><span class="p">:</span>
+            <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">)</span>
+            <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">_name</span> <span class="o">=</span> <span class="s2">&quot;/vis_weight&quot;</span>
+
+        <span class="k">if</span> <span class="s2">&quot;/flags/inputs&quot;</span> <span class="ow">in</span> <span class="n">newdata</span><span class="p">:</span>
+            <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;input_flags&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;inputs&quot;</span><span class="p">)</span>
+            <span class="n">storage</span><span class="p">[</span><span class="s2">&quot;input_flags&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">_name</span> <span class="o">=</span> <span class="s2">&quot;/input_flags&quot;</span>
+
+        <span class="c1"># Remove any datasets/flags which shouldn&#39;t be present in this container.</span>
+        <span class="c1"># If any other dataset is needed, then a CorrData container should be used</span>
+        <span class="c1"># or a new dataset_spec entry should be added to this container. At present,</span>
+        <span class="c1"># this should only affect the &quot;frac_rfi&quot; flag.</span>
+        <span class="n">contains</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">newdata</span><span class="o">.</span><span class="n">datasets</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span>
+            <span class="s2">&quot;flags/&quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">newdata</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span>
+        <span class="p">}</span>
+
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">contains</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">newdata</span><span class="o">.</span><span class="n">dataset_spec</span><span class="p">:</span>
+                <span class="k">del</span> <span class="n">newdata</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+                <span class="k">continue</span>
+
+        <span class="k">return</span> <span class="n">newdata</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">frac_lost</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the input flags dataset.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">[</span><span class="s2">&quot;flags/frac_lost&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dataset_id</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the dataset_id dataset in Unicode.&quot;&quot;&quot;</span>
+        <span class="n">dsid</span> <span class="o">=</span> <span class="n">typeutils</span><span class="o">.</span><span class="n">ensure_unicode</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="s2">&quot;flags/dataset_id&quot;</span><span class="p">][:])</span>
+        <span class="n">dsid</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="k">return</span> <span class="n">dsid</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">flags</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get the flags group.&quot;&quot;&quot;</span>
+        <span class="n">flags_group</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Alias the groups back in for maximum compatibility with CHIME Andata</span>
+        <span class="c1"># based code</span>
+        <span class="k">if</span> <span class="s2">&quot;vis_weight&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">flags_group</span><span class="p">[</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="p">[</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="s2">&quot;input_flags&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="n">flags_group</span><span class="p">[</span><span class="s2">&quot;input_flags&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="p">[</span><span class="s2">&quot;input_flags&quot;</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">flags_group</span></div>
+
+
+
+<div class="viewcode-block" id="make_empty_corrdata">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.containers.html#ch_pipeline.core.containers.make_empty_corrdata">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_empty_corrdata</span><span class="p">(</span>
+    <span class="n">freq</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="nb">input</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">time</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">axes_from</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">attrs_from</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">distributed_axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">comm</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Make an empty CorrData (i.e. timestream) container.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    freq : np.ndarray, optional</span>
+<span class="sd">        Frequency map to use.</span>
+<span class="sd">    input : np.ndarray, optional</span>
+<span class="sd">        Input map.</span>
+<span class="sd">    time : np.ndarray, optional</span>
+<span class="sd">        Time map.</span>
+<span class="sd">    axes_from : BasicCont, optional</span>
+<span class="sd">        Another container to copy any unspecified axes from.</span>
+<span class="sd">    attrs_from : BasicCont, optional</span>
+<span class="sd">        Another container to copy any unspecified attributes from.</span>
+<span class="sd">    distributed : boolean, optional</span>
+<span class="sd">        Whether to create the container in distributed mode.</span>
+<span class="sd">    distributed_axis : int, optional</span>
+<span class="sd">        Axis to distribute over.</span>
+<span class="sd">    comm : MPI.Comm, optional</span>
+<span class="sd">        MPI communicator to distribute over.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    data : andata.CorrData</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Setup frequency axis</span>
+    <span class="k">if</span> <span class="n">freq</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;freq&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">freq</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;freq&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;No frequency axis defined.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Setup input axis</span>
+    <span class="k">if</span> <span class="nb">input</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;input&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="nb">input</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;No input axis defined.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Setup time axis</span>
+    <span class="k">if</span> <span class="n">time</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">time</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;No time axis defined.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Create CorrData object and setup axies</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span>
+
+    <span class="c1"># Initialise distributed container</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="p">)</span>
+    <span class="n">Container</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">comm</span><span class="o">=</span><span class="n">comm</span><span class="p">)</span>
+
+    <span class="c1"># Copy over attributes</span>
+    <span class="k">if</span> <span class="n">attrs_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">memdata</span><span class="o">.</span><span class="n">copyattrs</span><span class="p">(</span><span class="n">attrs_from</span><span class="o">.</span><span class="n">attrs</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">attrs</span><span class="p">)</span>
+
+    <span class="c1"># Create index map</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">create_index_map</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="n">freq</span><span class="p">)</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">create_index_map</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="nb">input</span><span class="p">)</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">create_index_map</span><span class="p">(</span><span class="s2">&quot;time&quot;</span><span class="p">,</span> <span class="n">time</span><span class="p">)</span>
+
+    <span class="c1"># Construct and create product map</span>
+    <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;prod&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+        <span class="n">prodmap</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">nfeed</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="n">prodmap</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="n">fi</span><span class="p">,</span> <span class="n">fj</span><span class="p">]</span> <span class="k">for</span> <span class="n">fi</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nfeed</span><span class="p">)</span> <span class="k">for</span> <span class="n">fj</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">fi</span><span class="p">,</span> <span class="n">nfeed</span><span class="p">)])</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">create_index_map</span><span class="p">(</span><span class="s2">&quot;prod&quot;</span><span class="p">,</span> <span class="n">prodmap</span><span class="p">)</span>
+
+    <span class="c1"># Construct and create stack map</span>
+    <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;stack&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+        <span class="n">stackmap</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">]</span>
+        <span class="n">vis_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">nfreq</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">stackmap</span><span class="p">),</span> <span class="n">data</span><span class="o">.</span><span class="n">ntime</span><span class="p">)</span>
+        <span class="n">vis_axis</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;stack&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">stackmap</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">prodmap</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">[(</span><span class="s2">&quot;prod&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;u4&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;conjugate&quot;</span><span class="p">,</span> <span class="s2">&quot;u1&quot;</span><span class="p">)])</span>
+        <span class="n">stackmap</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">prodmap</span><span class="p">))</span>
+        <span class="n">stackmap</span><span class="p">[</span><span class="s2">&quot;conjugate&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">vis_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">nprod</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">ntime</span><span class="p">)</span>
+        <span class="n">vis_axis</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;prod&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">])</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">create_index_map</span><span class="p">(</span><span class="s2">&quot;stack&quot;</span><span class="p">,</span> <span class="n">stackmap</span><span class="p">)</span>
+
+    <span class="c1"># Construct and create reverse map stack</span>
+    <span class="k">if</span> <span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;stack&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">:</span>
+        <span class="n">reverse_map_stack</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">reverse_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">]</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">create_reverse_map</span><span class="p">(</span><span class="s2">&quot;stack&quot;</span><span class="p">,</span> <span class="n">reverse_map_stack</span><span class="p">)</span>
+
+    <span class="c1"># Determine datatype for weights</span>
+    <span class="k">if</span> <span class="p">(</span>
+        <span class="p">(</span><span class="n">axes_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">axes_from</span><span class="p">,</span> <span class="s2">&quot;flags&quot;</span><span class="p">)</span>
+        <span class="ow">and</span> <span class="p">(</span><span class="s2">&quot;vis_weight&quot;</span> <span class="ow">in</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">flags</span><span class="p">)</span>
+    <span class="p">):</span>
+        <span class="n">weight_dtype</span> <span class="o">=</span> <span class="n">axes_from</span><span class="o">.</span><span class="n">flags</span><span class="p">[</span><span class="s2">&quot;vis_weight&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">weight_dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span>
+
+    <span class="c1"># Create empty datasets, and add axis attributes to them</span>
+    <span class="n">dset</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span>
+        <span class="s2">&quot;vis&quot;</span><span class="p">,</span>
+        <span class="n">shape</span><span class="o">=</span><span class="n">vis_shape</span><span class="p">,</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">,</span>
+        <span class="n">distributed</span><span class="o">=</span><span class="n">distributed</span><span class="p">,</span>
+        <span class="n">distributed_axis</span><span class="o">=</span><span class="n">distributed_axis</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">vis_axis</span>
+    <span class="n">dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="n">dset</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">create_flag</span><span class="p">(</span>
+        <span class="s2">&quot;vis_weight&quot;</span><span class="p">,</span>
+        <span class="n">shape</span><span class="o">=</span><span class="n">vis_shape</span><span class="p">,</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">weight_dtype</span><span class="p">,</span>
+        <span class="n">distributed</span><span class="o">=</span><span class="n">distributed</span><span class="p">,</span>
+        <span class="n">distributed_axis</span><span class="o">=</span><span class="n">distributed_axis</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">vis_axis</span>
+    <span class="n">dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="n">dset</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">create_flag</span><span class="p">(</span>
+        <span class="s2">&quot;inputs&quot;</span><span class="p">,</span>
+        <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">ninput</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">ntime</span><span class="p">),</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+        <span class="n">distributed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">distributed_axis</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">])</span>
+    <span class="n">dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="n">dset</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span>
+        <span class="s2">&quot;gain&quot;</span><span class="p">,</span>
+        <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">nfreq</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">ninput</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">ntime</span><span class="p">),</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex64</span><span class="p">,</span>
+        <span class="n">distributed</span><span class="o">=</span><span class="n">distributed</span><span class="p">,</span>
+        <span class="n">distributed_axis</span><span class="o">=</span><span class="n">distributed_axis</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="s2">&quot;freq&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;time&quot;</span><span class="p">])</span>
+    <span class="n">dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="k">return</span> <span class="n">data</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

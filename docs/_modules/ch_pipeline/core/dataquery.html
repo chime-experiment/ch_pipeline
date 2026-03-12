@@ -1,0 +1,1050 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.dataquery &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.dataquery</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.core.dataquery</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Dataset Specification.</span>
+
+<span class="sd">Lookup information from the database about the data, particularly which files</span>
+<span class="sd">are contained in a specific dataset (defined by a `run` global flag) and what</span>
+<span class="sd">each correlator input is connected to.</span>
+
+<span class="sd">Dataspec Format</span>
+<span class="sd">===============</span>
+
+<span class="sd">.. deprecated:: pass1</span>
+<span class="sd">    Use `run` global flag instead.</span>
+
+<span class="sd">A dataspec is just a dictionary with three required keys.</span>
+
+<span class="sd">:name:</span>
+<span class="sd">    A short name given to the dataset.</span>
+<span class="sd">:instrument:</span>
+<span class="sd">    The name of the instrument that took the data.</span>
+<span class="sd">:timerange:</span>
+<span class="sd">    A specification of the time range, or ranges that make up the dataset.</span>
+
+<span class="sd">The time range is specified either as a dictionary with `start` and `end`</span>
+<span class="sd">keys, containing datetime objects (in UTC). Or it can be a list of such</span>
+<span class="sd">ditionaries, to specify multiple time ranges to include. This can be contained</span>
+<span class="sd">in a dataspec YAML file, and loaded using :class:`LoadDataspec`. Example:</span>
+
+<span class="sd">.. code-block:: yaml</span>
+
+<span class="sd">    datasets:</span>
+<span class="sd">        -   name:       A</span>
+<span class="sd">            instrument: blanchard</span>
+<span class="sd">            timerange:</span>
+<span class="sd">                -   start:  2014-07-26 03:00:00</span>
+<span class="sd">                    end:    2014-07-28 01:00:00</span>
+
+<span class="sd">                -   start:  2014-07-28 11:00:00</span>
+<span class="sd">                    end:    2014-07-31 00:00:00</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.astro</span><span class="w"> </span><span class="kn">import</span> <span class="n">time</span> <span class="k">as</span> <span class="n">ctime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">PipelineStopIteration</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">mpitools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem</span><span class="w"> </span><span class="kn">import</span> <span class="n">sources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span><span class="p">,</span> <span class="n">finder</span><span class="p">,</span> <span class="n">layout</span><span class="p">,</span> <span class="n">tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">data_index</span> <span class="k">as</span> <span class="n">di</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataset</span> <span class="k">as</span> <span class="n">ds</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">exceptions</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_pipeline.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">containers</span>
+
+<span class="n">_DEFAULT_NODE_SPOOF</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;fir_online&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/chime_online/&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_force_list</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Ensure configuration property is a list.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="s2">&quot;__iter__&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">[</span><span class="n">val</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="ConnectDatabase">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.ConnectDatabase">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ConnectDatabase</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Establish an initial connection to the chimedb database.</span>
+
+<span class="sd">    This is useful when running pipelines on machines with poor</span>
+<span class="sd">    network I/O.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    timeout : int</span>
+<span class="sd">        Connection timeout in seconds</span>
+<span class="sd">    ntries : int</span>
+<span class="sd">        Number of times to retry if connection fails</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">timeout</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+    <span class="n">ntries</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ConnectDatabase.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.ConnectDatabase.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Establish a database connection.&quot;&quot;&quot;</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">chimedb.core</span>
+
+        <span class="c1"># Set the os connection timeout variable</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHIMEDB_CONNECT_TIMEOUT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">timeout</span><span class="p">)</span>
+
+        <span class="c1"># Try to establish a connection</span>
+        <span class="n">chimedb</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">ntries</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">ntries</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryDatabase">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDatabase">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryDatabase</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Find files from specified database queries.</span>
+
+<span class="sd">    This routine will query the database as specified in the runtime</span>
+<span class="sd">    configuration file.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    node_spoof : dictionary</span>
+<span class="sd">        (default: {&#39;fir_online&#39;: &#39;/project/rpp-chime/chime/chime_online/&#39;} )</span>
+<span class="sd">        host and directory in which to find data.</span>
+<span class="sd">    start_time, end_time : string (default: None)</span>
+<span class="sd">        start and end times to restrict the database search to</span>
+<span class="sd">        can be in any format ensure_unix will support, including e.g.</span>
+<span class="sd">        20190116T150323 and 2019-1-16 08:03:23 -7</span>
+<span class="sd">    acqtype : string (default: &#39;corr&#39;)</span>
+<span class="sd">        Type of acquisition. Options for acqtype are: &#39;corr&#39;, &#39;hk&#39;, &#39;weather&#39;,</span>
+<span class="sd">        &#39;rawadc&#39;, &#39;gain&#39;, &#39;flaginput&#39;, &#39;digitalgain&#39;.</span>
+<span class="sd">    instrument : string (optional)</span>
+<span class="sd">        Set the instrument name. Common ArchiveInst names are: &#39;chimeN2&#39;,</span>
+<span class="sd">        &#39;chimestack&#39;, &#39;chime26m&#39;, &#39;chimetiming&#39;, &#39;chimecal&#39;, &#39;mingun&#39; etc.</span>
+<span class="sd">        While acqtype returns all &#39;corr&#39; data, one must specify the instrument</span>
+<span class="sd">        to get e.g. only stacked data (i.e. instrument = &#39;chimestack&#39;)</span>
+<span class="sd">    source_26m : string (default: None)</span>
+<span class="sd">        holography source to include. If None, do not include holography data.</span>
+<span class="sd">    exclude_daytime : bool (default: False)</span>
+<span class="sd">        exclude daytime data</span>
+<span class="sd">    exclude_nighttime : bool (default: False)</span>
+<span class="sd">        exclude nighttime data</span>
+<span class="sd">    exclude_sun : bool (default: False)</span>
+<span class="sd">        exclude data around Sun</span>
+<span class="sd">    exclude_sun_time_delta : float (default: None)</span>
+<span class="sd">        time_delta parameter passed to exclude_sun()</span>
+<span class="sd">    exclude_sun_time_delta_rise_set : float (default: None)</span>
+<span class="sd">        time_delta_rise_set parameter passed to exclude_sun()</span>
+<span class="sd">    exclude_transits : list of string or float (default: [])</span>
+<span class="sd">        if set, call exclude_transits(). Pass list of sources or RA to exclude.</span>
+<span class="sd">    exclude_transits_time_delta : list of float (default : [])</span>
+<span class="sd">        time in seconds to exclude around each source transit given in `exclude_transits`.</span>
+<span class="sd">        if single value is passed, then that value will be applied to all source transits.</span>
+<span class="sd">    include_transits : list of string or float (default : [])</span>
+<span class="sd">        if set, call include_transits(). Pass list of sources or RA to include.</span>
+<span class="sd">    include_transits_time_delta : list of float (default : [])</span>
+<span class="sd">        time in seconds to include around each source transit given in `include_transits`.</span>
+<span class="sd">        if single value is passed, then that value will be applied to all source transits.</span>
+<span class="sd">    start_RA, end_RA : float (default: None)</span>
+<span class="sd">        starting and ending RA to include. Both values must be included or</span>
+<span class="sd">        no effect</span>
+<span class="sd">    run_name : string (default: None)</span>
+<span class="sd">        run name to include. If used, all other parameters will be ignored.</span>
+<span class="sd">    accept_all_global_flags : bool (default: False)</span>
+<span class="sd">        Accept all global flags. Due to a bug as of 2019-1-16, this may need to</span>
+<span class="sd">        be set to True</span>
+<span class="sd">    exclude_data_flag_types: list of string</span>
+<span class="sd">        Reject time intervals that overlap with DataFlags of these types.</span>
+<span class="sd">    return_intervals : bool (default: False)</span>
+<span class="sd">        Return the full interval from the Finder. Otherwise only a list of file names.</span>
+<span class="sd">    hfb_compression : bool (default: None)</span>
+<span class="sd">        If True or False, select only compressed/uncompressed HFB files.  Setting this</span>
+<span class="sd">        to either value will also implicitly limit the search to the absorber data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">return_intervals</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">_DEFAULT_NODE_SPOOF</span><span class="p">)</span>
+
+    <span class="n">acqtype</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;corr&quot;</span><span class="p">)</span>
+    <span class="n">instrument</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">source_26m</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">start_csd</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">end_csd</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">exclude_daytime</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">exclude_nighttime</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">exclude_sun</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">exclude_sun_time_delta</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">exclude_sun_time_delta_rise_set</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">exclude_transits</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="n">_force_list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">exclude_transits_time_delta</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="n">_force_list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="n">include_transits</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="n">_force_list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">include_transits_time_delta</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="n">_force_list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="n">start_RA</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">end_RA</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">run_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">accept_all_global_flags</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">exclude_data_flag_types</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="n">hfb_compression</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QueryDatabase.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDatabase.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Query the database and fetch the files.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Query the database on rank=0 only, and broadcast to everywhere else</span>
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_name</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">QueryRun</span><span class="p">()</span>
+
+            <span class="n">layout</span><span class="o">.</span><span class="n">connect_database</span><span class="p">()</span>
+
+            <span class="n">f</span> <span class="o">=</span> <span class="n">finder</span><span class="o">.</span><span class="n">Finder</span><span class="p">(</span><span class="n">node_spoof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span><span class="p">)</span>
+
+            <span class="n">f</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">AcqType</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">acqtype</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept_all_global_flags</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">accept_all_global_flags</span><span class="p">()</span>
+
+            <span class="c1"># Use start and end times if set, or try and use the start and end CSDs</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_time</span><span class="p">:</span>
+                <span class="n">st</span><span class="p">,</span> <span class="n">et</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_time</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_csd</span><span class="p">:</span>
+                <span class="n">st</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_csd</span><span class="p">)</span>
+                <span class="n">et</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">end_csd</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_csd</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="k">else</span> <span class="kc">None</span>
+                <span class="p">)</span>
+
+            <span class="c1"># Note: include_time_interval includes the specified time interval</span>
+            <span class="c1"># Using this instead of set_time_range, which only narrows the interval</span>
+            <span class="c1"># f.include_time_interval(self.start_time, self.end_time)</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">set_time_range</span><span class="p">(</span><span class="n">st</span><span class="p">,</span> <span class="n">et</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_RA</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_RA</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">include_RA_interval</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_RA</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_RA</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_RA</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_RA</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                    <span class="s2">&quot;One but not both of start_RA and end_RA &quot;</span> <span class="s2">&quot;are set. Ignoring both.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">f</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_daytime</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">exclude_daytime</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_nighttime</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">exclude_nighttime</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_sun</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">exclude_sun</span><span class="p">(</span>
+                    <span class="n">time_delta</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_sun_time_delta</span><span class="p">,</span>
+                    <span class="n">time_delta_rise_set</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_sun_time_delta_rise_set</span><span class="p">,</span>
+                <span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">include_transits</span><span class="p">:</span>
+                <span class="n">time_delta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">include_transits_time_delta</span>
+                <span class="n">ntime_delta</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">time_delta</span><span class="p">)</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">ntime_delta</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">ntime_delta</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">include_transits</span><span class="p">)):</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s2">&quot;Must specify `time_delta` for each source in &quot;</span>
+                        <span class="s2">&quot;`include_transits` or provide single value for all sources.&quot;</span>
+                    <span class="p">)</span>
+                <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">include_transits</span><span class="p">):</span>
+                    <span class="n">tdelta</span> <span class="o">=</span> <span class="n">time_delta</span><span class="p">[</span><span class="n">ss</span> <span class="o">%</span> <span class="n">ntime_delta</span><span class="p">]</span> <span class="k">if</span> <span class="n">ntime_delta</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span>
+                    <span class="n">bdy</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="n">sources</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="n">src</span>
+                    <span class="p">)</span>
+                    <span class="n">f</span><span class="o">.</span><span class="n">include_transits</span><span class="p">(</span><span class="n">bdy</span><span class="p">,</span> <span class="n">time_delta</span><span class="o">=</span><span class="n">tdelta</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_transits</span><span class="p">:</span>
+                <span class="n">time_delta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">exclude_transits_time_delta</span>
+                <span class="n">ntime_delta</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">time_delta</span><span class="p">)</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">ntime_delta</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">ntime_delta</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_transits</span><span class="p">)):</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s2">&quot;Must specify `time_delta` for each source in &quot;</span>
+                        <span class="s2">&quot;`exclude_transits` or provide single value for all sources.&quot;</span>
+                    <span class="p">)</span>
+                <span class="k">for</span> <span class="n">ss</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_transits</span><span class="p">):</span>
+                    <span class="n">tdelta</span> <span class="o">=</span> <span class="n">time_delta</span><span class="p">[</span><span class="n">ss</span> <span class="o">%</span> <span class="n">ntime_delta</span><span class="p">]</span> <span class="k">if</span> <span class="n">ntime_delta</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span>
+                    <span class="n">bdy</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="n">sources</span><span class="o">.</span><span class="n">source_dictionary</span><span class="p">[</span><span class="n">src</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="n">src</span>
+                    <span class="p">)</span>
+                    <span class="n">f</span><span class="o">.</span><span class="n">exclude_transits</span><span class="p">(</span><span class="n">bdy</span><span class="p">,</span> <span class="n">time_delta</span><span class="o">=</span><span class="n">tdelta</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source_26m</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">include_26m_obs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source_26m</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_data_flag_types</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">exclude_data_flag_type</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exclude_data_flag_types</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">hfb_compression</span> <span class="ow">is</span> <span class="kc">True</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">hfb_compression</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">only_hfb</span><span class="p">(</span><span class="n">compression</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hfb_compression</span><span class="p">)</span>
+
+            <span class="n">results</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">get_results</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">return_intervals</span><span class="p">:</span>
+                <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">fname</span> <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">for</span> <span class="n">fname</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+                <span class="n">files</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">files</span> <span class="o">=</span> <span class="n">results</span>
+                <span class="n">files</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="n">files</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Make sure all nodes have container before return</span>
+        <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">Barrier</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">files</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryRun">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryRun">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryRun</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Find the files belonging to a specific `run`.</span>
+
+<span class="sd">    This routine will query the database for the global flag corresponding to</span>
+<span class="sd">    the given run, and will use the start and end times (as well as the</span>
+<span class="sd">    instrument) to return a list of the contained files.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    run_name : str</span>
+<span class="sd">        Name of the `run` defined in the database.</span>
+<span class="sd">    node_spoof : str, optional</span>
+<span class="sd">        Node spoof argument. See documentation of :class:`ch_util.finder.Finder`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">run_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">_DEFAULT_NODE_SPOOF</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QueryRun.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryRun.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fetch the files in the specified run.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">layout</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">data_index</span> <span class="k">as</span> <span class="n">di</span>
+
+        <span class="n">files</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Query the database on rank=0 only, and broadcast to everywhere else</span>
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+            <span class="n">layout</span><span class="o">.</span><span class="n">connect_database</span><span class="p">()</span>
+
+            <span class="n">cat_run</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">layout</span><span class="o">.</span><span class="n">global_flag_category</span><span class="o">.</span><span class="n">select</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">global_flag_category</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;run&quot;</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Find run in database</span>
+            <span class="n">run_query</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">global_flag</span><span class="o">.</span><span class="n">select</span><span class="p">()</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                <span class="n">layout</span><span class="o">.</span><span class="n">global_flag</span><span class="o">.</span><span class="n">category</span> <span class="o">==</span> <span class="n">cat_run</span><span class="p">,</span>
+                <span class="n">layout</span><span class="o">.</span><span class="n">global_flag</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_name</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="c1"># Make sure we only have flags with active events</span>
+            <span class="n">run_query</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">run_query</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">graph_obj</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">event</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">event</span><span class="o">.</span><span class="n">active</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">run_query</span><span class="o">.</span><span class="n">count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Run </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">run_name</span><span class="si">}</span><span class="s2"> not found in database&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">run_query</span><span class="o">.</span><span class="n">count</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Multiple global flags found in database for run </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">run_name</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+
+            <span class="n">run</span> <span class="o">=</span> <span class="n">run_query</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+
+            <span class="c1"># Fetch run start and end time</span>
+            <span class="n">run_event</span> <span class="o">=</span> <span class="n">run</span><span class="o">.</span><span class="n">event</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+            <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">run_event</span><span class="o">.</span><span class="n">start</span><span class="o">.</span><span class="n">time</span><span class="p">,</span> <span class="n">run_event</span><span class="o">.</span><span class="n">end</span><span class="o">.</span><span class="n">time</span>
+
+            <span class="c1"># Fetch the instrument</span>
+            <span class="k">if</span> <span class="n">run</span><span class="o">.</span><span class="n">inst</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Instrument is not specified in database.&quot;</span><span class="p">)</span>
+            <span class="n">inst_obj</span> <span class="o">=</span> <span class="n">run</span><span class="o">.</span><span class="n">inst</span>
+
+            <span class="c1"># Create a finder object limited to the relevant time</span>
+            <span class="n">fi</span> <span class="o">=</span> <span class="n">finder</span><span class="o">.</span><span class="n">Finder</span><span class="p">(</span><span class="n">node_spoof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span><span class="p">)</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">only_corr</span><span class="p">()</span>
+
+            <span class="c1"># Set the time range that encapsulates all the intervals</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">set_time_range</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">)</span>
+
+            <span class="c1"># Add in all the time ranges</span>
+            <span class="c1"># for ti in timerange:</span>
+            <span class="c1">#     fi.include_time_interval(ti[&#39;start&#39;], ti[&#39;end&#39;])</span>
+
+            <span class="c1"># Only include the required instrument</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="o">.</span><span class="n">inst</span> <span class="o">==</span> <span class="n">inst_obj</span><span class="p">)</span>
+
+            <span class="c1"># Pull out the results and extract all the files</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="n">fi</span><span class="o">.</span><span class="n">get_results</span><span class="p">()</span>
+            <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">fname</span> <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">for</span> <span class="n">fname</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+            <span class="n">files</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+
+        <span class="n">files</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Make sure all nodes have container before return</span>
+        <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">Barrier</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">files</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryDataspecFile">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDataspecFile">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryDataspecFile</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Find the available files given a dataspec from a file.</span>
+
+<span class="sd">    .. deprecated:: pass1</span>
+<span class="sd">        Use the `run` global flag in the database,</span>
+<span class="sd">        combined with :class:`LoadRun` instead.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    dataset_file : str</span>
+<span class="sd">        YAML file containing dataset specification. If not specified, use the</span>
+<span class="sd">        one contained within the ch_pipeline repository.</span>
+<span class="sd">    dataset_name : str</span>
+<span class="sd">        Name of dataset to use.</span>
+<span class="sd">    archive_root : str</span>
+<span class="sd">        Root of archive to add to file paths.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">dataset_file</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">dataset_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">_DEFAULT_NODE_SPOOF</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QueryDataspecFile.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDataspecFile.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fetch the files in the given dataspec.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">yaml</span>
+
+        <span class="c1"># Set to default datasets file</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset_file</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">dataset_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;/data/datasets.yaml&quot;</span>
+
+        <span class="c1"># Check existense and read yaml datasets file</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset_file</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Dataset file not found.&quot;</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset_file</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">dconf</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s2">&quot;datasets&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">dconf</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;No datasets.&quot;</span><span class="p">)</span>
+
+        <span class="n">dsets</span> <span class="o">=</span> <span class="n">dconf</span><span class="p">[</span><span class="s2">&quot;datasets&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Find the correct dataset</span>
+        <span class="n">dspec</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">ds_</span> <span class="ow">in</span> <span class="n">dsets</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">ds_</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">dataset_name</span><span class="p">:</span>
+                <span class="n">dspec</span> <span class="o">=</span> <span class="n">ds_</span>
+                <span class="k">break</span>
+
+        <span class="c1"># Raise exception if it&#39;s not found</span>
+        <span class="k">if</span> <span class="n">dspec</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Dataset </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset_name</span><span class="si">}</span><span class="s2"> not found in </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset_file</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="s2">&quot;instrument&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">dspec</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">&quot;timerange&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">dspec</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Invalid dataset.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Add archive root if exists</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">dspec</span><span class="p">[</span><span class="s2">&quot;node_spoof&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span>
+
+        <span class="k">return</span> <span class="n">files_from_spec</span><span class="p">(</span><span class="n">dspec</span><span class="p">,</span> <span class="n">node_spoof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryDataspec">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDataspec">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryDataspec</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Find the available files given a dataspec in the config file.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    instrument : str</span>
+<span class="sd">        Name of the instrument.</span>
+<span class="sd">    timerange : list</span>
+<span class="sd">        List of time ranges as documented above.</span>
+<span class="sd">    node_spoof : dict, optional</span>
+<span class="sd">        Optional node spoof argument.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">instrument</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">timerange</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">_DEFAULT_NODE_SPOOF</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QueryDataspec.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryDataspec.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fetch the files in the given dataspec.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">dspec</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;instrument&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="p">,</span> <span class="s2">&quot;timerange&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">timerange</span><span class="p">}</span>
+
+        <span class="c1"># Add archive root if exists</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">dspec</span><span class="p">[</span><span class="s2">&quot;node_spoof&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span>
+
+        <span class="k">return</span> <span class="n">files_from_spec</span><span class="p">(</span><span class="n">dspec</span><span class="p">,</span> <span class="n">node_spoof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryAcquisitions">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryAcquisitions">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryAcquisitions</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Iterate over acquisitions.</span>
+
+<span class="sd">    This routine will query the database as specified in the runtime</span>
+<span class="sd">    configuration file.  It will iterate over the returned acquisitions</span>
+<span class="sd">    in chronological order, outputing a list of the corresponding files.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    node_spoof : dict</span>
+<span class="sd">        Host and directory in which to find data.</span>
+<span class="sd">    start_time, end_time : str</span>
+<span class="sd">        Find all acquisitions between this start and end time.</span>
+<span class="sd">    instrument : str</span>
+<span class="sd">        Find all acquisitions from this instrument.</span>
+<span class="sd">    accept_all_global_flags : bool</span>
+<span class="sd">        Accept all global flags.</span>
+<span class="sd">    min_num_files : int</span>
+<span class="sd">        Do not process acquisitions that contain less than this number of files.</span>
+<span class="sd">    max_num_files : int</span>
+<span class="sd">        Maximum number of files to return at once.  If an acquisition</span>
+<span class="sd">        contains more than this number of files, then it will be split</span>
+<span class="sd">        up into multiple blocks (pipeline iterations) of size roughly</span>
+<span class="sd">        equal to max_num_files.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">dict</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">_DEFAULT_NODE_SPOOF</span><span class="p">)</span>
+    <span class="n">instrument</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;chimestack&quot;</span><span class="p">)</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">accept_all_global_flags</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">min_num_files</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">max_num_files</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+<div class="viewcode-block" id="QueryAcquisitions.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryAcquisitions.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Query the database, fetch the files, and save to attribute.&quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">layout</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">chimedb</span><span class="w"> </span><span class="kn">import</span> <span class="n">data_index</span> <span class="k">as</span> <span class="n">di</span>
+
+        <span class="c1"># Function to break a list of files into groups of roughly the same size</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_choose_group_size</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">accept</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">%</span> <span class="n">m</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">accept</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">m</span>
+
+            <span class="n">l</span><span class="p">,</span> <span class="n">u</span> <span class="o">=</span> <span class="n">m</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">m</span> <span class="o">+</span> <span class="mi">1</span>
+
+            <span class="k">while</span> <span class="p">((</span><span class="n">n</span> <span class="o">%</span> <span class="n">l</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">accept</span><span class="p">)</span> <span class="ow">and</span> <span class="p">((</span><span class="n">n</span> <span class="o">%</span> <span class="n">u</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">accept</span><span class="p">):</span>
+                <span class="n">l</span><span class="p">,</span> <span class="n">u</span> <span class="o">=</span> <span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">u</span> <span class="o">+</span> <span class="mi">1</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">%</span> <span class="n">l</span><span class="p">)</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">n</span> <span class="o">%</span> <span class="n">u</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">l</span>
+
+            <span class="k">return</span> <span class="n">u</span>
+
+        <span class="c1"># Query the database on rank=0 only, and broadcast to everywhere else</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">layout</span><span class="o">.</span><span class="n">connect_database</span><span class="p">()</span>
+
+            <span class="n">fi</span> <span class="o">=</span> <span class="n">finder</span><span class="o">.</span><span class="n">Finder</span><span class="p">(</span><span class="n">node_spoof</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_spoof</span><span class="p">)</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">only_corr</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">accept_all_global_flags</span><span class="p">:</span>
+                <span class="n">fi</span><span class="o">.</span><span class="n">accept_all_global_flags</span><span class="p">()</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">set_time_range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_time</span><span class="p">)</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="p">)</span>
+
+            <span class="n">files</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">aa</span><span class="p">,</span> <span class="n">acq</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">fi</span><span class="o">.</span><span class="n">acqs</span><span class="p">):</span>
+                <span class="n">acq_results</span> <span class="o">=</span> <span class="n">fi</span><span class="o">.</span><span class="n">get_results_acq</span><span class="p">(</span><span class="n">aa</span><span class="p">)</span>
+
+                <span class="n">filelist</span> <span class="o">=</span> <span class="p">[</span><span class="n">ff</span> <span class="k">for</span> <span class="n">acqr</span> <span class="ow">in</span> <span class="n">acq_results</span> <span class="k">for</span> <span class="n">ff</span> <span class="ow">in</span> <span class="n">acqr</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+                <span class="n">nfiles</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">filelist</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">min_num_files</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">nfiles</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">min_num_files</span><span class="p">):</span>
+                    <span class="k">continue</span>
+
+                <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">max_num_files</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">nfiles</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_num_files</span><span class="p">):</span>
+                    <span class="n">files</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">filelist</span><span class="p">)</span>
+
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">group_size</span> <span class="o">=</span> <span class="n">_choose_group_size</span><span class="p">(</span>
+                        <span class="n">nfiles</span><span class="p">,</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">max_num_files</span><span class="p">,</span>
+                        <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="mf">0.10</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_num_files</span><span class="p">)),</span>
+                    <span class="p">)</span>
+
+                    <span class="n">ngroup</span><span class="p">,</span> <span class="n">offset</span> <span class="o">=</span> <span class="n">nfiles</span> <span class="o">//</span> <span class="n">group_size</span><span class="p">,</span> <span class="p">(</span><span class="n">nfiles</span> <span class="o">%</span> <span class="n">group_size</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span>
+                    <span class="n">bnd</span> <span class="o">=</span> <span class="p">[</span><span class="n">offset</span> <span class="o">+</span> <span class="n">gg</span> <span class="o">*</span> <span class="n">group_size</span> <span class="k">for</span> <span class="n">gg</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ngroup</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+                    <span class="n">bnd</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">bnd</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">nfiles</span>
+
+                    <span class="n">files</span> <span class="o">+=</span> <span class="p">[</span>
+                        <span class="n">filelist</span><span class="p">[</span><span class="n">bnd</span><span class="p">[</span><span class="n">ii</span><span class="p">]</span> <span class="p">:</span> <span class="n">bnd</span><span class="p">[</span><span class="n">ii</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span> <span class="k">for</span> <span class="n">ii</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">bnd</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="p">]</span>
+
+        <span class="c1"># Broadcast the files to the other nodes</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">Barrier</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span> <span class="o">=</span> <span class="n">files</span></div>
+
+
+<div class="viewcode-block" id="QueryAcquisitions.next">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryAcquisitions.next">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the files from the next acquisition.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">PipelineStopIteration</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryInputs">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryInputs">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryInputs</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;From a dataspec describing the data create a list of objects describing the inputs in the files.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    cache : bool</span>
+<span class="sd">        Only query for the inputs for the first container received. For all</span>
+<span class="sd">        subsequent files just return the initial set of inputs. This can help</span>
+<span class="sd">        minimise the number of potentially fragile database operations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">cache</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">_cached_inputs</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="QueryInputs.next">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryInputs.next">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ts</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generate an input description from the timestream passed in.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        ts : andata.CorrData</span>
+<span class="sd">            Timestream container.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        inputs : list of :class:`CorrInput`</span>
+<span class="sd">            A list of describing the inputs as they are in the file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Fetch from the cache if we can</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Using cached inputs.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span>
+
+        <span class="n">inputs</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+            <span class="c1"># Get the datetime of the middle of the file</span>
+            <span class="n">time</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">ts</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+            <span class="n">inputs</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_correlator_inputs</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+
+            <span class="n">inputs</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">reorder_correlator_inputs</span><span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">],</span> <span class="n">inputs</span><span class="p">)</span>
+
+        <span class="c1"># Broadcast input description to all ranks</span>
+        <span class="n">inputs</span> <span class="o">=</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Save into the cache for the next iteration</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span> <span class="o">=</span> <span class="n">inputs</span>
+
+        <span class="c1"># Make sure all nodes have container before return</span>
+        <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">Barrier</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">inputs</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="QueryFrequencyMap">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryFrequencyMap">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">QueryFrequencyMap</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">MPILoggedTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the CHIME frequency map that was active when this data was collected.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    cache : bool</span>
+<span class="sd">        Only query for the inputs for the first container received. For all</span>
+<span class="sd">        subsequent files just return the initial set of inputs. This can help</span>
+<span class="sd">        minimise the number of potentially fragile database operations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">cache</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">_cached_inputs</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="QueryFrequencyMap.next">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.QueryFrequencyMap.next">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">next</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">ts</span><span class="p">:</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span> <span class="o">|</span> <span class="n">containers</span><span class="o">.</span><span class="n">CHIMETimeStream</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">containers</span><span class="o">.</span><span class="n">FrequencyMapSingle</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generate an input description from the timestream passed in.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        ts</span>
+<span class="sd">            Timestream container.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        freq_map</span>
+<span class="sd">            Frequency slot map container</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">peewee</span><span class="w"> </span><span class="kn">import</span> <span class="n">DoesNotExist</span>
+
+        <span class="c1"># Fetch from the cache if we can</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Using cached inputs.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span>
+
+        <span class="n">stream_id</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">stream</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">dsid_flag</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">dataset_id</span><span class="p">[:]</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="n">dsid_flag</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">dsid_flag</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">layout</span><span class="o">.</span><span class="n">connect_database</span><span class="p">()</span>
+            <span class="c1"># Get only unique dataset ids to reduce number of lookups. Ignore</span>
+            <span class="c1"># the null dataset at the 0th index</span>
+            <span class="n">unique_dataset_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">dsid_flag</span><span class="p">[:])[</span><span class="mi">1</span><span class="p">:]</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">unique_dataset_ids</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">fmaps</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="c1"># Get the frequency map for each unique dataset id. They should all</span>
+                <span class="c1"># have the same frequency map - otherwise, raise an error</span>
+                <span class="k">for</span> <span class="n">dsid</span> <span class="ow">in</span> <span class="n">unique_dataset_ids</span><span class="p">:</span>
+                    <span class="n">_missing_ds_flag</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">dataset</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">Dataset</span><span class="o">.</span><span class="n">from_id</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">dsid</span><span class="p">))</span>
+                    <span class="k">except</span> <span class="n">DoesNotExist</span><span class="p">:</span>
+                        <span class="c1"># This dataset id does not exist in the database. If none of the</span>
+                        <span class="c1"># dataset ids are found, throw an exception</span>
+                        <span class="n">_missing_ds_flag</span> <span class="o">=</span> <span class="kc">True</span>
+                        <span class="k">continue</span>
+
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">state</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">closest_ancestor_of_type</span><span class="p">(</span>
+                            <span class="s2">&quot;f_engine_frequency_map&quot;</span>
+                        <span class="p">)</span><span class="o">.</span><span class="n">state</span>
+                        <span class="n">fmaps</span><span class="p">[</span><span class="n">state</span><span class="o">.</span><span class="n">id</span><span class="p">]</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">data</span>
+                    <span class="k">except</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">NotFoundError</span><span class="p">:</span>
+                        <span class="c1"># No frequency map found for this dataset id, so the default</span>
+                        <span class="c1"># is used. Provide an entry so we can still check how many</span>
+                        <span class="c1"># frequency maps were found</span>
+                        <span class="n">fmaps</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+
+                <span class="k">if</span> <span class="n">_missing_ds_flag</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">fmaps</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">NotFoundError</span><span class="p">(</span>
+                        <span class="s2">&quot;None of the available dataset_ids exist in the chime database.&quot;</span>
+                    <span class="p">)</span>
+
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">fmaps</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Multiple frequency maps found for this dataset.&quot;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="s2">&quot;default&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">fmaps</span><span class="p">:</span>
+                    <span class="c1"># Extract the stream_id and frequency map</span>
+                    <span class="n">fmap_dict</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">fmaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))[</span><span class="s2">&quot;fmap&quot;</span><span class="p">]</span>
+
+                    <span class="n">stream_id</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fromiter</span><span class="p">(</span><span class="n">fmap_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">(),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+                    <span class="n">fmap</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">fmap_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+                    <span class="n">stream</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">order_frequency_map_stream</span><span class="p">(</span><span class="n">fmap</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">)</span>
+
+        <span class="c1"># Broadcast to all ranks</span>
+        <span class="n">stream_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">stream_id</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">stream</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Check to see if we found a frequency map. If not, get the default mapping</span>
+        <span class="k">if</span> <span class="n">stream</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">stream_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">stream</span><span class="p">,</span> <span class="n">stream_id</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_default_frequency_map_stream</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;No frequency map found. Using default.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Set the frequency array for all 1024 frequencies, starting at 800 MHz</span>
+        <span class="c1"># The frequency map is only properly defined when all frequencies are used</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">400</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">cont</span> <span class="o">=</span> <span class="n">containers</span><span class="o">.</span><span class="n">FrequencyMapSingle</span><span class="p">(</span><span class="n">copy_from</span><span class="o">=</span><span class="n">ts</span><span class="p">,</span> <span class="n">freq</span><span class="o">=</span><span class="n">freq</span><span class="p">)</span>
+
+        <span class="n">cont</span><span class="o">.</span><span class="n">stream</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">stream</span>
+        <span class="n">cont</span><span class="o">.</span><span class="n">stream_id</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">stream_id</span>
+
+        <span class="c1"># Save into the cache for the next iteration</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Caching input.&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_inputs</span> <span class="o">=</span> <span class="n">cont</span>
+
+        <span class="k">return</span> <span class="n">cont</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="finder_from_spec">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.finder_from_spec">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">finder_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">node_spoof</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get a `Finder` object from the dataspec.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    spec : dict</span>
+<span class="sd">        Dataspec dictionary.</span>
+<span class="sd">    node_spoof : dict or None</span>
+<span class="sd">        Host and directory in which to find data.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    fi : ch_util.finder.Finder</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">instrument</span> <span class="o">=</span> <span class="n">spec</span><span class="p">[</span><span class="s2">&quot;instrument&quot;</span><span class="p">]</span>
+    <span class="n">timerange</span> <span class="o">=</span> <span class="n">spec</span><span class="p">[</span><span class="s2">&quot;timerange&quot;</span><span class="p">]</span>
+
+    <span class="n">fi</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+        <span class="c1"># Get instrument</span>
+        <span class="n">inst_obj</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">select</span><span class="p">()</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">instrument</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Ensure timerange is a list</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">timerange</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="n">timerange</span> <span class="o">=</span> <span class="p">[</span><span class="n">timerange</span><span class="p">]</span>
+
+        <span class="c1"># Find the earliest and latest times</span>
+        <span class="n">earliest</span> <span class="o">=</span> <span class="nb">min</span><span class="p">([</span><span class="n">tr</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">tr</span> <span class="ow">in</span> <span class="n">timerange</span><span class="p">])</span>
+        <span class="n">latest</span> <span class="o">=</span> <span class="nb">max</span><span class="p">([</span><span class="n">tr</span><span class="p">[</span><span class="s2">&quot;end&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">tr</span> <span class="ow">in</span> <span class="n">timerange</span><span class="p">])</span>
+
+        <span class="c1"># Set the archive_root</span>
+        <span class="k">if</span> <span class="n">node_spoof</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="s2">&quot;node_spoof&quot;</span> <span class="ow">in</span> <span class="n">spec</span><span class="p">:</span>
+            <span class="n">node_spoof</span> <span class="o">=</span> <span class="n">spec</span><span class="p">[</span><span class="s2">&quot;node_spoof&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Create a finder object limited to the relevant time</span>
+        <span class="n">fi</span> <span class="o">=</span> <span class="n">finder</span><span class="o">.</span><span class="n">Finder</span><span class="p">(</span><span class="n">node_spoof</span><span class="o">=</span><span class="n">node_spoof</span><span class="p">)</span>
+
+        <span class="c1"># Set the time range that encapsulates all the intervals</span>
+        <span class="n">fi</span><span class="o">.</span><span class="n">set_time_range</span><span class="p">(</span><span class="n">earliest</span><span class="p">,</span> <span class="n">latest</span><span class="p">)</span>
+
+        <span class="c1"># Add in all the time ranges</span>
+        <span class="k">for</span> <span class="n">ti</span> <span class="ow">in</span> <span class="n">timerange</span><span class="p">:</span>
+            <span class="n">fi</span><span class="o">.</span><span class="n">include_time_interval</span><span class="p">(</span><span class="n">ti</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">],</span> <span class="n">ti</span><span class="p">[</span><span class="s2">&quot;end&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Only include the required instrument</span>
+        <span class="n">fi</span><span class="o">.</span><span class="n">filter_acqs</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="o">.</span><span class="n">inst</span> <span class="o">==</span> <span class="n">inst_obj</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">fi</span></div>
+
+
+
+<div class="viewcode-block" id="files_from_spec">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.core.dataquery.html#ch_pipeline.core.dataquery.files_from_spec">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">files_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">node_spoof</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the names of files in a dataset.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    spec : dict</span>
+<span class="sd">        Dataspec dictionary.</span>
+<span class="sd">    node_spoof : dict or None</span>
+<span class="sd">        Host and directory in which to find data.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    files : list</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Get a list of files in a dataset from an instrument name and timerange.</span>
+
+    <span class="n">files</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">rank0</span><span class="p">:</span>
+        <span class="c1"># Get the finder object</span>
+        <span class="n">fi</span> <span class="o">=</span> <span class="n">finder_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">node_spoof</span><span class="p">)</span>
+
+        <span class="c1"># Pull out the results and extract all the files</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">fi</span><span class="o">.</span><span class="n">get_results</span><span class="p">()</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">fname</span> <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">for</span> <span class="n">fname</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+        <span class="n">files</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">mpitools</span><span class="o">.</span><span class="n">world</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

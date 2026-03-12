@@ -1,0 +1,1741 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.daily &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.daily</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.processing.daily</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Chime Daily Pipeline processing type.</span>
+
+<span class="sd">This processing type is used to run the Chime daily pipeline.</span>
+
+<span class="sd">Classes</span>
+<span class="sd">=======</span>
+<span class="sd">- :py:class:`DailyProcessing`</span>
+<span class="sd">- :py:class:`TestDailyProcessing`</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">caput.astro.time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ctime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">chimedb.core</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">db</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">chimedb.data_index</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">di</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">chimedb.dataflag</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">df</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">peewee</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pw</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.util.arraytools</span><span class="w"> </span><span class="kn">import</span> <span class="n">unique_ordered</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_pipeline.processing</span><span class="w"> </span><span class="kn">import</span> <span class="n">base</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">DEFAULT_SCRIPT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Cluster configuration</span>
+<span class="s2">cluster:</span>
+<span class="s2">  name: </span><span class="si">{jobname}</span>
+<span class="s2">  account: rpp-chime</span>
+
+<span class="s2">  directory: </span><span class="si">{dir}</span>
+<span class="s2">  temp_directory: </span><span class="si">{tempdir}</span>
+
+<span class="s2">  time: </span><span class="si">{time}</span>
+<span class="s2">  system: slurm</span>
+<span class="s2">  nodes: </span><span class="si">{nodes}</span>
+<span class="s2">  ompnum: </span><span class="si">{ompnum}</span>
+<span class="s2">  pernode: </span><span class="si">{pernode}</span>
+<span class="s2">  mem: 768000M</span>
+
+<span class="s2">  invoke: mpirun</span>
+<span class="s2">  invoke_args: &quot;--map-by l3cache:PE=$SLURM_CPUS_PER_TASK&quot;</span>
+
+<span class="s2">  venv: </span><span class="si">{venv}</span>
+<span class="s2">  module_path: </span><span class="si">{modpath}</span>
+<span class="s2">  module_list: </span><span class="si">{modlist}</span>
+
+<span class="s2"># Pipeline task configuration</span>
+<span class="s2">pipeline:</span>
+
+<span class="s2">  logging:</span>
+<span class="s2">    root: DEBUG</span>
+<span class="s2">    peewee: INFO</span>
+<span class="s2">    matplotlib: INFO</span>
+
+<span class="s2">  save_versions:</span>
+<span class="s2">    - caput</span>
+<span class="s2">    - ch_util</span>
+<span class="s2">    - ch_pipeline</span>
+<span class="s2">    - chimedb.core</span>
+<span class="s2">    - chimedb.data_index</span>
+<span class="s2">    - chimedb.dataflag</span>
+<span class="s2">    - cora</span>
+<span class="s2">    - draco</span>
+<span class="s2">    - drift</span>
+<span class="s2">    - fluxcat</span>
+<span class="s2">    - numpy</span>
+<span class="s2">    - scipy</span>
+<span class="s2">    - h5py</span>
+<span class="s2">    - mpi4py</span>
+
+<span class="s2">  tasks:</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.base.SetMPILogging</span>
+<span class="s2">      params:</span>
+<span class="s2">        level_rank0: DEBUG</span>
+<span class="s2">        level_all: WARNING</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.debug.CheckMPIEnvironment</span>
+<span class="s2">      params:</span>
+<span class="s2">        timeout: 420</span>
+
+<span class="s2">    - type: ch_pipeline.core.dataquery.ConnectDatabase</span>
+<span class="s2">      params:</span>
+<span class="s2">        timeout: 5</span>
+<span class="s2">        ntries: 5</span>
+
+<span class="s2">    # Query for all the data for the sidereal day we are processing</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryDatabase</span>
+<span class="s2">      out: filelist</span>
+<span class="s2">      params:</span>
+<span class="s2">        start_csd: </span><span class="si">{csd[0]:.2f}</span>
+<span class="s2">        end_csd: </span><span class="si">{csd[1]:.2f}</span>
+<span class="s2">        accept_all_global_flags: true</span>
+<span class="s2">        node_spoof:</span>
+<span class="s2">          fir_online: &quot;/project/rpp-chime/chime/chime_online/&quot;</span>
+<span class="s2">        instrument: chimestack</span>
+
+<span class="s2">    # Load the telescope model that we need for several steps</span>
+<span class="s2">    - type: draco.core.io.LoadProductManager</span>
+<span class="s2">      out: manager</span>
+<span class="s2">      params:</span>
+<span class="s2">        product_directory: &quot;</span><span class="si">{product_path}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Load and accumulate the available timing correction files.</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.LoadFilesFromParams</span>
+<span class="s2">      out: tcorr</span>
+<span class="s2">      params:</span>
+<span class="s2">        files: &quot;</span><span class="si">{timing_file}</span><span class="s2">&quot;</span>
+<span class="s2">        distributed: false</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.flow.AccumulateList</span>
+<span class="s2">      in: tcorr</span>
+<span class="s2">      out: tcorrlist</span>
+
+<span class="s2">    # We need to block the loading of the files until all the timing correction files are available</span>
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: filelist</span>
+<span class="s2">      out: filelist2</span>
+
+<span class="s2">    # Load the individual data files</span>
+<span class="s2">    - type: ch_pipeline.core.io.LoadCorrDataFiles</span>
+<span class="s2">      requires: filelist2</span>
+<span class="s2">      out: tstream_orig</span>
+<span class="s2">      params:</span>
+<span class="s2">        channel_range: [</span><span class="si">{freq[0]:d}</span><span class="s2">, </span><span class="si">{freq[1]:d}</span><span class="s2">]</span>
+
+<span class="s2">    # Mask out any weights that are abnormally large or small, since these are likely</span>
+<span class="s2">    # numerical issues and represent bad data</span>
+<span class="s2">    - type: draco.analysis.flagging.SanitizeWeights</span>
+<span class="s2">      in: tstream_orig</span>
+<span class="s2">      out: tstream_sanitized</span>
+<span class="s2">      params:</span>
+<span class="s2">        max_thresh: 1e30</span>
+<span class="s2">        min_thresh: 1e-30</span>
+
+<span class="s2">    # Correct the timing distribution errors</span>
+<span class="s2">    - type: ch_pipeline.analysis.timing.ApplyTimingCorrection</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: tstream_sanitized</span>
+<span class="s2">      out: tstream_corr</span>
+<span class="s2">      params:</span>
+<span class="s2">        use_input_flags: true</span>
+
+<span class="s2">    # Get the telescope layout that was active when this data file was recorded</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryInputs</span>
+<span class="s2">      in: tstream_corr</span>
+<span class="s2">      out: inputmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        cache: true</span>
+
+<span class="s2">    # Correct the miscalibration of the data due to the varying estimates of telescope</span>
+<span class="s2">    # rotation</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTelescopeRotation</span>
+<span class="s2">      in: [tstream_corr, inputmap]</span>
+<span class="s2">      out: tstream_rot</span>
+<span class="s2">      params:</span>
+<span class="s2">        rotation: -0.071</span>
+
+<span class="s2">    # Correct an early bug in the interpretation of the timestamps that effected the</span>
+<span class="s2">    # calibration</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.CorrectTimeOffset</span>
+<span class="s2">      in: [tstream_rot, inputmap]</span>
+<span class="s2">      out: tstream</span>
+
+<span class="s2">    # Identify samples where autocorrelations are negative, corresponding</span>
+<span class="s2">    # to bad data</span>
+<span class="s2">    - type: draco.analysis.flagging.NegativeAutosMask</span>
+<span class="s2">      in: tstream</span>
+<span class="s2">      out: negative_auto_mask</span>
+
+<span class="s2">    # Apply the negative auto mask</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream, negative_auto_mask]</span>
+<span class="s2">      out: tstream_no_neg_auto</span>
+
+<span class="s2">    # Calculate the system sensitivity for this file</span>
+<span class="s2">    - type: draco.analysis.sensitivity.ComputeSystemSensitivity</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_no_neg_auto</span>
+<span class="s2">      out: sensitivity</span>
+<span class="s2">      params:</span>
+<span class="s2">        exclude_intracyl: true</span>
+
+<span class="s2">    # Identify individual baselines with much lower weights than expected</span>
+<span class="s2">    - type: draco.analysis.flagging.ThresholdVisWeightBaseline</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_no_neg_auto</span>
+<span class="s2">      out: full_bad_baseline_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        average_type: &quot;median&quot;</span>
+<span class="s2">        absolute_threshold: 1e-7</span>
+<span class="s2">        relative_threshold: 1e-5</span>
+<span class="s2">        pols_to_flag: &quot;copol&quot;</span>
+
+<span class="s2">    # Collapse bad-baseline mask over baseline, so that any time-freq sample</span>
+<span class="s2">    # with a low weight at any baseline is masked</span>
+<span class="s2">    - type: draco.analysis.flagging.CollapseBaselineMask</span>
+<span class="s2">      in: full_bad_baseline_mask</span>
+<span class="s2">      out: bad_baseline_mask</span>
+
+<span class="s2">    # Load the frequency map that was active when this data was collected</span>
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryFrequencyMap</span>
+<span class="s2">      in: tstream_no_neg_auto</span>
+<span class="s2">      out: freqmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        cache: false</span>
+
+<span class="s2">    # Identify decorrelated cylinders</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskDecorrelatedCylinder</span>
+<span class="s2">      in: [tstream_no_neg_auto, inputmap, freqmap]</span>
+<span class="s2">      out: decorr_cyl_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        threshold: 5.0</span>
+<span class="s2">        max_frac_freq: 0.1</span>
+
+<span class="s2">    # Average over redundant baselines across all cylinder pairs</span>
+<span class="s2">    - type: draco.analysis.transform.CollateProducts</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_no_neg_auto</span>
+<span class="s2">      out: tstream_col</span>
+<span class="s2">      params:</span>
+<span class="s2">        weight: &quot;natural&quot;</span>
+
+<span class="s2">    # Concatenate together all the days sensitivity information and output it</span>
+<span class="s2">    # for validation</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sensitivity</span>
+<span class="s2">      out: sensitivity_day</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sensitivity_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Concatenate together all the masks for bad baselines</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: bad_baseline_mask</span>
+<span class="s2">      out: bad_baseline_mask_day</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;bad_baseline_mask_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Concatenate together all the decorrelated cylinder masks</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: decorr_cyl_mask</span>
+<span class="s2">      out: decorr_cyl_mask_day</span>
+
+<span class="s2">    # Expand the decorrelated cylinder mask along the time axis</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.ExpandMask</span>
+<span class="s2">      in: decorr_cyl_mask_day</span>
+<span class="s2">      out: decorr_cyl_mask_day_exp</span>
+<span class="s2">      params:</span>
+<span class="s2">        nexpand: 6</span>
+<span class="s2">        in_place: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;decorrelated_cylinder_mask_expanded_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Concatenate together all the days timestream information</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealGrouper</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_col</span>
+<span class="s2">      out: tstream_day</span>
+
+<span class="s2">    # Calculate the thermal gain correction</span>
+<span class="s2">    - type: ch_pipeline.analysis.calibration.ThermalCalibration</span>
+<span class="s2">      in: tstream_day</span>
+<span class="s2">      out: thermal_gain</span>
+<span class="s2">      params:</span>
+<span class="s2">        caltime_path: &quot;</span><span class="si">{caltimes_file}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Apply the thermal correction</span>
+<span class="s2">    - type: draco.analysis.calibration.ApplyGain</span>
+<span class="s2">      in: [tstream_day, thermal_gain]</span>
+<span class="s2">      out: tstream_thermal_corrected</span>
+<span class="s2">      params:</span>
+<span class="s2">        inverse: false</span>
+
+<span class="s2">    # Apply the mask from the bad baselines. This will modify the data in</span>
+<span class="s2">    # place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_thermal_corrected, bad_baseline_mask_day]</span>
+<span class="s2">      out: tstream_bbm</span>
+
+<span class="s2">    # Apply the mask from the decorrelated cylinders. This will modify the data</span>
+<span class="s2">    # in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_bbm, decorr_cyl_mask_day_exp]</span>
+<span class="s2">      out: tstream_dcm</span>
+
+<span class="s2">    # Precision truncate the timestream and write to disk</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.Truncate</span>
+<span class="s2">      in: tstream_dcm</span>
+<span class="s2">      out: tstream_truncated</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          vis:</span>
+<span class="s2">            weight_dataset: vis_weight</span>
+<span class="s2">            variance_increase: 1.0e-4</span>
+<span class="s2">          vis_weight: 1.0e-5</span>
+<span class="s2">          gain: 1.0e-3</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;tstream_no_rfi_mask_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Calculate a RFI mask targeting transient scattered emission</span>
+<span class="s2">    - type: draco.analysis.flagging.RFITransientVisMask</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_truncated</span>
+<span class="s2">      out: rfimask_transient</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_transient_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the StokesI RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_truncated, rfimask_transient]</span>
+<span class="s2">      out: tstream_day_rfi</span>
+
+<span class="s2">    # Estimate a static frequency mask from the visibilities. This task</span>
+<span class="s2">    # does NOT use the hard-coded static mask</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.RFIStaticVisMask</span>
+<span class="s2">      requires: [manager, manager, manager]</span>
+<span class="s2">      in: tstream_day_rfi</span>
+<span class="s2">      out: rfimask_static</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_static_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the static RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_day_rfi, rfimask_static]</span>
+<span class="s2">      out: tstream_day_rfi2</span>
+
+<span class="s2">    # Calculate a RFI mask from the sensitivity metric</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.RFISensitivityMask</span>
+<span class="s2">      in: sensitivity_day</span>
+<span class="s2">      out: rfimask_sensitivity</span>
+<span class="s2">      params:</span>
+<span class="s2">        include_static_mask: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_sensitivity_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the Sensitivity RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_day_rfi2, rfimask_sensitivity]</span>
+<span class="s2">      out: tstream_day_rfi3</span>
+
+<span class="s2">    # Fully remove any frequencies which are mostly flagged. A threshold</span>
+<span class="s2">    # of 0.3 (30%) generally only removes ~0.4-0.8</span><span class="si">% o</span><span class="s2">f additional data</span>
+<span class="s2">    - type: draco.analysis.flagging.MaskFreq</span>
+<span class="s2">      in: tstream_day_rfi3</span>
+<span class="s2">      out: freq_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        freq_frac: 0.3</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_freq_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the frequency mask</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_day_rfi3, freq_mask]</span>
+<span class="s2">      out: tstream_day_rfi4</span>
+
+<span class="s2">    # Apply an aggressive delay filter and check consistency of</span>
+<span class="s2">    # data with noise at high delay.</span>
+<span class="s2">    - type: draco.analysis.dayenu.DayenuDelayFilterFixedCutoff</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_day_rfi4</span>
+<span class="s2">      out: chisq_day_filtered</span>
+<span class="s2">      params:</span>
+<span class="s2">        tauw: 0.400</span>
+<span class="s2">        single_mask: true</span>
+<span class="s2">        atten_threshold: 0.0</span>
+<span class="s2">        reduce_baseline: true</span>
+<span class="s2">        mask_short: 20.0</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;chisq_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Generate an RFI mask from the chi-squared test statistic.</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.RFIMaskChisqHighDelay</span>
+<span class="s2">      in: chisq_day_filtered</span>
+<span class="s2">      out: rfimask_chisq</span>
+<span class="s2">      params:</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_chisq_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [tstream_day_rfi4, rfimask_chisq]</span>
+<span class="s2">      out: tstream_day_rfi5</span>
+
+<span class="s2">    # Smooth the noise estimates which suffer from sample variance</span>
+<span class="s2">    - type: draco.analysis.flagging.SmoothVisWeight</span>
+<span class="s2">      in: tstream_day_rfi5</span>
+<span class="s2">      out: tstream_day_smoothweight</span>
+
+<span class="s2">    # Regrid the data onto a regular grid in sidereal time</span>
+<span class="s2">    - type: draco.analysis.sidereal.SiderealRegridderGP</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: tstream_day_smoothweight</span>
+<span class="s2">      out: sstream</span>
+<span class="s2">      params:</span>
+<span class="s2">        samples: 4096</span>
+<span class="s2">        mask_cutoff: 1.7</span>
+<span class="s2">        kernel_width: 5</span>
+
+<span class="s2">    # Make a map of the full dataset</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: ringmap</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: false</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Precision truncate and write out the chunked normal ringmap</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.Truncate</span>
+<span class="s2">      in: ringmap</span>
+<span class="s2">      out: ringmap_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          map:</span>
+<span class="s2">            weight_dataset: weight</span>
+<span class="s2">            variance_increase: 1.0e-3</span>
+<span class="s2">          weight: 1.0e-5</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Make a map from the inter cylinder baselines. This is less sensitive to</span>
+<span class="s2">    # cross talk and emphasis point sources</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: ringmap_int</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: true</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Precision truncate and write out the chunked intercylinder ringmap</span>
+<span class="s2">    # NOTE: this cannot be combined with the above Truncate task as it would</span>
+<span class="s2">    # result in both ringmaps existing in memory at the same time.</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.Truncate</span>
+<span class="s2">      in: ringmap_int</span>
+<span class="s2">      out: ringmap_int_trunc</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset:</span>
+<span class="s2">          map:</span>
+<span class="s2">            weight_dataset: weight</span>
+<span class="s2">            variance_increase: 1.0e-3</span>
+<span class="s2">          weight: 1.0e-5</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_intercyl_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Ensure that the ringmaps have been written out before proceeding</span>
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: ringmap_int_trunc</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: sstream2</span>
+
+<span class="s2">    # Mask out intercylinder baselines before beam forming to minimise cross</span>
+<span class="s2">    # talk. This creates a copy of the input that shares the vis dataset (but</span>
+<span class="s2">    # with a distinct weight dataset) to save memory</span>
+<span class="s2">    - type: draco.analysis.flagging.MaskBaselines</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream2</span>
+<span class="s2">      out: sstream_inter</span>
+<span class="s2">      params:</span>
+<span class="s2">        share: vis</span>
+<span class="s2">        mask_short_ew: 1.0</span>
+
+<span class="s2">    # Load the source catalogs to measure flux as a function of hour angle</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.LoadFilesFromParams</span>
+<span class="s2">      out: source_catalog_nocollapse</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[0]}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Wait until the catalog is loaded, otherwise this task will</span>
+<span class="s2">    # run its setup method and significantly increase memory used</span>
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: source_catalog_nocollapse</span>
+<span class="s2">      in: sstream_inter</span>
+<span class="s2">      out: sstream_inter2</span>
+
+<span class="s2">    # Measure the beamformed visibility as a function of hour angle</span>
+<span class="s2">    - type: draco.analysis.beamform.BeamFormCat</span>
+<span class="s2">      requires: [manager, sstream_inter2]</span>
+<span class="s2">      in: source_catalog_nocollapse</span>
+<span class="s2">      out: sourceflux_nocollapse</span>
+<span class="s2">      params:</span>
+<span class="s2">        timetrack: 300.0</span>
+<span class="s2">        collapse_ha: false</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sourceflux_vs_ha_{{tag}}.h5&quot;</span>
+<span class="s2">        limit_outputs: 1</span>
+
+<span class="s2">    # Wait until the first beam forming task is done in order to</span>
+<span class="s2">    # avoid unnecessary memory usage</span>
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: sourceflux_nocollapse</span>
+<span class="s2">      in: sstream_inter</span>
+<span class="s2">      out: sstream_inter3</span>
+
+<span class="s2">    # Load the source catalogs to measure fluxes of</span>
+<span class="s2">    - type: caput.pipeline.tasklib.io.LoadFilesFromParams</span>
+<span class="s2">      out: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        files:</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[0]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[1]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[2]}</span><span class="s2">&quot;</span>
+<span class="s2">        - &quot;</span><span class="si">{catalogs[3]}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Measure the observed fluxes of the point sources in the catalogs</span>
+<span class="s2">    - type: draco.analysis.beamform.BeamFormCat</span>
+<span class="s2">      requires: [manager, sstream_inter3]</span>
+<span class="s2">      in: source_catalog</span>
+<span class="s2">      params:</span>
+<span class="s2">        timetrack: 300.0</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;sourceflux_{{tag}}.h5&quot;</span>
+<span class="s2">        limit_outputs: 4</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.io.LoadFilesFromParams</span>
+<span class="s2">      out: sstream_template</span>
+<span class="s2">      params:</span>
+<span class="s2">        files: &quot;</span><span class="si">{template_file}</span><span class="s2">&quot;</span>
+
+<span class="s2">    # Subtract the template</span>
+<span class="s2">    - type: draco.analysis.transform.MixTwoDatasets</span>
+<span class="s2">      in: [sstream, sstream_template]</span>
+<span class="s2">      out: sstream_template_subtract</span>
+<span class="s2">      params:</span>
+<span class="s2">        data_coeff: [1.0, -1.0]</span>
+<span class="s2">        weight_coeff: [1.0, 1.0e-4]</span>
+<span class="s2">        tag_coeff: [true, false]</span>
+<span class="s2">        invert_weight: true</span>
+<span class="s2">        require_nonzero_weight: true</span>
+
+<span class="s2">    # Make a template-subtracted ringmap</span>
+<span class="s2">    - type: draco.analysis.ringmapmaker.RingMapMaker</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_template_subtract</span>
+<span class="s2">      out: ringmap_template_subtract</span>
+<span class="s2">      params:</span>
+<span class="s2">        single_beam: true</span>
+<span class="s2">        weight: natural</span>
+<span class="s2">        exclude_intracyl: false</span>
+<span class="s2">        include_auto: false</span>
+
+<span class="s2">    # Compute the chi-squared of the template-subtracted ringmap</span>
+<span class="s2">    # and save out to disk</span>
+<span class="s2">    - type: draco.analysis.transform.ReduceChisq</span>
+<span class="s2">      in: ringmap_template_subtract</span>
+<span class="s2">      out: ringmap_chisq_el</span>
+<span class="s2">      params:</span>
+<span class="s2">        axes: [el]</span>
+<span class="s2">        dataset: map</span>
+<span class="s2">        weighting: weighted</span>
+<span class="s2">        compression: false</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;ringmap_chisq_el_template_sub_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Block any further processing until the template-subtracted</span>
+<span class="s2">    # block is finished</span>
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: ringmap_chisq_el</span>
+<span class="s2">      in: sstream</span>
+<span class="s2">      out: sstream3</span>
+
+<span class="s2">    # Mask out day time data</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DayMask</span>
+<span class="s2">      in: sstream3</span>
+<span class="s2">      out: sstream_mask1</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskMoon</span>
+<span class="s2">      in: sstream_mask1</span>
+<span class="s2">      out: sstream_mask2</span>
+
+<span class="s2">    # Remove ranges of time known to be bad that may affect the delay power</span>
+<span class="s2">    # spectrum estimate</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DataFlagger</span>
+<span class="s2">      in: sstream_mask2</span>
+<span class="s2">      out: sstream_mask3</span>
+<span class="s2">      params:</span>
+<span class="s2">        flag_type:</span>
+<span class="s2">          - acjump</span>
+<span class="s2">          - bad_calibration_acquisition_restart</span>
+<span class="s2">          - bad_calibration_fpga_restart</span>
+<span class="s2">          - bad_calibration_gains</span>
+<span class="s2">          - decorrelated_cylinder</span>
+<span class="s2">          - globalflag</span>
+
+<span class="s2">    # Blend in the template file</span>
+<span class="s2">    - type: draco.analysis.flagging.BlendStack</span>
+<span class="s2">      requires: sstream_template</span>
+<span class="s2">      in: sstream_mask3</span>
+<span class="s2">      out: sstream_blend</span>
+<span class="s2">      params:</span>
+<span class="s2">        frac: 1.0e-4</span>
+<span class="s2">        match_median: true</span>
+<span class="s2">        mask_freq: false</span>
+
+<span class="s2">    # Re-mask the daytime</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.DayMask</span>
+<span class="s2">      in: sstream_blend</span>
+<span class="s2">      out: sstream_blend_daymask</span>
+
+<span class="s2">    # Get Stokes I visibilities</span>
+<span class="s2">    - type: draco.analysis.transform.StokesIVis</span>
+<span class="s2">      requires: manager</span>
+<span class="s2">      in: sstream_blend_daymask</span>
+<span class="s2">      out: sstream_stokesI</span>
+
+<span class="s2">    # Mask out the bright sources so we can see the high delay structure more easily</span>
+<span class="s2">    - type: ch_pipeline.analysis.flagging.MaskSource</span>
+<span class="s2">      in: sstream_stokesI</span>
+<span class="s2">      out: sstream_stokesI_mask</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: [&quot;CAS_A&quot;, &quot;CYG_A&quot;, &quot;TAU_A&quot;, &quot;VIR_A&quot;]</span>
+
+<span class="s2">    # Split the data into sub-bands and iterate to produce</span>
+<span class="s2">    # separate power spectra</span>
+<span class="s2">    - type: draco.analysis.transform.GenerateSubBands</span>
+<span class="s2">      requires: sstream_stokesI_mask</span>
+<span class="s2">      out: sstream_stokesI_subband</span>
+<span class="s2">      params:</span>
+<span class="s2">        sub_band_spec:</span>
+<span class="s2">          banda:</span>
+<span class="s2">            # 758.98 - 796.09 MHz</span>
+<span class="s2">            channel_range: [10, 106]</span>
+<span class="s2">          bandb1:</span>
+<span class="s2">            # 652.34 - 717.97 MHz</span>
+<span class="s2">            channel_range: [210, 379]</span>
+<span class="s2">          bandb2:</span>
+<span class="s2">            # 610.55 - 651.93 MHz</span>
+<span class="s2">            channel_range: [379, 486]</span>
+<span class="s2">          bandb3:</span>
+<span class="s2">            # 572.27 - 610.16 MHz</span>
+<span class="s2">            channel_range: [486, 584]</span>
+<span class="s2">          bandc:</span>
+<span class="s2">            # 400.39 - 450.00 MHz</span>
+<span class="s2">            channel_range: [896, 1024]</span>
+<span class="s2">  </span>
+<span class="s2">    # Try and derive an optimal time-freq factorizable mask that covers the</span>
+<span class="s2">    # existing masked entries</span>
+<span class="s2">    - type: draco.analysis.flagging.MaskFreq</span>
+<span class="s2">      in: sstream_stokesI_subband</span>
+<span class="s2">      out: factmask</span>
+<span class="s2">      params:</span>
+<span class="s2">        factorize: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;rfi_mask_factorized_{{tag}}.h5&quot;</span>
+
+<span class="s2">    # Apply the RFI mask. This will modify the data in place.</span>
+<span class="s2">    - type: draco.analysis.flagging.ApplyTimeFreqMask</span>
+<span class="s2">      in: [sstream_stokesI_subband, factmask]</span>
+<span class="s2">      out: sstream_stokesI_factmask</span>
+
+<span class="s2">    # Estimate the delay power spectrum of the data using the Gibbs</span>
+<span class="s2">    # estimator. This is a good diagnostic of instrument performance.</span>
+<span class="s2">    # Increase weights by a factor of 100 so that we&#39;re estimating</span>
+<span class="s2">    # the combined spectrum of the signal and noise</span>
+<span class="s2">    - type: draco.analysis.delay.DelayPowerSpectrumGibbs</span>
+<span class="s2">      in: sstream_stokesI_factmask</span>
+<span class="s2">      params:</span>
+<span class="s2">        dataset: &quot;vis&quot;</span>
+<span class="s2">        sample_axis: &quot;ra&quot;</span>
+<span class="s2">        remove_mean: true</span>
+<span class="s2">        nsamp: 500</span>
+<span class="s2">        weight_boost: 1.0</span>
+<span class="s2">        complex_timedomain: true</span>
+<span class="s2">        save: true</span>
+<span class="s2">        output_name: &quot;delayspectrum_{{tag}}.h5&quot;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="DailyProcessing">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.DailyProcessing">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">DailyProcessing</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Chime daily processing pipeline processing type.</span>
+
+<span class="sd">    Processes individual chimestack files into one CSD in RA, along with</span>
+<span class="sd">    ringmaps and other data products.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;daily&quot;</span>
+    <span class="n">tag_pattern</span> <span class="o">=</span> <span class="sa">r</span><span class="s2">&quot;\d+&quot;</span>
+
+    <span class="c1"># Parameters of the job processing</span>
+    <span class="n">default_params</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="c1"># Time range(s) to process</span>
+        <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="c1"># Two short two-day intervals either side of the caltime change</span>
+            <span class="c1"># (1878, 3000), one with the weird 4 baseline issue (1912), one</span>
+            <span class="c1"># with no actual data (1898), one with a single baseline-freq issue</span>
+            <span class="c1"># (1960), one to test the thermal correction which otherwise shows</span>
+            <span class="c1"># a large spread (1965), one with a different set of vertical</span>
+            <span class="c1"># stripes (1983), and one with a decorrelated cylinder (2325) in</span>
+            <span class="c1"># order to have a few good test days at the very start</span>
+            <span class="c1"># NOTE: these intervals are *inclusive*</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1879&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1898&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1898&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1912&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1912&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1960&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1960&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1965&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1965&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1983&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1983&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2325&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2325&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3000&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3001&quot;</span><span class="p">},</span>
+            <span class="c1"># Good short ranges from rev_00, these are spread over the year and</span>
+            <span class="c1"># quickly cover the full sky</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1868&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1875&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1927&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1935&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1973&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1977&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2071&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2080&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2162&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2166&quot;</span><span class="p">},</span>
+            <span class="c1"># Intervals covering the days used in the stacking analysis</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1939&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1958&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1990&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2012&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2013&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2029&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2046&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2059&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2060&quot;</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2072&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2143&quot;</span><span class="p">},</span>
+            <span class="c1"># Intervals for which we process only one day every 7 days, this</span>
+            <span class="c1"># will slowly build up coverage over the whole timespan, extending</span>
+            <span class="c1"># as new days become available</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1879&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1880&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1881&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1882&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1883&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1884&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+        <span class="p">],</span>
+        <span class="c1"># Fixed CSDS to ignore</span>
+        <span class="s2">&quot;flags&quot;</span><span class="p">:</span> <span class="p">{},</span>
+        <span class="c1"># Any days flagged by these flags are excluded from</span>
+        <span class="c1"># the days to run</span>
+        <span class="s2">&quot;exclude_flags&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;no_timing_correction&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;timing_correction_edge&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;no_weather_data&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;corrupted_file&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;globalflag&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;bad_calibration_acquisition_restart&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;acjump&quot;</span><span class="p">,</span>
+        <span class="p">],</span>
+        <span class="c1"># Fraction of day flagged to exclude</span>
+        <span class="s2">&quot;frac_flagged&quot;</span><span class="p">:</span> <span class="mf">0.8</span><span class="p">,</span>
+        <span class="c1"># Amount of padding each side of sidereal day to load</span>
+        <span class="s2">&quot;padding&quot;</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">,</span>
+        <span class="c1"># Minimum data coverage in order to process a day</span>
+        <span class="s2">&quot;data_coverage&quot;</span><span class="p">:</span> <span class="mf">0.3</span><span class="p">,</span>
+        <span class="c1"># Weather files are usuall only produced once per day, so</span>
+        <span class="c1"># full coverage should generally be required</span>
+        <span class="s2">&quot;weather_coverage&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+        <span class="c1"># Whether to look for offline data and request it be brought online</span>
+        <span class="s2">&quot;include_offline_files&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="c1"># Number of recent days to prioritize in queue</span>
+        <span class="s2">&quot;num_recent_days_first&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">,</span>
+        <span class="c1"># Frequencies to process</span>
+        <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">],</span>
+        <span class="c1"># The beam transfers to use (need to have the same freq range as above)</span>
+        <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/&quot;</span><span class="p">,</span>
+        <span class="c1"># Calibration times for thermal correction</span>
+        <span class="s2">&quot;caltimes_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/gain/calibration_times/&quot;</span>
+            <span class="s2">&quot;20180902_20201230_calibration_times.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># File for the timing correction</span>
+        <span class="s2">&quot;timing_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/timing/rev_00/referenced/&quot;</span>
+            <span class="s2">&quot;*_chimetiming_delay.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># File containing the freq map being used for processing the data</span>
+        <span class="s2">&quot;freqmap_file&quot;</span><span class="p">:</span> <span class="p">(</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/freq_map/&quot;</span>
+            <span class="s2">&quot;20180902_20220927_freq_map.h5&quot;</span>
+        <span class="p">),</span>
+        <span class="c1"># Catalogs to extract fluxes of</span>
+        <span class="s2">&quot;catalogs&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_cora_10Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_QSO_05Jy.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_OVRO.h5&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/catalogs/ps_requested.h5&quot;</span><span class="p">,</span>
+        <span class="p">],</span>
+        <span class="c1"># Annual template files for template subtraction/blending</span>
+        <span class="s2">&quot;template_file&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="mi">2018</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2019.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2019</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2019.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2020</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2020.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2021</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2021.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2022</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2022.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2023</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2023.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2024</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2024.h5&quot;</span><span class="p">,</span>
+            <span class="mi">2025</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/templates/rev_08/sstack_2025.h5&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="c1"># System modules to use/load</span>
+        <span class="s2">&quot;modpath&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/chime_env/modules/modulefiles&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;modlist&quot;</span><span class="p">:</span> <span class="s2">&quot;chime/python/2025.10&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;nfreq_delay&quot;</span><span class="p">:</span> <span class="mi">1025</span><span class="p">,</span>
+        <span class="c1"># Job params</span>
+        <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">90</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+        <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+        <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+        <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">24</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+    <span class="p">}</span>
+    <span class="n">default_script</span> <span class="o">=</span> <span class="n">DEFAULT_SCRIPT</span>
+    <span class="c1"># Make sure not to remove chimestack files before this CSD</span>
+    <span class="c1"># Range is from 2018/10/14 to 2020/01/06</span>
+    <span class="n">daemon_config</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;keep_online&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1800&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD2250&quot;</span><span class="p">}}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_create_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Produce a list of bad days based on the following criteria.&quot;&quot;&quot;</span>
+        <span class="n">intervals</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="s2">&quot;intervals&quot;</span><span class="p">]:</span>
+            <span class="n">intervals</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">],</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;end&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;step&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)))</span>
+        <span class="c1"># Save out a list of heavily flagged days</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="n">get_flagged_csds</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">intervals</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">expand_csd_range</span><span class="p">(</span><span class="o">*</span><span class="n">i</span><span class="p">)],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="s2">&quot;exclude_flags&quot;</span><span class="p">],</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">default_params</span><span class="p">[</span><span class="s2">&quot;frac_flagged&quot;</span><span class="p">],</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Process the intervals</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;intervals&quot;</span><span class="p">]:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;start&quot;</span><span class="p">],</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;end&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;step&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;padding&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_data_coverage</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;data_coverage&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_weather_coverage</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;weather_coverage&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;num_recent_days_first&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_include_offline_files</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+            <span class="s2">&quot;include_offline_files&quot;</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_exclude</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">flag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;exclude_flags&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">flag</span><span class="p">,</span> <span class="p">[]):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_exclude</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">csd</span><span class="p">[</span><span class="mi">3</span><span class="p">:]))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_available_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return all the tags that are available to run.</span>
+
+<span class="sd">        This includes any that currently exist or are in the job queue.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">csds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">runnable_tags</span><span class="p">(</span><span class="n">require_online</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_config_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return all tags listed in the revision config.</span>
+
+<span class="sd">        Order is preserved, except priority CSDS are placed</span>
+<span class="sd">        at the start of the list.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">csds</span> <span class="o">=</span> <span class="n">unique_ordered</span><span class="p">(</span>
+            <span class="n">csd</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_intervals</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">expand_csd_range</span><span class="p">(</span><span class="o">*</span><span class="n">i</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">priority</span> <span class="o">=</span> <span class="n">get_recent_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span><span class="p">)</span>
+            <span class="n">csds</span> <span class="o">=</span> <span class="n">priority</span> <span class="o">+</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">priority</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">csds</span>
+
+<div class="viewcode-block" id="DailyProcessing.runnable_tags">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.DailyProcessing.runnable_tags">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">runnable_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">require_online</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return all runnable tags, whether or not the data is available.&quot;&quot;&quot;</span>
+        <span class="n">csds</span> <span class="o">=</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config_tags</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_exclude</span><span class="p">]</span>
+
+        <span class="n">runnable</span> <span class="o">=</span> <span class="n">available_csds</span><span class="p">(</span>
+            <span class="nb">sorted</span><span class="p">(</span><span class="n">csds</span><span class="p">),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_data_coverage</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_weather_coverage</span><span class="p">,</span>
+            <span class="n">require_online</span><span class="o">=</span><span class="n">require_online</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span> <span class="k">if</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">runnable</span><span class="p">]</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finalise_jobparams</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Modify the job parameters before the final config is generated.</span>
+
+<span class="sd">        Does the following:</span>
+
+<span class="sd">        - Set bounds for this CSD.</span>
+<span class="sd">        - Select the correct template file</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">csd</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+        <span class="n">year</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span><span class="o">.</span><span class="n">year</span>
+
+        <span class="k">if</span> <span class="n">year</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;template_file&quot;</span><span class="p">]:</span>
+            <span class="c1"># Just use the most recent template if nothing</span>
+            <span class="c1"># exists for the current year</span>
+            <span class="n">year</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;template_file&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+
+        <span class="n">template_file</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;template_file&quot;</span><span class="p">][</span><span class="n">year</span><span class="p">]</span>
+
+        <span class="n">jobparams</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;csd&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">csd</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">,</span> <span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">],</span>
+                <span class="s2">&quot;template_file&quot;</span><span class="p">:</span> <span class="n">template_file</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">jobparams</span>
+
+<div class="viewcode-block" id="DailyProcessing.update_files">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.DailyProcessing.update_files">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update_files</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retrieve</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">clear</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Update the status of files used by this revision.</span>
+
+<span class="sd">        This includes requesting that soon-to-be needed files get brought</span>
+<span class="sd">        online, and that files that are no longer needed be moved offline.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">nfiles</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;nretrieve&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;nclear&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_include_offline_files</span><span class="p">:</span>
+            <span class="c1"># Cannot try to retrieve files if forbidden. Can</span>
+            <span class="c1"># still clear out files which are no longer needed</span>
+            <span class="n">retrieve</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="n">rev_stats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)</span>
+        <span class="c1"># Get the upcoming jobs</span>
+        <span class="n">upcoming</span> <span class="o">=</span> <span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">]</span>
+        <span class="c1"># Get all the runnable tags</span>
+        <span class="n">all_tags</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">runnable_tags</span><span class="p">(</span><span class="n">require_online</span><span class="o">=</span><span class="kc">False</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">retrieve</span><span class="p">:</span>
+            <span class="c1"># If there are any upcoming jobs which require offline data,</span>
+            <span class="c1"># request that this be moved online</span>
+            <span class="n">exclude_tags</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;pending&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;running&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;successful&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;failed&quot;</span><span class="p">],</span>
+            <span class="p">}</span>
+            <span class="n">all_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">tag</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">all_tags</span> <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">exclude_tags</span><span class="p">]</span>
+
+            <span class="c1"># Search the next 20 tags and request any that we may want to be brought online.</span>
+            <span class="n">online_request_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+                <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">all_tags</span><span class="p">[:</span><span class="mi">20</span><span class="p">]</span> <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">upcoming</span><span class="p">]</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">online_request_tags</span><span class="p">:</span>
+                <span class="c1"># Submit the request to bring files online</span>
+                <span class="n">nfiles</span><span class="p">[</span><span class="s2">&quot;nretrieve&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">request_offline_csds</span><span class="p">(</span>
+                    <span class="n">online_request_tags</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span>
+                <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">clear</span><span class="p">:</span>
+            <span class="c1"># Clear out data that we don&#39;t need anymore</span>
+            <span class="n">remove_request_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">([</span><span class="nb">int</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;successful&quot;</span><span class="p">]])</span>
+            <span class="n">exclude_tags</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;running&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;pending&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;failed&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">rev_stats</span><span class="p">[</span><span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">],</span>
+                <span class="o">*</span><span class="n">expand_csd_range</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">daemon_config</span><span class="p">[</span><span class="s2">&quot;keep_online&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
+            <span class="p">]</span>
+            <span class="n">exclude_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">([</span><span class="nb">int</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">exclude_tags</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">remove_request_tags</span><span class="p">:</span>
+                <span class="c1"># Submit the request to remove these files</span>
+                <span class="n">nfiles</span><span class="p">[</span><span class="s2">&quot;nclear&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">remove_online_csds</span><span class="p">(</span>
+                    <span class="n">remove_request_tags</span><span class="p">,</span> <span class="n">exclude_tags</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span>
+                <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">nfiles</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_generate_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">priority_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">check_failed</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># Get the list of tags remaining to run, in order</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="o">=</span><span class="n">user</span><span class="p">)[</span><span class="s2">&quot;not_yet_submitted&quot;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">check_failed</span><span class="p">:</span>
+            <span class="n">requeue</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;chimedb_error&quot;</span><span class="p">,</span> <span class="s2">&quot;time_limit&quot;</span><span class="p">,</span> <span class="s2">&quot;mpi_error&quot;</span><span class="p">}</span>
+
+            <span class="c1"># Place failed jobs at the start of the queue</span>
+            <span class="n">to_run</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">tag</span>
+                <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">tags</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">failed</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span>
+                <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">requeue</span>
+            <span class="p">]</span> <span class="o">+</span> <span class="n">to_run</span>
+
+        <span class="c1"># Ensure that the current in-progress acquisition does not get queued</span>
+        <span class="n">today</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">get_current_lsd</span><span class="p">()</span>
+        <span class="n">to_run</span> <span class="o">=</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">to_run</span> <span class="k">if</span> <span class="p">(</span><span class="n">today</span> <span class="o">-</span> <span class="nb">float</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span> <span class="o">&gt;</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_padding</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">priority_only</span><span class="p">:</span>
+            <span class="n">to_run</span> <span class="o">=</span> <span class="n">get_recent_csds</span><span class="p">(</span><span class="n">to_run</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_recent_days</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">to_run</span></div>
+
+
+
+<div class="viewcode-block" id="TestDailyProcessing">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.TestDailyProcessing">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TestDailyProcessing</span><span class="p">(</span><span class="n">DailyProcessing</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A test version of the daily processing.</span>
+
+<span class="sd">    Processes only 16 frequencies on a single node.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;test_daily&quot;</span>
+
+    <span class="c1"># Override params above</span>
+    <span class="n">default_params</span> <span class="o">=</span> <span class="n">DailyProcessing</span><span class="o">.</span><span class="n">default_params</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">default_params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;intervals&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="c1"># 1878 and 1885 have files available online</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1878&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD1889&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3000&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;CSD3014&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">},</span>
+                <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="s2">&quot;20181224T000000Z&quot;</span><span class="p">,</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="s2">&quot;20181228T000000Z&quot;</span><span class="p">},</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">400</span><span class="p">,</span> <span class="mi">416</span><span class="p">],</span>
+            <span class="s2">&quot;val_freq&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">7</span><span class="p">],</span>
+            <span class="s2">&quot;nfreq_delay&quot;</span><span class="p">:</span> <span class="mi">17</span><span class="p">,</span>
+            <span class="s2">&quot;product_path&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/bt_empty/chime_4cyl_16freq/&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="mi">60</span><span class="p">,</span>  <span class="c1"># How long in minutes?</span>
+            <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>  <span class="c1"># Number of nodes to use.</span>
+            <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>  <span class="c1"># Number of OpenMP threads</span>
+            <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">16</span><span class="p">,</span>  <span class="c1"># Jobs per node</span>
+        <span class="p">}</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="expand_csd_range">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.expand_csd_range">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">expand_csd_range</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the CSDs within a time range.</span>
+
+<span class="sd">    The start and end parameters must either be strings of the form &quot;CSD\d+&quot;</span>
+<span class="sd">    (i.e. CSD followed by an int), which specifies an exact CSD start, or a</span>
+<span class="sd">    form that `caput.astro.time.ensure_unix` understands.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start : str or parseable to datetime</span>
+<span class="sd">        Start of interval. If `None`, use CSD 0</span>
+<span class="sd">    end : str or parseable to datetime</span>
+<span class="sd">        End of interval. If `None` use now. Note that for CSD intervals the</span>
+<span class="sd">        end is *inclusive* (unlike a `range`).</span>
+<span class="sd">    step : int</span>
+<span class="sd">        step size to use when traversing interval</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    csds : list of ints</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">start</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">ctime</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">start</span><span class="p">))</span>
+        <span class="n">start_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">end</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">chime</span><span class="o">.</span><span class="n">get_current_lsd</span><span class="p">())</span>
+    <span class="k">elif</span> <span class="n">end</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;CSD&quot;</span><span class="p">):</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">end</span><span class="p">[</span><span class="mi">3</span><span class="p">:])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">ctime</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="n">end</span><span class="p">))</span>
+        <span class="n">end_csd</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">end_csd</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">start_csd</span><span class="p">,</span> <span class="n">end_csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">step</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="files_in_timespan">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.files_in_timespan">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">files_in_timespan</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">file_times</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Iterate over a list of file times and find those in a range.</span>
+
+<span class="sd">    Given a list of file (name start, end) times, iterate over the list and</span>
+<span class="sd">    find which files fall within start, end</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start : float</span>
+<span class="sd">        unix timestamp</span>
+<span class="sd">    end : float</span>
+<span class="sd">        unix timestamp</span>
+<span class="sd">    file_times : list of tuples</span>
+<span class="sd">        tuple: (name, start_time, finish_time)</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of elements of `files`, whose start_time and finish_time</span>
+<span class="sd">    fall between `start` and `end`</span>
+
+<span class="sd">    index of the first file whose `start_time` is after `end`</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">available</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ts</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">file_times</span><span class="p">):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">end</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">ts</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">start</span><span class="p">):</span>
+            <span class="n">available</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ts</span><span class="p">)</span>
+        <span class="c1"># files are in chronological order, so once we hit this, there are no files</span>
+        <span class="c1"># further in the list which will fall within the time window</span>
+        <span class="k">elif</span> <span class="n">ts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">end</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">available</span><span class="p">,</span> <span class="n">i</span>
+
+    <span class="k">return</span> <span class="n">available</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">file_times</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span></div>
+
+
+
+<div class="viewcode-block" id="available_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.available_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">available_csds</span><span class="p">(</span>
+    <span class="n">csds</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span>
+    <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">data_coverage</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">weather_coverage</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="n">require_online</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the subset of csds in `csds` for whom all files are online.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds</span>
+<span class="sd">        sorted list of csds to check</span>
+<span class="sd">    pad</span>
+<span class="sd">      fraction of a day to pad on either end. This data should also be available</span>
+<span class="sd">      in order for a day to be considered available</span>
+<span class="sd">    data_coverage</span>
+<span class="sd">      What fraction of the day must exist in order to be considered available.</span>
+<span class="sd">      This *includes* the padding fraction, so values greater than 1 are</span>
+<span class="sd">      permitted. For example, if `pad=0.2`, setting `data_coverage=1.4`</span>
+<span class="sd">      would indicate that all the data must be available.</span>
+<span class="sd">      Even if all files are online, if the data coverage is less than this</span>
+<span class="sd">      fraction, the day shouldn&#39;t be processed.</span>
+<span class="sd">    weather_coverage</span>
+<span class="sd">        What fraction of the day must have weather coverage. Generally,</span>
+<span class="sd">        weather files are only produced once per day, so this should be</span>
+<span class="sd">        set to 1.0 unless there are changes to data format.</span>
+<span class="sd">    require_online</span>
+<span class="sd">        If True, a CSD must have all files available online to be considered</span>
+<span class="sd">        available. Default is True.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    available</span>
+<span class="sd">        set of all available csds</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Figure out which files exist online and which ones exist entirely</span>
+    <span class="c1"># Repeat the process for corr data and weather data</span>
+    <span class="n">corr_online</span><span class="p">,</span> <span class="n">corr_that_exist</span> <span class="o">=</span> <span class="n">db_get_corr_files_in_range</span><span class="p">(</span>
+        <span class="n">csds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">pad</span><span class="p">,</span> <span class="n">csds</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">pad</span>
+    <span class="p">)</span>
+    <span class="n">weather_online</span><span class="p">,</span> <span class="n">weather_that_exist</span> <span class="o">=</span> <span class="n">db_get_weather_files_in_range</span><span class="p">(</span>
+        <span class="n">csds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">pad</span><span class="p">,</span> <span class="n">csds</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">pad</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_available</span><span class="p">(</span><span class="n">filenames_online</span><span class="p">,</span> <span class="n">filenames_that_exist</span><span class="p">,</span> <span class="n">coverage</span><span class="p">):</span>
+        <span class="n">available</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">coverage</span> <span class="o">=</span> <span class="n">coverage</span> <span class="o">*</span> <span class="mi">86400</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">_check_coverage</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+            <span class="n">time_range</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">tr</span> <span class="ow">in</span> <span class="n">x</span><span class="p">:</span>
+                <span class="n">time_range</span> <span class="o">+=</span> <span class="n">tr</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">tr</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">time_range</span> <span class="o">&gt;</span> <span class="n">coverage</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">True</span>
+
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">:</span>
+            <span class="n">start_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">-</span> <span class="n">pad</span><span class="p">)</span>
+            <span class="n">end_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)</span>
+
+            <span class="n">exists</span><span class="p">,</span> <span class="n">index_exists</span> <span class="o">=</span> <span class="n">files_in_timespan</span><span class="p">(</span>
+                <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span><span class="p">,</span> <span class="n">filenames_that_exist</span>
+            <span class="p">)</span>
+
+            <span class="n">available_offline</span> <span class="o">=</span> <span class="n">_check_coverage</span><span class="p">(</span><span class="n">exists</span><span class="p">)</span>
+
+            <span class="c1"># The final file in the span may contain more than one sidereal day</span>
+            <span class="n">index_exists</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">index_exists</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">filenames_that_exist</span> <span class="o">=</span> <span class="n">filenames_that_exist</span><span class="p">[</span><span class="n">index_exists</span><span class="p">:]</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">available_offline</span><span class="p">:</span>
+                <span class="c1"># We can&#39;t get this data no matter what</span>
+                <span class="k">continue</span>
+
+            <span class="k">if</span> <span class="n">require_online</span><span class="p">:</span>
+                <span class="c1"># online - list of file start and end times that are online</span>
+                <span class="c1"># between start_time and end_time</span>
+                <span class="c1"># index_online - the final index in which data was located</span>
+                <span class="n">online</span><span class="p">,</span> <span class="n">index_online</span> <span class="o">=</span> <span class="n">files_in_timespan</span><span class="p">(</span>
+                    <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span><span class="p">,</span> <span class="n">filenames_online</span>
+                <span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">_check_coverage</span><span class="p">(</span><span class="n">online</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">online</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">exists</span><span class="p">)):</span>
+                    <span class="n">available</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+
+                <span class="n">index_online</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">index_online</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">filenames_online</span> <span class="o">=</span> <span class="n">filenames_online</span><span class="p">[</span><span class="n">index_online</span><span class="p">:]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">available</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">available</span>
+
+    <span class="n">corr_available</span> <span class="o">=</span> <span class="n">_available</span><span class="p">(</span><span class="n">corr_online</span><span class="p">,</span> <span class="n">corr_that_exist</span><span class="p">,</span> <span class="n">data_coverage</span><span class="p">)</span>
+    <span class="n">weather_available</span> <span class="o">=</span> <span class="n">_available</span><span class="p">(</span><span class="n">weather_online</span><span class="p">,</span> <span class="n">weather_that_exist</span><span class="p">,</span> <span class="n">weather_coverage</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">corr_available</span> <span class="o">&amp;</span> <span class="n">weather_available</span></div>
+
+
+
+<div class="viewcode-block" id="db_get_corr_files_in_range">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.db_get_corr_files_in_range">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">db_get_corr_files_in_range</span><span class="p">(</span><span class="n">start_csd</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">end_csd</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the name and start and end times of corrdata files in the CSD range.</span>
+
+<span class="sd">    Return both a list of files which were found on the online node and those</span>
+<span class="sd">    which were found anywhere. If `has_file` is `N`, these lists should be</span>
+<span class="sd">    the same.</span>
+
+<span class="sd">    Return an empty list if files between start_csd and end_csd are only</span>
+<span class="sd">    partially available online.</span>
+
+<span class="sd">    Total file count is verified by checking files that exist everywhere.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start_csd</span>
+<span class="sd">        Start date in sidereal day format</span>
+<span class="sd">    end_csd</span>
+<span class="sd">        End date in sidereal day format</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    filenames_online</span>
+<span class="sd">        chimestack files available in the timespan, if</span>
+<span class="sd">        all of them are available online</span>
+<span class="sd">    filenames_that_exist</span>
+<span class="sd">        all chimestack files available in the timespan</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Query all the files in this time range</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">end_csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+
+    <span class="n">chimestack_inst</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;chimestack&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Query for all chimestack files in the time range</span>
+    <span class="n">archive_files</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">select</span><span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">file</span><span class="p">,</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">finish_time</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">switch</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="p">)</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="o">.</span><span class="n">inst</span> <span class="o">==</span> <span class="n">chimestack_inst</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">start_time</span> <span class="o">&lt;</span> <span class="n">end_time</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">CorrFileInfo</span><span class="o">.</span><span class="n">finish_time</span> <span class="o">&gt;=</span> <span class="n">start_time</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">has_file</span> <span class="o">==</span> <span class="s2">&quot;Y&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># Figure out which files are online</span>
+    <span class="n">online_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_online&quot;</span><span class="p">,</span> <span class="n">active</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">files_online</span> <span class="o">=</span> <span class="n">archive_files</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">node</span> <span class="o">==</span> <span class="n">online_node</span><span class="p">)</span>
+
+    <span class="n">files_online</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">files_online</span><span class="o">.</span><span class="n">tuples</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="c1"># files_that_exist might contain the same file multiple files</span>
+    <span class="c1"># if it exists in multiple locations (nearline, online, gossec, etc)</span>
+    <span class="c1"># we only want to include it once, so we initially create a set</span>
+    <span class="n">files_that_exist</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">archive_files</span><span class="o">.</span><span class="n">tuples</span><span class="p">()),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">files_online</span><span class="p">,</span> <span class="n">files_that_exist</span></div>
+
+
+
+<div class="viewcode-block" id="db_get_weather_files_in_range">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.db_get_weather_files_in_range">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">db_get_weather_files_in_range</span><span class="p">(</span><span class="n">start_csd</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">end_csd</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the name and start and end times of weather files in the CSD range.</span>
+
+<span class="sd">    Return both a list of files which were found on the online node and those</span>
+<span class="sd">    which were found anywhere. If `has_file` is `N`, these lists should be</span>
+<span class="sd">    the same.</span>
+
+<span class="sd">    Return an empty list if files between start_csd and end_csd are only</span>
+<span class="sd">    partially available online.</span>
+
+<span class="sd">    Total file count is verified by checking files that exist everywhere.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    start_csd</span>
+<span class="sd">        Start date in sidereal day format</span>
+<span class="sd">    end_csd</span>
+<span class="sd">        End date in sidereal day format</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    filenames_online</span>
+<span class="sd">        chimestack files available in the timespan, if</span>
+<span class="sd">        all of them are available online</span>
+<span class="sd">    filenames_that_exist</span>
+<span class="sd">        all chimestack files available in the timespan</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">start_csd</span><span class="p">)</span>
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">end_csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+
+    <span class="n">archive_files</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">select</span><span class="p">(</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">file</span><span class="p">,</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">WeatherFileInfo</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span>
+            <span class="n">di</span><span class="o">.</span><span class="n">WeatherFileInfo</span><span class="o">.</span><span class="n">finish_time</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveAcq</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">switch</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFile</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">WeatherFileInfo</span><span class="p">)</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveInst</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;chime&quot;</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">WeatherFileInfo</span><span class="o">.</span><span class="n">start_time</span> <span class="o">&lt;</span> <span class="n">end_time</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">WeatherFileInfo</span><span class="o">.</span><span class="n">finish_time</span> <span class="o">&gt;=</span> <span class="n">start_time</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">has_file</span> <span class="o">==</span> <span class="s2">&quot;Y&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># Figure out which files are online</span>
+    <span class="n">online_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_online&quot;</span><span class="p">,</span> <span class="n">active</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">files_online</span> <span class="o">=</span> <span class="n">archive_files</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">node</span> <span class="o">==</span> <span class="n">online_node</span><span class="p">)</span>
+
+    <span class="n">files_online</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">files_online</span><span class="o">.</span><span class="n">tuples</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="c1"># files_that_exist might contain the same file multiple files</span>
+    <span class="c1"># if it exists in multiple locations (nearline, online, gossec, etc)</span>
+    <span class="c1"># we only want to include it once, so we initially create a set</span>
+    <span class="n">files_that_exist</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">archive_files</span><span class="o">.</span><span class="n">tuples</span><span class="p">()),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">files_online</span><span class="p">,</span> <span class="n">files_that_exist</span></div>
+
+
+
+<div class="viewcode-block" id="get_filenames_used_by_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.get_filenames_used_by_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_filenames_used_by_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;For a list of CSDS, return all files from `files` which are used by the CSDS.</span>
+
+<span class="sd">    This only returns the file names.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds</span>
+<span class="sd">        list of integer CSDS</span>
+<span class="sd">    files</span>
+<span class="sd">        list of files in format (name, start_time, end_time). This list</span>
+<span class="sd">        is searched for files with times overlapping any CSD</span>
+<span class="sd">    pad</span>
+<span class="sd">        A fraction of a full CSD to pad when searching for files - i.e., a</span>
+<span class="sd">        given CSD may want a small amount of data from adajacent days</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    files_used</span>
+<span class="sd">        list of file names that are needed by the CSDS</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">files_used</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">:</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">-</span> <span class="n">pad</span><span class="p">)</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)</span>
+        <span class="c1"># Get all the files in this timespan which exist in `files`</span>
+        <span class="n">f</span><span class="p">,</span> <span class="n">index</span> <span class="o">=</span> <span class="n">files_in_timespan</span><span class="p">(</span><span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span><span class="p">,</span> <span class="n">files</span><span class="p">)</span>
+        <span class="n">files_used</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="c1"># Update the view of the list to reduce future iterations</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">index</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="n">files</span><span class="p">[</span><span class="n">index</span><span class="p">:]</span>
+
+    <span class="k">return</span> <span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files_used</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="request_offline_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.request_offline_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">request_offline_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Given a list of csds, request that all required data be copied online.</span>
+
+<span class="sd">    Request that all data required by the list of CSDS get copied to the</span>
+<span class="sd">    fir_online node.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds</span>
+<span class="sd">        list of integer csds to copy</span>
+<span class="sd">    pad</span>
+<span class="sd">        fraction of data from adjacent days that should also be copied online</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_make_copy_request</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">sources</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+        <span class="c1"># Find a source with the file</span>
+        <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">node</span><span class="o">=</span><span class="n">source</span><span class="p">,</span> <span class="n">has_file</span><span class="o">=</span><span class="s2">&quot;Y&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">pw</span><span class="o">.</span><span class="n">DoesNotExist</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># There is a copy of the file on this node, try to copy it.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Check if an active request already exists. If so,</span>
+                <span class="c1"># leave alpenhorn alone to do its thing</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopyRequest</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                    <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span>
+                    <span class="n">group_to</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+                    <span class="n">node_from</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
+                    <span class="n">completed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                    <span class="n">cancelled</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="mi">0</span>
+            <span class="k">except</span> <span class="n">pw</span><span class="o">.</span><span class="n">DoesNotExist</span><span class="p">:</span>
+                <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopyRequest</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span>
+                    <span class="n">file</span><span class="o">=</span><span class="n">file_</span><span class="p">,</span>
+                    <span class="n">group_to</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+                    <span class="n">node_from</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
+                    <span class="n">cancelled</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">completed</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">n_requests</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="n">timestamp</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span>
+                <span class="p">)</span><span class="o">.</span><span class="n">execute</span><span class="p">()</span>
+                <span class="k">return</span> <span class="mi">1</span>
+
+        <span class="c1"># No source with the file</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="c1"># Figure out which chimestack files are needed</span>
+    <span class="n">online_files</span><span class="p">,</span> <span class="n">files</span> <span class="o">=</span> <span class="n">db_get_corr_files_in_range</span><span class="p">(</span><span class="n">csds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">pad</span><span class="p">,</span> <span class="n">csds</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)</span>
+    <span class="c1"># Only check files that are not online</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span> <span class="k">if</span> <span class="n">f</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">online_files</span><span class="p">]</span>
+    <span class="n">request_corr_files</span> <span class="o">=</span> <span class="n">get_filenames_used_by_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">,</span> <span class="n">files</span><span class="p">,</span> <span class="n">pad</span><span class="p">)</span>
+
+    <span class="c1"># Repeat for weather data. These are usually always online</span>
+    <span class="n">online_files</span><span class="p">,</span> <span class="n">files</span> <span class="o">=</span> <span class="n">db_get_weather_files_in_range</span><span class="p">(</span><span class="n">csds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">pad</span><span class="p">,</span> <span class="n">csds</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span> <span class="k">if</span> <span class="n">f</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">online_files</span><span class="p">]</span>
+    <span class="n">request_weather_files</span> <span class="o">=</span> <span class="n">get_filenames_used_by_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">,</span> <span class="n">files</span><span class="p">,</span> <span class="n">pad</span><span class="p">)</span>
+
+    <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">read_write</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">target_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageGroup</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_online&quot;</span><span class="p">)</span>
+    <span class="n">offline_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_nearline&quot;</span><span class="p">)</span>
+    <span class="n">smallfile_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_smallfile&quot;</span><span class="p">)</span>
+
+    <span class="n">nrequests</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="c1"># Request chimestack files be brought back online</span>
+    <span class="k">for</span> <span class="n">file_</span> <span class="ow">in</span> <span class="n">request_corr_files</span><span class="p">:</span>
+        <span class="n">nr</span> <span class="o">=</span> <span class="n">_make_copy_request</span><span class="p">(</span><span class="n">file_</span><span class="p">,</span> <span class="p">[</span><span class="n">offline_node</span><span class="p">,</span> <span class="n">smallfile_node</span><span class="p">],</span> <span class="n">target_node</span><span class="p">)</span>
+        <span class="n">nrequests</span> <span class="o">+=</span> <span class="n">nr</span>
+
+    <span class="c1"># Request weather files be brought back online</span>
+    <span class="k">for</span> <span class="n">file_</span> <span class="ow">in</span> <span class="n">request_weather_files</span><span class="p">:</span>
+        <span class="n">nr</span> <span class="o">=</span> <span class="n">_make_copy_request</span><span class="p">(</span><span class="n">file_</span><span class="p">,</span> <span class="p">[</span><span class="n">smallfile_node</span><span class="p">],</span> <span class="n">target_node</span><span class="p">)</span>
+        <span class="n">nrequests</span> <span class="o">+=</span> <span class="n">nr</span>
+
+    <span class="k">return</span> <span class="n">nrequests</span></div>
+
+
+
+<div class="viewcode-block" id="remove_online_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.remove_online_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">remove_online_csds</span><span class="p">(</span><span class="n">csds_remove</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">csds_keep</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Remove online files which are solely used by specified csds.</span>
+
+<span class="sd">    Check the files required by `csds_remove` and check against those used</span>
+<span class="sd">    by `csds_keep`. Any files which are _only_ used by csds in `csds_remove`</span>
+<span class="sd">    are removed from the `fir_online` node, provided that a copy exists</span>
+<span class="sd">    elsewhere.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds_remove</span>
+<span class="sd">        list of integer csds to clear data where possible</span>
+<span class="sd">    csds_keep</span>
+<span class="sd">        list of integer csds for which all data is still required</span>
+<span class="sd">    pad</span>
+<span class="sd">        fraction of data required by adjacent days. This will prevent</span>
+<span class="sd">        a csd in `csds_remove` from clearing all its data if that fraction</span>
+<span class="sd">        of data is needed by an adjacent csd in `csds_keep`</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">files</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">db_get_corr_files_in_range</span><span class="p">(</span>
+        <span class="nb">min</span><span class="p">(</span><span class="n">csds_remove</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">csds_keep</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+        <span class="nb">max</span><span class="p">(</span><span class="n">csds_remove</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">csds_keep</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span>
+    <span class="p">)</span>
+    <span class="c1"># Get all the files we want to keep and remove. Choosing to</span>
+    <span class="c1"># keep a file supercedes choosing to remove one</span>
+    <span class="n">keep_files</span> <span class="o">=</span> <span class="n">get_filenames_used_by_csds</span><span class="p">(</span><span class="n">csds_keep</span><span class="p">,</span> <span class="n">files</span><span class="p">,</span> <span class="n">pad</span><span class="p">)</span>
+    <span class="n">remove_files</span> <span class="o">=</span> <span class="n">get_filenames_used_by_csds</span><span class="p">(</span><span class="n">csds_remove</span><span class="p">,</span> <span class="n">files</span><span class="p">,</span> <span class="n">pad</span><span class="p">)</span>
+    <span class="n">remove_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">file</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">remove_files</span> <span class="k">if</span> <span class="n">file</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">keep_files</span><span class="p">]</span>
+
+    <span class="n">online_node</span> <span class="o">=</span> <span class="n">di</span><span class="o">.</span><span class="n">StorageNode</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;fir_online&quot;</span><span class="p">)</span>
+    <span class="c1"># Establish a read-write database connection</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">read_write</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="c1"># Request that these files be removed from the online node</span>
+    <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">wants_file</span><span class="o">=</span><span class="s2">&quot;N&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">file</span> <span class="o">&lt;&lt;</span> <span class="n">remove_files</span><span class="p">,</span>
+        <span class="n">di</span><span class="o">.</span><span class="n">ArchiveFileCopy</span><span class="o">.</span><span class="n">node</span> <span class="o">==</span> <span class="n">online_node</span><span class="p">,</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">execute</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">remove_files</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_flagged_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.get_flagged_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_flagged_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">flags</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">frac_flagged</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return a subset of csds which are heavily flagged.</span>
+
+<span class="sd">    Return a set of csds from the input list for which more than</span>
+<span class="sd">    `frac_flagged` of the data is flagged.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds</span>
+<span class="sd">        List of integer csds to check</span>
+
+<span class="sd">    flags</span>
+<span class="sd">        List of flag names to consider</span>
+
+<span class="sd">    frac_flagged</span>
+<span class="sd">        Fraction between 0 and 1 of flagged data for which to</span>
+<span class="sd">        return a csd</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    flagged</span>
+<span class="sd">        Subset of days in `csds` for which more than the threshold of</span>
+<span class="sd">        data is flagged</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># No point in doing database queries if there&#39;s nothing</span>
+    <span class="c1"># to looks for</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">csds</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">flags</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+
+    <span class="n">out_flags</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">flagged_days</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Open a database connection</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+    <span class="c1"># Get flags from the database</span>
+    <span class="n">flag_types</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">DataFlagType</span><span class="o">.</span><span class="n">select</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">ft</span> <span class="ow">in</span> <span class="n">flag_types</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ft</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">flags</span><span class="p">:</span>
+            <span class="n">out_flags</span><span class="p">[</span><span class="n">ft</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span>
+                <span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">select</span><span class="p">()</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">DataFlag</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">ft</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="n">flagged_days</span><span class="p">[</span><span class="n">ft</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">flags</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">out_flags</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ignoring invalid flag </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Iterate over csds and flags to find which ones need to be excluded</span>
+    <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span><span class="p">:</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span><span class="p">)</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">csd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">flag_name</span><span class="p">,</span> <span class="n">flag_list</span> <span class="ow">in</span> <span class="n">out_flags</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">flagged_intervals</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="c1"># Iterate over the individual flags</span>
+            <span class="k">for</span> <span class="n">flag</span> <span class="ow">in</span> <span class="n">flag_list</span><span class="p">:</span>
+                <span class="c1"># Iterate over flagged intervals for this flag</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">&lt;</span> <span class="n">flag</span><span class="o">.</span><span class="n">finish_time</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">end</span> <span class="o">&gt;=</span> <span class="n">flag</span><span class="o">.</span><span class="n">start_time</span><span class="p">):</span>
+                    <span class="c1"># some part of this day is flagged</span>
+                    <span class="n">overlap</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">for</span> <span class="n">interval</span> <span class="ow">in</span> <span class="n">flagged_intervals</span><span class="p">:</span>
+                        <span class="c1"># Check if this flag overlaps with an already-flagged region</span>
+                        <span class="k">if</span> <span class="p">(</span><span class="n">interval</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">flag</span><span class="o">.</span><span class="n">finish_time</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span>
+                            <span class="n">interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">flag</span><span class="o">.</span><span class="n">start_time</span>
+                        <span class="p">):</span>
+                            <span class="n">overlap</span> <span class="o">=</span> <span class="kc">True</span>
+                            <span class="n">interval</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">interval</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">flag</span><span class="o">.</span><span class="n">start_time</span><span class="p">)</span>
+                            <span class="n">interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">interval</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">flag</span><span class="o">.</span><span class="n">finish_time</span><span class="p">)</span>
+
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">overlap</span><span class="p">:</span>
+                        <span class="c1"># This is part of a new interval</span>
+                        <span class="n">flagged_intervals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                            <span class="p">[</span><span class="nb">max</span><span class="p">(</span><span class="n">flag</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span> <span class="n">start</span><span class="p">),</span> <span class="nb">min</span><span class="p">(</span><span class="n">flag</span><span class="o">.</span><span class="n">finish_time</span><span class="p">,</span> <span class="n">end</span><span class="p">)]</span>
+                        <span class="p">)</span>
+
+            <span class="c1"># Figure out what fraction of this day is flagged</span>
+            <span class="n">flagged_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">([</span><span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">flagged_intervals</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">flagged_time</span> <span class="o">&gt;</span> <span class="n">frac_flagged</span> <span class="o">*</span> <span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">):</span>
+                <span class="n">flagged_days</span><span class="p">[</span><span class="n">flag_name</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CSD</span><span class="si">{</span><span class="n">csd</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Ensure flagged CSDS are unique and sorted</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">flagged_days</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">flagged_days</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">val</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">flagged_days</span></div>
+
+
+
+<div class="viewcode-block" id="get_recent_csds">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.daily.html#ch_pipeline.processing.daily.get_recent_csds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_recent_csds</span><span class="p">(</span><span class="n">csds</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">ndays</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return CSDs from the last `ndays` chime sidereal days.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    csds</span>
+<span class="sd">        List of integer csds</span>
+<span class="sd">    ndays</span>
+<span class="sd">        Number of days to look back</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    recent</span>
+<span class="sd">        CSDs in the past `ndays` sidereal days</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">today</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">chime</span><span class="o">.</span><span class="n">get_current_lsd</span><span class="p">())</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">[</span><span class="n">csd</span> <span class="k">for</span> <span class="n">csd</span> <span class="ow">in</span> <span class="n">csds</span> <span class="k">if</span> <span class="p">(</span><span class="n">today</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="n">csd</span><span class="p">))</span> <span class="o">&lt;=</span> <span class="n">ndays</span><span class="p">]</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
