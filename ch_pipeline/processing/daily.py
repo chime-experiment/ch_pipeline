@@ -1433,17 +1433,20 @@ def request_offline_csds(csds: list, pad: float = 0):
     target_node = di.StorageGroup.get(name="fir_online")
     offline_node = di.StorageNode.get(name="fir_nearline")
     smallfile_node = di.StorageNode.get(name="fir_smallfile")
+    staging_node = di.StorageNode.get(name="fir_staging")
 
     nrequests = 0
 
     # Request chimestack files be brought back online
     for file_ in request_corr_files:
-        nr = _make_copy_request(file_, [offline_node, smallfile_node], target_node)
+        nr = _make_copy_request(
+            file_, [offline_node, smallfile_node, staging_node], target_node
+        )
         nrequests += nr
 
     # Request weather files be brought back online
     for file_ in request_weather_files:
-        nr = _make_copy_request(file_, [smallfile_node], target_node)
+        nr = _make_copy_request(file_, [smallfile_node, staging_node], target_node)
         nrequests += nr
 
     return nrequests
