@@ -1,0 +1,748 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.analysis.sidereal &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.analysis.sidereal</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.analysis.sidereal</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Tasks for sidereal regridding.</span>
+
+<span class="sd">Tasks for taking the timestream data and regridding it into sidereal days</span>
+<span class="sd">which can be stacked.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">=====</span>
+
+<span class="sd">Generally you would want to use these tasks together. Starting with a</span>
+<span class="sd">:class:`LoadTimeStreamSidereal`, then feeding that into</span>
+<span class="sd">:class:`SiderealRegridder` to grid onto each sidereal day, and then into</span>
+<span class="sd">:class:`draco.analysis.SiderealStacker` if you want to combine the different days.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">caput.astro.time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ctime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.algorithms.median</span><span class="w"> </span><span class="kn">import</span> <span class="n">weighted_median</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.containers</span><span class="w"> </span><span class="kn">import</span> <span class="n">tod</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">exceptions</span><span class="p">,</span> <span class="n">tasklib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem</span><span class="w"> </span><span class="kn">import</span> <span class="n">sources</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_ephem.observers</span><span class="w"> </span><span class="kn">import</span> <span class="n">chime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">andata</span><span class="p">,</span> <span class="n">tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.analysis</span><span class="w"> </span><span class="kn">import</span> <span class="n">sidereal</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">draco.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">containers</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mpi4py</span><span class="w"> </span><span class="kn">import</span> <span class="n">MPI</span>
+
+
+<div class="viewcode-block" id="LoadTimeStreamSidereal">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">LoadTimeStreamSidereal</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load data in sidereal days.</span>
+
+<span class="sd">    This task takes an input list of data, and loads in a sidereal day at a</span>
+<span class="sd">    time, and passes it on.</span>
+
+<span class="sd">    .. deprecated:: pass1</span>
+<span class="sd">        The preferred option now is to load a whole range of files one at a time</span>
+<span class="sd">        and feed them into the :class:`SiderealGrouper`.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    padding : float</span>
+<span class="sd">        Extra amount of a sidereal day to pad each timestream by. Useful for</span>
+<span class="sd">        getting rid of interpolation artifacts.</span>
+<span class="sd">    freq_physical : list</span>
+<span class="sd">        List of physical frequencies in MHz.</span>
+<span class="sd">        Given first priority.</span>
+<span class="sd">    channel_range : list</span>
+<span class="sd">        Range of frequency channel indices, either</span>
+<span class="sd">        [start, stop, step], [start, stop], or [stop]</span>
+<span class="sd">        is acceptable.  Given second priority.</span>
+<span class="sd">    channel_index : list</span>
+<span class="sd">        List of frequency channel indices.</span>
+<span class="sd">        Given third priority.</span>
+<span class="sd">    only_autos : bool</span>
+<span class="sd">        Only load the autocorrelations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">padding</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.005</span><span class="p">)</span>
+
+    <span class="n">freq_physical</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_range</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">channel_index</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="n">only_autos</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="LoadTimeStreamSidereal.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Divide the list of files up into sidereal days.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        files : list</span>
+<span class="sd">            List of files to load.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">files</span> <span class="o">=</span> <span class="n">files</span>
+
+        <span class="n">filemap</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">se_times</span> <span class="o">=</span> <span class="n">get_times</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">)</span>
+            <span class="n">se_csd</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">se_times</span><span class="p">)</span>
+            <span class="n">days</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">se_csd</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">))</span>
+
+            <span class="c1"># Construct list of files in each day</span>
+            <span class="n">filemap</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">(</span><span class="n">day</span><span class="p">,</span> <span class="n">_days_in_csd</span><span class="p">(</span><span class="n">day</span><span class="p">,</span> <span class="n">se_csd</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">padding</span><span class="p">))</span> <span class="k">for</span> <span class="n">day</span> <span class="ow">in</span> <span class="n">days</span>
+            <span class="p">]</span>
+
+            <span class="c1"># Filter our days with only a few files in them.</span>
+            <span class="n">filemap</span> <span class="o">=</span> <span class="p">[(</span><span class="n">day</span><span class="p">,</span> <span class="n">dmap</span><span class="p">)</span> <span class="k">for</span> <span class="n">day</span><span class="p">,</span> <span class="n">dmap</span> <span class="ow">in</span> <span class="n">filemap</span> <span class="k">if</span> <span class="n">dmap</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">]</span>
+            <span class="n">filemap</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">filemap</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">bcast</span><span class="p">(</span><span class="n">filemap</span><span class="p">,</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Set up frequency selection.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">:</span>
+            <span class="n">basefreq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">800.0</span><span class="p">,</span> <span class="mf">400.0</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="n">endpoint</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">freq_sel</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+                <span class="p">{</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">basefreq</span> <span class="o">-</span> <span class="n">freq</span><span class="p">))</span> <span class="k">for</span> <span class="n">freq</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">freq_physical</span><span class="p">}</span>
+            <span class="p">)</span>
+
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span> <span class="ow">and</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">freq_sel</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">channel_range</span><span class="p">))</span>
+
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">freq_sel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channel_index</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">freq_sel</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="LoadTimeStreamSidereal.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.LoadTimeStreamSidereal.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Load in each sidereal day.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        ts : andata.CorrData</span>
+<span class="sd">            The timestream of each sidereal day.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filemap</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">PipelineStopIteration</span>
+
+        <span class="c1"># Extract filelist for this CSD</span>
+        <span class="n">csd</span><span class="p">,</span> <span class="n">fmap</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">filemap</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">dfiles</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="n">fi</span><span class="p">]</span> <span class="k">for</span> <span class="n">fi</span> <span class="ow">in</span> <span class="n">fmap</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Starting read of CSD:</span><span class="si">%i</span><span class="s2"> [</span><span class="si">%i</span><span class="s2"> files]&quot;</span><span class="p">,</span> <span class="n">csd</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">fmap</span><span class="p">))</span>
+
+        <span class="c1"># Set up product selection</span>
+        <span class="c1"># NOTE: this probably doesn&#39;t work with stacked data</span>
+        <span class="n">prod_sel</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">only_autos</span><span class="p">:</span>
+            <span class="n">rd</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrReader</span><span class="p">(</span><span class="n">dfiles</span><span class="p">)</span>
+            <span class="n">prod_sel</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">ii</span> <span class="k">for</span> <span class="p">(</span><span class="n">ii</span><span class="p">,</span> <span class="n">pp</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">rd</span><span class="o">.</span><span class="n">prod</span><span class="p">)</span> <span class="k">if</span> <span class="n">pp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">pp</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Load files</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">CorrData</span><span class="o">.</span><span class="n">from_acq_h5</span><span class="p">(</span>
+            <span class="n">dfiles</span><span class="p">,</span> <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">freq_sel</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">freq_sel</span><span class="p">,</span> <span class="n">prod_sel</span><span class="o">=</span><span class="n">prod_sel</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Add attributes for the CSD and a tag for labelling saved files</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;csd_</span><span class="si">{</span><span class="n">csd</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">csd</span>
+
+        <span class="c1"># Add a weight dataset if needed</span>
+        <span class="k">if</span> <span class="s2">&quot;vis_weight&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ts</span><span class="o">.</span><span class="n">flags</span><span class="p">:</span>
+            <span class="n">weight_dset</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">create_flag</span><span class="p">(</span>
+                <span class="s2">&quot;vis_weight&quot;</span><span class="p">,</span>
+                <span class="n">shape</span><span class="o">=</span><span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">,</span>
+                <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">distributed_axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">weight_dset</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span>
+
+            <span class="c1"># Set weight to maximum value (255), unless the vis value is</span>
+            <span class="c1"># zero which presumably came from missing data. NOTE: this may have</span>
+            <span class="c1"># a small bias</span>
+            <span class="n">weight_dset</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span> <span class="o">==</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+
+        <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">ts</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="SiderealGrouper">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealGrouper">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SiderealGrouper</span><span class="p">(</span><span class="n">sidereal</span><span class="o">.</span><span class="n">SiderealGrouper</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SiderealGrouper that automatically uses the location of CHIME.</span>
+
+<span class="sd">    See `draco.analysis.sidereal.SiderealGrouper` for extended documentation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SiderealGrouper.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealGrouper.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the SiderealGrouper task.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        observer : caput.time.Observer, optional</span>
+<span class="sd">            Details of the observer, if not set default to CHIME.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Set up the default Observer</span>
+        <span class="n">observer</span> <span class="o">=</span> <span class="n">chime</span> <span class="k">if</span> <span class="n">observer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">observer</span>
+
+        <span class="n">sidereal</span><span class="o">.</span><span class="n">SiderealGrouper</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observer</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="WeatherGrouper">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.WeatherGrouper">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">WeatherGrouper</span><span class="p">(</span><span class="n">SiderealGrouper</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Group Weather files together within the sidereal day.</span>
+
+<span class="sd">    This is just a weather file specific version of `SiderealGrouper`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_process_current_lsd</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Override with a weather file specific version. It&#39;s not clear *why* exactly</span>
+        <span class="c1"># this is needed</span>
+
+        <span class="c1"># Check if we have weather data for this day.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;No weather data for this sidereal day&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="c1"># Check if there is data missing</span>
+        <span class="c1"># Calculate the length of data in this current LSD</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">sid_seconds</span> <span class="o">=</span> <span class="mf">86400.0</span> <span class="o">/</span> <span class="n">ctime</span><span class="o">.</span><span class="n">SIDEREAL_S</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">sid_seconds</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">padding</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Not enough weather data - skipping this day&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">lsd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_current_lsd</span>
+
+        <span class="c1"># Convert the current lsd day to unix time and pad it.</span>
+        <span class="n">unix_start</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observer</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">lsd</span><span class="p">)</span>
+        <span class="n">unix_end</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">observer</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">lsd</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pad_start</span> <span class="o">=</span> <span class="n">unix_start</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">padding</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pad_end</span> <span class="o">=</span> <span class="n">unix_end</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">padding</span>
+
+        <span class="n">times</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">ts</span><span class="o">.</span><span class="n">time</span> <span class="k">for</span> <span class="n">ts</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">])</span>
+        <span class="n">start_ind</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">times</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">pad_start</span><span class="p">)))</span>
+        <span class="n">stop_ind</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">times</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">pad_end</span><span class="p">)))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Constructing LSD:</span><span class="si">%i</span><span class="s2"> [</span><span class="si">%i</span><span class="s2"> files]&quot;</span><span class="p">,</span> <span class="n">lsd</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">))</span>
+
+        <span class="c1"># Concatenate timestreams</span>
+        <span class="n">ts</span> <span class="o">=</span> <span class="n">tod</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestream_list</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="n">start_ind</span><span class="p">,</span> <span class="n">stop</span><span class="o">=</span><span class="n">stop_ind</span><span class="p">)</span>
+
+        <span class="c1"># Make sure that our timestamps of the concatenated files don&#39;t fall</span>
+        <span class="c1"># out of the requested lsd time span</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">unix_start</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">ts</span><span class="o">.</span><span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">unix_end</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;lsd_</span><span class="si">{</span><span class="n">lsd</span><span class="si">:</span><span class="s2">d</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">ts</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lsd</span>
+
+        <span class="k">return</span> <span class="n">ts</span></div>
+
+
+
+<div class="viewcode-block" id="SiderealRegridder">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealRegridder">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SiderealRegridder</span><span class="p">(</span><span class="n">sidereal</span><span class="o">.</span><span class="n">SiderealRegridder</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SiderealRegridder that automatically uses the location of CHIME.</span>
+
+<span class="sd">    See `draco.analysis.sidereal.SiderealRegridder` for extended documentation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SiderealRegridder.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealRegridder.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observer</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Setup the SiderealRegridder task.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        observer : caput.time.Observer, optional</span>
+<span class="sd">            Details of the observer, if not set default to CHIME.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Down mix requires the baseline distribution to work and so this simple</span>
+        <span class="c1"># wrapper around the draco regridder will not work if it is turned on</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">down_mix</span> <span class="ow">and</span> <span class="n">observer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;A Telescope object must be supplied if down_mix=True.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Set up the default Observer</span>
+        <span class="n">observer</span> <span class="o">=</span> <span class="n">chime</span> <span class="k">if</span> <span class="n">observer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">observer</span>
+
+        <span class="n">sidereal</span><span class="o">.</span><span class="n">SiderealRegridder</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observer</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="SiderealMean">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealMean">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SiderealMean</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate the weighted mean(median) over time.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    median : bool</span>
+<span class="sd">        Calculate weighted median instead of the weighted mean.</span>
+<span class="sd">    inverse_variance : bool</span>
+<span class="sd">        Use inverse variance weights.  If this is False, then use uniform</span>
+<span class="sd">        weighting of timesamples where the `weight` dataset is greater than zero.</span>
+<span class="sd">    mask_day : bool</span>
+<span class="sd">        Mask out daytime data prior to calculating the mean(median).</span>
+<span class="sd">        Note that timestamps where the weight dataset is equal to zero will be excluded</span>
+<span class="sd">        from the calculation regardless.</span>
+<span class="sd">    mask_ra : list of two element lists</span>
+<span class="sd">        Only use data within these ranges of right ascension (in degrees) to calculate</span>
+<span class="sd">        the mean(median).</span>
+<span class="sd">    mask_sources : bool</span>
+<span class="sd">        Mask out the transit of bright sources prior to calculating the mean(median).</span>
+<span class="sd">        The set of sources that are masked is determined by the `flux_threshold` and</span>
+<span class="sd">        `dec_threshold` parameters, with values of 400 Jy and 5 deg masking out</span>
+<span class="sd">        the big 4 (CygA, CasA, TauA, VirA).</span>
+<span class="sd">    flux_threshold : float</span>
+<span class="sd">        Only mask sources with flux above this threshold in Jansky.</span>
+<span class="sd">    dec_threshold : float</span>
+<span class="sd">        Only mask sources with declination above this threshold in degrees.</span>
+<span class="sd">    nsigma : float</span>
+<span class="sd">        Mask this number of sigma on either side of the source transits.</span>
+<span class="sd">        Here sigma is the expected width of the primary beam for an E-W</span>
+<span class="sd">        polarisation antenna at 400 MHz as defined by</span>
+<span class="sd">        :py:func:`ch_util.cal_utils.guess_fwhm`.</span>
+<span class="sd">    missing_threshold : float</span>
+<span class="sd">        If less than this fraction of data remains within the regions included by the</span>
+<span class="sd">        specified masks, then all the data is counted as missing (per baseline and</span>
+<span class="sd">        frequency). Default is 0.0, i.e. this is not applied.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">median</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">inverse_variance</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">mask_day</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">mask_ra</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[])</span>
+    <span class="n">mask_sources</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">flux_threshold</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">400.0</span><span class="p">)</span>
+    <span class="n">dec_threshold</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+    <span class="n">nsigma</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+    <span class="n">missing_threshold</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="n">use_default_range_for_quarter</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">_reference_ra_range</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;q1&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="mf">150.0</span><span class="p">,</span> <span class="mf">165.0</span><span class="p">]],</span>
+        <span class="s2">&quot;q2&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="mf">240.0</span><span class="p">,</span> <span class="mf">255.0</span><span class="p">]],</span>
+        <span class="s2">&quot;q3&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="mf">315.0</span><span class="p">,</span> <span class="mf">330.0</span><span class="p">]],</span>
+        <span class="s2">&quot;q4&quot;</span><span class="p">:</span> <span class="p">[[</span><span class="mf">15.0</span><span class="p">,</span> <span class="mf">30.0</span><span class="p">]],</span>
+    <span class="p">}</span>
+
+<div class="viewcode-block" id="SiderealMean.setup">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealMean.setup">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Determine which sources will be masked, if any.&quot;&quot;&quot;</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">fluxcat</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_name_of_statistic</span> <span class="o">=</span> <span class="s2">&quot;median&quot;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">median</span> <span class="k">else</span> <span class="s2">&quot;mean&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">body</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_sources</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="n">sources</span><span class="o">.</span><span class="n">source_dictionary</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">fluxcat</span><span class="o">.</span><span class="n">FluxCatalog</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="p">(</span>
+                        <span class="n">fluxcat</span><span class="o">.</span><span class="n">FluxCatalog</span><span class="p">[</span><span class="n">src</span><span class="p">]</span><span class="o">.</span><span class="n">predict_flux</span><span class="p">(</span><span class="n">fluxcat</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">FREQ_NOMINAL</span><span class="p">)</span>
+                        <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">flux_threshold</span>
+                    <span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">body</span><span class="o">.</span><span class="n">dec</span><span class="o">.</span><span class="n">degrees</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">dec_threshold</span><span class="p">):</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Will mask </span><span class="si">{</span><span class="n">src</span><span class="si">}</span><span class="s2"> prior to calculating sidereal </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_name_of_statistic</span><span class="si">}</span><span class="s2">.&quot;</span>
+                        <span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">body</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SiderealMean.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.SiderealMean.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate the mean (median) over the sidereal day.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : andata.CorrData, containers.TimeStream, containers.SiderealStream,</span>
+<span class="sd">                  containers.HybridVisStream, containers.RingMap</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        mustream : same as sstream</span>
+<span class="sd">            Same type of container as the input but with a singleton time axis</span>
+<span class="sd">            that contains the mean (or median) value.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.flagging</span><span class="w"> </span><span class="kn">import</span> <span class="n">daytime_flag</span><span class="p">,</span> <span class="n">transit_flag</span>
+
+        <span class="c1"># Make sure we are distributed over frequency</span>
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Extract lsd</span>
+        <span class="n">lsd</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;lsd&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;lsd&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span> <span class="k">else</span> <span class="n">sstream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;csd&quot;</span><span class="p">]</span>
+        <span class="n">lsd_list</span> <span class="o">=</span> <span class="n">lsd</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lsd</span><span class="p">,</span> <span class="s2">&quot;__iter__&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="p">[</span><span class="n">lsd</span><span class="p">]</span>
+
+        <span class="c1"># Calculate the right ascension, method differs depending on input container</span>
+        <span class="k">if</span> <span class="s2">&quot;ra&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">ra</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="p">{</span><span class="n">dd</span><span class="p">:</span> <span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">dd</span> <span class="o">+</span> <span class="n">ra</span> <span class="o">/</span> <span class="mf">360.0</span><span class="p">)</span> <span class="k">for</span> <span class="n">dd</span> <span class="ow">in</span> <span class="n">lsd_list</span><span class="p">}</span>
+            <span class="n">flag_quiet</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">ra</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="s2">&quot;time&quot;</span> <span class="ow">in</span> <span class="n">sstream</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">ra</span> <span class="o">=</span> <span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsa</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">time</span><span class="p">)</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="p">{</span><span class="n">lsd</span><span class="p">:</span> <span class="n">sstream</span><span class="o">.</span><span class="n">time</span><span class="p">}</span>
+            <span class="n">flag_quiet</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fix</span><span class="p">(</span><span class="n">chime</span><span class="o">.</span><span class="n">unix_to_lsd</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">time</span><span class="p">))</span> <span class="o">==</span> <span class="n">lsd</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Format of `sstream` argument is unknown.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># If requested, determine &quot;quiet&quot; region of sky.</span>
+        <span class="c1"># In the case of a SiderealStack, there will be multiple LSDs and the</span>
+        <span class="c1"># mask will be the logical AND of the mask from each individual LSDs.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_day</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">dd</span><span class="p">,</span> <span class="n">time_dd</span> <span class="ow">in</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="c1"># Mask daytime data</span>
+                <span class="n">flag_quiet</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">daytime_flag</span><span class="p">(</span><span class="n">time_dd</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_sources</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">dd</span><span class="p">,</span> <span class="n">time_dd</span> <span class="ow">in</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="c1"># Mask data near bright source transits</span>
+                <span class="k">for</span> <span class="n">body</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">body</span><span class="p">:</span>
+                    <span class="n">flag_quiet</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">transit_flag</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">time_dd</span><span class="p">,</span> <span class="n">nsigma</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">nsigma</span><span class="p">)</span>
+
+        <span class="c1"># Only use data within user specified ranges of RA</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_default_range_for_quarter</span><span class="p">:</span>
+            <span class="n">dates</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">unix_to_datetime</span><span class="p">(</span><span class="n">chime</span><span class="o">.</span><span class="n">lsd_to_unix</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">lsd_list</span><span class="p">)))</span>
+            <span class="n">quarter</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">([(</span><span class="n">d</span><span class="o">.</span><span class="n">month</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">//</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">dates</span><span class="p">])</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">ra_ranges</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_reference_ra_range</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;q</span><span class="si">{</span><span class="n">quarter</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Using default RA range for quarter </span><span class="si">{</span><span class="n">quarter</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">quarter</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2"> days).&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_ra</span><span class="p">:</span>
+            <span class="n">ra_ranges</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_ra</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ra_ranges</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="n">ra_ranges</span><span class="p">:</span>
+            <span class="n">mask_ra</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">ra</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">ra_range</span> <span class="ow">in</span> <span class="n">ra_ranges</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Using data between RA = [</span><span class="si">{</span><span class="n">ra_range</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">ra_range</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">] deg&quot;</span>
+                <span class="p">)</span>
+                <span class="n">mask_ra</span> <span class="o">|=</span> <span class="p">(</span><span class="n">ra</span> <span class="o">&gt;=</span> <span class="n">ra_range</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ra</span> <span class="o">&lt;=</span> <span class="n">ra_range</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">flag_quiet</span> <span class="o">&amp;=</span> <span class="n">mask_ra</span>
+
+        <span class="c1"># Create output container</span>
+        <span class="n">newra</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">ra</span><span class="p">[</span><span class="n">flag_quiet</span><span class="p">],</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">mustream</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="vm">__class__</span><span class="p">(</span>
+            <span class="n">ra</span><span class="o">=</span><span class="n">newra</span><span class="p">,</span>
+            <span class="n">axes_from</span><span class="o">=</span><span class="n">sstream</span><span class="p">,</span>
+            <span class="n">attrs_from</span><span class="o">=</span><span class="n">sstream</span><span class="p">,</span>
+            <span class="n">distributed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">comm</span><span class="o">=</span><span class="n">sstream</span><span class="o">.</span><span class="n">comm</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">mustream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">mustream</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;statistic&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_name_of_statistic</span>
+
+        <span class="c1"># Dereference visibilities</span>
+        <span class="n">all_vis</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span>
+        <span class="n">mu_vis</span> <span class="o">=</span> <span class="n">mustream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span>
+
+        <span class="c1"># Combine the visibility weights with the quiet flag</span>
+        <span class="n">all_weight</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span> <span class="o">*</span> <span class="n">flag_quiet</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">inverse_variance</span><span class="p">:</span>
+            <span class="n">all_weight</span> <span class="o">=</span> <span class="p">(</span><span class="n">all_weight</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># Only include freqs/baselines where enough data is actually present</span>
+        <span class="n">frac_present</span> <span class="o">=</span> <span class="p">(</span><span class="n">all_weight</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">flag_quiet</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">all_weight</span> <span class="o">*=</span> <span class="p">(</span><span class="n">frac_present</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">missing_threshold</span><span class="p">)[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+
+        <span class="c1"># Log number of frequencies that do not have enough data</span>
+        <span class="n">waxis</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">][:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">caxind</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">([</span><span class="n">ii</span> <span class="k">for</span> <span class="n">ii</span><span class="p">,</span> <span class="n">ax</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">waxis</span><span class="p">)</span> <span class="k">if</span> <span class="n">ax</span> <span class="o">!=</span> <span class="s2">&quot;freq&quot;</span><span class="p">])</span>
+
+        <span class="n">num_freq_missing_local</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">frac_present</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">missing_threshold</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="n">caxind</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="n">num_freq_missing</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">comm</span><span class="o">.</span><span class="n">allreduce</span><span class="p">(</span><span class="n">num_freq_missing_local</span><span class="p">,</span> <span class="n">op</span><span class="o">=</span><span class="n">MPI</span><span class="o">.</span><span class="n">SUM</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="s2">&quot;Cannot estimate a sidereal mean for &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="mf">100.0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">num_freq_missing</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">mustream</span><span class="o">.</span><span class="n">freq</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">% of all frequencies.&quot;</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Save the total number of nonzero samples as the weight dataset of the output</span>
+        <span class="c1"># container</span>
+        <span class="n">mustream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">all_weight</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Identify any axis not contained in weight</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sstream</span><span class="p">,</span> <span class="n">containers</span><span class="o">.</span><span class="n">HybridVisStream</span><span class="p">):</span>
+            <span class="n">vslc</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">s_</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="n">ee</span><span class="p">]</span> <span class="k">for</span> <span class="n">ee</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">all_vis</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">3</span><span class="p">])]</span>
+
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sstream</span><span class="p">,</span> <span class="n">containers</span><span class="o">.</span><span class="n">RingMap</span><span class="p">):</span>
+            <span class="n">vslc</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">all_vis</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">vslc</span> <span class="o">=</span> <span class="p">[</span><span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">)]</span>
+
+        <span class="c1"># If requested, compute median</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">median</span><span class="p">:</span>
+
+            <span class="n">missing</span> <span class="o">=</span> <span class="o">~</span><span class="p">(</span><span class="n">all_weight</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">))</span>
+
+            <span class="c1"># Loop over all axes not shared with weight dataset</span>
+            <span class="k">for</span> <span class="n">slc</span> <span class="ow">in</span> <span class="n">vslc</span><span class="p">:</span>
+
+                <span class="n">mu_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">][</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">real</span> <span class="o">=</span> <span class="n">weighted_median</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">all_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span><span class="o">.</span><span class="n">real</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+                    <span class="n">all_weight</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">mu_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">][</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">imag</span> <span class="o">=</span> <span class="n">weighted_median</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">all_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span><span class="o">.</span><span class="n">imag</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+                    <span class="n">all_weight</span><span class="p">,</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Where all the weights are zero explicitly set the median to zero</span>
+                <span class="n">mu_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">][</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">][</span><span class="n">missing</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Otherwise calculate the mean</span>
+            <span class="c1"># Again loop over all axes not shared with weight dataset</span>
+            <span class="k">for</span> <span class="n">slc</span> <span class="ow">in</span> <span class="n">vslc</span><span class="p">:</span>
+                <span class="n">mu_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">all_weight</span> <span class="o">*</span> <span class="n">all_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">],</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">mu_vis</span><span class="p">[</span><span class="n">slc</span><span class="p">]</span> <span class="o">*=</span> <span class="n">tools</span><span class="o">.</span><span class="n">invert_no_zero</span><span class="p">(</span><span class="n">mustream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:])</span>
+
+        <span class="c1"># Return container with singleton time axis containing the mean value</span>
+        <span class="k">return</span> <span class="n">mustream</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="ChangeSiderealMean">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.ChangeSiderealMean">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ChangeSiderealMean</span><span class="p">(</span><span class="n">tasklib</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">ContainerTask</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Subtract or add an overall offset (over time) to each visibility.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    add : bool</span>
+<span class="sd">        Add the value instead of subtracting.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">add</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">Property</span><span class="p">(</span><span class="n">proptype</span><span class="o">=</span><span class="nb">bool</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="ChangeSiderealMean.process">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.ChangeSiderealMean.process">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sstream</span><span class="p">,</span> <span class="n">mustream</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add or subtract mustream from the sidereal stream.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sstream : andata.CorrData or containers.SiderealStream</span>
+<span class="sd">            Timestream or sidereal stream.</span>
+
+<span class="sd">        mustream : andata.CorrData or containers.SiderealStream</span>
+<span class="sd">            Timestream or sidereal stream with 1 element in the time axis</span>
+<span class="sd">            that contains the value to add or subtract.</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        sstream : same as input</span>
+<span class="sd">            Timestream or sidereal stream with value added or subtracted.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Check that input visibilities have consistent shapes</span>
+        <span class="n">sshp</span><span class="p">,</span> <span class="n">mshp</span> <span class="o">=</span> <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">mustream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">sshp</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">mshp</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Frequency or product axis differ between inputs.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">mshp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Mean value has incorrect shape, must be (..., 1).&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Ensure both inputs are distributed over frequency</span>
+        <span class="n">sstream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+        <span class="n">mustream</span><span class="o">.</span><span class="n">redistribute</span><span class="p">(</span><span class="s2">&quot;freq&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Determine indices of autocorrelations</span>
+        <span class="k">if</span> <span class="s2">&quot;prod&quot;</span> <span class="ow">in</span> <span class="n">mustream</span><span class="o">.</span><span class="n">index_map</span><span class="p">:</span>
+            <span class="n">prod</span> <span class="o">=</span> <span class="n">mustream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">][</span><span class="n">mustream</span><span class="o">.</span><span class="n">index_map</span><span class="p">[</span><span class="s2">&quot;stack&quot;</span><span class="p">][</span><span class="s2">&quot;prod&quot;</span><span class="p">]]</span>
+            <span class="n">not_auto</span> <span class="o">=</span> <span class="n">prod</span><span class="p">[</span><span class="s2">&quot;input_a&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">prod</span><span class="p">[</span><span class="s2">&quot;input_b&quot;</span><span class="p">]</span>
+
+            <span class="n">pslc</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+                <span class="p">[</span>
+                    <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span> <span class="k">if</span> <span class="n">ax</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;prod&quot;</span><span class="p">,</span> <span class="s2">&quot;stack&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
+                    <span class="k">for</span> <span class="n">ax</span> <span class="ow">in</span> <span class="n">mustream</span><span class="o">.</span><span class="n">vis</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;axis&quot;</span><span class="p">]</span>
+                <span class="p">]</span>
+            <span class="p">)</span>
+
+            <span class="n">mu</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">not_auto</span><span class="p">[</span><span class="n">pslc</span><span class="p">],</span> <span class="n">mustream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mu</span> <span class="o">=</span> <span class="n">mustream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span>
+
+        <span class="c1"># Add or subtract value to the cross-correlations</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">add</span><span class="p">:</span>
+            <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span><span class="p">[:]</span> <span class="o">+=</span> <span class="n">mu</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">sstream</span><span class="o">.</span><span class="n">vis</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span><span class="p">[:]</span> <span class="o">-=</span> <span class="n">mu</span>
+
+        <span class="c1"># Set weights to zero if there was no mean</span>
+        <span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span><span class="p">[:]</span> <span class="o">*=</span> <span class="p">(</span>
+            <span class="n">mustream</span><span class="o">.</span><span class="n">weight</span><span class="p">[:]</span><span class="o">.</span><span class="n">local_array</span> <span class="o">&gt;</span> <span class="mf">0.0</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">sstream</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+
+        <span class="c1"># Return sidereal stream with modified offset</span>
+        <span class="k">return</span> <span class="n">sstream</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="get_times">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.analysis.sidereal.html#ch_pipeline.analysis.sidereal.get_times">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_times</span><span class="p">(</span><span class="n">acq_files</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract the start and end times of a list of acquisition files.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    acq_files : list</span>
+<span class="sd">        List of filenames.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    times : np.ndarray[nfiles, 2]</span>
+<span class="sd">        Start and end times.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">acq_files</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">get_times</span><span class="p">(</span><span class="n">acq_file</span><span class="p">)</span> <span class="k">for</span> <span class="n">acq_file</span> <span class="ow">in</span> <span class="n">acq_files</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">acq_files</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="c1"># Load in file (but ignore all datasets)</span>
+        <span class="n">ad_empty</span> <span class="o">=</span> <span class="n">andata</span><span class="o">.</span><span class="n">AnData</span><span class="o">.</span><span class="n">from_acq_h5</span><span class="p">(</span><span class="n">acq_files</span><span class="p">,</span> <span class="n">datasets</span><span class="o">=</span><span class="p">())</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">ad_empty</span><span class="o">.</span><span class="n">timestamp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">ad_empty</span><span class="o">.</span><span class="n">timestamp</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span>
+
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Input </span><span class="si">{</span><span class="n">acq_files</span><span class="si">!r}</span><span class="s2">, not understood&quot;</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_days_in_csd</span><span class="p">(</span><span class="n">day</span><span class="p">,</span> <span class="n">se_csd</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="mf">0.005</span><span class="p">):</span>
+    <span class="c1"># Find which days are in each CSD</span>
+    <span class="n">stest</span> <span class="o">=</span> <span class="n">se_csd</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">day</span> <span class="o">-</span> <span class="n">extra</span>
+    <span class="n">etest</span> <span class="o">=</span> <span class="n">se_csd</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">day</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">extra</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">stest</span><span class="p">,</span> <span class="n">etest</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

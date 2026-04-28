@@ -1,0 +1,525 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.base &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.processing.beam" href="ch_pipeline.processing.beam.html" />
+    <link rel="prev" title="ch_pipeline.processing" href="ch_pipeline.processing.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a><ul class="current">
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.processing.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.beam.html">ch_pipeline.processing.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.client.html">ch_pipeline.processing.client</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.daily.html">ch_pipeline.processing.daily</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.base</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.processing.base.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.processing.base">
+<span id="ch-pipeline-processing-base"></span><h1>ch_pipeline.processing.base<a class="headerlink" href="#module-ch_pipeline.processing.base" title="Link to this heading"></a></h1>
+<p>Base class for a pipeline processing type.</p>
+<p>The base class is inherited by specific pipeline processing types and handles
+most steps in setting up and running the processing type.</p>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#ch_pipeline.processing.base.ProcessingType" title="ch_pipeline.processing.base.ProcessingType"><code class="xref py py-class docutils literal notranslate"><span class="pre">ProcessingType</span></code></a></p></li>
+</ul>
+</section>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.all_subclasses" title="ch_pipeline.processing.base.all_subclasses"><code class="xref py py-obj docutils literal notranslate"><span class="pre">all_subclasses</span></code></a>(cls)</p></td>
+<td><p>Recursively find all subclasses of cls.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.check_duplicates" title="ch_pipeline.processing.base.check_duplicates"><code class="xref py py-obj docutils literal notranslate"><span class="pre">check_duplicates</span></code></a>([user, cancel])</p></td>
+<td><p>Return a list of job IDs corresponding to duplicate jobs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.classify_failed" title="ch_pipeline.processing.base.classify_failed"><code class="xref py py-obj docutils literal notranslate"><span class="pre">classify_failed</span></code></a>(dir, tags[, patterns])</p></td>
+<td><p>Analyze the cause of crashed jobs.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.find_venv" title="ch_pipeline.processing.base.find_venv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_venv</span></code></a>()</p></td>
+<td><p>Get the path of the current virtual environment.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.queue_job" title="ch_pipeline.processing.base.queue_job"><code class="xref py py-obj docutils literal notranslate"><span class="pre">queue_job</span></code></a>(script[, submit])</p></td>
+<td><p>Queue a pipeline script given as a string.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.slurm_fairshare" title="ch_pipeline.processing.base.slurm_fairshare"><code class="xref py py-obj docutils literal notranslate"><span class="pre">slurm_fairshare</span></code></a>(account[, user])</p></td>
+<td><p>Get the LevelFS for the current user and account.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.slurm_jobs" title="ch_pipeline.processing.base.slurm_jobs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">slurm_jobs</span></code></a>([user])</p></td>
+<td><p>Get the jobs of the given user.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.base.ProcessingType" title="ch_pipeline.processing.base.ProcessingType"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ProcessingType</span></code></a>(revision[, create, root_path])</p></td>
+<td><p>Baseclass for a pipeline processing type.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">ProcessingType</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">revision</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">root_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Baseclass for a pipeline processing type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>revision</strong> (<em>str</em>) – Revision to use.</p></li>
+<li><p><strong>create</strong> (<em>bool</em><em>, </em><em>optional</em>) – Create the revision if it isn’t found.</p></li>
+<li><p><strong>root_path</strong> (<em>str</em><em>, </em><em>optional</em>) – Override the path to the processing root.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.available">
+<span class="sig-name descname"><span class="pre">available</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.available"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.available" title="Link to this definition"></a></dt>
+<dd><p>Return the list of tags that we can generate given current data.</p>
+<p>This can (and should) include tags that have already been processed
+if the prerequites are still available, but will exclude any tags
+currently present in the working directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of all the tags that could be generated.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>tags</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.base_path">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">base_path</span></span><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.base_path" title="Link to this definition"></a></dt>
+<dd><p>Base path for this processed data type.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.create_rev">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">create_rev</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.create_rev"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.create_rev" title="Link to this definition"></a></dt>
+<dd><p>Create a new revision of this type.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.failed">
+<span class="sig-name descname"><span class="pre">failed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_sort</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.failed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.failed" title="Link to this definition"></a></dt>
+<dd><p>Categorize failed jobs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>user</strong> – user to find running jobs for. If not provided, this
+will default to the current user</p></li>
+<li><p><strong>time_sort</strong> – true if tags should be sorted by time (newest first)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>tags associated with each category</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>crashed</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.generate">
+<span class="sig-name descname"><span class="pre">generate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">priority_only</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check_failed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.generate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.generate" title="Link to this definition"></a></dt>
+<dd><p>Queue up jobs that are available to run.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>max</strong> – The maximum number of jobs to submit at once.</p></li>
+<li><p><strong>submit</strong> – Submit the jobs to the queue.</p></li>
+<li><p><strong>user</strong> – user to find running jobs for. If not provided, this
+will default to the current user</p></li>
+<li><p><strong>priority_only</strong> – If true, only submit priority jobs</p></li>
+<li><p><strong>check_failed</strong> – If true, check for a specific set of failures and include those
+jobs in the queue list</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.job_name">
+<span class="sig-name descname"><span class="pre">job_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.job_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.job_name" title="Link to this definition"></a></dt>
+<dd><p>The job name used to run the tag.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tag</strong> – Tag for the job.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>jobname</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.job_script">
+<span class="sig-name descname"><span class="pre">job_script</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.job_script"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.job_script" title="Link to this definition"></a></dt>
+<dd><p>The slurm job script to queue up.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.jobtemplate_path">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">jobtemplate_path</span></span><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.jobtemplate_path" title="Link to this definition"></a></dt>
+<dd><p>Path to template pipeline job config for this revision.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.latest">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">latest</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.latest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.latest" title="Link to this definition"></a></dt>
+<dd><p>Create an instance to manage the latest revision.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>pt</strong> – An instance of the processing type for the latest revision.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>cls</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.ls">
+<span class="sig-name descname"><span class="pre">ls</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">time_sort</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.ls"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.ls" title="Link to this definition"></a></dt>
+<dd><p>Find all matching data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>time_sort</strong> – true if tags should be sorted by time (newest first)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Return the tags of all outputs found.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tags</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.ls_rev">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ls_rev</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.ls_rev"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.ls_rev" title="Link to this definition"></a></dt>
+<dd><p>List all existing revisions of this type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of revision names</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>rev</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.ls_type">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ls_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">existing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.ls_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.ls_type" title="Link to this definition"></a></dt>
+<dd><p>List all processing types found.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>existing</strong> – Only return types that have existing data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of processing types found</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>type_names</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.queued">
+<span class="sig-name descname"><span class="pre">queued</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">list</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.queued"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.queued" title="Link to this definition"></a></dt>
+<dd><p>Get the queued and running jobs of this type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>user</strong> – user to find running jobs for. If not provided, this
+will default to the current user</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><em>waiting</em> – List of jobs that are waiting to run.</p></li>
+<li><p><em>running</em> – List of running jobs.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.revconfig_path">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">revconfig_path</span></span><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.revconfig_path" title="Link to this definition"></a></dt>
+<dd><p>Path to default config for this revision.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.status">
+<span class="sig-name descname"><span class="pre">status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_sort</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.status"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.status" title="Link to this definition"></a></dt>
+<dd><p>Find the status of existing jobs.</p>
+<p>This duplicates some other methods for individual status values, but
+reduces repeated method (and slurm) calls.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>user</strong> – user to find running jobs for. If not provided, this
+will default to the current user</p></li>
+<li><p><strong>time_sort</strong> – true if tags should be sorted by time (newest first)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A dict of statuses: available, not_available, not_yet_submitted, pending,
+running, successful, failed. The value for each status key is a list of tags
+with that status.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>status</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.update_files">
+<span class="sig-name descname"><span class="pre">update_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#ProcessingType.update_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.update_files" title="Link to this definition"></a></dt>
+<dd><p>Overwrite to implement functionality to update required files.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.venv_path">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">venv_path</span></span><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.venv_path" title="Link to this definition"></a></dt>
+<dd><p>Path to virtual environment for this revision.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.ProcessingType.workdir_path">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">workdir_path</span></span><a class="headerlink" href="#ch_pipeline.processing.base.ProcessingType.workdir_path" title="Link to this definition"></a></dt>
+<dd><p>Path to the working directory.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.all_subclasses">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">all_subclasses</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cls</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#all_subclasses"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.all_subclasses" title="Link to this definition"></a></dt>
+<dd><p>Recursively find all subclasses of cls.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.check_duplicates">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">check_duplicates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cancel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#check_duplicates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.check_duplicates" title="Link to this definition"></a></dt>
+<dd><p>Return a list of job IDs corresponding to duplicate jobs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>user</strong> – The user account to check</p></li>
+<li><p><strong>cancel</strong> – If True, cancel duplicate jobs. If any jobs are running, the most
+most recently started job is kept. Otherwise, the most recently queued
+job is kept. The most recent job is kept rather than the oldest to avoid
+cases where a file has been modified by the newer job.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>List of JOBIDs corresponding to duplicate pipeline jobs. If <cite>cancel</cite> is
+True, these jobs will be cancelled.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>duplicates</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.classify_failed">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">classify_failed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tags</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">patterns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">{}</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#classify_failed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.classify_failed" title="Link to this definition"></a></dt>
+<dd><p>Analyze the cause of crashed jobs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>dir</strong> – directory to find tags</p></li>
+<li><p><strong>tags</strong> – tags to check</p></li>
+<li><p><strong>patterns</strong> – dictionary of patterns to check for. Keys are expected
+categories and values are lists of regex patterns to
+check for.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>tags associated with each pattern. Any unmatched tags are
+added with the key “other”</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>crashed</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.find_venv">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">find_venv</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#find_venv"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.find_venv" title="Link to this definition"></a></dt>
+<dd><p>Get the path of the current virtual environment.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>path</strong> – Path to the venv, or <cite>None</cite> if we are not in a virtual environment.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.queue_job">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">queue_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#queue_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.queue_job" title="Link to this definition"></a></dt>
+<dd><p>Queue a pipeline script given as a string.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.slurm_fairshare">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">slurm_fairshare</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">account</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#slurm_fairshare"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.slurm_fairshare" title="Link to this definition"></a></dt>
+<dd><p>Get the LevelFS for the current user and account.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>account</strong> – The account to check.</p></li>
+<li><p><strong>user</strong> – The user on the account to check for.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><em>account_fs</em> – The LevelFS for the whole account, i.e. the priority relative to all other
+accounts on the cluster.</p></li>
+<li><p><em>user_fs</em> – The LevelFS for the user, i.e. the priority compared to all other users on
+the account.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.base.slurm_jobs">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.base.</span></span><span class="sig-name descname"><span class="pre">slurm_jobs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/base.html#slurm_jobs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.base.slurm_jobs" title="Link to this definition"></a></dt>
+<dd><p>Get the jobs of the given user.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>user</strong> – User to fetch the slurm jobs of. If not set, use the current user.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>List of dictionaries giving the jobs state.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>jobs</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.processing.html" class="btn btn-neutral float-left" title="ch_pipeline.processing" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.processing.beam.html" class="btn btn-neutral float-right" title="ch_pipeline.processing.beam" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,323 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.beam &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.beam</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.processing.beam</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Holography pipeline processing type.</span>
+
+<span class="sd">Classes</span>
+<span class="sd">=======</span>
+<span class="sd">- :py:class:`HolographyFringestop`</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClassVar</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">caput.astro</span><span class="w"> </span><span class="kn">import</span> <span class="n">time</span> <span class="k">as</span> <span class="n">ctime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ch_util</span><span class="w"> </span><span class="kn">import</span> <span class="n">holography</span> <span class="k">as</span> <span class="n">holo</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chimedb.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect</span> <span class="k">as</span> <span class="n">connect_db</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">base</span>
+
+<span class="n">DEFAULT_SCRIPT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Cluster configuration</span>
+<span class="s2">cluster:</span>
+<span class="s2">  name: </span><span class="si">{jobname}</span>
+<span class="s2">  account: rpp-chime</span>
+
+<span class="s2">  directory: </span><span class="si">{dir}</span>
+<span class="s2">  temp_directory: </span><span class="si">{tempdir}</span>
+
+<span class="s2">  time: </span><span class="si">{time}</span>
+<span class="s2">  system: slurm</span>
+<span class="s2">  nodes: </span><span class="si">{nodes}</span>
+<span class="s2">  ompnum: </span><span class="si">{ompnum}</span>
+<span class="s2">  pernode: </span><span class="si">{pernode}</span>
+
+<span class="s2">  venv: </span><span class="si">{venv}</span>
+<span class="s2">  module_path: </span><span class="si">{modpath}</span>
+<span class="s2">  module_list: </span><span class="si">{modlist}</span>
+
+<span class="s2"># source, hour angle span will be used by multiple tasks</span>
+<span class="s2">param_anchors:</span>
+<span class="s2">  - &amp;source_name </span><span class="si">{src}</span>
+<span class="s2">  - &amp;hour_angle </span><span class="si">{ha_span}</span>
+<span class="s2">  - &amp;db_source_name </span><span class="si">{src_db}</span>
+
+<span class="s2"># Pipeline task configuration</span>
+<span class="s2">pipeline:</span>
+<span class="s2">  tasks:</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.base.SetMPILogging</span>
+<span class="s2">      params:</span>
+<span class="s2">          level_all: INFO</span>
+<span class="s2">          level_rank0: DEBUG</span>
+
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryDatabase</span>
+<span class="s2">      out: files_wait</span>
+<span class="s2">      params:</span>
+<span class="s2">        node_spoof:</span>
+<span class="s2">            fir_online: /project/rpp-chime/chime/chime_online</span>
+<span class="s2">        instrument: chime26m</span>
+<span class="s2">        source_26m: *db_source_name</span>
+<span class="s2">        start_time: </span><span class="si">{start_time}</span>
+<span class="s2">        end_time: </span><span class="si">{end_time}</span>
+<span class="s2">        accept_all_global_flags: True</span>
+<span class="s2">        exclude_data_flag_types: [&quot;misc&quot;]</span>
+<span class="s2">        return_intervals: True</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.io.LoadFilesFromParams</span>
+<span class="s2">      out: tcorr</span>
+<span class="s2">      params:</span>
+<span class="s2">        files: </span><span class="si">{timing_corr}</span>
+<span class="s2">        distributed: No</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.flow.AccumulateList</span>
+<span class="s2">      in: tcorr</span>
+<span class="s2">      out: tcorrlist</span>
+
+<span class="s2">    - type: caput.pipeline.tasklib.flow.WaitUntil</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: files_wait</span>
+<span class="s2">      out: files</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.beam.FilterHolographyProcessed</span>
+<span class="s2">      in: files</span>
+<span class="s2">      out: files_filt</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: *db_source_name</span>
+<span class="s2">        processed_dir: [</span><span class="si">{dir}</span><span class="s2">, </span><span class="si">{tempdir}</span><span class="s2">]</span>
+
+<span class="s2">    - type: ch_pipeline.core.io.LoadCorrDataFiles</span>
+<span class="s2">      requires: files_filt</span>
+<span class="s2">      out: tstreams</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.timing.ApplyTimingCorrection</span>
+<span class="s2">      requires: tcorrlist</span>
+<span class="s2">      in: tstreams</span>
+<span class="s2">      out: tstreams_corr</span>
+<span class="s2">      params:</span>
+<span class="s2">        pass_if_missing: True</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.beam.TransitGrouper</span>
+<span class="s2">      in: tstreams_corr</span>
+<span class="s2">      out: transits</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: *source_name</span>
+<span class="s2">        db_source: *db_source_name</span>
+<span class="s2">        ha_span: *hour_angle</span>
+
+<span class="s2">    - type: ch_pipeline.core.dataquery.QueryInputs</span>
+<span class="s2">      in: transits</span>
+<span class="s2">      out: inputs</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.fringestop.FringeStop</span>
+<span class="s2">      in: [transits, inputs]</span>
+<span class="s2">      out: transits_fs</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: *source_name</span>
+<span class="s2">        wterm: True</span>
+<span class="s2">        overwrite: True</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.decorrelation.CorrectDecorrelation</span>
+<span class="s2">      in: [transits_fs, inputs]</span>
+<span class="s2">      out: transits_corr</span>
+<span class="s2">      params:</span>
+<span class="s2">        source: *source_name</span>
+<span class="s2">        wterm: True</span>
+<span class="s2">        overwrite: True</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.beam.TransitRegridder</span>
+<span class="s2">      in: transits_corr</span>
+<span class="s2">      out: transit_regrid</span>
+<span class="s2">      params:</span>
+<span class="s2">        ha_span: *hour_angle</span>
+<span class="s2">        samples: </span><span class="si">{num_samples}</span>
+<span class="s2">        snr_cov: 1.</span>
+<span class="s2">        source: *source_name</span>
+<span class="s2">        lanczos_width: 7</span>
+<span class="s2">        mask_zero_weight: True</span>
+
+<span class="s2">    - type: ch_pipeline.analysis.beam.MakeHolographyBeam</span>
+<span class="s2">      in: [transit_regrid, inputs]</span>
+<span class="s2">      params:</span>
+<span class="s2">        save:  Yes</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="HolographyFringestop">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.beam.html#ch_pipeline.processing.beam.HolographyFringestop">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">HolographyFringestop</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Holography beam pipeline processing type.&quot;&quot;&quot;</span>
+
+    <span class="n">type_name</span> <span class="o">=</span> <span class="s2">&quot;holo_fstop&quot;</span>
+    <span class="c1"># tag by name of source and processing run</span>
+    <span class="n">tag_pattern</span> <span class="o">=</span> <span class="sa">r</span><span class="s2">&quot;(.+)_run(\d</span><span class="si">{3}</span><span class="s2">)&quot;</span>
+
+    <span class="c1"># Parameters of the job processing</span>
+    <span class="n">default_params</span><span class="p">:</span> <span class="n">ClassVar</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;src&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;CYG_A&quot;</span><span class="p">,</span> <span class="s2">&quot;CAS_A&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;src_db&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;CygA&quot;</span><span class="p">,</span> <span class="s2">&quot;CasA&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;start_time&quot;</span><span class="p">:</span> <span class="s2">&quot;20180101T000000&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;end_time&quot;</span><span class="p">:</span> <span class="s2">&quot;20200101T000000&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;transits_per_run&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+        <span class="s2">&quot;ha_span&quot;</span><span class="p">:</span> <span class="mf">60.0</span><span class="p">,</span>
+        <span class="s2">&quot;num_samples&quot;</span><span class="p">:</span> <span class="mi">720</span><span class="p">,</span>
+        <span class="s2">&quot;nodes&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="s2">&quot;pernode&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+        <span class="s2">&quot;ompnum&quot;</span><span class="p">:</span> <span class="mi">24</span><span class="p">,</span>
+        <span class="s2">&quot;time&quot;</span><span class="p">:</span> <span class="s2">&quot;0-4:00:00&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;timing_corr&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/chime_processed/timing/rev_00/not_referenced/*_chimetiming_delay.h5&quot;</span><span class="p">,</span>
+        <span class="c1"># System modules to use/load</span>
+        <span class="s2">&quot;modpath&quot;</span><span class="p">:</span> <span class="s2">&quot;/project/rpp-chime/chime/chime_env/modules/modulefiles&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;modlist&quot;</span><span class="p">:</span> <span class="s2">&quot;chime/python/2022.06&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="n">default_script</span> <span class="o">=</span> <span class="n">DEFAULT_SCRIPT</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_available_tags</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="c1"># Divide observations by source and in groups</span>
+        <span class="n">start_t</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;start_time&quot;</span><span class="p">])</span>
+        <span class="n">end_t</span> <span class="o">=</span> <span class="n">ctime</span><span class="o">.</span><span class="n">ensure_unix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;end_time&quot;</span><span class="p">])</span>
+        <span class="n">connect_db</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">src</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;src_db&quot;</span><span class="p">]:</span>
+            <span class="c1"># query database for observations within time range and sort by time</span>
+            <span class="n">db_src</span> <span class="o">=</span> <span class="n">holo</span><span class="o">.</span><span class="n">HolographySource</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographySource</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">src</span><span class="p">)</span>
+            <span class="n">db_obs</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">select</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">source</span> <span class="o">==</span> <span class="n">db_src</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">start_time</span> <span class="o">&gt;</span> <span class="n">start_t</span><span class="p">)</span>
+                    <span class="o">&amp;</span> <span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">finish_time</span> <span class="o">&lt;</span> <span class="n">end_t</span><span class="p">)</span>
+                <span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                    <span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">quality_flag</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+                    <span class="o">|</span> <span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">quality_flag</span> <span class="o">==</span> <span class="kc">None</span><span class="p">)</span>  <span class="c1"># noqa: E711</span>
+                <span class="p">)</span>
+                <span class="o">.</span><span class="n">order_by</span><span class="p">(</span><span class="n">holo</span><span class="o">.</span><span class="n">HolographyObservation</span><span class="o">.</span><span class="n">start_time</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="c1"># divide into groups to process together</span>
+            <span class="n">n_per</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;transits_per_run&quot;</span><span class="p">]</span>
+            <span class="n">n_groups</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">db_obs</span><span class="p">)</span> <span class="o">//</span> <span class="n">n_per</span> <span class="o">+</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">db_obs</span><span class="p">)</span> <span class="o">%</span> <span class="n">n_per</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_groups</span><span class="p">):</span>
+                <span class="n">tag</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">src</span><span class="si">}</span><span class="s2">_run</span><span class="si">{</span><span class="n">i</span><span class="si">:</span><span class="s2">0&gt;3d</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="c1"># set up time range for these transits, with 1h padding</span>
+                <span class="n">i</span> <span class="o">*=</span> <span class="n">n_per</span>
+                <span class="n">j</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_per</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="n">j</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">db_obs</span><span class="p">):</span>
+                    <span class="n">j</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">db_obs</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="n">bnds</span> <span class="o">=</span> <span class="p">(</span><span class="n">db_obs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">start_time</span> <span class="o">-</span> <span class="mi">3600</span><span class="p">,</span> <span class="n">db_obs</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="o">.</span><span class="n">finish_time</span> <span class="o">+</span> <span class="mi">3600</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="n">bnds</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;end&quot;</span><span class="p">:</span> <span class="n">bnds</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;src_db&quot;</span><span class="p">:</span> <span class="n">src</span><span class="p">}</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_finalise_jobparams</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">jobparams</span><span class="p">):</span>
+        <span class="c1"># adjust start and end time</span>
+        <span class="n">jobparams</span><span class="p">[</span><span class="s2">&quot;start_time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">][</span><span class="s2">&quot;start&quot;</span><span class="p">]</span>
+        <span class="n">jobparams</span><span class="p">[</span><span class="s2">&quot;end_time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">][</span><span class="s2">&quot;end&quot;</span><span class="p">]</span>
+
+        <span class="c1"># set source</span>
+        <span class="n">jobparams</span><span class="p">[</span><span class="s2">&quot;src_db&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">][</span><span class="s2">&quot;src_db&quot;</span><span class="p">]</span>
+        <span class="n">jobparams</span><span class="p">[</span><span class="s2">&quot;src&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;src&quot;</span><span class="p">][</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_revparams</span><span class="p">[</span><span class="s2">&quot;src_db&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">][</span><span class="s2">&quot;src_db&quot;</span><span class="p">])</span>
+        <span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">jobparams</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
