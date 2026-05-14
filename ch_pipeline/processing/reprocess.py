@@ -72,6 +72,8 @@ pipeline:
       out: sstream
       params:
         files: "{src_type_path}/{csd}/{file_match}*{csd}.*"
+        selections:
+            freq_range: [{freq[0]:d}, {freq[1]:d}]
 """
 
 
@@ -139,6 +141,8 @@ class SiderealReprocessing(base.ProcessingType):
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
         "modlist": "chime/python/2026.05",
         "nfreq_delay": 1025,
+        # Frequencies to load
+        "freq": [0, 1024],
         # Job params
         "time": 60,  # How long in minutes?
         "nodes": 2,  # Number of nodes to use.
