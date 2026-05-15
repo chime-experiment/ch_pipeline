@@ -1,10 +1,11 @@
 """Processing type to reprocess daily data products."""
 
+import os
 from typing import ClassVar
 
 from caput.util.arraytools import unique_ordered
 
-from . import base, client, daily
+from . import base, daily
 
 DEFAULT_SCRIPT = """
 # Cluster configuration
@@ -177,7 +178,8 @@ class SiderealReprocessing(base.ProcessingType):
         # get a reference to the daily processing instance that
         # we are pulling data from
         source_rev = self._revparams["src_rev"]
-        self.source_rev = client.PRev().convert(f"daily:{source_rev}", None, None)
+        source_root = self._revparams["src_root_path"]
+        self.source_rev = daily.DailyProcessing(source_rev, root_path=source_root)
 
         # Process the intervals given in the rev config
         self._intervals = []
@@ -187,12 +189,34 @@ class SiderealReprocessing(base.ProcessingType):
     def _create_hook(self):
         """Finalize the default configuration."""
         # Include the daily revision that we want to pull data from.
-        # By default, this is the most recent revision
-        latest_daily_rev = daily.DailyProcessing.latest()
+        # By default, this is the most recent revision, but query the
+        # user for a different option first
+        root_path = input(
+            "Enter the root path to the daily data [blank to use current root path]: "
+        )
+
+        if not root_path:
+            root_path = self.root_path
+        else:
+            # The user might have provided the path to the daily directory
+            # instead of the pipeline root directory
+            root_path = os.path.normpath(root_path).split("daily", 1)[0]
+            # Make sure this is a valid path
+            root_path = os.path.join(root_path, "")
+
+        # Also prompt user for the revision
+        rev = input("Enter the daily revision to provess (rev_XX) [required]: ")
+
+        try:
+            daily_rev = daily.DailyProcessing(rev, root_path=root_path)
+        except Exception:  # noqa: BLE001
+            raise ValueError(f"Could not load revision {rev} at `{root_path}`")
+
         self.default_params.update(
             {
-                "src_rev": latest_daily_rev.revision,
-                "src_type_path": str(latest_daily_rev.base_path),
+                "src_rev": daily_rev.revision,
+                "src_root_path": str(daily_rev.root_path),
+                "src_type_path": str(daily_rev.base_path),
             }
         )
         self._update_default_params_hook()
