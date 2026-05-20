@@ -1,21 +1,22 @@
 # CHIME Analysis Pipeline
 
-This is the repository for storing the CHIME Analysis Pipeline.
+This is the repository for storing the CHIME Analysis Pipeline. For CHIME members, more information about
+the pipeline can be found in the [Pipeline Repo](https://github.com/chime-experiment/Pipeline) and
+[Pipeline Wiki](https://github.com/chime-experiment/Pipeline/wiki/Overview).
 
-Development should be done along the lines of [Github
-Flow](https://guides.github.com/introduction/flow/). This is the same model we
-use for `ch_util`.
+Development should be done along the lines of [Github Flow](https://guides.github.com/introduction/flow/).
 
 Important notes:
 
- - *Don't* develop directly in master, use a feature branch for any change, and merge back into *master* promptly. Merging should be done by filing a Pull Request.
+ - *Don't* develop directly in `main`, use a feature branch for any change, and merge back into *main* promptly. Merging should be done by filing a Pull Request.
  - *Do* install the `virtualenv` with `mkchimeenv`, located [here](https://github.com/chime-experiment/mkchimeenv).
 
 ## Development Guidelines
 
-The idea behind this repository is to keep track of the CHIME pipeline development, such that the union of the input data and this repository always gives the same output. This requires that we keep track of not only the code and scripts in this repository, but also any dependencies (discussed below).
+The idea behind this repository is to keep track of the CHIME pipeline development, such that the union of the input data and this repository always gives the same
+output. This requires that we keep track of not only the code and scripts in this repository, but also any dependencies (discussed below).
 
-As far as possible the pipeline code should be using Kiyo's pipeline task module `caput.pipeline`  ([doc](https://caput.readthedocs.io/en/latest/generated/caput.pipeline.html#module-caput.pipeline)).
+The underlying pipeline code uses the pipeline task module `caput.pipeline` ([doc](https://caput.readthedocs.io/en/latest/autoapi/caput/pipeline/index.html)).
 
 ### Structure
 
@@ -23,13 +24,11 @@ Tasks should go into the appropriate subdirectory of `ch_pipeline/`. Ask for cla
 
 ### Coding Standards
 
-Code should adhere to the [CHIME contribution guidelines](https://github.com/chime-experiment/Pipeline/blob/master/CONTRIBUTING.md).
+Code should adhere to the [CHIME contribution guidelines](https://github.com/chime-experiment/Pipeline/blob/main/CONTRIBUTING.md).
 If you haven't looked at it please do so.
 
 Code should be well documented, with a docstring expected for each public
-function, class or method. These should be done according to Numpy docstring
-style
-([guide](https://github.com/numpy/numpy/blob/master/doc/HOWTO_DOCUMENT.rst.txt)).
+function, class or method. These should be done according to [Numpy docstring style](https://numpydoc.readthedocs.io/en/latest/format.html).
 
 Code should also be well commented (not the same as well documented). Try and
 put in comments that explain logically what each section of code is trying to
@@ -42,7 +41,7 @@ generally be done around reasonably small, self contained, features, and should
 be tracked in specific feature branches. These should not be long lived, as soon
 as the feature is finished and tested, file a Pull Request, get it reviewed by
 someone else, and when given the okay, merge the code and delete the branch. Any
-new development should be branched off from `master` again.
+new development should be branched off from `main` again.
 
 Please don't use long lived, person specific branches e.g. `richard-dev`.
 
@@ -56,7 +55,7 @@ and commit hashes. An example dependency list that you might find in
 
 ```toml
 dependencies = [
-    "caput-master @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d",
+    "caput @ git+https://github.com/radiocosmology/caput.git@ee1c55ea4cf8cb7857af2ef3adcb2439d876768d",
     "ch_util @ git+https://github.com/chime-experiment/ch_util.git@e33b174696509b158c15cf0bfc27f4cb2b0c6406#egg=ch_util",
     "cora @ git+https://github.com/radiocosmology/cora.git@v1.0.0",
     "driftscan @ git+https://github.com/radiocosmology/driftscan.git@v1.0.0"
