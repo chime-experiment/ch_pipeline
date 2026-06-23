@@ -391,12 +391,13 @@ class SiderealMean(task.SingleTask):
 
         # Create output container
         newra = np.mean(ra[flag_quiet], keepdims=True)
-        mustream = containers.SiderealStream(
+        mustream = sstream.__class__(
             ra=newra,
             axes_from=sstream,
             attrs_from=sstream,
             distributed=True,
             comm=sstream.comm,
+            input=np.array(["common"]),
         )
         mustream.redistribute("freq")
         mustream.attrs["statistic"] = self._name_of_statistic
@@ -428,14 +429,20 @@ class SiderealMean(task.SingleTask):
         # container
         mustream.weight[:] = np.sum(all_weight, axis=-1, keepdims=True)
 
+        self.log.info(f"all_vis shape is {all_vis.real.shape} and all_weight shape is {all_weight.shape}")
+
+        if isinstance(sstream, containers.HybridVisStream):
+            vslc = [np.s_[:, :, :, ee] for ee in range(all_vis.shape[3])]
         # If requested, compute median (requires loop over frequencies and baselines)
         if self.median:
-            mu_vis[..., 0].real = weighted_median(all_vis.real.copy(), all_weight)
-            mu_vis[..., 0].imag = weighted_median(all_vis.imag.copy(), all_weight)
+            missing = ~(all_weight.any(axis=-1))
+            for slc in vslc:
+                mu_vis[slc][..., 0].real = weighted_median(all_vis[slc].real.copy(), all_weight)
+                mu_vis[slc][..., 0].imag = weighted_median(all_vis[slc].imag.copy(), all_weight)
 
             # Where all the weights are zero explicitly set the median to zero
             missing = ~(all_weight.any(axis=-1))
-            mu_vis[missing, 0] = 0.0
+            mu_vis[slc][..., 0][missing] = 0.0
 
         else:
             # Otherwise calculate the mean
@@ -487,15 +494,15 @@ class ChangeSiderealMean(task.SingleTask):
         mustream.redistribute("freq")
 
         # Determine indices of autocorrelations
-        prod = mustream.index_map["prod"][mustream.index_map["stack"]["prod"]]
-        not_auto = (prod["input_a"] != prod["input_b"]).astype(np.float32)
-        not_auto = not_auto[np.newaxis, :, np.newaxis]
+        #prod = mustream.index_map["prod"][mustream.index_map["stack"]["prod"]]
+        #not_auto = (prod["input_a"] != prod["input_b"]).astype(np.float32)
+        #not_auto = not_auto[np.newaxis, :, np.newaxis]
 
         # Add or subtract value to the cross-correlations
         if self.add:
-            sstream.vis[:].local_array[:] += mustream.vis[:].local_array * not_auto
+            sstream.vis[:].local_array[:] += mustream.vis[:].local_array #* not_auto
         else:
-            sstream.vis[:].local_array[:] -= mustream.vis[:].local_array * not_auto
+            sstream.vis[:].local_array[:] -= mustream.vis[:].local_array #* not_auto
 
         # Set weights to zero if there was no mean
         sstream.weight[:].local_array[:] *= (
