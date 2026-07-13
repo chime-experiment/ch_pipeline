@@ -7,6 +7,7 @@ Classes
 - :py:class:`QuarterStackProcessing`
 """
 
+import glob
 import os
 import re
 import warnings
@@ -42,6 +43,9 @@ cluster:
 
 days: &days
 {days}
+
+masks: &masks
+{masks}
 
 # Pipeline task configuration
 pipeline:
@@ -93,36 +97,29 @@ pipeline:
         product_directory: "{product_path}"
 
     # Load each Sidereal Stream which will go into this stack
-    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
-      out: datastream
+    - type: caput.pipeline.tasklib.io.LoadFileBatches
+      out: [datastream, rfimasks]
       params:
-        files: *days
+        file_batches:
+          datastreams: *days
+          masks: *masks
         selections:
           freq_range: [{freq[0]:d}, {freq[1]:d}]
 
-    # This block should only run if this is time-sampled data. It loads
-    # the unmasked timestreams, applies the masks, smooths, and grids
-    - type: caput.pipeline.tasklib.io.LoadAllFiles
-      if: {{ is_timesampled_data }}
-      out: rfimasks
-      params:
-        files: {{ rfi_mask_list_or_glob }}
-        distributed: false
-
     # Combine all the RFI masks
     - type: draco.analysis.flagging.CombineMasks
-      if: {{ is_timesampled_data }}
+      if: {is_timesampled_data}
       in: rfimasks
       out: rfimask_complete
 
     - type: draco.analysis.flagging.ApplyTimeFreqMask
-      if: {{ is_timesampled_data }}
+      if: {is_timesampled_data}
       in: [datastream, rfimask_complete]
       out: datastream_masked
 
     # If this is time-sampled data, load RFI masks and regrid
     - type: draco.analysis.sidereal.SiderealRegridderGP
-      if: {{ is_timesampled_data }}
+      if: {is_timesampled_data}
       requires: manager
       in: datastream_masked
       out: sstream
@@ -373,6 +370,8 @@ class QuarterStackProcessing(base.ProcessingType):
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
         "daily_revisions": ["rev_08"],
+        # Some revisions produce time-sampled data instead of sidereal gridded data
+        "is_timesampled_data": False,
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
@@ -388,7 +387,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.10",
+        "modlist": "chime/python/2026.05",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
@@ -399,6 +398,7 @@ class QuarterStackProcessing(base.ProcessingType):
             "q3": [315, 330],
             "q4": [45, 60],
         },
+        "rfi_mask_file_globs": ["rfi_mask*", "!rfi_mask_factorized*"],
         "gain_error_file": {
             2018: (
                 "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
@@ -443,9 +443,7 @@ class QuarterStackProcessing(base.ProcessingType):
         )
         if daily_revs:
             daily_revs = re.compile(r"rev_[0-9]{2}").findall(daily_revs)
-            for d in daily_revs:
-                if d not in self.default_params["daily_revisions"]:
-                    self.default_params["daily_revisions"].append(d)
+            self.default_params["daily_revisions"] = daily_revs
 
         days = {}
 
@@ -470,6 +468,8 @@ class QuarterStackProcessing(base.ProcessingType):
                     daily_path = os.path.normpath(daily_path).removesuffix("daily")
                     # Make sure this is a valid path
                     daily_path = os.path.join(daily_path, "")
+                # update the default parameters for proper tracking
+                self.default_params["daily_root"] = daily_path
             else:
                 daily_path = self.default_params["daily_root"]
 
@@ -579,11 +579,51 @@ class QuarterStackProcessing(base.ProcessingType):
         days = self._revparams["stacks"][tag]
         paths = self._revparams["days"]
 
-        # TODO: find a better way to do this. Some kind of configuration language
-        # (Jsonnet/YTT/...) seems like it would be a better idea here
-        day_list_str = "\n" + "\n".join(
-            [f"- {paths[day]}/sstream_lsd_{day}.zarr.zip" for day in days]
-        )
+        # Figure out the expected input data file name and extension
+        day_list = []
+        mask_list = []
+
+        for day in days:
+            if jobparams["is_timesampled_data"]:
+                glob_str = "tstream*"
+            else:
+                glob_str = "sstream*"
+
+            fops = glob.glob(f"{paths[day]}/{glob_str}")
+
+            # found multiple streams - something's wrong
+            if len(fops) > 1:
+                raise RuntimeError(
+                    f"Unexpected input glob result: {fops}\n Expected exactly one result."
+                )
+            # no data
+            if len(fops) < 1:
+                continue
+
+            day_list.append(f"- {fops[0]}")
+
+            # Also find relevant RFI masks. There can be multiple masks and multiple
+            # globs for each day, so these need to be stored as a string of a list
+            mask_day_set = set()
+            # Start by adding all matches
+            for glb in self._revparams.get("rfi_mask_file_globs"):
+                if ~glb.startswith("!"):
+                    # use set to avoid duplicates
+                    mask_day_set.update(glob.glob(f"{paths[day]}/{glb}"))
+            # now go through and remove any ignored matches
+            for glb in self._revparams.get("rfi_mask_file_globs"):
+                if glb.startswith("!"):
+                    # remove all matches
+                    mask_day_set.difference_update(glob.glob(f"{paths[day]}/{glb[1:]}"))
+
+            # add all mask glob matches to the mask list for this day
+            mask_list.append(f"- {list(mask_day_set)!s}")
+
+        # concatenate into a string to insert in the config file
+        day_list_str = "\n" + "\n".join(day_list)
+        # concatenate RFI mask list. We're actually forming a list of lists,
+        # so this requires careful string formatting
+        mask_list_str = "\n" + "\n".join(mask_list)
 
         year, quarter, _ = self._parse_tag(tag)
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
@@ -596,6 +636,7 @@ class QuarterStackProcessing(base.ProcessingType):
         jobparams.update(
             {
                 "days": day_list_str,
+                "masks": mask_list_str,
                 "ra_range": ra_range,
                 "gain_err_file": gain_err_file,
             }
