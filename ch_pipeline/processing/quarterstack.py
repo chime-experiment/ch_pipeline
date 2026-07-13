@@ -61,6 +61,7 @@ pipeline:
     - cora
     - draco
     - drift
+    - fluxcat
     - numpy
     - scipy
     - h5py
@@ -93,12 +94,43 @@ pipeline:
 
     # Load each Sidereal Stream which will go into this stack
     - type: caput.pipeline.tasklib.io.LoadFilesFromParams
-      out: sstream
+      out: datastream
       params:
         files: *days
         selections:
           freq_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # This block should only run if this is time-sampled data. It loads
+    # the unmasked timestreams, applies the masks, smooths, and grids
+    - type: caput.pipeline.tasklib.io.LoadAllFiles
+      if: {{ is_timesampled_data }}
+      out: rfimasks
+      params:
+        files: {{ rfi_mask_list_or_glob }}
+        distributed: false
+
+    # Combine all the RFI masks
+    - type: draco.analysis.flagging.CombineMasks
+      if: {{ is_timesampled_data }}
+      in: rfimasks
+      out: rfimask_complete
+
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      if: {{ is_timesampled_data }}
+      in: [datastream, rfimask_complete]
+      out: datastream_masked
+
+    # If this is time-sampled data, load RFI masks and regrid
+    - type: draco.analysis.sidereal.SiderealRegridderGP
+      if: {{ is_timesampled_data }}
+      requires: manager
+      in: datastream_masked
+      out: sstream
+      params:
+        samples: 4096
+        mask_cutoff: 1.7
+        kernel_width: 5
+          
     # Mask out daytime data
     - type: ch_pipeline.analysis.flagging.MaskDay
       in: sstream
@@ -229,8 +261,6 @@ pipeline:
       out: factmask
       params:
         factorize: true
-        save: true
-        output_name: "fact_mask.h5"
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
