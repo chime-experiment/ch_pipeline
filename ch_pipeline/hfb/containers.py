@@ -1,5 +1,6 @@
 """HFB containers."""
 
+import re
 from functools import cached_property
 from typing import ClassVar
 
@@ -12,6 +13,7 @@ from draco.core.containers import (
     COMPRESSION_OPTS,
     DataWeightContainer,
     SiderealContainer,
+    SourceCatalog,
     TODContainer,
 )
 
@@ -783,3 +785,176 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
     def get_frac_rfi(self, sigma_key: float) -> np.ndarray:
         """Get the fraction of HFB subfrequency channels detecting RFI for a given sigma value."""
         return self.get_subfreq_rfi(sigma_key) / 128
+
+
+class AbsorberCatalogue(SourceCatalog):
+    """A catalogue of absorbers (known and candidate).
+
+    Required per-entry values are: 'ra' (degrees), 'dec' (degrees), 'freq' (MHz),
+    and 'status'. The 'amplitude' is optional: when unknown it is stored as
+    NaN, and when provided it must be a finite float.
+
+    Status values
+    -------------
+    Allowed values are "confirmed", "false_positive", "control", and
+    candidates. A candidate records the S/N of its detection in the status
+    itself, e.g. "candidate_snr5" or "candidate_snr7" (plain "candidate" is
+    also allowed if the S/N is unknown). "control" marks bright continuum
+    test sources (e.g. Cyg A) or narrowband RFI used to validate the pipeline.
+    """
+
+    STATUS_VALUES = ("confirmed", "candidate", "false_positive", "control")
+
+    _STATUS_RE = re.compile(
+        r"^(confirmed|false_positive|control|candidate(_snr\d+(\.\d+)?)?)$"
+    )
+
+    _table_spec: ClassVar = {
+        "absorber": {
+            "columns": [
+                ["freq", np.float64],
+                ["amplitude", np.float64],
+                ["status", "<U24"],
+            ],
+            "axis": "object_id",
+        },
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Record the allowed status values in the container attributes
+        self.attrs["status_values"] = list(self.STATUS_VALUES)
+
+    @staticmethod
+    def _snr_of(status) -> float:
+        """S/N recorded in a status ('candidate_snr5' -> 5.0; NaN if none)."""
+        s = str(status)
+        if "_snr" in s:
+            try:
+                return float(s.split("_snr", 1)[1])
+            except ValueError:
+                return np.nan
+        return np.nan
+
+    @classmethod
+    def status_match(cls, status, include) -> np.ndarray:
+        """Boolean mask of 'status' entries matching the 'include' list.
+
+        Rules per entry of 'include':
+        - "confirmed" / "false_positive" : exact match.
+        - "candidate" : matches all candidates.
+        - "candidate_snrX" : matches candidates with S/N >= X
+          (candidates without a recorded S/N are not matched).
+
+        Parameters
+        ----------
+        status : str or array_like of str
+            Status values to test.
+        include : str or list of str
+            Status values to match against.
+
+        Returns
+        -------
+        mask : np.ndarray of bool
+            True for entries that match.
+        """
+        if isinstance(include, str):
+            include = [include]
+
+        status = np.atleast_1d(np.asarray(status, dtype=str))
+        is_candidate = np.char.startswith(status, "candidate")
+        snr = np.array([cls._snr_of(s) for s in status])
+
+        mask = np.zeros(status.size, dtype=bool)
+        for inc in include:
+            inc = str(inc)
+            if inc == "candidate":
+                mask |= is_candidate
+            elif inc.startswith("candidate_snr"):
+                threshold = float(inc.split("_snr", 1)[1])
+                mask |= is_candidate & (snr >= threshold)
+            else:
+                mask |= status == inc
+
+        return mask
+
+    def validate(self):
+        """Check that all entries hold valid values."""
+        names = self.index_map["object_id"]
+
+        # Required columns:
+        ra = self["position"]["ra"][:]
+        dec = self["position"]["dec"][:]
+        freq = self["absorber"]["freq"][:]
+        for field, values, ok in [
+            ("ra", ra, (ra >= 0.0) & (ra <= 360.0)),
+            ("dec", dec, (dec >= -90.0) & (dec <= 90.0)),
+            ("freq", freq, (freq > 0.0) & np.isfinite(freq)),
+        ]:
+            bad = ~ok
+            if bad.any():
+                raise ValueError(
+                    f"Required column '{field}' has missing or out-of-range "
+                    f"values for entries {names[bad].tolist()}: "
+                    f"{values[bad].tolist()}. "
+                    "Expected 0 <= ra < 360, -90 <= dec <= 90, freq > 0 (MHz)."
+                )
+
+        # Status: "confirmed", "false_positive", "candidate" or "candidate_snrX"
+        status = self["absorber"]["status"][:]
+        bad = np.array(
+            [self._STATUS_RE.match(str(s)) is None for s in status], dtype=bool
+        )
+        if bad.any():
+            raise ValueError(
+                f"Invalid status values {np.unique(status[bad]).tolist()} for "
+                f"entries {names[bad].tolist()}. "
+                f"Allowed: {self.STATUS_VALUES}, where candidates may record "
+                "their detection S/N as 'candidate_snrX' (e.g. 'candidate_snr5')."
+            )
+
+        # Amplitude (optional):
+        amplitude = self["absorber"]["amplitude"][:]
+        bad = np.isinf(amplitude)
+        if bad.any():
+            raise ValueError(
+                f"Column 'amplitude' has non-finite (infinite) values for "
+                f"entries: {names[bad].tolist()}. Amplitude must be a finite "
+                "float, or NaN if unknown."
+            )
+
+    @property
+    def id(self) -> np.ndarray:
+        """The names/IDs of the absorbers."""
+        return self.index_map["object_id"]
+
+    @property
+    def ra(self) -> np.ndarray:
+        """Right ascension of each absorber."""
+        return self["position"]["ra"]
+
+    @property
+    def dec(self) -> np.ndarray:
+        """Declination of each absorber."""
+        return self["position"]["dec"]
+
+    @property
+    def freq(self) -> np.ndarray:
+        """Observed frequency (MHz) of the absorption feature."""
+        return self["absorber"]["freq"]
+
+    @property
+    def amplitude(self) -> np.ndarray:
+        """Estimated amplitude of the absorption feature (NaN if unknown)."""
+        return self["absorber"]["amplitude"]
+
+    @property
+    def status(self) -> np.ndarray:
+        """Status of each absorber (confirmed/candidate[_snrX]/false_positive)."""
+        return self["absorber"]["status"]
+
+    @property
+    def snr(self) -> np.ndarray:
+        """Detection S/N of each entry, parsed from the status (NaN if none)."""
+        return np.array([self._snr_of(s) for s in self["absorber"]["status"][:]])
