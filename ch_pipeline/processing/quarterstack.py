@@ -15,6 +15,7 @@ from typing import ClassVar
 
 import numpy as np
 from caput.astro import time as ctime
+from caput.config import CaputConfigError
 from ch_ephem.observers import chime
 from chimedb import core
 from chimedb import dataflag as df
@@ -437,6 +438,8 @@ class QuarterStackProcessing(base.ProcessingType):
         This tries to determine which days are good and bad, and partitions the
         available good days into the individual stacks.
         """
+        opinion_overrides: dict = self.default_params.get("opinion_overrides", {})
+
         # Request additional information from the user
         daily_revs = input(
             "Enter the daily revisions to include (<rev_ij>,<rev_ik>,...): "
@@ -445,9 +448,21 @@ class QuarterStackProcessing(base.ProcessingType):
             daily_revs = re.compile(r"rev_[0-9]{2}").findall(daily_revs)
             self.default_params["daily_revisions"] = daily_revs
 
-        days = {}
+            # Also, let the user specify additional revisions whose votes are compatible
+            # with the revisions being processed
+            overrides = input(
+                "Enter a daily revision with compatible votes [blank to only use current]: "
+            )
+            overrides = re.compile(r"rev_[0-9]{2}").findall(overrides)
+            if len(overrides) > 1:
+                raise CaputConfigError(
+                    f"Only a sigle vote override is allowed. Got {overrides}"
+                )
 
-        opinion_overrides = self.default_params.get("opinion_overrides", {})
+            for rev in daily_revs:
+                opinion_overrides[rev] = overrides
+
+        days = {}
 
         # Go over each revision and construct the set of LSDs we should stack, and save
         # the path to each. Later entries in `daily_revisions` will override LSDs found
