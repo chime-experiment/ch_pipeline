@@ -117,32 +117,21 @@ pipeline:
       if: {is_timesampled_data}
       in: [datastream, rfimask_complete]
       out: datastream_masked
-
-    # If this is time-sampled data, load RFI masks and regrid
-    - type: draco.analysis.sidereal.SiderealRegridderGP
-      if: {is_timesampled_data}
-      requires: manager
-      in: datastream_masked
-      out: sstream
-      params:
-        samples: 4096
-        mask_cutoff: 1.7
-        kernel_width: 5
           
     # Mask out daytime data
     - type: ch_pipeline.analysis.flagging.MaskDay
-      in: sstream
-      out: sstream_mask
+      in: datastream_masked
+      out: datastream_mask2
 
     # Mask out the moon when it can affect the data
     - type: ch_pipeline.analysis.flagging.MaskMoon
-      in: sstream_mask
-      out: sstream_mask2
+      in: datastream_mask2
+      out: datastream_mask3
 
     # Flag data based on database flags
     - type: ch_pipeline.analysis.flagging.DataFlagger
-      in: sstream_mask2
-      out: sstream_mask3
+      in: datastream_mask3
+      out: datastream_mask4
       params:
         flag_type:
           - acjump_sd
@@ -155,8 +144,8 @@ pipeline:
 
     # Flag periods of rainfall which could affect data
     - type: ch_pipeline.analysis.flagging.FlagRainfall
-      in: sstream_mask3
-      out: sstream_mask4
+      in: datastream_mask4
+      out: datastream_mask5
       params:
         accumulation_time: 30.0
         threshold: 1.0
@@ -173,7 +162,7 @@ pipeline:
     # Apply a mask that removes frequencies and times that suffer from gain errors
     - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
       requires: gain_err
-      in: sstream_mask4
+      in: datastream_mask5
       out: mask_gain_err
       params:
         transition: 600.0
@@ -182,13 +171,13 @@ pipeline:
         save: false
 
     - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_mask4, mask_gain_err]
-      out: sstream_mask5
+      in: [datastream_mask5, mask_gain_err]
+      out: datastream_mask6
 
     # Calculate a median in RA over a specified RA window. This acts
     # as an estimation of the cross-talk for this stack
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: sstream_mask5
+      in: datastream_mask6
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -197,13 +186,24 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask5, med]
-      out: sstream_mask6
+      in: [datastream_mask6, med]
+      out: datastream_mask7
+
+    # If this is time-sampled data, load RFI masks and regrid
+    - type: draco.analysis.sidereal.SiderealRegridderGP
+      if: {is_timesampled_data}
+      requires: manager
+      in: datastream_mask7
+      out: sstream
+      params:
+        samples: 4096
+        mask_cutoff: 1.7
+        kernel_width: 5
 
     # Update the stack with each sidereal stream. This is effectively
     # a weighted average
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask6
+      in: sstream
       out: sstack
       params:
         tag: {tag}
