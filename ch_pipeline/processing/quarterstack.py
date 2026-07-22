@@ -150,34 +150,10 @@ pipeline:
         accumulation_time: 30.0
         threshold: 1.0
 
-    # Load gain errors as a function of time
-    - type: ch_pipeline.core.io.LoadSetupFile
-      out: gain_err
-      params:
-        filename: {gain_err_file}
-        distributed: true
-        selections:
-          freq_range: [{freq[0]:d}, {freq[1]:d}]
-
-    # Apply a mask that removes frequencies and times that suffer from gain errors
-    - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
-      requires: gain_err
-      in: datastream_mask5
-      out: mask_gain_err
-      params:
-        transition: 600.0
-        threshold: 1.0e-3
-        ignore_input_flags: Yes
-        save: false
-
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [datastream_mask5, mask_gain_err]
-      out: datastream_mask6
-
     # Calculate a median in RA over a specified RA window. This acts
     # as an estimation of the cross-talk for this stack
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: datastream_mask6
+      in: datastream_mask5
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -186,19 +162,18 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [datastream_mask6, med]
-      out: datastream_mask7
+      in: [datastream_mask5, med]
+      out: datastream_mask6
 
-    # If this is time-sampled data, load RFI masks and regrid
-    - type: draco.analysis.sidereal.SiderealRegridderGP
+    # If this is time-sampled data, load RFI masks and resample
+    # onto a fixed grid
+    - type: draco.analysis.sidereal.SiderealRegridderLinear
       if: {is_timesampled_data}
       requires: manager
-      in: datastream_mask7
+      in: datastream_mask6
       out: sstream
       params:
-        samples: 4096
-        mask_cutoff: 1.7
-        kernel_width: 5
+        samples: 8192
 
     # Update the stack with each sidereal stream. This is effectively
     # a weighted average
@@ -208,9 +183,18 @@ pipeline:
       params:
         tag: {tag}
 
+    # downsample the oversampled stack
+    - type: draco.analysis.sidereal.SiderealRegridder
+      if: True
+      requires: manager
+      in: sstack
+      out: sstack_downsample
+      params:
+        samples: 4096
+
     # Precision truncate the sidereal stack data
     - type: caput.pipeline.tasklib.io.Truncate
-      in: sstack
+      in: sstack_downsample
       out: sstack_trunc
       params:
         dataset:
@@ -223,7 +207,7 @@ pipeline:
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstack
+      in: sstack_downsample
       out: ringmap
       params:
         single_beam: true
@@ -247,7 +231,7 @@ pipeline:
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: sstack
+      in: sstack_downsample
       out: sstack_flag_src
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
