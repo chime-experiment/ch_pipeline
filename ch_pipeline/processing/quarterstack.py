@@ -184,7 +184,7 @@ pipeline:
         tag: {tag}
 
     # downsample the oversampled stack
-    - type: draco.analysis.sidereal.SiderealRegridder
+    - type: draco.analysis.sidereal.SiderealRegridderLanczos
       if: True
       requires: manager
       in: sstack
