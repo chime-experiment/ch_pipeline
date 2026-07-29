@@ -239,7 +239,7 @@ class WeatherGrouper(SiderealGrouper):
         return ts
 
 
-class SiderealRegridder(sidereal.SiderealRegridder):
+class SiderealRegridder(sidereal.SiderealRegridderLanczos):
     """SiderealRegridder that automatically uses the location of CHIME.
 
     See `draco.analysis.sidereal.SiderealRegridder` for extended documentation.
@@ -261,7 +261,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         # Set up the default Observer
         observer = chime if observer is None else observer
 
-        sidereal.SiderealRegridder.setup(self, observer)
+        sidereal.SiderealRegridderLanczos.setup(self, observer)
 
 
 class SiderealMean(tasklib.base.ContainerTask):
@@ -468,12 +468,10 @@ class SiderealMean(tasklib.base.ContainerTask):
 
         # If requested, compute median
         if self.median:
-
             missing = ~(all_weight.any(axis=-1))
 
             # Loop over all axes not shared with weight dataset
             for slc in vslc:
-
                 mu_vis[slc][..., 0].real = weighted_median(
                     np.ascontiguousarray(all_vis[slc].real, dtype=np.float32),
                     all_weight,
