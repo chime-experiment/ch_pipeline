@@ -7,6 +7,7 @@ Classes
 - :py:class:`QuarterStackProcessing`
 """
 
+import glob
 import os
 import re
 import warnings
@@ -14,6 +15,7 @@ from typing import ClassVar
 
 import numpy as np
 from caput.astro import time as ctime
+from caput.config import CaputConfigError
 from ch_ephem.observers import chime
 from chimedb import core
 from chimedb import dataflag as df
@@ -43,6 +45,9 @@ cluster:
 days: &days
 {days}
 
+masks: &masks
+{masks}
+
 # Pipeline task configuration
 pipeline:
 
@@ -61,6 +66,7 @@ pipeline:
     - cora
     - draco
     - drift
+    - fluxcat
     - numpy
     - scipy
     - h5py
@@ -92,27 +98,40 @@ pipeline:
         product_directory: "{product_path}"
 
     # Load each Sidereal Stream which will go into this stack
-    - type: caput.pipeline.tasklib.io.LoadFilesFromParams
-      out: sstream
+    - type: caput.pipeline.tasklib.io.LoadFileBatches
+      out: [datastream, rfimasks]
       params:
-        files: *days
+        file_batches:
+          datastreams: *days
+          masks: *masks
         selections:
           freq_range: [{freq[0]:d}, {freq[1]:d}]
 
+    # Combine all the RFI masks
+    - type: draco.analysis.flagging.CombineMasks
+      if: {is_timesampled_data}
+      in: rfimasks
+      out: rfimask_complete
+
+    - type: draco.analysis.flagging.ApplyTimeFreqMask
+      if: {is_timesampled_data}
+      in: [datastream, rfimask_complete]
+      out: datastream_masked
+          
     # Mask out daytime data
     - type: ch_pipeline.analysis.flagging.MaskDay
-      in: sstream
-      out: sstream_mask
+      in: datastream_masked
+      out: datastream_mask2
 
     # Mask out the moon when it can affect the data
     - type: ch_pipeline.analysis.flagging.MaskMoon
-      in: sstream_mask
-      out: sstream_mask2
+      in: datastream_mask2
+      out: datastream_mask3
 
     # Flag data based on database flags
     - type: ch_pipeline.analysis.flagging.DataFlagger
-      in: sstream_mask2
-      out: sstream_mask3
+      in: datastream_mask3
+      out: datastream_mask4
       params:
         flag_type:
           - acjump_sd
@@ -125,40 +144,16 @@ pipeline:
 
     # Flag periods of rainfall which could affect data
     - type: ch_pipeline.analysis.flagging.FlagRainfall
-      in: sstream_mask3
-      out: sstream_mask4
+      in: datastream_mask4
+      out: datastream_mask5
       params:
         accumulation_time: 30.0
         threshold: 1.0
 
-    # Load gain errors as a function of time
-    - type: ch_pipeline.core.io.LoadSetupFile
-      out: gain_err
-      params:
-        filename: {gain_err_file}
-        distributed: true
-        selections:
-          freq_range: [{freq[0]:d}, {freq[1]:d}]
-
-    # Apply a mask that removes frequencies and times that suffer from gain errors
-    - type: ch_pipeline.analysis.calibration.FlagNarrowbandGainError
-      requires: gain_err
-      in: sstream_mask4
-      out: mask_gain_err
-      params:
-        transition: 600.0
-        threshold: 1.0e-3
-        ignore_input_flags: Yes
-        save: false
-
-    - type: draco.analysis.flagging.ApplyRFIMask
-      in: [sstream_mask4, mask_gain_err]
-      out: sstream_mask5
-
     # Calculate a median in RA over a specified RA window. This acts
     # as an estimation of the cross-talk for this stack
     - type: ch_pipeline.analysis.sidereal.SiderealMean
-      in: sstream_mask5
+      in: datastream_mask5
       out: med
       params:
         mask_ra: [[{ra_range[0]:.2f}, {ra_range[1]:.2f}]]
@@ -167,20 +162,39 @@ pipeline:
         inverse_variance: false
 
     - type: ch_pipeline.analysis.sidereal.ChangeSiderealMean
-      in: [sstream_mask5, med]
-      out: sstream_mask6
+      in: [datastream_mask5, med]
+      out: datastream_mask6
+
+    # If this is time-sampled data, load RFI masks and resample
+    # onto a fixed grid
+    - type: draco.analysis.sidereal.SiderealRegridderLinear
+      if: {is_timesampled_data}
+      requires: manager
+      in: datastream_mask6
+      out: sstream
+      params:
+        samples: 8192
 
     # Update the stack with each sidereal stream. This is effectively
     # a weighted average
     - type: draco.analysis.sidereal.SiderealStacker
-      in: sstream_mask6
+      in: sstream
       out: sstack
       params:
         tag: {tag}
 
+    # downsample the oversampled stack
+    - type: draco.analysis.sidereal.SiderealRegridderLanczos
+      if: True
+      requires: manager
+      in: sstack
+      out: sstack_downsample
+      params:
+        samples: 4096
+
     # Precision truncate the sidereal stack data
     - type: caput.pipeline.tasklib.io.Truncate
-      in: sstack
+      in: sstack_downsample
       out: sstack_trunc
       params:
         dataset:
@@ -193,7 +207,7 @@ pipeline:
 
     - type: draco.analysis.ringmapmaker.RingMapMaker
       requires: manager
-      in: sstack
+      in: sstack_downsample
       out: ringmap
       params:
         single_beam: true
@@ -217,7 +231,7 @@ pipeline:
 
     # Mask out the bright sources so we can see the high delay structure more easily
     - type: ch_pipeline.analysis.flagging.MaskSource
-      in: sstack
+      in: sstack_downsample
       out: sstack_flag_src
       params:
         source: ["CAS_A", "CYG_A", "TAU_A", "VIR_A"]
@@ -229,8 +243,6 @@ pipeline:
       out: factmask
       params:
         factorize: true
-        save: true
-        output_name: "fact_mask.h5"
 
     # Apply the RFI mask. This will modify the data in place.
     - type: draco.analysis.flagging.ApplyTimeFreqMask
@@ -343,6 +355,8 @@ class QuarterStackProcessing(base.ProcessingType):
         # Daily processing revisions to use (later entries in this list take precedence
         # over earlier ones)
         "daily_revisions": ["rev_08"],
+        # Some revisions produce time-sampled data instead of sidereal gridded data
+        "is_timesampled_data": False,
         # Usually the opinions are queried for each revision, this dictionary allows
         # that to be overridden. Each `data_rev: opinion_rev` pair means that the
         # opinions used to select days for `data_rev` will instead be taken from
@@ -358,7 +372,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.10",
+        "modlist": "chime/python/2026.05",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
@@ -369,6 +383,7 @@ class QuarterStackProcessing(base.ProcessingType):
             "q3": [315, 330],
             "q4": [45, 60],
         },
+        "rfi_mask_file_globs": ["rfi_mask*", "!rfi_mask_factorized*"],
         "gain_error_file": {
             2018: (
                 "/project/rpp-chime/chime/chime_processed/gain/gain_errors/rev_00/"
@@ -407,19 +422,31 @@ class QuarterStackProcessing(base.ProcessingType):
         This tries to determine which days are good and bad, and partitions the
         available good days into the individual stacks.
         """
+        opinion_overrides: dict = self.default_params.get("opinion_overrides", {})
+
         # Request additional information from the user
         daily_revs = input(
             "Enter the daily revisions to include (<rev_ij>,<rev_ik>,...): "
         )
         if daily_revs:
             daily_revs = re.compile(r"rev_[0-9]{2}").findall(daily_revs)
-            for d in daily_revs:
-                if d not in self.default_params["daily_revisions"]:
-                    self.default_params["daily_revisions"].append(d)
+            self.default_params["daily_revisions"] = daily_revs
+
+            # Also, let the user specify additional revisions whose votes are compatible
+            # with the revisions being processed
+            overrides = input(
+                "Enter a daily revision with compatible votes [blank to only use current]: "
+            )
+            overrides = re.compile(r"rev_[0-9]{2}").findall(overrides)
+            if len(overrides) > 1:
+                raise CaputConfigError(
+                    f"Only a sigle vote override is allowed. Got {overrides}"
+                )
+
+            for rev in daily_revs:
+                opinion_overrides[rev] = overrides
 
         days = {}
-
-        opinion_overrides = self.default_params.get("opinion_overrides", {})
 
         # Go over each revision and construct the set of LSDs we should stack, and save
         # the path to each. Later entries in `daily_revisions` will override LSDs found
@@ -440,6 +467,8 @@ class QuarterStackProcessing(base.ProcessingType):
                     daily_path = os.path.normpath(daily_path).removesuffix("daily")
                     # Make sure this is a valid path
                     daily_path = os.path.join(daily_path, "")
+                # update the default parameters for proper tracking
+                self.default_params["daily_root"] = daily_path
             else:
                 daily_path = self.default_params["daily_root"]
 
@@ -549,11 +578,51 @@ class QuarterStackProcessing(base.ProcessingType):
         days = self._revparams["stacks"][tag]
         paths = self._revparams["days"]
 
-        # TODO: find a better way to do this. Some kind of configuration language
-        # (Jsonnet/YTT/...) seems like it would be a better idea here
-        day_list_str = "\n" + "\n".join(
-            [f"- {paths[day]}/sstream_lsd_{day}.zarr.zip" for day in days]
-        )
+        # Figure out the expected input data file name and extension
+        day_list = []
+        mask_list = []
+
+        for day in days:
+            if jobparams["is_timesampled_data"]:
+                glob_str = "tstream*"
+            else:
+                glob_str = "sstream*"
+
+            fops = glob.glob(f"{paths[day]}/{glob_str}")
+
+            # found multiple streams - something's wrong
+            if len(fops) > 1:
+                raise RuntimeError(
+                    f"Unexpected input glob result: {fops}\n Expected exactly one result."
+                )
+            # no data
+            if len(fops) < 1:
+                continue
+
+            day_list.append(f"- {fops[0]}")
+
+            # Also find relevant RFI masks. There can be multiple masks and multiple
+            # globs for each day, so these need to be stored as a string of a list
+            mask_day_set = set()
+            # Start by adding all matches
+            for glb in self._revparams.get("rfi_mask_file_globs"):
+                if ~glb.startswith("!"):
+                    # use set to avoid duplicates
+                    mask_day_set.update(glob.glob(f"{paths[day]}/{glb}"))
+            # now go through and remove any ignored matches
+            for glb in self._revparams.get("rfi_mask_file_globs"):
+                if glb.startswith("!"):
+                    # remove all matches
+                    mask_day_set.difference_update(glob.glob(f"{paths[day]}/{glb[1:]}"))
+
+            # add all mask glob matches to the mask list for this day
+            mask_list.append(f"- {list(mask_day_set)!s}")
+
+        # concatenate into a string to insert in the config file
+        day_list_str = "\n" + "\n".join(day_list)
+        # concatenate RFI mask list. We're actually forming a list of lists,
+        # so this requires careful string formatting
+        mask_list_str = "\n" + "\n".join(mask_list)
 
         year, quarter, _ = self._parse_tag(tag)
         ra_range = self._revparams["crosstalk_ra"][f"q{quarter}"]
@@ -566,6 +635,7 @@ class QuarterStackProcessing(base.ProcessingType):
         jobparams.update(
             {
                 "days": day_list_str,
+                "masks": mask_list_str,
                 "ra_range": ra_range,
                 "gain_err_file": gain_err_file,
             }

@@ -239,7 +239,7 @@ class WeatherGrouper(SiderealGrouper):
         return ts
 
 
-class SiderealRegridder(sidereal.SiderealRegridder):
+class SiderealRegridder(sidereal.SiderealRegridderLanczos):
     """SiderealRegridder that automatically uses the location of CHIME.
 
     See `draco.analysis.sidereal.SiderealRegridder` for extended documentation.
@@ -261,7 +261,7 @@ class SiderealRegridder(sidereal.SiderealRegridder):
         # Set up the default Observer
         observer = chime if observer is None else observer
 
-        sidereal.SiderealRegridder.setup(self, observer)
+        sidereal.SiderealRegridderLanczos.setup(self, observer)
 
 
 class SiderealMean(tasklib.base.ContainerTask):
@@ -361,17 +361,23 @@ class SiderealMean(tasklib.base.ContainerTask):
         lsd = sstream.attrs["lsd"] if "lsd" in sstream.attrs else sstream.attrs["csd"]
         lsd_list = lsd if hasattr(lsd, "__iter__") else [lsd]
 
-        # Calculate the right ascension, method differs depending on input container
+        # Calculate the right ascension, method differs depending on input container.
+        # Record the actual time-like axis in order to construct the output
+        # container
         if "ra" in sstream.index_map:
+            timelike_axis_name = "ra"
+            timelike_axis = sstream.ra
+
             ra = sstream.ra
             timestamp = {dd: chime.lsd_to_unix(dd + ra / 360.0) for dd in lsd_list}
             flag_quiet = np.ones(ra.size, dtype=bool)
-
         elif "time" in sstream.index_map:
+            timelike_axis_name = "time"
+            timelike_axis = sstream.time
+
             ra = chime.unix_to_lsa(sstream.time)
             timestamp = {lsd: sstream.time}
             flag_quiet = np.fix(chime.unix_to_lsd(sstream.time)) == lsd
-
         else:
             raise RuntimeError("Format of `sstream` argument is unknown.")
 
@@ -414,13 +420,13 @@ class SiderealMean(tasklib.base.ContainerTask):
             flag_quiet &= mask_ra
 
         # Create output container
-        newra = np.mean(ra[flag_quiet], keepdims=True)
+        new_timelike = np.mean(timelike_axis[flag_quiet], keepdims=True)
         mustream = sstream.__class__(
-            ra=newra,
             axes_from=sstream,
             attrs_from=sstream,
             distributed=True,
             comm=sstream.comm,
+            **{timelike_axis_name: new_timelike},
         )
         mustream.redistribute("freq")
         mustream.attrs["statistic"] = self._name_of_statistic
@@ -468,12 +474,10 @@ class SiderealMean(tasklib.base.ContainerTask):
 
         # If requested, compute median
         if self.median:
-
             missing = ~(all_weight.any(axis=-1))
 
             # Loop over all axes not shared with weight dataset
             for slc in vslc:
-
                 mu_vis[slc][..., 0].real = weighted_median(
                     np.ascontiguousarray(all_vis[slc].real, dtype=np.float32),
                     all_weight,
