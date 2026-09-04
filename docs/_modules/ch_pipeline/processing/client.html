@@ -1,0 +1,611 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.client &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../reference.html">Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.client</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ch_pipeline.processing.client</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Command line client for Chime Pipeline processing."""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">click</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">base</span><span class="p">,</span> <span class="n">beam</span><span class="p">,</span> <span class="n">daily</span><span class="p">,</span> <span class="n">fullstack</span><span class="p">,</span> <span class="n">hfb</span><span class="p">,</span> <span class="n">quarterstack</span><span class="p">,</span> <span class="n">reprocess</span>  <span class="c1"># noqa: F401</span>
+
+<span class="n">click</span><span class="o">.</span><span class="n">disable_unicode_literals_warning</span> <span class="o">=</span> <span class="kc">True</span>
+
+
+<span class="c1"># Map the type names to classes</span>
+<span class="n">_typedict</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">t</span><span class="o">.</span><span class="n">type_name</span><span class="p">:</span> <span class="n">t</span>
+    <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">base</span><span class="o">.</span><span class="n">all_subclasses</span><span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="s2">"type_name"</span><span class="p">)</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="PType">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.PType">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PType</span><span class="p">(</span><span class="n">click</span><span class="o">.</span><span class="n">ParamType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Param type for validating and returning ProcessingType arguments."""</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">"processing type"</span>
+
+<div class="viewcode-block" id="PType.convert">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.PType.convert">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">convert</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">param</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Get a processing type from a string."""</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_typedict</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fail</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"processing type '</span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">' unknown. See `chp type list` "</span>
+                <span class="s2">"for valid options."</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">_typedict</span><span class="p">[</span><span class="n">value</span><span class="p">]</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="PRev">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.PRev">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PRev</span><span class="p">(</span><span class="n">click</span><span class="o">.</span><span class="n">ParamType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Param type for validating and returning ProcessingType arguments."""</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">"processing revision"</span>
+
+<div class="viewcode-block" id="PRev.convert">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.PRev.convert">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">convert</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">param</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Parses `value` as {type}:{revision}."""</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">":"</span><span class="p">)</span>
+
+        <span class="n">typename</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">typename</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_typedict</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fail</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"processing type '</span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">' unknown. See `chp type list` "</span>
+                <span class="s2">"for valid options."</span>
+            <span class="p">)</span>
+
+        <span class="n">_type</span> <span class="o">=</span> <span class="n">_typedict</span><span class="p">[</span><span class="n">typename</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_type</span><span class="o">.</span><span class="n">latest</span><span class="p">()</span>
+
+        <span class="n">rev</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">rev</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_type</span><span class="o">.</span><span class="n">ls_rev</span><span class="p">():</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fail</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"revision not found for spec </span><span class="si">{</span><span class="n">rev</span><span class="si">}</span><span class="s2"> in type </span><span class="si">{</span><span class="n">typename</span><span class="si">}</span><span class="s2">. "</span>
+                <span class="sa">f</span><span class="s2">"See `chp rev list </span><span class="si">{</span><span class="n">typename</span><span class="si">}</span><span class="s2">` for valid revisions."</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">_type</span><span class="p">(</span><span class="n">rev</span><span class="p">)</span></div>
+</div>
+
+
+
+<span class="n">PTYPE</span> <span class="o">=</span> <span class="n">PType</span><span class="p">()</span>
+<span class="n">PREV</span> <span class="o">=</span> <span class="n">PRev</span><span class="p">()</span>
+
+
+<span class="nd">@click</span><span class="o">.</span><span class="n">group</span><span class="p">()</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--root"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="n">click</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">exists</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">file_okay</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">dir_okay</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+    <span class="n">default</span><span class="o">=</span><span class="n">base</span><span class="o">.</span><span class="n">DEFAULT_ROOT</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Set the root directory to save processed data."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cli</span><span class="p">(</span><span class="n">root</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""CHIME pipeline processing."""</span>
+    <span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="o">.</span><span class="n">root_path</span> <span class="o">=</span> <span class="n">root</span>
+
+
+<span class="nd">@cli</span><span class="o">.</span><span class="n">group</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">type</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Types of data processing."""</span>
+    <span class="k">pass</span>
+
+
+<span class="nd">@cli</span><span class="o">.</span><span class="n">group</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rev</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Revisions of a processed data type."""</span>
+    <span class="k">pass</span>
+
+
+<span class="nd">@cli</span><span class="o">.</span><span class="n">group</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">item</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Bundles of generated data."""</span>
+    <span class="k">pass</span>
+
+
+<span class="nd">@type</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"list"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-a"</span><span class="p">,</span>
+    <span class="s2">"--all"</span><span class="p">,</span>
+    <span class="s2">"show_all"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Also list types for which there is no data."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">type_list</span><span class="p">(</span><span class="n">show_all</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""List known processing types."""</span>
+    <span class="k">for</span> <span class="n">type_</span> <span class="ow">in</span> <span class="n">base</span><span class="o">.</span><span class="n">ProcessingType</span><span class="o">.</span><span class="n">ls_type</span><span class="p">(</span><span class="n">existing</span><span class="o">=</span><span class="p">(</span><span class="ow">not</span> <span class="n">show_all</span><span class="p">)):</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">type_</span><span class="p">)</span>
+
+
+<span class="nd">@rev</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"list"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"type_"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PTYPE</span><span class="p">,</span> <span class="n">metavar</span><span class="o">=</span><span class="s2">"TYPE"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rev_list</span><span class="p">(</span><span class="n">type_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""List known revisions of TYPE."""</span>
+    <span class="k">for</span> <span class="n">rev</span> <span class="ow">in</span> <span class="n">type_</span><span class="o">.</span><span class="n">ls_rev</span><span class="p">():</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">rev</span><span class="p">)</span>
+
+
+<span class="nd">@rev</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"type_"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PTYPE</span><span class="p">,</span> <span class="n">metavar</span><span class="o">=</span><span class="s2">"TYPE"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="n">type_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Create a new revision of TYPE."""</span>
+    <span class="n">rev</span> <span class="o">=</span> <span class="n">type_</span><span class="o">.</span><span class="n">create_rev</span><span class="p">()</span>
+    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Created </span><span class="si">{</span><span class="n">rev</span><span class="o">.</span><span class="n">revision</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"You must create a virtual environment in </span><span class="si">{</span><span class="n">rev</span><span class="o">.</span><span class="n">venv_path</span><span class="si">}</span><span class="s2"> "</span>
+        <span class="s2">"before you can run any jobs."</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"list"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-l"</span><span class="p">,</span> <span class="s2">"--long"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Display directory size and number of files."</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-h"</span><span class="p">,</span>
+    <span class="s2">"--human"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Display directory size in human-readable format."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"-t"</span><span class="p">,</span> <span class="s2">"--time"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Sort item be time, newest first."</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">item_list</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">long</span><span class="p">,</span> <span class="n">human</span><span class="p">,</span> <span class="n">time</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""List existing items within the REVISION (given as type:revision)."""</span>
+    <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">revision</span><span class="o">.</span><span class="n">ls</span><span class="p">(</span><span class="n">time</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">long</span><span class="p">:</span>
+            <span class="n">n</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="n">dirstats</span><span class="p">(</span><span class="n">revision</span><span class="o">.</span><span class="n">base_path</span> <span class="o">/</span> <span class="n">tag</span><span class="p">)</span>
+            <span class="n">size</span> <span class="o">=</span> <span class="n">humansize</span><span class="p">(</span><span class="n">size</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span> <span class="k">if</span> <span class="n">human</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">size</span><span class="p">)</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tag</span><span class="si">:</span><span class="s2">8s</span><span class="si">}{</span><span class="n">n</span><span class="si">:</span><span class="s2">10d</span><span class="si">}{</span><span class="n">size</span><span class="si">:</span><span class="s2">10s</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-n"</span><span class="p">,</span>
+    <span class="s2">"--number"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"The maximum number of jobs to be submitted this time."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-m"</span><span class="p">,</span>
+    <span class="s2">"--max-number"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"The maximum number of jobs to be end up in the queue. This does not include "</span>
+        <span class="s2">" running jobs."</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--submit/--no-submit"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Submit the jobs to the queue (or not)"</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-f"</span><span class="p">,</span>
+    <span class="s2">"--fairshare"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Only submit jobs if the account LevelFS is above this threshold."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--user-fairshare"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Only submit jobs if the user LevelFS is above this threshold."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-p"</span><span class="p">,</span>
+    <span class="s2">"--priority-fairshare"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"Fairshare threshold for priority jobs. If `--fairshare` is also given, "</span>
+        <span class="s2">"and is lower than the priority fairshare given here, this option is ignored."</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"--check-failed"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Try to requeue failed jobs."</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span>
+    <span class="n">revision</span><span class="p">,</span>
+    <span class="n">number</span><span class="p">,</span>
+    <span class="n">max_number</span><span class="p">,</span>
+    <span class="n">submit</span><span class="p">,</span>
+    <span class="n">fairshare</span><span class="p">,</span>
+    <span class="n">user_fairshare</span><span class="p">,</span>
+    <span class="n">priority_fairshare</span><span class="p">,</span>
+    <span class="n">check_failed</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Submit pending jobs for REVISION (given as type:revision)."""</span>
+    <span class="n">priority_only</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">fs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">slurm_fairshare</span><span class="p">(</span><span class="s2">"rpp-chime_cpu"</span><span class="p">)</span>
+
+    <span class="c1"># If a fairshare limit has been set, check that the current fairshare</span>
+    <span class="c1"># is below it.</span>
+    <span class="k">if</span> <span class="n">fairshare</span> <span class="o">&gt;</span> <span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Current fairshare </span><span class="si">{</span><span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> is lower than threshold </span><span class="si">{</span><span class="n">fairshare</span><span class="si">}</span><span class="s2">. "</span>
+            <span class="s2">"Skipping non-priority."</span>
+        <span class="p">)</span>
+        <span class="n">priority_only</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1"># If a user fairshare limit has been set, check that the current user</span>
+    <span class="c1"># fairshare is below it.</span>
+    <span class="k">if</span> <span class="n">user_fairshare</span> <span class="o">&gt;</span> <span class="n">fs</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Current user fairshare </span><span class="si">{</span><span class="n">fs</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2"> is lower than threshold </span><span class="si">{</span><span class="n">user_fairshare</span><span class="si">}</span><span class="s2">. "</span>
+            <span class="s2">"Skipping non-priority."</span>
+        <span class="p">)</span>
+        <span class="n">priority_only</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="c1"># If a priority fairshare limit has been set, check if priority jobs</span>
+    <span class="c1"># can still be processed</span>
+    <span class="k">if</span> <span class="n">priority_only</span> <span class="ow">and</span> <span class="n">priority_fairshare</span> <span class="o">&gt;</span> <span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Current fairshare </span><span class="si">{</span><span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> is lower than priority threshold </span><span class="si">{</span><span class="n">priority_fairshare</span><span class="si">}</span><span class="s2">. "</span>
+            <span class="s2">"Skipping all."</span>
+        <span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="n">number_in_queue</span><span class="p">,</span> <span class="n">number_running</span> <span class="o">=</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">l</span><span class="p">)</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">revision</span><span class="o">.</span><span class="n">queued</span><span class="p">())</span>
+    <span class="n">number_to_submit</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span>
+        <span class="nb">min</span><span class="p">(</span><span class="n">number</span><span class="p">,</span> <span class="n">max_number</span> <span class="o">-</span> <span class="n">number_in_queue</span> <span class="o">-</span> <span class="n">number_running</span><span class="p">),</span> <span class="mi">0</span>
+    <span class="p">)</span>
+
+    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"Generating </span><span class="si">{</span><span class="n">number_to_submit</span><span class="si">}</span><span class="s2"> jobs (</span><span class="si">{</span><span class="n">number_in_queue</span><span class="si">}</span><span class="s2"> jobs already queued)."</span>
+    <span class="p">)</span>
+    <span class="n">revision</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span>
+        <span class="nb">max</span><span class="o">=</span><span class="n">number_to_submit</span><span class="p">,</span>
+        <span class="n">submit</span><span class="o">=</span><span class="n">submit</span><span class="p">,</span>
+        <span class="n">priority_only</span><span class="o">=</span><span class="n">priority_only</span><span class="p">,</span>
+        <span class="n">check_failed</span><span class="o">=</span><span class="n">check_failed</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"update"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--clear"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Remove data files which are no longer needed by this revision."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--retrieve"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Submit a request to move required files to project storage."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">update_files</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">clear</span><span class="p">,</span> <span class="n">retrieve</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Manage files between project and long-term storage spaces."""</span>
+    <span class="n">nfiles</span> <span class="o">=</span> <span class="n">revision</span><span class="o">.</span><span class="n">update_files</span><span class="p">(</span><span class="n">retrieve</span><span class="o">=</span><span class="n">retrieve</span><span class="p">,</span> <span class="n">clear</span><span class="o">=</span><span class="n">clear</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">retrieve</span><span class="p">:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Retrieving </span><span class="si">{</span><span class="n">nfiles</span><span class="p">[</span><span class="s1">'nretrieve'</span><span class="p">]</span><span class="si">}</span><span class="s2"> files."</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">clear</span><span class="p">:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Clearing </span><span class="si">{</span><span class="n">nfiles</span><span class="p">[</span><span class="s1">'nclear'</span><span class="p">]</span><span class="si">}</span><span class="s2"> files."</span><span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"status"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-u"</span><span class="p">,</span>
+    <span class="s2">"--user"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="s2">"chime"</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"User to check jobs for."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-v"</span><span class="p">,</span>
+    <span class="s2">"--verbose"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Show all tags in each category instead of just a count."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"-t"</span><span class="p">,</span> <span class="s2">"--time"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Sort tags by time."</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-c"</span><span class="p">,</span>
+    <span class="s2">"--category"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"Only return metrics for jobs with this status. Valid categories "</span>
+        <span class="s2">"include: available, not_available, not_yet_submitted, pending, "</span>
+        <span class="s2">"running, successful, failed"</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"--json"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Dump json representation of status info."</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">status</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">user</span><span class="p">,</span> <span class="n">verbose</span><span class="p">,</span> <span class="n">time</span><span class="p">,</span> <span class="n">category</span><span class="p">,</span> <span class="n">json</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Show metrics about currently running jobs for REVISION.</span>
+
+<span class="sd">    Given as (type:revision)</span>
+<span class="sd">    """</span>
+    <span class="n">fs</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">slurm_fairshare</span><span class="p">(</span><span class="s2">"rpp-chime_cpu"</span><span class="p">)</span>
+    <span class="n">tag_status</span> <span class="o">=</span> <span class="n">revision</span><span class="o">.</span><span class="n">status</span><span class="p">(</span><span class="n">user</span><span class="p">,</span> <span class="n">time</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">category</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">category</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">tag_status</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Invalid category: </span><span class="si">{</span><span class="n">category</span><span class="si">}</span><span class="s2">. See --help for valid options."</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="n">category</span> <span class="o">=</span> <span class="p">[</span><span class="n">category</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">category</span> <span class="o">=</span> <span class="n">tag_status</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">json</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+        <span class="n">status</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="n">k</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">tag_status</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">category</span><span class="p">}</span>
+        <span class="n">status</span><span class="p">[</span><span class="s2">"fairshare"</span><span class="p">]</span> <span class="o">=</span> <span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">status</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"fairshare: </span><span class="si">{</span><span class="n">fs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">category</span><span class="p">:</span>
+            <span class="n">tags</span> <span class="o">=</span> <span class="n">tag_status</span><span class="p">[</span><span class="n">c</span><span class="p">]</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tags</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span><span class="p">:</span>
+                    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"failed"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-u"</span><span class="p">,</span>
+    <span class="s2">"--user"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="s2">"chime"</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"User to check jobs for."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-v"</span><span class="p">,</span>
+    <span class="s2">"--verbose"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"-t"</span><span class="p">,</span> <span class="s2">"--time"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"--json"</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Dump json representation of crashed tags."</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">crashed</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">user</span><span class="p">,</span> <span class="n">verbose</span><span class="p">,</span> <span class="n">time</span><span class="p">,</span> <span class="n">json</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""List crashed tags for REVISION, associated with available category matches."""</span>
+    <span class="n">failed</span> <span class="o">=</span> <span class="n">revision</span><span class="o">.</span><span class="n">failed</span><span class="p">(</span><span class="n">user</span><span class="p">,</span> <span class="n">time</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">json</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">failed</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">tags</span> <span class="ow">in</span> <span class="n">failed</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">tags</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tags</span><span class="p">)</span><span class="si">}</span><span class="s2"> job(s) failed for reason: </span><span class="si">{</span><span class="n">k</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span><span class="p">:</span>
+                    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+
+
+<span class="nd">@item</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="s2">"run"</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">"revision"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">PREV</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">"--update"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Refresh time in minutes."</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-m"</span><span class="p">,</span>
+    <span class="s2">"--max-number"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"The maximum number of jobs to end up in the queue."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-f"</span><span class="p">,</span>
+    <span class="s2">"--fairshare"</span><span class="p">,</span>
+    <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"Only submit jobs above this threshold."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"-u"</span><span class="p">,</span> <span class="s2">"--user"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"User to use when checking slurm jobs."</span>
+<span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+    <span class="s2">"--run-indefinitely"</span><span class="p">,</span>
+    <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">help</span><span class="o">=</span><span class="s2">"If set, the runner should continue running even if there are no jobs remaining."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_pipeline</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">update</span><span class="p">,</span> <span class="n">max_number</span><span class="p">,</span> <span class="n">fairshare</span><span class="p">,</span> <span class="n">user</span><span class="p">,</span> <span class="n">run_indefinitely</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Run the pipeline service for this revision."""</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">runner</span>
+
+    <span class="c1"># Set up and update the config</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">"update_minutes"</span><span class="p">:</span> <span class="n">update</span><span class="p">,</span>
+        <span class="s2">"max_jobs_number"</span><span class="p">:</span> <span class="n">max_number</span><span class="p">,</span>
+        <span class="s2">"min_fairshare_number"</span><span class="p">:</span> <span class="n">fairshare</span><span class="p">,</span>
+        <span class="s2">"run_indefinitely"</span><span class="p">:</span> <span class="n">run_indefinitely</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">user</span><span class="p">:</span>
+        <span class="n">existing_user</span> <span class="o">=</span> <span class="n">runner</span><span class="o">.</span><span class="n">GLOBAL_CONFIG</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"user"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">existing_user</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"Existing user </span><span class="si">{</span><span class="n">existing_user</span><span class="si">}</span><span class="s2"> found. "</span>
+                <span class="sa">f</span><span class="s2">"Job will run as user </span><span class="si">{</span><span class="n">existing_user</span><span class="si">}</span><span class="s2">."</span>
+            <span class="p">)</span>
+            <span class="n">user</span> <span class="o">=</span> <span class="n">existing_user</span>
+        <span class="c1"># Set the global user</span>
+        <span class="n">runner</span><span class="o">.</span><span class="n">GLOBAL_CONFIG</span><span class="p">[</span><span class="s2">"user"</span><span class="p">]</span> <span class="o">=</span> <span class="n">user</span>
+
+    <span class="c1"># Set up this revision</span>
+    <span class="n">runner</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="n">revision</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+    <span class="c1"># Run the server</span>
+    <span class="n">runner</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="dirstats">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.dirstats">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">dirstats</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Get stats for the specified directory.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    path : Path</span>
+<span class="sd">        Directory to calculate stats of.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    num_files : int</span>
+<span class="sd">        Number of files under the directory (recursive).</span>
+<span class="sd">    total_size : int</span>
+<span class="sd">        Total size in bytes of all files under the directory (recursive).</span>
+<span class="sd">    """</span>
+    <span class="n">total_size</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">num_files</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"path </span><span class="si">{</span><span class="n">path</span><span class="si">!s}</span><span class="s2"> must be an exisiting directory"</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">rglob</span><span class="p">(</span><span class="s2">"*"</span><span class="p">):</span>
+        <span class="n">num_files</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">total_size</span> <span class="o">+=</span> <span class="n">p</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+
+    <span class="k">return</span> <span class="n">num_files</span><span class="p">,</span> <span class="n">total_size</span></div>
+
+
+
+<div class="viewcode-block" id="humansize">
+<a class="viewcode-back" href="../../../_autosummary/ch_pipeline.processing.client.html#ch_pipeline.processing.client.humansize">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">humansize</span><span class="p">(</span><span class="n">num</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">precision</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Human readable file size.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    num : int</span>
+<span class="sd">        Size in bytes.</span>
+<span class="sd">    suffix : str</span>
+<span class="sd">        unit suffix to include</span>
+<span class="sd">    precision : int</span>
+<span class="sd">        number of decimal places to include</span>
+<span class="sd">    width : int</span>
+<span class="sd">        minimum number of characters to include</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    size : str</span>
+<span class="sd">        The size as a human readable string.</span>
+<span class="sd">    """</span>
+    <span class="k">for</span> <span class="n">unit</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"B"</span><span class="p">,</span> <span class="s2">"K"</span><span class="p">,</span> <span class="s2">"M"</span><span class="p">,</span> <span class="s2">"G"</span><span class="p">,</span> <span class="s2">"T"</span><span class="p">,</span> <span class="s2">"P"</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">num</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1024.0</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="n">num</span> <span class="o">/=</span> <span class="mf">1024.0</span>
+
+    <span class="k">return</span> <span class="s2">"{:</span><span class="si">{width}</span><span class="s2">.</span><span class="si">{precision}</span><span class="s2">f}</span><span class="si">{}{}</span><span class="s2">"</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">num</span><span class="p">,</span> <span class="n">unit</span><span class="p">,</span> <span class="n">suffix</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="n">width</span><span class="p">,</span> <span class="n">precision</span><span class="o">=</span><span class="n">precision</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">cli</span><span class="p">()</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

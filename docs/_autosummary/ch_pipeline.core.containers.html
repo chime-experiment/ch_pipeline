@@ -1,0 +1,489 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.core.containers &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.core.dataquery" href="ch_pipeline.core.dataquery.html" />
+    <link rel="prev" title="ch_pipeline.core" href="ch_pipeline.core.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a><ul class="current">
+<li class="toctree-l4 current"><a class="reference internal" href="ch_pipeline.core.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.core.containers</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.core.containers.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.core.containers">
+<span id="ch-pipeline-core-containers"></span><h1>ch_pipeline.core.containers<a class="headerlink" href="#module-ch_pipeline.core.containers" title="Link to this heading"></a></h1>
+<p>Parallel data containers.</p>
+<p>Containers for holding various types of CHIME specific analysis data in a
+distributed fashion. The module <cite>draco.core.containers</cite> contains general data
+containers which are imported into this module.</p>
+<section id="containers">
+<h2>Containers<a class="headerlink" href="#containers" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.FrequencyMap" title="ch_pipeline.core.containers.FrequencyMap"><code class="xref py py-class docutils literal notranslate"><span class="pre">FrequencyMap</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask"><code class="xref py py-class docutils literal notranslate"><span class="pre">RFIMask</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInputMask</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputTest" title="ch_pipeline.core.containers.CorrInputTest"><code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInputTest</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputMonitor" title="ch_pipeline.core.containers.CorrInputMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">CorrInputMonitor</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.SiderealDayFlag" title="ch_pipeline.core.containers.SiderealDayFlag"><code class="xref py py-class docutils literal notranslate"><span class="pre">SiderealDayFlag</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.TransitFitParams" title="ch_pipeline.core.containers.TransitFitParams"><code class="xref py py-class docutils literal notranslate"><span class="pre">TransitFitParams</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.PointSourceTransit" title="ch_pipeline.core.containers.PointSourceTransit"><code class="xref py py-class docutils literal notranslate"><span class="pre">PointSourceTransit</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel"><code class="xref py py-class docutils literal notranslate"><span class="pre">SourceModel</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.SunTransit" title="ch_pipeline.core.containers.SunTransit"><code class="xref py py-class docutils literal notranslate"><span class="pre">SunTransit</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><code class="xref py py-class docutils literal notranslate"><span class="pre">RingMap</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.core.containers.Photometry" title="ch_pipeline.core.containers.Photometry"><code class="xref py py-class docutils literal notranslate"><span class="pre">Photometry</span></code></a></p></li>
+</ul>
+</section>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.make_empty_corrdata" title="ch_pipeline.core.containers.make_empty_corrdata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">make_empty_corrdata</span></code></a>([freq, input, time, ...])</p></td>
+<td><p>Make an empty CorrData (i.e. timestream) container.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.CHIMETimeStream" title="ch_pipeline.core.containers.CHIMETimeStream"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHIMETimeStream</span></code></a>(*args, **kwargs)</p></td>
+<td><p>A container for CHIME visibility data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputMask" title="ch_pipeline.core.containers.CorrInputMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrInputMask</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding mask indicating good correlator inputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputMonitor" title="ch_pipeline.core.containers.CorrInputMonitor"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrInputMonitor</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding results of good correlator inputs monitor.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.CorrInputTest" title="ch_pipeline.core.containers.CorrInputTest"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CorrInputTest</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding results of tests for good correlator inputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.FormedBeamTime" title="ch_pipeline.core.containers.FormedBeamTime"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FormedBeamTime</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for formed beams with a time axis.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.FrequencyMap" title="ch_pipeline.core.containers.FrequencyMap"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FrequencyMap</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Map between frequency bin and FPGA stream (GPU node) as a function of time.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.FrequencyMapSingle" title="ch_pipeline.core.containers.FrequencyMapSingle"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FrequencyMapSingle</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Map between frequency bin and FPGA [crate, slot, link].</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.Photometry" title="ch_pipeline.core.containers.Photometry"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Photometry</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Parallel container for holding photometry extracted from a map.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.PointSourceTransit" title="ch_pipeline.core.containers.PointSourceTransit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PointSourceTransit</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Parallel container for holding sidereal calibration.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.RFIMask" title="ch_pipeline.core.containers.RFIMask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RFIMask</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding a mask that indicates data that is free of RFI events.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.RawContainer" title="ch_pipeline.core.containers.RawContainer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RawContainer</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Base class for using raw CHIME data via the draco containers API.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.RingMap" title="ch_pipeline.core.containers.RingMap"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RingMap</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding multifrequency ring maps.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.SiderealDayFlag" title="ch_pipeline.core.containers.SiderealDayFlag"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SiderealDayFlag</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding flag that indicates good chime sidereal days.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.SourceModel" title="ch_pipeline.core.containers.SourceModel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SourceModel</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Container for holding model for visiblities.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.SpectralLineCatalog" title="ch_pipeline.core.containers.SpectralLineCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SpectralLineCatalog</span></code></a>(*args, **kwargs)</p></td>
+<td><p>A container for spectral line sources.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.SunTransit" title="ch_pipeline.core.containers.SunTransit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SunTransit</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Parallel container for holding the results of a fit to a point source transit.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.core.containers.TransitFitParams" title="ch_pipeline.core.containers.TransitFitParams"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TransitFitParams</span></code></a>(*args, **kwargs)</p></td>
+<td><p>Parallel container for holding the results of fitting a model to a point source transit.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CHIMETimeStream">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">CHIMETimeStream</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#CHIMETimeStream"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.CHIMETimeStream" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">TimeStream</span></code>, <a class="reference internal" href="#ch_pipeline.core.containers.RawContainer" title="ch_pipeline.core.containers.RawContainer"><code class="xref py py-class docutils literal notranslate"><span class="pre">RawContainer</span></code></a></p>
+<p>A container for CHIME visibility data.</p>
+<p>This provides a close analog of the CorrData container but implemented via the draco
+containers API.</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CHIMETimeStream.dataset_id">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">dataset_id</span></span><a class="headerlink" href="#ch_pipeline.core.containers.CHIMETimeStream.dataset_id" title="Link to this definition"></a></dt>
+<dd><p>Get the dataset_id dataset in Unicode.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CHIMETimeStream.flags">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">flags</span></span><a class="headerlink" href="#ch_pipeline.core.containers.CHIMETimeStream.flags" title="Link to this definition"></a></dt>
+<dd><p>Get the flags group.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CHIMETimeStream.frac_lost">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">frac_lost</span></span><a class="headerlink" href="#ch_pipeline.core.containers.CHIMETimeStream.frac_lost" title="Link to this definition"></a></dt>
+<dd><p>Get the input flags dataset.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CHIMETimeStream.from_corrdata">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_corrdata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">CorrData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#ch_pipeline.core.containers.CHIMETimeStream" title="ch_pipeline.core.containers.CHIMETimeStream"><span class="pre">CHIMETimeStream</span></a></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#CHIMETimeStream.from_corrdata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.CHIMETimeStream.from_corrdata" title="Link to this definition"></a></dt>
+<dd><p>Turn a CorrData container into a CHIMETimeStream.</p>
+<p>This makes a shallow copy of the input <cite>data</cite>. The internals of <cite>data</cite> will be
+destroyed during this process and so the container should be discarded.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> – A CorrData instance to clone. This instance should be discarded after this
+call.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The correlator data as a CHIMETimeStream object.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>newdata</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CorrInputMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">CorrInputMask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#CorrInputMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.CorrInputMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding mask indicating good correlator inputs.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CorrInputMonitor">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">CorrInputMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#CorrInputMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.CorrInputMonitor" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding results of good correlator inputs monitor.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.CorrInputTest">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">CorrInputTest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#CorrInputTest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.CorrInputTest" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding results of tests for good correlator inputs.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.FormedBeamTime">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">FormedBeamTime</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#FormedBeamTime"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.FormedBeamTime" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">FormedBeam</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">TODContainer</span></code></p>
+<p>Container for formed beams with a time axis.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.FrequencyMap">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">FrequencyMap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#FrequencyMap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.FrequencyMap" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">FreqContainer</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">TODContainer</span></code></p>
+<p>Map between frequency bin and FPGA stream (GPU node) as a function of time.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.FrequencyMapSingle">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">FrequencyMapSingle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#FrequencyMapSingle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.FrequencyMapSingle" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">FreqContainer</span></code></p>
+<p>Map between frequency bin and FPGA [crate, slot, link].</p>
+<p>This container holds a map between the frequency bins and stream ids.
+A stream id is encoded based on the shuffle, crate, slot, and link values
+as follows:</p>
+<p>stream_id = shuffle*2**12 + crate*2**8 + slot*2**4 + link</p>
+<p>The value of shuffle is always 3.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.Photometry">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">Photometry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#Photometry"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.Photometry" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Parallel container for holding photometry extracted from a map.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.PointSourceTransit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">PointSourceTransit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#PointSourceTransit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.PointSourceTransit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StaticGainData</span></code></p>
+<p>Parallel container for holding sidereal calibration.</p>
+<p>Contains the response of each feed to the source inferred from the eigendecomposition,
+the largest eigenvalues, the parameters of a model fit to the response, and the gain
+obtained by evaluating that model at transit.</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.PointSourceTransit.freq">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">freq</span></span><a class="headerlink" href="#ch_pipeline.core.containers.PointSourceTransit.freq" title="Link to this definition"></a></dt>
+<dd><p>The physical frequency associated with each entry of the time axis.</p>
+<p>By convention this property should return the frequency in MHz at the centre
+of each of frequency channel.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.PointSourceTransit.gain">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">gain</span></span><a class="headerlink" href="#ch_pipeline.core.containers.PointSourceTransit.gain" title="Link to this definition"></a></dt>
+<dd><p>Get the gain dataset.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.PointSourceTransit.input">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">input</span></span><a class="headerlink" href="#ch_pipeline.core.containers.PointSourceTransit.input" title="Link to this definition"></a></dt>
+<dd><p>Get the input axis.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.PointSourceTransit.weight">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">weight</span></span><a class="headerlink" href="#ch_pipeline.core.containers.PointSourceTransit.weight" title="Link to this definition"></a></dt>
+<dd><p>The weights for each data point.</p>
+<p>Returns None is no weight dataset exists.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RFIMask">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">RFIMask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RFIMask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RFIMask" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding a mask that indicates data that is free of RFI events.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RawContainer">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">RawContainer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RawContainer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RawContainer" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">TODContainer</span></code></p>
+<p>Base class for using raw CHIME data via the draco containers API.</p>
+<p>This modifies the set of allowed group/dataset names to allow access to the
+flags group.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RawContainer.dataset_name_allowed">
+<span class="sig-name descname"><span class="pre">dataset_name_allowed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RawContainer.dataset_name_allowed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RawContainer.dataset_name_allowed" title="Link to this definition"></a></dt>
+<dd><p>Allow access to datasets under both / and /flags.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RawContainer.from_acq_h5">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_acq_h5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acq_files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stop</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#ch_pipeline.core.containers.RawContainer" title="ch_pipeline.core.containers.RawContainer"><span class="pre">RawContainer</span></a></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RawContainer.from_acq_h5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RawContainer.from_acq_h5" title="Link to this definition"></a></dt>
+<dd><p>Load from an HDF5 file on disk.</p>
+<p>This is a thin wrapper around <cite>from_file</cite> to support the
+<cite>andata.BaseData.from_acq_h5</cite> API. The main difference is supporting
+the <cite>start</cite> and <cite>stop</cite> parameters. All other parameters are passed
+straight into <cite>from_file</cite>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This does not support loading in a distributed manner as the archive
+files don’t have the correct hints set, but that should be added into this
+routine by using the information given in the <cite>_dataset_spec</cite> of derived
+classes.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acq_files</strong> – Path or glob to files (or list of).</p></li>
+<li><p><strong>start</strong> – Indices into the full set of files to select.</p></li>
+<li><p><strong>stop</strong> – Indices into the full set of files to select.</p></li>
+<li><p><strong>**kwargs</strong> – Additional keyword arguments to pass to <cite>from_file</cite></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A single container instance.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>cont</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RawContainer.group_name_allowed">
+<span class="sig-name descname"><span class="pre">group_name_allowed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RawContainer.group_name_allowed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RawContainer.group_name_allowed" title="Link to this definition"></a></dt>
+<dd><p>Allow access to the flags group.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.RingMap">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">RingMap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#RingMap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.RingMap" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding multifrequency ring maps.</p>
+<p>The maps are packed in format <cite>[freq, pol, ra, EW beam, el]</cite> where
+the polarisations are Stokes I, Q, U and V.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>nside</strong> (<em>int</em>) – The nside of the Healpix maps.</p></li>
+<li><p><strong>polarisation</strong> (<em>bool</em><em>, </em><em>optional</em>) – If <cite>True</cite> all Stokes parameters are stored, if <cite>False</cite> only Stokes I is
+stored.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.SiderealDayFlag">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">SiderealDayFlag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#SiderealDayFlag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.SiderealDayFlag" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Container for holding flag that indicates good chime sidereal days.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.SourceModel">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">SourceModel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#SourceModel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.SourceModel" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">FreqContainer</span></code></p>
+<p>Container for holding model for visiblities.</p>
+<p>Model consists of the sum of the signal from
+multiple (possibly extended) sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.SpectralLineCatalog">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">SpectralLineCatalog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#SpectralLineCatalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.SpectralLineCatalog" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">SpectroscopicCatalog</span></code></p>
+<p>A container for spectral line sources.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.SunTransit">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">SunTransit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#SunTransit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.SunTransit" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Parallel container for holding the results of a fit to a point source transit.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.TransitFitParams">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">TransitFitParams</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#TransitFitParams"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.TransitFitParams" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ContainerPrototype</span></code></p>
+<p>Parallel container for holding the results of fitting a model to a point source transit.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.core.containers.make_empty_corrdata">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.core.containers.</span></span><span class="sig-name descname"><span class="pre">make_empty_corrdata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">freq</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_from</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attrs_from</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">distributed</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">distributed_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">comm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/core/containers.html#make_empty_corrdata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.core.containers.make_empty_corrdata" title="Link to this definition"></a></dt>
+<dd><p>Make an empty CorrData (i.e. timestream) container.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>freq</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – Frequency map to use.</p></li>
+<li><p><strong>input</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – Input map.</p></li>
+<li><p><strong>time</strong> (<em>np.ndarray</em><em>, </em><em>optional</em>) – Time map.</p></li>
+<li><p><strong>axes_from</strong> (<em>BasicCont</em><em>, </em><em>optional</em>) – Another container to copy any unspecified axes from.</p></li>
+<li><p><strong>attrs_from</strong> (<em>BasicCont</em><em>, </em><em>optional</em>) – Another container to copy any unspecified attributes from.</p></li>
+<li><p><strong>distributed</strong> (<em>boolean</em><em>, </em><em>optional</em>) – Whether to create the container in distributed mode.</p></li>
+<li><p><strong>distributed_axis</strong> (<em>int</em><em>, </em><em>optional</em>) – Axis to distribute over.</p></li>
+<li><p><strong>comm</strong> (<em>MPI.Comm</em><em>, </em><em>optional</em>) – MPI communicator to distribute over.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>data</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>andata.CorrData</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.core.html" class="btn btn-neutral float-left" title="ch_pipeline.core" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.core.dataquery.html" class="btn btn-neutral float-right" title="ch_pipeline.core.dataquery" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
