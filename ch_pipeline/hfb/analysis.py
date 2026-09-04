@@ -7,6 +7,7 @@ from caput.algorithms import median
 from caput.containers import copy_datasets_filter, empty_like
 from caput.pipeline import tasklib
 from caput.util import mpitools
+from caput.util.pfb import DeconvolvePFB
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
 from draco.util import tools
 from skyfield.positionlib import Angle
@@ -14,7 +15,6 @@ from skyfield.starlib import Star
 
 from . import containers
 from .io import BeamSelectionMixin
-from .pfb import DeconvolvePFB
 
 
 class HFBAverage(tasklib.base.ContainerTask):
