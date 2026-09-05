@@ -1,5 +1,6 @@
 """Tasks for HFB analysis."""
 
+import beam_model.formed as fm
 import numpy as np
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from caput import config, mpiarray
@@ -9,9 +10,13 @@ from caput.pipeline import tasklib
 from caput.util import mpitools
 from caput.util.pfb import DeconvolvePFB
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
+from draco.analysis.sidereal import _search_nearest
+from draco.core import io
 from draco.util import tools
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
+
+from ch_pipeline.hfb.containers import HFBHighResRingMap
 
 from . import containers
 from .io import BeamSelectionMixin
@@ -954,6 +959,95 @@ class SelectBeam(BeamSelectionMixin, tasklib.base.ContainerTask):
         return newstream
 
 
+class SelectBeamsAroundSources(tasklib.base.ContainerTask):
+    """Select the beams around the sources recorded in the attributes.
+
+    The source declination and frequency are read from the container
+    attributes ('source_dec', 'source_freq'), which are set by
+    LoadFilesForAbsorbers.
+
+    Attributes
+    ----------
+    n_beams_ns : int
+        Number of NS beams to include on either side of the beam closest
+        to each source (i.e. 2 * n_beams_ns + 1 NS beams per source).
+        Default is 2.
+    beam_ew_include : list
+        List of East-West beam indices to include. Default is [0, 1, 2].
+    """
+
+    n_beams_ns = config.Property(proptype=int, default=2)
+    beam_ew_include = config.Property(proptype=list, default=[0, 1, 2])
+
+    def setup(self, manager):
+        """Load the beam model used to locate the sources' NS beams.
+
+        Parameters
+        ----------
+        manager :
+            An Observer object holding the geographic location of the telescope.
+        """
+        self.beam_mdl = fm.FFTFormedBeamModel()
+        self.observer = io.get_telescope(manager)
+        self.latitude = self.observer.latitude
+
+    def process(self, stream):
+        """Select the beams around the catalogue's sources.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with a beam axis and 'source_dec' / 'source_freq'
+            attributes.
+
+        Returns
+        -------
+        newstream : containers.HFBData
+            New container holding only the selected beams.
+        """
+        src_dec = np.atleast_1d(stream.attrs["source_dec"])
+        src_freq = np.atleast_1d(stream.attrs["source_freq"])
+
+        # Union of the NS-beam neighbourhoods of all absorbers in the catalogue.
+        ns_beams: set = set()
+        for dec, freq in zip(src_dec, src_freq):
+            angles = self.beam_mdl.get_beam_positions(np.arange(0, 256), [freq])
+            ns0 = int(_search_nearest(angles.T[1][0], dec - self.latitude))
+            ns_beams.update(
+                range(
+                    max(0, ns0 - self.n_beams_ns), min(256, ns0 + self.n_beams_ns + 1)
+                )
+            )
+
+        ns_sel = np.array(sorted(ns_beams))
+        ew_sel = np.array(self.beam_ew_include)
+
+        # Full beam indices, restricted to beams present in the stream
+        beam_sel = (ew_sel[:, np.newaxis] * 256 + ns_sel).flatten()
+        beam_sel = np.sort(beam_sel[np.isin(beam_sel, stream.beam)])
+
+        self.log.info(
+            f"Selecting {beam_sel.size} beams for {src_dec.size} absorbers "
+            f"({ns_sel.size} NS beams, EW {ew_sel.tolist()})."
+        )
+
+        # Create new container with the subset of beams
+        newstream = empty_like(stream, beam=beam_sel)
+
+        # Make sure all datasets are initialised
+        for dname in stream.datasets.keys():
+            if dname not in newstream.datasets:
+                newstream.add_dataset(dname)
+
+        # Find indices in current beam axis of selected subset of beams
+        selindex = np.flatnonzero(np.isin(stream.beam, beam_sel)).tolist()
+
+        # Copy over datasets
+        copy_datasets_filter(stream, newstream, "beam", selindex)
+
+        return newstream
+
+
 class HFBFlattenPFB(tasklib.base.ContainerTask):
     """Flatten HFB data using PFB deconvolution."""
 
@@ -1406,3 +1500,176 @@ class HFBMedianSubtraction(tasklib.base.ContainerTask):
         out.weight[:] = weight
 
         return out
+
+
+class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
+    """Extract and save one cutout per absorber in the catalogue.
+
+    The frequency window is physical (MHz); the RA and el windows are in
+    pixels (samples) around the pixel nearest the source: e.g. the defaults
+    give the centre pixel +/- 30 RA pixels and +/- 1 el pixel (one beam
+    either side). The RA window wraps correctly around RA = 0/360; the el
+    window is clipped at the edges of the el axis.
+
+    Attributes
+    ----------
+    freq_window : float
+        Half-width of the frequency window to extract, in MHz.
+        Default is 0.2 (i.e. a 400 kHz wide cutout, ~131 high-res
+        channels).
+    n_ra : int
+        Number of RA pixels to include on either side of the pixel nearest
+        the source RA (i.e. 2 * n_ra + 1 pixels total). Default is 30.
+    n_el : int
+        Number of el pixels (beams) to include on either side of the pixel
+        nearest the source el (i.e. 2 * n_el + 1 pixels total, clipped at
+        the axis edges). Default is 1.
+    """
+
+    freq_window = config.Property(proptype=float, default=0.2)
+    n_ra = config.Property(proptype=int, default=30)
+    n_el = config.Property(proptype=int, default=1)
+
+    def setup(self, manager):
+        """Set the local observer's position.
+
+        Parameters
+        ----------
+        manager :
+            An Observer object holding the geographic location of the telescope.
+        """
+        self.observer = io.get_telescope(manager)
+        self.latitude = self.observer.latitude
+
+    def process(self, stream):
+        """Extract and save one cutout file per absorber in the catalogue.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMap
+            High frequency resolution ringmap container.
+
+        Returns
+        -------
+        None
+            Files are saved directly via '_save_output'; nothing is passed
+            downstream.
+        """
+        from mpi4py import MPI
+
+        # Ensure ONLY the freq axis is distributed. After this, beam_ew, el
+        # and ra are complete on every rank.
+        stream.redistribute("freq")
+
+        names = np.atleast_1d(stream.attrs["source_names"])
+        src_ra = np.atleast_1d(stream.attrs["source_ra"])
+        src_dec = np.atleast_1d(stream.attrs["source_dec"])
+        src_freq = np.atleast_1d(stream.attrs["source_freq"])
+        lsd = stream.attrs.get("lsd", stream.attrs.get("csd", None))
+
+        freq = np.asarray(stream.index_map["freq"])
+        ra = np.asarray(stream.index_map["ra"])
+        el = np.asarray(stream.index_map["el"])
+        beam_ns = np.asarray(stream.index_map["beam_ns"])
+        nra = ra.size
+        nel = el.size
+
+        # Local data: (beam_ew, el, ra, freq_local)
+        hfb_local = stream.hfb[:].local_array
+        weight_local = stream.weight[:].local_array
+        freq_offset = stream.hfb[:].local_offset[3]
+        nfreq_local = hfb_local.shape[3]
+        nbeam_ew = hfb_local.shape[0]
+
+        comm = stream.comm
+        nsaved = 0
+
+        for iobj, name in enumerate(names):
+            name = str(name)
+
+            # Frequency: +/- freq_window MHz around the absorber frequency
+            fsel = np.flatnonzero(np.abs(freq - src_freq[iobj]) <= self.freq_window)
+            if fsel.size == 0:
+                self.log.warning(
+                    f"Absorber {name}: no data in frequency range. Skipping."
+                )
+                continue
+
+            # RA: nearest pixel +/- n_ra pixels, wrapping at 0/360
+            dra = (ra - src_ra[iobj] + 180.0) % 360.0 - 180.0
+            ira0 = int(np.argmin(np.abs(dra)))
+            rsel = (ira0 + np.arange(-self.n_ra, self.n_ra + 1)) % nra
+
+            # el: nearest pixel +/- n_el pixels, clipped at edges
+            el_src = np.sin(np.radians(src_dec[iobj] - self.latitude))
+            ie0 = int(np.argmin(np.abs(el - el_src)))
+            esel = np.arange(max(0, ie0 - self.n_el), min(nel, ie0 + self.n_el + 1))
+
+            # Extract this rank's freq chunk
+            shape = (nbeam_ew, esel.size, rsel.size, fsel.size)
+            data_cut = np.zeros(shape, dtype=hfb_local.dtype)
+            weight_cut = np.zeros(shape, dtype=weight_local.dtype)
+
+            # Convert global freq indices to this rank's local indices
+            fsel_local = fsel - freq_offset
+            valid = (fsel_local >= 0) & (fsel_local < nfreq_local)
+            fsel_local = fsel_local[valid]
+
+            # Destination positions along the cutout freq axis (0..nfsel-1)
+            fsel_out = np.flatnonzero(valid)
+
+            if fsel_local.size > 0:
+                ix = np.ix_(np.arange(nbeam_ew), esel, rsel, fsel_local)
+                data_cut[..., fsel_out] = hfb_local[ix]
+                weight_cut[..., fsel_out] = weight_local[ix]
+
+            # Combine freq chunks from all ranks
+            comm.Allreduce(MPI.IN_PLACE, data_cut, op=MPI.SUM)
+            comm.Allreduce(MPI.IN_PLACE, weight_cut, op=MPI.SUM)
+
+            if not weight_cut.any():
+                self.log.warning(f"Absorber {name}: all-zero weights. Skipping.")
+                continue
+
+            # Build and fill the output container
+            out = HFBHighResRingMap(
+                beam_ew=stream.index_map["beam_ew"],
+                beam_ns=beam_ns[esel],
+                el=el[esel],
+                ra=ra[rsel],
+                freq=freq[fsel],
+                attrs_from=stream,
+            )
+            out.redistribute("freq")
+
+            of = out.hfb[:].local_offset[3]
+            ns = out.hfb[:].local_array.shape[3]
+            out.hfb[:].local_array[:] = data_cut[..., of : of + ns]
+            out.weight[:].local_array[:] = weight_cut[..., of : of + ns]
+
+            # Replace catalogue-level array attrs with per-absorber scalars
+            for key in [
+                "source_names",
+                "source_ra",
+                "source_dec",
+                "source_freq",
+                "source_status",
+                "source_amplitude",
+            ]:
+                if key in out.attrs:
+                    del out.attrs[key]
+            out.attrs["source_name"] = name
+            out.attrs["source_ra"] = float(src_ra[iobj])
+            out.attrs["source_dec"] = float(src_dec[iobj])
+            out.attrs["source_freq"] = float(src_freq[iobj])
+
+            tag = name if lsd is None else f"{name}_lsd_{int(lsd)}"
+            out.attrs["tag"] = tag
+
+            outfile = self._save_output(out)
+            if outfile is not None:
+                self.log.info(f"Saved cutout for {name} -> {outfile}.")
+                nsaved += 1
+
+        self.log.info(f"Saved {nsaved}/{len(names)} cutouts.")
+        return

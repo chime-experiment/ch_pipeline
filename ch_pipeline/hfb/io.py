@@ -1,6 +1,7 @@
 """HFB tasks for reading and writing files."""
 
 import gc
+import json
 import os
 from pathlib import Path
 
@@ -8,12 +9,15 @@ import caput.astro.time as ctime
 import numpy as np
 from beam_model.formed import FFTFormedActualBeamModel
 from caput import config
+from caput.containers.tod import concatenate as _concatenate_time
 from caput.pipeline import exceptions
-from caput.pipeline.tasklib import io
+from caput.pipeline.tasklib import base, io
+from caput.util import mpitools
 from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
+from draco.core.io import get_telescope
 
-from .containers import HFBData, HFBReader
+from .containers import AbsorberCatalogue, HFBData, HFBReader
 
 
 class BeamSelectionMixin:
@@ -448,3 +452,277 @@ class LoadFiles(LoadFilesFromParams):
 
         # Call the baseclass setup to resolve any selections
         super().setup()
+
+
+class MakeAbsorberCatalogue(base.ContainerTask):
+    """Build an AbsorberCatalogue container from a JSON target list.
+
+    'ra' (degrees), 'dec' (degrees), 'freq' (MHz) and 'status' are required.
+    'amplitude' may be null or omitted (stored as NaN).
+
+    Status values: "confirmed", "false_positive", "control" (bright
+    continuum test sources like Cyg A), and candidates, where a candidate
+    records its detection S/N in the status itself, e.g. "candidate_snr5"
+    or "candidate_snr7".
+
+    Attributes
+    ----------
+    json_file : str
+        Path to the JSON target list.
+    status_include : list, optional
+        Only include entries whose status matches:
+        "confirmed"/"false_positive" match exactly; "candidate" matches
+        ALL candidates; "candidate_snrX" matches candidates with S/N >= X.
+        By default all entries are included.
+    """
+
+    json_file = config.Property(proptype=str)
+    status_include = config.Property(proptype=list, default=None)
+
+    _done = False
+
+    def process(self):
+        """Read the JSON file and return the catalogue container.
+
+        Returns
+        -------
+        cat : AbsorberCatalogue
+        """
+        if self._done:
+            raise exceptions.PipelineStopIteration
+        self._done = True
+
+        with open(self.json_file) as f:
+            data = json.load(f)
+
+        names, ras, decs, freqs, amps, statuses = [], [], [], [], [], []
+
+        for name, entry in data.items():
+            try:
+                status = str(entry["status"])
+                ra = float(entry["ra"])
+                dec = float(entry["dec"])
+                freq = float(entry["freq"])
+            except (KeyError, TypeError) as e:
+                raise RuntimeError(
+                    f"Entry {name} in {self.json_file} is missing or has an "
+                    f"invalid required key: {e}."
+                ) from e
+
+            # Filter on status ("candidate" = all candidates;
+            # "candidate_snrX" = candidates with S/N >= X)
+            if (
+                self.status_include
+                and not AbsorberCatalogue.status_match(
+                    status, self.status_include
+                ).any()
+            ):
+                continue
+
+            amp = entry.get("amplitude", None)
+            amp = np.nan if amp is None else float(amp)
+
+            names.append(str(name))
+            ras.append(ra)
+            decs.append(dec)
+            freqs.append(freq)
+            amps.append(amp)
+            statuses.append(status)
+
+        if not names:
+            raise RuntimeError(
+                f"No absorbers in {self.json_file} matched "
+                f"status_include={self.status_include}."
+            )
+
+        # Generate catalogue names from the sky position, as
+        # CHIME_<RA><+/-Dec> in whole degrees (e.g. CHIME_024+33).
+        # Entries that round to the same position get a numeric suffix
+        # to keep object_id unique.
+        cat_names = []
+        for ra, dec in zip(ras, decs):
+            base = f"CHIME_{round(ra) % 360:03d}{round(dec):+03d}"
+            cname = base
+            n = 1
+            while cname in cat_names:
+                n += 1
+                cname = f"{base}_{n}"
+            cat_names.append(cname)
+
+        # Build the catalogue container
+        cat = AbsorberCatalogue(object_id=np.array(cat_names, dtype="U64"))
+        cat["position"]["ra"][:] = np.array(ras)
+        cat["position"]["dec"][:] = np.array(decs)
+        cat["absorber"]["freq"][:] = np.array(freqs)
+        cat["absorber"]["amplitude"][:] = np.array(amps)
+        cat["absorber"]["status"][:] = np.array(statuses, dtype="U24")
+
+        cat.attrs["tag"] = Path(self.json_file).stem
+        cat.attrs["source_json"] = os.path.abspath(self.json_file)
+
+        # Raise on any invalid values before the catalogue is used/saved
+        cat.validate()
+
+        self.log.info(
+            f"Built AbsorberCatalogue with {len(names)}/{len(data)} entries "
+            f"from {self.json_file} (status_include={self.status_include})."
+        )
+
+        return cat
+
+
+class LoadFilesForAbsorbers(BaseLoadFiles):
+    """Load HFB data for the absorbers in a catalogue.
+
+    Works like LoadFiles but computes the frequency selection as the union
+    of the absorbers' frequency windows, loading only those channels, then
+    handing back one time-chunk per file group.
+
+    The absorber parameters are stored as arrays in each returned
+    container's attributes ('source_names', 'source_ra', 'source_dec',
+    'source_freq', 'source_status', 'source_amplitude') and are propagated
+    through the pipeline via 'attrs_from'.
+
+    Attributes
+    ----------
+    freq_phys_delta : float
+        Half-width of the frequency window (in MHz) to load around each
+        absorber frequency. Default is 0.4, giving 3-4 coarse channels
+        and guaranteeing coverage for the final +/- 390 kHz cutout window.
+    """
+
+    freq_phys_delta = config.Property(proptype=float, default=0.4)
+
+    _fgroup_ptr = 0
+
+    def setup(self, manager, filelists, catalogue):
+        """Parse the file groups, take the catalogue and set up the observer.
+
+        Parameters
+        ----------
+        filelists : list
+            A specification of the set of files for the day.
+        catalogue : AbsorberCatalogue
+            The catalogue of absorbers to load.
+        manager :
+            An Observer object holding the geographic location of the telescope.
+        """
+        self.observer = get_telescope(manager)
+
+        if not isinstance(filelists, list):
+            raise RuntimeError("Argument must be a list.")
+
+        self.filegroups = []
+        for flist in filelists:
+            if isinstance(flist, tuple):
+                fgroup = {"files": flist[0], "time_range": flist[1]}
+            elif isinstance(flist, list):
+                fgroup = {"files": flist, "time_range": (None, None)}
+            elif isinstance(flist, str | Path):
+                fgroup = {"files": [flist], "time_range": (None, None)}
+            else:
+                raise ValueError(
+                    f"Did not expect to get an object of type {type(flist)}"
+                )
+            # Avoid adding filegroups with empty filelists (the output of
+            # QueryDatabase with return_intervals can include days with no files)
+            if fgroup["files"]:
+                self.filegroups.append(fgroup)
+
+        self.log.info(f"Will iterate over {len(self.filegroups)} file groups.")
+
+        # Take the absorber parameters from the catalogue container
+        if not isinstance(catalogue, AbsorberCatalogue):
+            raise TypeError(f"Expected an AbsorberCatalogue, got {type(catalogue)}.")
+        catalogue.validate()
+
+        names = np.array([str(n) for n in catalogue.index_map["object_id"]])
+        freqs = np.asarray(catalogue["absorber"]["freq"][:])
+        freq_ax = np.linspace(800.0, 400.0, 1024, endpoint=False)
+
+        # Per-absorber coarse-channel windows
+        self._slices = []
+        for f0 in freqs:
+            i0 = int(np.argmin(np.abs(freq_ax - (f0 + self.freq_phys_delta))))
+            i1 = int(np.argmin(np.abs(freq_ax - (f0 - self.freq_phys_delta))))
+            self._slices.append(slice(min(i0, i1), max(i0, i1) + 1))
+
+        # Union of all absorber channel windows, as a sorted list of indices.
+        self.freq_sel = sorted(
+            {ch for sl in self._slices for ch in range(sl.start, sl.stop)}
+        )
+
+        self.log.info(
+            f"Catalogue has {len(names)} absorbers, {len(self.freq_sel)} total "
+            f"channels to distribute across {mpitools.size} MPI ranks."
+        )
+
+        self._source_names = names
+        self._source_ra = np.asarray(catalogue["position"]["ra"][:])
+        self._source_dec = np.asarray(catalogue["position"]["dec"][:])
+        self._source_freq = freqs
+        self._source_status = np.asarray(catalogue["absorber"]["status"][:])
+        self._source_amp = np.asarray(catalogue["absorber"]["amplitude"][:])
+
+    def process(self):
+        """Load the next file group for all absorbers.
+
+        Returns
+        -------
+        tstream : HFBData
+            One time-chunk with all absorbers' frequency channels
+            distributed across MPI ranks.
+        """
+        gc.collect()
+
+        if self._fgroup_ptr >= len(self.filegroups):
+            raise exceptions.PipelineStopIteration
+
+        filegroup = self.filegroups[self._fgroup_ptr]
+        self._fgroup_ptr += 1
+
+        self.log.info(f"Reading file group {self._fgroup_ptr}/{len(self.filegroups)}.")
+
+        time_range = filegroup.get("time_range", (None, None))
+
+        # Load each file into an HFBData container, applying the union
+        # frequency selection, then concatenate along the time axis
+        fgroup_containers = []
+        for fname in filegroup["files"]:
+            if not os.path.exists(fname):
+                raise RuntimeError(f"File does not exist: {fname}")
+            cont = HFBData.from_file(
+                fname,
+                distributed=self.distributed,
+                freq_sel=self.freq_sel,
+            )
+            fgroup_containers.append(cont)
+
+        tstream = (
+            _concatenate_time(fgroup_containers)
+            if len(fgroup_containers) > 1
+            else fgroup_containers[0]
+        )
+
+        # Redistribute so channels are evenly spread across MPI ranks
+        tstream.redistribute("freq")
+
+        # Find the time to use to compute the container's LSD
+        if time_range and time_range != (None, None):
+            container_time = float(np.mean(time_range))
+        else:
+            container_time = 0.5 * (float(tstream.time[0]) + float(tstream.time[-1]))
+
+        lsd = int(self.observer.unix_to_lsd(container_time))
+        tstream.attrs["lsd"] = lsd
+        tstream.attrs["tag"] = f"lsd_{lsd}"
+        tstream.attrs["files"] = filegroup["files"]
+
+        tstream.attrs["source_names"] = self._source_names
+        tstream.attrs["source_ra"] = self._source_ra
+        tstream.attrs["source_dec"] = self._source_dec
+        tstream.attrs["source_freq"] = self._source_freq
+        tstream.attrs["source_status"] = self._source_status
+        tstream.attrs["source_amplitude"] = self._source_amp
+
+        return tstream
