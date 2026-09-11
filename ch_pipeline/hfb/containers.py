@@ -837,8 +837,8 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         return self.get_subfreq_rfi(sigma_key) / 128
 
 
-class HFBAbsorberCatalogue(SourceCatalog):
-    """A catalogue of absorbers (confirmed and candidate) and calibration sources.
+class HFBAbsorberCatalog(SourceCatalog):
+    """A catalog of absorbers (confirmed and candidate) and calibration sources.
 
     Required per-entry values are: 'ra' (degrees), 'dec' (degrees), and 'freq' (MHz).
     """

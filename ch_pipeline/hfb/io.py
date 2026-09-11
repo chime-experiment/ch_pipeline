@@ -19,7 +19,7 @@ from ch_util.hfbcat import HFBCatalog
 from draco.core.io import get_telescope
 from mpi4py import MPI
 
-from .containers import HFBAbsorberCatalogue, HFBData, HFBHighResRingMapStack, HFBReader
+from .containers import HFBAbsorberCatalog, HFBData, HFBHighResRingMapStack, HFBReader
 
 
 class BeamSelectionMixin:
@@ -456,8 +456,8 @@ class LoadFiles(LoadFilesFromParams):
         super().setup()
 
 
-class MakeAbsorberCatalogue(base.ContainerTask):
-    """Build an HFBAbsorberCatalogue from JSON target lists, resolving calibrators.
+class MakeAbsorberCatalog(base.ContainerTask):
+    """Build an HFBAbsorberCatalog from JSON target lists, resolving calibrators.
 
     Each JSON entry holds 'ra' (degrees), 'dec' (degrees), 'freq' (MHz), and
     optionally 'cal_src' (a calibration source name). Entries with the same
@@ -499,11 +499,11 @@ class MakeAbsorberCatalogue(base.ContainerTask):
         return pos
 
     def process(self):
-        """Read the JSON files, resolve calibrators, return the catalogue.
+        """Read the JSON files, resolve calibrators, return the catalog.
 
         Returns
         -------
-        cat : HFBAbsorberCatalogue
+        cat : HFBAbsorberCatalog
         """
         if self._done:
             raise exceptions.PipelineStopIteration
@@ -608,14 +608,14 @@ class MakeAbsorberCatalogue(base.ContainerTask):
 
         all_entries = entry_list + cal_entries
 
-        # Build the catalogue container. validate() raises on any out-of-range ra/dec/freq
+        # Build the catalog container. validate() raises on any out-of-range ra/dec/freq
         # before it's used downstream.
         names = [e["name"] for e in all_entries]
         ras = [e["ra"] for e in all_entries]
         decs = [e["dec"] for e in all_entries]
         freqs = [e["freq"] for e in all_entries]
 
-        cat = HFBAbsorberCatalogue(object_id=np.array(names, dtype="U64"))
+        cat = HFBAbsorberCatalog(object_id=np.array(names, dtype="U64"))
         cat["position"]["ra"][:] = np.array(ras)
         cat["position"]["dec"][:] = np.array(decs)
         cat["absorber"]["freq"][:] = np.array(freqs)
@@ -632,7 +632,7 @@ class MakeAbsorberCatalogue(base.ContainerTask):
 
 
 class LoadFilesForAbsorbers(BaseLoadFiles):
-    """Load HFB data for the absorbers in a catalogue.
+    """Load HFB data for the absorbers in a catalog.
 
     Works like LoadFiles but computes the frequency selection as the union
     of the absorbers' frequency windows, loading only those channels, then
@@ -655,8 +655,8 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
 
     _fgroup_ptr = 0
 
-    def setup(self, manager, filelists, catalogue):
-        """Parse the file groups, take the catalogue and set up the observer.
+    def setup(self, manager, filelists, catalog):
+        """Parse the file groups, take the catalog and set up the observer.
 
         Parameters
         ----------
@@ -664,8 +664,8 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
             An Observer object holding the geographic location of the telescope.
         filelists : list
             A specification of the set of files for the day.
-        catalogue : HFBAbsorberCatalogue
-            The catalogue of absorbers to load.
+        catalog : HFBAbsorberCatalog
+            The catalog of absorbers to load.
         """
         self.observer = get_telescope(manager)
 
@@ -691,13 +691,13 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
 
         self.log.info(f"Will iterate over {len(self.filegroups)} file groups.")
 
-        # Take the absorber parameters from the catalogue container
-        if not isinstance(catalogue, HFBAbsorberCatalogue):
-            raise TypeError(f"Expected an HFBAbsorberCatalogue, got {type(catalogue)}.")
-        catalogue.validate()
+        # Take the absorber parameters from the catalog container
+        if not isinstance(catalog, HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
 
-        names = np.array([str(n) for n in catalogue.index_map["object_id"]])
-        freqs = np.asarray(catalogue["absorber"]["freq"][:])
+        names = np.array([str(n) for n in catalog.index_map["object_id"]])
+        freqs = np.asarray(catalog["absorber"]["freq"][:])
         freq_ax = np.linspace(800.0, 400.0, 1024, endpoint=False)
         nfreq = len(freq_ax)
 
@@ -715,13 +715,13 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
         )
 
         self.log.info(
-            f"Catalogue has {len(names)} absorbers, {len(self.freq_sel)} total "
+            f"Catalog has {len(names)} absorbers, {len(self.freq_sel)} total "
             f"channels to distribute across {mpitools.size} MPI ranks."
         )
 
         self._source_names = names
-        self._source_ra = np.asarray(catalogue["position"]["ra"][:])
-        self._source_dec = np.asarray(catalogue["position"]["dec"][:])
+        self._source_ra = np.asarray(catalog["position"]["ra"][:])
+        self._source_dec = np.asarray(catalog["position"]["dec"][:])
         self._source_freq = freqs
 
     def process(self):
