@@ -1,6 +1,5 @@
 """HFB containers."""
 
-import re
 from functools import cached_property
 from typing import ClassVar
 
@@ -517,6 +516,57 @@ class HFBHighResRingMap(HFBBeamRingMap, HFBHighResContainer):
     }
 
 
+class HFBHighResRingMapStack(HFBHighResRingMap):
+    """Container for holding high-resolution ringmap cutouts from multiple days.
+
+    With respect to HFBHighResRingMap, a 'csd' axis is added in front of
+    the other axes, so that ringmap cutouts around the same absorber from several
+    sidereal days can be stacked together in one container. The distributed axis is
+    'csd' (rather than 'el', as in the parent class), since the 'csd' axis grows
+    as more days are added.
+    """
+
+    _axes = ("csd",)
+
+    _dataset_spec: ClassVar = {
+        "hfb": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": "gzip",
+            "compression_opts": 4,
+            "chunks": (20, 3, 5, 2000, 13),
+        },
+        "weight": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": "gzip",
+            "compression_opts": 4,
+            "chunks": (20, 3, 5, 2000, 13),
+        },
+        "nsample": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": "gzip",
+            "compression_opts": 4,
+            "chunks": (20, 3, 5, 2000, 13),
+        },
+    }
+
+    @property
+    def csd(self):
+        """The csd indices of the csd axis."""
+        return self.index_map["csd"]
+
+
 class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
     """Container for holding EW-beam-averaged high-resolution frequency ringmap data."""
 
@@ -787,97 +837,20 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
         return self.get_subfreq_rfi(sigma_key) / 128
 
 
-class AbsorberCatalogue(SourceCatalog):
-    """A catalogue of absorbers (known and candidate).
+class HFBAbsorberCatalogue(SourceCatalog):
+    """A catalogue of absorbers (confirmed and candidate) and calibration sources.
 
-    Required per-entry values are: 'ra' (degrees), 'dec' (degrees), 'freq' (MHz),
-    and 'status'. The 'amplitude' is optional: when unknown it is stored as
-    NaN, and when provided it must be a finite float.
-
-    Status values
-    -------------
-    Allowed values are "confirmed", "false_positive", "control", and
-    candidates. A candidate records the S/N of its detection in the status
-    itself, e.g. "candidate_snr5" or "candidate_snr7" (plain "candidate" is
-    also allowed if the S/N is unknown). "control" marks bright continuum
-    test sources (e.g. Cyg A) or narrowband RFI used to validate the pipeline.
+    Required per-entry values are: 'ra' (degrees), 'dec' (degrees), and 'freq' (MHz).
     """
-
-    STATUS_VALUES = ("confirmed", "candidate", "false_positive", "control")
-
-    _STATUS_RE = re.compile(
-        r"^(confirmed|false_positive|control|candidate(_snr\d+(\.\d+)?)?)$"
-    )
 
     _table_spec: ClassVar = {
         "absorber": {
             "columns": [
                 ["freq", np.float64],
-                ["amplitude", np.float64],
-                ["status", "<U24"],
             ],
             "axis": "object_id",
         },
     }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # Record the allowed status values in the container attributes
-        self.attrs["status_values"] = list(self.STATUS_VALUES)
-
-    @staticmethod
-    def _snr_of(status) -> float:
-        """S/N recorded in a status ('candidate_snr5' -> 5.0; NaN if none)."""
-        s = str(status)
-        if "_snr" in s:
-            try:
-                return float(s.split("_snr", 1)[1])
-            except ValueError:
-                return np.nan
-        return np.nan
-
-    @classmethod
-    def status_match(cls, status, include) -> np.ndarray:
-        """Boolean mask of 'status' entries matching the 'include' list.
-
-        Rules per entry of 'include':
-        - "confirmed" / "false_positive" : exact match.
-        - "candidate" : matches all candidates.
-        - "candidate_snrX" : matches candidates with S/N >= X
-          (candidates without a recorded S/N are not matched).
-
-        Parameters
-        ----------
-        status : str or array_like of str
-            Status values to test.
-        include : str or list of str
-            Status values to match against.
-
-        Returns
-        -------
-        mask : np.ndarray of bool
-            True for entries that match.
-        """
-        if isinstance(include, str):
-            include = [include]
-
-        status = np.atleast_1d(np.asarray(status, dtype=str))
-        is_candidate = np.char.startswith(status, "candidate")
-        snr = np.array([cls._snr_of(s) for s in status])
-
-        mask = np.zeros(status.size, dtype=bool)
-        for inc in include:
-            inc = str(inc)
-            if inc == "candidate":
-                mask |= is_candidate
-            elif inc.startswith("candidate_snr"):
-                threshold = float(inc.split("_snr", 1)[1])
-                mask |= is_candidate & (snr >= threshold)
-            else:
-                mask |= status == inc
-
-        return mask
 
     def validate(self):
         """Check that all entries hold valid values."""
@@ -887,10 +860,11 @@ class AbsorberCatalogue(SourceCatalog):
         ra = self["position"]["ra"][:]
         dec = self["position"]["dec"][:]
         freq = self["absorber"]["freq"][:]
+
         for field, values, ok in [
             ("ra", ra, (ra >= 0.0) & (ra <= 360.0)),
-            ("dec", dec, (dec >= -90.0) & (dec <= 90.0)),
-            ("freq", freq, (freq > 0.0) & np.isfinite(freq)),
+            ("dec", dec, (dec > -90.0) & (dec < 90.0)),
+            ("freq", freq, (freq >= 400.0) & (freq <= 800.0)),
         ]:
             bad = ~ok
             if bad.any():
@@ -898,31 +872,8 @@ class AbsorberCatalogue(SourceCatalog):
                     f"Required column '{field}' has missing or out-of-range "
                     f"values for entries {names[bad].tolist()}: "
                     f"{values[bad].tolist()}. "
-                    "Expected 0 <= ra < 360, -90 <= dec <= 90, freq > 0 (MHz)."
+                    "Expected 0 <= ra <= 360, -90 < dec < 90, 400 <= freq <= 800 (MHz)."
                 )
-
-        # Status: "confirmed", "false_positive", "candidate" or "candidate_snrX"
-        status = self["absorber"]["status"][:]
-        bad = np.array(
-            [self._STATUS_RE.match(str(s)) is None for s in status], dtype=bool
-        )
-        if bad.any():
-            raise ValueError(
-                f"Invalid status values {np.unique(status[bad]).tolist()} for "
-                f"entries {names[bad].tolist()}. "
-                f"Allowed: {self.STATUS_VALUES}, where candidates may record "
-                "their detection S/N as 'candidate_snrX' (e.g. 'candidate_snr5')."
-            )
-
-        # Amplitude (optional):
-        amplitude = self["absorber"]["amplitude"][:]
-        bad = np.isinf(amplitude)
-        if bad.any():
-            raise ValueError(
-                f"Column 'amplitude' has non-finite (infinite) values for "
-                f"entries: {names[bad].tolist()}. Amplitude must be a finite "
-                "float, or NaN if unknown."
-            )
 
     @property
     def id(self) -> np.ndarray:
@@ -943,18 +894,3 @@ class AbsorberCatalogue(SourceCatalog):
     def freq(self) -> np.ndarray:
         """Observed frequency (MHz) of the absorption feature."""
         return self["absorber"]["freq"]
-
-    @property
-    def amplitude(self) -> np.ndarray:
-        """Estimated amplitude of the absorption feature (NaN if unknown)."""
-        return self["absorber"]["amplitude"]
-
-    @property
-    def status(self) -> np.ndarray:
-        """Status of each absorber (confirmed/candidate[_snrX]/false_positive)."""
-        return self["absorber"]["status"]
-
-    @property
-    def snr(self) -> np.ndarray:
-        """Detection S/N of each entry, parsed from the status (NaN if none)."""
-        return np.array([self._snr_of(s) for s in self["absorber"]["status"][:]])

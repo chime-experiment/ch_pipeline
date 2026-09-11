@@ -1,5 +1,6 @@
 """HFB tasks for reading and writing files."""
 
+import fcntl
 import gc
 import json
 import os
@@ -16,8 +17,9 @@ from caput.util import mpitools
 from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
 from draco.core.io import get_telescope
+from mpi4py import MPI
 
-from .containers import AbsorberCatalogue, HFBData, HFBReader
+from .containers import HFBAbsorberCatalogue, HFBData, HFBHighResRingMapStack, HFBReader
 
 
 class BeamSelectionMixin:
@@ -455,117 +457,175 @@ class LoadFiles(LoadFilesFromParams):
 
 
 class MakeAbsorberCatalogue(base.ContainerTask):
-    """Build an AbsorberCatalogue container from a JSON target list.
+    """Build an HFBAbsorberCatalogue from JSON target lists, resolving calibrators.
 
-    'ra' (degrees), 'dec' (degrees), 'freq' (MHz) and 'status' are required.
-    'amplitude' may be null or omitted (stored as NaN).
+    Each JSON entry holds 'ra' (degrees), 'dec' (degrees), 'freq' (MHz), and
+    optionally 'cal_src' (a calibration source name). Entries with the same
+    key across files count as one object. (The first occurrence wins,
+    adopting a later entry's 'cal_src' if it has none itself.)
 
-    Status values: "confirmed", "false_positive", "control" (bright
-    continuum test sources like Cyg A), and candidates, where a candidate
-    records its detection S/N in the status itself, e.g. "candidate_snr5"
-    or "candidate_snr7".
+    For each unique (cal_src, coarse channel) pair referenced by an
+    absorber, get position from 'combinedps_file', frequency borrowed from that
+    absorber (so the same window is extracted downstream), and name
+    "<ra><+/-dec>_<cal_src>", e.g. "141+79_3C_220.3".
 
     Attributes
     ----------
-    json_file : str
-        Path to the JSON target list.
-    status_include : list, optional
-        Only include entries whose status matches:
-        "confirmed"/"false_positive" match exactly; "candidate" matches
-        ALL candidates; "candidate_snrX" matches candidates with S/N >= X.
-        By default all entries are included.
+    json_files : list of str
+        Paths of the JSON target list files.
+    combinedps_file : str, optional
+        Point-source table for calibrator positions. Required if any
+        entry has a 'cal_src'.
     """
 
-    json_file = config.Property(proptype=str)
-    status_include = config.Property(proptype=list, default=None)
+    json_files = config.Property(proptype=list)
+    combinedps_file = config.Property(proptype=str, default=None)
 
     _done = False
 
+    def _load_combinedps(self):
+        """Load {name: (ra, dec)} from the combined point-source table."""
+        with open(self.combinedps_file) as f:
+            header = f.readline().split()
+            rows = [line.split() for line in f if line.strip()]
+
+        ira = header.index("RA")
+        idec = header.index("DEC")
+        i3c = header.index("3CNAME")
+
+        pos = {}
+        for row in rows:
+            pos.setdefault(row[i3c], (float(row[ira]), float(row[idec])))
+        return pos
+
     def process(self):
-        """Read the JSON file and return the catalogue container.
+        """Read the JSON files, resolve calibrators, return the catalogue.
 
         Returns
         -------
-        cat : AbsorberCatalogue
+        cat : HFBAbsorberCatalogue
         """
         if self._done:
             raise exceptions.PipelineStopIteration
         self._done = True
 
-        with open(self.json_file) as f:
-            data = json.load(f)
-
-        names, ras, decs, freqs, amps, statuses = [], [], [], [], [], []
-
-        for name, entry in data.items():
-            try:
-                status = str(entry["status"])
-                ra = float(entry["ra"])
-                dec = float(entry["dec"])
-                freq = float(entry["freq"])
-            except (KeyError, TypeError) as e:
-                raise RuntimeError(
-                    f"Entry {name} in {self.json_file} is missing or has an "
-                    f"invalid required key: {e}."
-                ) from e
-
-            # Filter on status ("candidate" = all candidates;
-            # "candidate_snrX" = candidates with S/N >= X)
-            if (
-                self.status_include
-                and not AbsorberCatalogue.status_match(
-                    status, self.status_include
-                ).any()
-            ):
-                continue
-
-            amp = entry.get("amplitude", None)
-            amp = np.nan if amp is None else float(amp)
-
-            names.append(str(name))
-            ras.append(ra)
-            decs.append(dec)
-            freqs.append(freq)
-            amps.append(amp)
-            statuses.append(status)
-
-        if not names:
-            raise RuntimeError(
-                f"No absorbers in {self.json_file} matched "
-                f"status_include={self.status_include}."
+        # Check we were given at least one file.
+        files = [str(f) for f in (self.json_files or [])]
+        if not files:
+            raise config.CaputConfigError(
+                "At least one JSON file must be given via 'json_files'."
             )
 
-        # Generate catalogue names from the sky position, as
-        # CHIME_<RA><+/-Dec> in whole degrees (e.g. CHIME_024+33).
-        # Entries that round to the same position get a numeric suffix
-        # to keep object_id unique.
-        cat_names = []
-        for ra, dec in zip(ras, decs):
-            base = f"CHIME_{round(ra) % 360:03d}{round(dec):+03d}"
-            cname = base
-            n = 1
-            while cname in cat_names:
-                n += 1
-                cname = f"{base}_{n}"
-            cat_names.append(cname)
+        # CHIME coarse channel centres
+        cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
 
-        # Build the catalogue container
-        cat = AbsorberCatalogue(object_id=np.array(cat_names, dtype="U64"))
+        # Read every file in order. Duplicate keys (across files) count as one object
+        # The first occurrence wins, but a later occurrence's cal_src is adopted if
+        # the first one didn't have one.
+        entries = {}  # name -> entry dict, in first-seen order
+        nmerged = 0
+
+        for fname in files:
+            with open(fname) as f:
+                data = json.load(f)
+
+            for name, entry in data.items():
+                name = str(name)
+                try:
+                    ra = float(entry["ra"])
+                    dec = float(entry["dec"])
+                    freq = float(entry["freq"])
+                except (KeyError, TypeError, ValueError) as e:
+                    raise RuntimeError(
+                        f"Entry {name} in {fname} is missing or has an "
+                        f"invalid required key: {e}."
+                    ) from e
+
+                cal_src = entry.get("cal_src", None)
+                cal_src = str(cal_src) if cal_src else ""
+
+                if name in entries:
+                    nmerged += 1
+                    kept = entries[name]
+                    self.log.info(
+                        f"Entry {name} ({fname}) already read from "
+                        f"{kept['source_file']}; treating as the same object."
+                    )
+                    if cal_src and not kept["cal_src"]:
+                        kept["cal_src"] = cal_src
+                    continue
+
+                channel = int(np.argmin(np.abs(cfreq - freq)))
+                entries[name] = {
+                    "name": name,
+                    "ra": ra,
+                    "dec": dec,
+                    "freq": freq,
+                    "cal_src": cal_src,
+                    "channel": channel,
+                }
+
+        entry_list = list(entries.values())
+        seen = {e["name"] for e in entry_list}
+
+        # Build one calibrator entry per unique (cal_src, coarse channel) pair,
+        # at the calibrator's own position but the absorber's frequency, so the same window
+        # is extracted downstream.
+        cal_entries = []
+        if any(e["cal_src"] for e in entry_list):
+            if not self.combinedps_file:
+                raise config.CaputConfigError(
+                    "Entries have 'cal_src' but no 'combinedps_file' was "
+                    "given to look up calibrator positions."
+                )
+            positions = self._load_combinedps()
+
+            cal_seen = set()
+            for e in entry_list:
+                cs = e["cal_src"]
+                if not cs or (cs, e["channel"]) in cal_seen:
+                    continue
+                cal_seen.add((cs, e["channel"]))
+
+                if cs not in positions:
+                    raise RuntimeError(
+                        f"Calibration source {cs} (for {e['name']}) not "
+                        f"found in {self.combinedps_file}."
+                    )
+                cra, cdec = positions[cs]
+
+                # Name from the calibrator's own position: e.g. "041+79_3C_220.3".
+                base_cname = f"{round(cra):03d}{round(cdec):+d}_{cs}"
+                cname, n = base_cname, 1
+                while cname in seen:
+                    n += 1
+                    cname = f"{base_cname}_{n}"
+                seen.add(cname)
+
+                cal_entries.append(
+                    {"name": cname, "ra": cra, "dec": cdec, "freq": e["freq"]}
+                )
+
+        all_entries = entry_list + cal_entries
+
+        # Build the catalogue container. validate() raises on any out-of-range ra/dec/freq
+        # before it's used downstream.
+        names = [e["name"] for e in all_entries]
+        ras = [e["ra"] for e in all_entries]
+        decs = [e["dec"] for e in all_entries]
+        freqs = [e["freq"] for e in all_entries]
+
+        cat = HFBAbsorberCatalogue(object_id=np.array(names, dtype="U64"))
         cat["position"]["ra"][:] = np.array(ras)
         cat["position"]["dec"][:] = np.array(decs)
         cat["absorber"]["freq"][:] = np.array(freqs)
-        cat["absorber"]["amplitude"][:] = np.array(amps)
-        cat["absorber"]["status"][:] = np.array(statuses, dtype="U24")
 
-        cat.attrs["tag"] = Path(self.json_file).stem
-        cat.attrs["source_json"] = os.path.abspath(self.json_file)
-
-        # Raise on any invalid values before the catalogue is used/saved
         cat.validate()
 
         self.log.info(
-            f"Built AbsorberCatalogue with {len(names)}/{len(data)} entries "
-            f"from {self.json_file} (status_include={self.status_include})."
+            f"Read {len(files)} files and merged {nmerged} as duplicates; "
+            f"{len(entry_list)} unique absorbers and {len(cal_entries)} calibrator entries, "
+            f"totaling {len(names)}."
         )
 
         return cat
@@ -580,18 +640,18 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
 
     The absorber parameters are stored as arrays in each returned
     container's attributes ('source_names', 'source_ra', 'source_dec',
-    'source_freq', 'source_status', 'source_amplitude') and are propagated
-    through the pipeline via 'attrs_from'.
+    'source_freq') and are propagated through the pipeline via
+    'attrs_from'.
 
     Attributes
     ----------
-    freq_phys_delta : float
-        Half-width of the frequency window (in MHz) to load around each
-        absorber frequency. Default is 0.4, giving 3-4 coarse channels
-        and guaranteeing coverage for the final +/- 390 kHz cutout window.
+    n_coarse : int
+        Coarse channels either side of the one nearest each absorber's
+        frequency (i.e. 2 * n_coarse + 1 channels), clipped at the true
+        400/800 MHz band edges. Default is 6.
     """
 
-    freq_phys_delta = config.Property(proptype=float, default=0.4)
+    n_coarse = config.Property(proptype=int, default=6)
 
     _fgroup_ptr = 0
 
@@ -600,12 +660,12 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
 
         Parameters
         ----------
-        filelists : list
-            A specification of the set of files for the day.
-        catalogue : AbsorberCatalogue
-            The catalogue of absorbers to load.
         manager :
             An Observer object holding the geographic location of the telescope.
+        filelists : list
+            A specification of the set of files for the day.
+        catalogue : HFBAbsorberCatalogue
+            The catalogue of absorbers to load.
         """
         self.observer = get_telescope(manager)
 
@@ -632,20 +692,22 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
         self.log.info(f"Will iterate over {len(self.filegroups)} file groups.")
 
         # Take the absorber parameters from the catalogue container
-        if not isinstance(catalogue, AbsorberCatalogue):
-            raise TypeError(f"Expected an AbsorberCatalogue, got {type(catalogue)}.")
+        if not isinstance(catalogue, HFBAbsorberCatalogue):
+            raise TypeError(f"Expected an HFBAbsorberCatalogue, got {type(catalogue)}.")
         catalogue.validate()
 
         names = np.array([str(n) for n in catalogue.index_map["object_id"]])
         freqs = np.asarray(catalogue["absorber"]["freq"][:])
         freq_ax = np.linspace(800.0, 400.0, 1024, endpoint=False)
+        nfreq = len(freq_ax)
 
         # Per-absorber coarse-channel windows
         self._slices = []
         for f0 in freqs:
-            i0 = int(np.argmin(np.abs(freq_ax - (f0 + self.freq_phys_delta))))
-            i1 = int(np.argmin(np.abs(freq_ax - (f0 - self.freq_phys_delta))))
-            self._slices.append(slice(min(i0, i1), max(i0, i1) + 1))
+            i0 = int(np.argmin(np.abs(freq_ax - f0)))
+            self._slices.append(
+                slice(max(0, i0 - self.n_coarse), min(nfreq, i0 + self.n_coarse + 1))
+            )
 
         # Union of all absorber channel windows, as a sorted list of indices.
         self.freq_sel = sorted(
@@ -661,8 +723,6 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
         self._source_ra = np.asarray(catalogue["position"]["ra"][:])
         self._source_dec = np.asarray(catalogue["position"]["dec"][:])
         self._source_freq = freqs
-        self._source_status = np.asarray(catalogue["absorber"]["status"][:])
-        self._source_amp = np.asarray(catalogue["absorber"]["amplitude"][:])
 
     def process(self):
         """Load the next file group for all absorbers.
@@ -716,13 +776,154 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
         lsd = int(self.observer.unix_to_lsd(container_time))
         tstream.attrs["lsd"] = lsd
         tstream.attrs["tag"] = f"lsd_{lsd}"
-        tstream.attrs["files"] = filegroup["files"]
 
         tstream.attrs["source_names"] = self._source_names
         tstream.attrs["source_ra"] = self._source_ra
         tstream.attrs["source_dec"] = self._source_dec
         tstream.attrs["source_freq"] = self._source_freq
-        tstream.attrs["source_status"] = self._source_status
-        tstream.attrs["source_amplitude"] = self._source_amp
 
         return tstream
+
+
+class UpdateAbsorberStacks(base.ContainerTask):
+    """Merge each absorber's cutout from ExtractAbsorberCutouts into its stack file.
+
+    The cutout is written into this day's csd slot of <stack_dir>/<name>.h5, which
+    must already exist with matching axes: 'beam_ew', 'ra' and 'freq' must equal
+    the stack file's axes exactly; 'el' only has to have the same length.
+
+    An advisory file lock keeps concurrent jobs updating the same absorber from racing.
+
+    This task takes the container ExtractAbsorberCutouts produced ('csd' in its attrs,
+    one named group per absorber).
+
+    Attributes
+    ----------
+    stack_dir : str
+        Directory holding the per-absorber stack files.
+    """
+
+    stack_dir = config.Property(proptype=str)
+
+    def process(self, cont):
+        """Merge this day's cutouts into their stack files.
+
+        Parameters
+        ----------
+        cont : caput.memdata.MemDiskGroup
+            The output of ExtractAbsorberCutouts: 'cont.attrs["csd"]' plus
+            one group per absorber (cont[name]), each holding
+            beam_ew / el / ra / freq / hfb / weight datasets.
+        """
+        comm = MPI.COMM_WORLD
+        rank0 = comm.rank == 0
+
+        if cont is None:
+            if rank0:
+                self.log.warning("Nothing to merge (no cutouts this day).")
+            return
+
+        csd = int(cont.attrs["csd"])
+        names = list(cont.keys())
+
+        error = None
+        nsaved = 0
+
+        if rank0:
+            for name in names:
+                grp = cont[name]
+                axes = {
+                    "beam_ew": grp["beam_ew"][:],
+                    "el": grp["el"][:],
+                    "ra": grp["ra"][:],
+                    "freq": grp["freq"][:],
+                }
+                data = {"hfb": grp["hfb"][:], "weight": grp["weight"][:]}
+                try:
+                    self._merge_into_stack(name, csd, axes, data)
+                    nsaved += 1
+                except Exception as e:
+                    self.log.exception(f"Absorber {name}: stack update failed: {e}")
+                    error = f"{name}: {type(e).__name__}: {e}"
+                    break
+
+        # Stop the job cleanly if it failed.
+        error = comm.bcast(error, root=0)
+        if error is not None:
+            raise RuntimeError(f"UpdateAbsorberStacks failed on rank 0: {error}")
+
+        if rank0:
+            self.log.info(f"Merged {nsaved}/{len(names)} cutouts into their stacks.")
+
+    def _merge_into_stack(self, name, csd, axes, data):
+        """Write one absorber's cutout into its stack file. Rank 0 only.
+
+        Parameters
+        ----------
+        name : str
+            Absorber name; the stack file is <stack_dir>/<name>.h5.
+        csd : int
+            Day this cutout is from.
+        axes : dict
+            {'beam_ew', 'el', 'ra', 'freq'} -> axis values of the cutout.
+            beam_ew, ra and freq must equal the stack file's axes while el only has to
+            have the same length.
+        data : dict
+            Dataset name -> array, e.g. {'hfb': ..., 'weight': ...}.
+        """
+        path = os.path.join(self.stack_dir, f"{name}.h5")
+        lockpath = path + ".lock"
+        tmp_path = os.path.join(self.stack_dir, f".{name}.{os.getpid()}.tmp.h5")
+
+        if not os.path.exists(path):
+            raise RuntimeError(
+                f"{name}: stack file {path} does not exist. Create it before "
+                "running this task."
+            )
+
+        # The lock file is opened in append mode so it is created if missing.
+        with open(lockpath, "a") as lockfile:
+            fcntl.flock(lockfile, fcntl.LOCK_EX)
+            try:
+                stack = HFBHighResRingMapStack.from_file(path, distributed=False)
+
+                for axis, values in axes.items():
+                    existing = np.asarray(stack.index_map[axis])
+                    values = np.asarray(values)
+                    if existing.shape != values.shape:
+                        raise RuntimeError(
+                            f"{name}: cutout '{axis}' axis has shape "
+                            f"{values.shape}, but stack file {path} has "
+                            f"{existing.shape}."
+                        )
+                    if axis != "el" and not np.allclose(
+                        existing, values, rtol=1e-5, atol=1e-8
+                    ):
+                        raise RuntimeError(
+                            f"{name}: cutout '{axis}' axis values differ from "
+                            f"stack file {path} (same shape, different values)."
+                        )
+
+                csd_index = np.asarray(stack.index_map["csd"])
+                matches = np.flatnonzero(csd_index == csd)
+                if matches.size == 0:
+                    raise RuntimeError(
+                        f"{name}: csd={csd} is outside the range of stack file "
+                        f"{path} ({csd_index.min()}-{csd_index.max()})."
+                    )
+                ic = int(matches[0])
+
+                for dset, arr in data.items():
+                    stack[dset][ic] = arr
+
+                # Atomic save: write to a temp file, then rename it over the
+                # original, so a crash mid-save can't corrupt the stack.
+                stack.save(tmp_path)
+                os.replace(tmp_path, path)
+
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                fcntl.flock(lockfile, fcntl.LOCK_UN)
+
+        self.log.info(f"Updated {path} at csd={csd}.")
