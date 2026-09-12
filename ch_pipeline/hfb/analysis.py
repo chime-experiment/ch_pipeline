@@ -1,15 +1,20 @@
 """Tasks for HFB analysis."""
 
+import beam_model.formed as fm
 import numpy as np
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from caput import config, mpiarray
 from caput.algorithms import median
 from caput.containers import copy_datasets_filter, empty_like
+from caput.memdata import MemDiskGroup
 from caput.pipeline import tasklib
 from caput.util import mpitools
 from caput.util.pfb import DeconvolvePFB
+from ch_ephem.coord import bmxy_to_hadec
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
+from draco.core import io
 from draco.util import tools
+from mpi4py import MPI
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
 
@@ -301,7 +306,27 @@ class HFBDivideByTemplate(tasklib.base.ContainerTask):
 
 
 class HFBAlignEWBeams(tasklib.base.ContainerTask):
-    """Shift HFB ringmap data to true RA values in order to align EW beams."""
+    """Shift HFB ringmap data to true RA values in order to align EW beams.
+
+    The RA axis of the input may be a partial window that wraps through
+    RA = 0/360 (as for the absorber cutouts). In that case the axis is
+    internally unwrapped to a monotonic coordinate (values above the wrap
+    get +360 deg) before interpolation, so alignment behaves correctly
+    across the boundary.
+
+    Attributes
+    ----------
+    mode : str
+        How to treat evaluation points that fall outside the range of the
+        (shifted) input RA samples. One of:
+        "zero" -- set data and weight to zero there (appropriate for partial
+        RA windows such as cutouts).
+        "extrapolate" -- linearly extrapolate from the two nearest samples.
+        "wrap" -- treat RA as periodic with a period of 360 deg. Only valid
+        when the RA axis covers the full circle.
+    """
+
+    mode = config.enum(["zero", "extrapolate", "wrap"], default="wrap")
 
     def setup(self):
         """Load offsets and reference angles from CHIME/FRB beam model."""
@@ -320,7 +345,8 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
         Parameters
         ----------
         stream : containers.HFBHighResRingMap
-            HFB ringmap container to align.
+            HFB ringmap container to align. Its RA axis may be a partial
+            window, possibly wrapping through RA = 0/360.
 
         Returns
         -------
@@ -329,8 +355,35 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
         """
         from ch_ephem.coord import bmxy_to_hadec
 
-        data = stream.hfb[:]
-        weight = stream.weight[:]
+        # Distribute over freq so that the RA axis is complete on all ranks
+        stream.redistribute("freq")
+
+        data = stream.hfb[:].local_array
+        weight = stream.weight[:].local_array
+
+        # Get the RA axis and unwrap it if it crosses RA = 0/360, so that
+        # it is strictly monotonic (needed by the interpolation). At most
+        # one wrap is allowed.
+        ra = np.asarray(stream.ra[:], dtype=np.float64).copy()
+        jumps = np.flatnonzero(np.diff(ra) < 0)
+        if jumps.size > 1:
+            raise ValueError(
+                "RA axis is not monotonic even after allowing for a single "
+                "wrap through 0/360."
+            )
+        wraps = jumps.size == 1
+        if wraps:
+            ra[jumps[0] + 1 :] += 360.0
+
+        if self.mode == "wrap":
+            # "wrap" only makes sense for full RA coverage
+            dra = np.median(np.diff(ra))
+            if wraps or not np.isclose(ra.size * dra, 360.0, rtol=1e-3):
+                raise ValueError(
+                    "mode='wrap' requires an RA axis covering the full "
+                    "0-360 deg circle; got a partial RA window. Use "
+                    "mode='zero' or 'extrapolate' for cutouts."
+                )
 
         # Find CHIME/FRB XY coordinates of beams
         x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
@@ -351,8 +404,8 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
 
                 # Do alignment by evaluating the data and weight at the RAs
                 # given by the `ra` axis of the container. Do this using linear
-                # interpolation with cyclic wrapping in RA, taking into account
-                # uncertainties and flagged data.
+                # interpolation. The treatment of points outside the shifted RA
+                # range is set by the `mode` attribute.
                 (
                     data_aligned[iewb, insb, :, :],
                     weight_aligned[iewb, insb, :, :],
@@ -360,13 +413,14 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
                     x=ra_true,
                     y=data[iewb, insb, :, :],
                     w=weight[iewb, insb, :, :],
-                    xeval=stream.ra,
-                    mode="wrap",
-                    xperiod=360.0,
+                    xeval=ra.copy(),
+                    mode=self.mode,
+                    xperiod=360.0 if self.mode == "wrap" else None,
                 )
 
         # Create output container; add data and weights
-        out = containers.HFBHighResRingMap(copy_from=stream)
+        out = containers.HFBHighResRingMap(axes_from=stream, attrs_from=stream)
+        out.redistribute("freq")
         out.data[:] = data_aligned
         out.weight[:] = weight_aligned
 
@@ -574,6 +628,8 @@ class HFBStackDays(tasklib.base.ContainerTask):
         # container that will hold the stack.
         if self.stack is None:
             self.stack = empty_like(sdata)
+            self.stack.hfb[:] = 0.0
+            self.stack.weight[:] = 0.0
 
             # Add stack-specific dataset: count of samples, to be used as weight
             # for the uniform weighting case. Initialize this dataset to zero.
@@ -947,6 +1003,97 @@ class SelectBeam(BeamSelectionMixin, tasklib.base.ContainerTask):
 
         # Find indices in current beam axis of selected subset of beams
         selindex = np.flatnonzero(np.isin(stream.beam, self.beam_sel)).tolist()
+
+        # Copy over datasets
+        copy_datasets_filter(stream, newstream, "beam", selindex)
+
+        return newstream
+
+
+class SelectBeamsAroundSources(tasklib.base.ContainerTask):
+    """Select the beams around the sources recorded in the attributes.
+
+    The source declination and frequency are read from the container
+    attributes ('source_dec', 'source_freq'), which are set by
+    LoadFilesFromCatalog.
+
+    Attributes
+    ----------
+    n_beams_ns : int
+        Number of NS beams to include on either side of the beam closest
+        to each source (i.e. 2 * n_beams_ns + 1 NS beams per source).
+        Default is 2.
+    beam_ew_include : list
+        List of East-West beam indices to include. Default is [0, 1, 2].
+    """
+
+    n_beams_ns = config.Property(proptype=int, default=2)
+    beam_ew_include = config.Property(proptype=list, default=[0, 1, 2])
+
+    def setup(self, manager):
+        """Load the beam model used to locate the sources' NS beams.
+
+        Parameters
+        ----------
+        manager :
+            An Observer object holding the geographic location of the telescope.
+        """
+        self.beam_mdl = fm.FFTFormedBeamModel()
+        self.observer = io.get_telescope(manager)
+        self.latitude = self.observer.latitude
+
+    def process(self, stream):
+        """Select the beams around the catalog's sources.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with a beam axis and 'source_dec' / 'source_freq'
+            attributes from 'LoadFilesFromCatalog'
+
+        Returns
+        -------
+        newstream : containers.HFBData
+            New container holding only the selected beams.
+        """
+        src_dec = np.atleast_1d(stream.attrs["source_dec"])
+        src_freq = np.atleast_1d(stream.attrs["source_freq"])
+
+        # Union of the NS-beam neighbourhoods of all absorbers in the catalog.
+        ns_beams: set = set()
+        for dec, freq in zip(src_dec, src_freq):
+            angles = self.beam_mdl.get_beam_positions(np.arange(0, 256), [freq])
+            ns0 = int(np.argmin(np.abs(angles[:, 0, 1] - (dec - self.latitude))))
+            #            angles = self.beam_mdl.get_beam_positions(np.arange(0, 256), [freq])
+            #            ns0 = int(_search_nearest(angles.T[1][0], dec - self.latitude))
+            ns_beams.update(
+                range(
+                    max(0, ns0 - self.n_beams_ns), min(256, ns0 + self.n_beams_ns + 1)
+                )
+            )
+
+        ns_sel = np.array(sorted(ns_beams))
+        ew_sel = np.array(self.beam_ew_include)
+
+        # Full beam indices, restricted to beams present in the stream
+        beam_sel = (ew_sel[:, np.newaxis] * 256 + ns_sel).flatten()
+        beam_sel = np.sort(beam_sel[np.isin(beam_sel, stream.beam)])
+
+        self.log.info(
+            f"Selecting {beam_sel.size} beams for {src_dec.size} absorbers "
+            f"({ns_sel.size} NS beams, EW {ew_sel.tolist()})."
+        )
+
+        # Create new container with the subset of beams
+        newstream = empty_like(stream, beam=beam_sel)
+
+        # Make sure all datasets are initialised
+        for dname in stream.datasets.keys():
+            if dname not in newstream.datasets:
+                newstream.add_dataset(dname)
+
+        # Find indices in current beam axis of selected subset of beams
+        selindex = np.flatnonzero(np.isin(stream.beam, beam_sel)).tolist()
 
         # Copy over datasets
         copy_datasets_filter(stream, newstream, "beam", selindex)
@@ -1406,3 +1553,243 @@ class HFBMedianSubtraction(tasklib.base.ContainerTask):
         out.weight[:] = weight
 
         return out
+
+
+def ra_window_pixels(dec, freq, dra_deg, ra_step, beam_mdl, latitude, ns_grid=None):
+    """Number of RA pixels (one-sided) covering 'dra_deg' degrees at best resolution.
+
+    The width in hour angle (i.e. RA) of a synthetic beam grows towards the
+    celestial pole. This scales the requested half-width by the ratio of the
+    beam width at the source's declination to the narrowest beam width, so
+    every cutout contains the same number of "beam widths" of RA.
+
+    Parameters
+    ----------
+    dec : float
+        Declination of the source, in degrees.
+    freq : float
+        Frequency, in MHz, at which to evaluate the beam model.
+    dra_deg : float
+        Desired RA half-width, in degrees, at the best-resolution declination.
+    ra_step : float
+        RA-axis pixel spacing, in degrees (e.g. 360 / 4280).
+    beam_mdl : beam_model.formed.FFTFormedBeamModel
+        Beam model instance.
+    latitude : float
+        Latitude of the telescope, in degrees.
+    ns_grid : array_like of int, optional
+        NS beam indices to scan. Default is np.arange(256).
+
+    Returns
+    -------
+    n_ra : int
+        Number of RA pixels either side of the source's own pixel.
+    """
+    if ns_grid is None:
+        ns_grid = np.arange(256)
+
+    # Beam-model y position and EW FWHM of every NS beam at this frequency.
+    # Get_beam_positions returns shape (nbeam, nfreq, 2)
+    bmy = beam_mdl.get_beam_positions(ns_grid, [freq])[:, 0, 1]
+    fwhm_x = beam_mdl.get_beam_widths(ns_grid, [freq])[:, 0, 0]
+
+    # Convert the EW half-width of each beam into an hour-angle width.
+    ha0, _ = bmxy_to_hadec(np.zeros_like(bmy), bmy)
+    ha1, _ = bmxy_to_hadec(fwhm_x / 2, bmy)
+    width = np.abs(ha1 - ha0)
+
+    # Ratio of the width at the source's own NS beam to the narrowest width.
+    ns_beam = int(np.argmin(np.abs(bmy - (dec - latitude))))
+    ratio = width[ns_beam] / width.min()
+
+    # Scale the requested half-width and convert degrees to pixels.
+    return int(np.ceil(dra_deg * ratio / ra_step))
+
+
+class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
+    """Extract each absorber's cutout from a day's ringmap, MPI-combined.
+
+    The RA window is 'dra_deg' physical degrees (converted to a per-absorber
+    pixel count via 'ra_window_pixels'), wrapping correctly around
+    RA = 0/360. The el window is a fixed number of pixels, clipped at the edges
+    of the el axis. The freq window is 'n_coarse' whole coarse channels,
+    clipped at the edges of the loaded freq axis.
+
+    Attributes
+    ----------
+    dra_deg : float
+        RA half-width in degrees at the best-resolution declination.
+        Default is 2.0.
+    n_coarse : int
+        Coarse channels either side of the one nearest the absorber's
+        frequency (i.e. 2 * n_coarse + 1 channels, each expanded to 128
+        high-res sub-frequencies). Default is 6.
+    n_el : int
+        El pixels (beams) to include on either side of the pixel nearest
+        the absorber's el (i.e. 2 * n_el + 1 pixels total, clipped at the
+        axis edges). Default is 2.
+    """
+
+    dra_deg = config.Property(proptype=float, default=2.0)
+    n_coarse = config.Property(proptype=int, default=6)
+    n_el = config.Property(proptype=int, default=2)
+
+    def setup(self, manager):
+        """Set the local observer's position and load the beam model.
+
+        Parameters
+        ----------
+        manager :
+            An Observer object holding the geographic location of the telescope.
+        """
+        self.observer = io.get_telescope(manager)
+        self.latitude = self.observer.latitude
+        self._beam_mdl = fm.FFTFormedBeamModel()
+
+    def process(self, stream):
+        """Extract and MPI-combine one cutout per absorber in the catalogue.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMap
+            High frequency resolution ringmap container.
+
+        Returns
+        -------
+        cont : caput.memdata.MemDiskGroup
+            One group per absorber (cont[name]), each holding
+            beam_ew / el / ra / freq / hfb / weight datasets,
+            plus cont.attrs["csd"]. N
+        """
+        # Ensure only the freq axis is distributed. After this,
+        # beam_ew, el and ra are complete on every rank.
+        stream.redistribute("freq")
+        comm = stream.comm
+        rank0 = comm.rank == 0
+
+        # Source list and day label from the attributes.
+        names = [str(n) for n in np.atleast_1d(stream.attrs["source_names"])]
+        src_ra = np.atleast_1d(stream.attrs["source_ra"]).astype(float)
+        src_dec = np.atleast_1d(stream.attrs["source_dec"]).astype(float)
+        src_freq = np.atleast_1d(stream.attrs["source_freq"]).astype(float)
+
+        lsd = stream.attrs.get("lsd", stream.attrs.get("csd", None))
+        if lsd is None:
+            if rank0:
+                self.log.warning("No lsd/csd in stream attrs; nothing extracted.")
+            return None
+        lsd = np.atleast_1d(lsd)
+        if lsd.size != 1:
+            raise ValueError(f"Stream holds several days ({lsd}); expected one.")
+        csd = int(lsd[0])
+
+        # Axes of the ringmap as plain numpy arrays.
+        freq = np.asarray(stream.index_map["freq"])
+        ra = np.asarray(stream.index_map["ra"])
+        el = np.asarray(stream.index_map["el"])
+        beam_ew = np.asarray(stream.index_map["beam_ew"])
+        nra = ra.size
+        nel = el.size
+        ra_step = float(np.median(np.diff(ra)))
+
+        # Number of HFB sub-frequencies per coarse channel.
+        nsubfreq = 128
+
+        # The freq axis is made of whole coarse channels of nsubfreq
+        # sub-frequencies each. Get each channel's centre frequency and the
+        # channel width, both needed to build the frequency window.
+        if freq.size % nsubfreq != 0:
+            raise ValueError(
+                f"Length of freq axis ({freq.size}) is not a multiple of "
+                f"nsubfreq ({nsubfreq}); cannot identify coarse channels."
+            )
+        block_freq = freq.reshape(-1, nsubfreq)
+        block_centre = block_freq.mean(axis=1)
+        nblock = block_centre.size
+
+        n_el_win = 2 * self.n_el + 1
+        if n_el_win > nel:
+            raise RuntimeError(
+                f"el window ({n_el_win}) is wider than the el axis ({nel})."
+            )
+
+        # This rank's slice of the data, (beam_ew, el, ra, freq_local),
+        # and where that slice sits on the full freq axis.
+        hfb_local = stream.hfb[:].local_array
+        weight_local = stream.weight[:].local_array
+        freq_offset = stream.hfb[:].local_offset[3]
+        nfreq_local = hfb_local.shape[3]
+        nbeam_ew = hfb_local.shape[0]
+
+        cont = MemDiskGroup()
+        cont.attrs["csd"] = csd
+        cont.attrs["tag"] = f"lsd_{csd}"
+        nextracted = 0
+
+        for iobj, name in enumerate(names):
+            # RA window: +/- physical degrees -> per-absorber pixel count,
+            # wrapping at 0/360
+            n_ra = ra_window_pixels(
+                src_dec[iobj],
+                src_freq[iobj],
+                self.dra_deg,
+                ra_step,
+                self._beam_mdl,
+                self.latitude,
+            )
+            if 2 * n_ra + 1 > nra:
+                raise RuntimeError(
+                    f"Source {name}: RA window ({2 * n_ra + 1}) is wider than "
+                    f"the RA axis ({nra}). Reduce dra_deg."
+                )
+            dra = np.abs((ra - src_ra[iobj] + 180.0) % 360.0 - 180.0)
+            ira0 = int(np.argmin(dra))
+            rsel = (ira0 + np.arange(-n_ra, n_ra + 1)) % nra
+
+            # Freq window: +/- n_coarse whole coarse channels, clipped
+            # at the true edges of the loaded axis.
+            ib0 = int(np.argmin(np.abs(block_centre - src_freq[iobj])))
+            bsel = np.arange(
+                max(0, ib0 - self.n_coarse), min(nblock, ib0 + self.n_coarse + 1)
+            )
+            fsel = (bsel[:, np.newaxis] * nsubfreq + np.arange(nsubfreq)).ravel()
+
+            # El window: +/- n_el pixels, clipped at edges
+            el_src = np.sin(np.radians(src_dec[iobj] - self.latitude))
+            ie0 = int(np.argmin(np.abs(el - el_src)))
+            esel = np.arange(max(0, ie0 - self.n_el), min(nel, ie0 + self.n_el + 1))
+
+            # Extract this rank's freq chunk
+            shape = (nbeam_ew, esel.size, rsel.size, fsel.size)
+            data_cut = np.zeros(shape, dtype=hfb_local.dtype)
+            weight_cut = np.zeros(shape, dtype=weight_local.dtype)
+
+            # Convert global freq indices to this rank's local indices
+            fsel_local = fsel - freq_offset
+            valid = (fsel_local >= 0) & (fsel_local < nfreq_local)
+            fsel_local = fsel_local[valid]
+            fsel_out = np.flatnonzero(valid)
+
+            if fsel_local.size > 0:
+                ix = np.ix_(np.arange(nbeam_ew), esel, rsel, fsel_local)
+                data_cut[..., fsel_out] = hfb_local[ix]
+                weight_cut[..., fsel_out] = weight_local[ix]
+
+            # Combine freq chunks from all ranks
+            comm.Allreduce(MPI.IN_PLACE, data_cut, op=MPI.SUM)
+            comm.Allreduce(MPI.IN_PLACE, weight_cut, op=MPI.SUM)
+
+            # Fill the output container
+            cutout_grp = cont.create_group(name)
+            cutout_grp.create_dataset("beam_ew", data=beam_ew)
+            cutout_grp.create_dataset("el", data=el[esel])
+            cutout_grp.create_dataset("ra", data=ra[rsel])
+            cutout_grp.create_dataset("freq", data=freq[fsel])
+            cutout_grp.create_dataset("hfb", data=data_cut)
+            cutout_grp.create_dataset("weight", data=weight_cut)
+            nextracted += 1
+
+        if rank0:
+            self.log.info(f"Extracted {nextracted}/{len(names)} cutouts.")
+
+        return cont
