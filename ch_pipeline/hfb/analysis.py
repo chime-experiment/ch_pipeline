@@ -9,6 +9,7 @@ from caput.containers import copy_datasets_filter, empty_like
 from caput.memdata import MemDiskGroup
 from caput.pipeline import tasklib
 from caput.util import mpitools
+from caput.util.pfb import DeconvolvePFB
 from ch_ephem.coord import bmxy_to_hadec
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
 from draco.core import io
@@ -19,7 +20,6 @@ from skyfield.starlib import Star
 
 from . import containers
 from .io import BeamSelectionMixin
-from .pfb import DeconvolvePFB
 
 
 class HFBAverage(tasklib.base.ContainerTask):
