@@ -616,7 +616,9 @@ class MakeAbsorberCatalog(base.ContainerTask):
                 cra, cdec = positions[cs]
 
                 # Name from the calibrator's own position: e.g. "041+79_3C_220.3".
-                base_cname = f"{round(cra):03d}{round(cdec):+d}_{cs}"
+                # RA and dec are truncated toward zero, so -5.7 and -5.2 both
+                # give -05.
+                base_cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}"
                 cname, n = base_cname, 1
                 while cname in seen:
                     n += 1
@@ -1078,11 +1080,11 @@ def create_absorber_stacks(
                 )
             cra, cdec = positions[cs]
 
-            cname = f"{round(cra):03d}{round(cdec):+d}_{cs}"
+            cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}"
             n = 1
             while cname in seen:
                 n += 1
-                cname = f"{round(cra):03d}{round(cdec):+d}_{cs}_{n}"
+                cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}_{n}"
             seen.add(cname)
 
             sources.append((cname, cra, cdec, freq))
@@ -1159,7 +1161,6 @@ def create_absorber_stacks(
                 for dname, dspec in HFBHighResRingMapStack._dataset_spec.items():
                     chunks = dspec.get("chunks")
                     if chunks is not None:
-                        # Clamp: HDF5 rejects a chunk larger than the dataset.
                         chunks = tuple(
                             min(c, s) for c, s in zip(chunks, shape, strict=True)
                         )
