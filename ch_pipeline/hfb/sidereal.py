@@ -61,9 +61,8 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
 
         # Massage down to a 3D array by combining the subfreq and beam axes;
         # this is to fit the expectations of the base class
-        lfreq, *_, ntime = hfb_data.shape
-        hfb_data = hfb_data.reshape(lfreq, -1, ntime)
-        weight = weight.reshape(lfreq, -1, ntime)
+        hfb_data = hfb_data.reshape(lfreq, nsubfreq * nbeam, ntime)
+        weight = weight.reshape(lfreq, nsubfreq * nbeam, ntime)
 
         # Perform regridding
         _, sts, ni = self._regrid(hfb_data, weight, timestamp_lsd)
@@ -96,7 +95,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         )
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
-        sdata.attrs["tag"] = f"lsd_{self.start:d}"
+        sdata.attrs["tag"] = f"lsd_{int(self.start)}"
 
         # Put regridded data into output container, one beam at a time
         sh = sdata.hfb[:]
