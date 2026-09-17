@@ -173,7 +173,7 @@ pipeline:
       in: datastream_mask6
       out: sstream
       params:
-        samples: 8192
+        samples: 16384
 
     # Update the stack with each sidereal stream. This is effectively
     # a weighted average
@@ -256,28 +256,28 @@ pipeline:
       out: sstack_stokesI
 
     # Estimate the delay power spectrum
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    - type: draco.analysis.delay.DelayPowerSpectrumGibbs
       in: sstack_stokesI
       params:
         dataset: "vis"
         sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 150
-        weight_boost: 1.0e3
+        nsamp: 500
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_weightboost.h5"
 
     # Estimate the delay power spectrum with no weight boost
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    - type: draco.analysis.delay.DelayPowerSpectrumGibbs
       in: sstack_stokesI
       params:
         dataset: "vis"
         sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 150
+        nsamp: 500
         complex_timedomain: true
         save: true
         output_name: "delayspectrum.h5"
@@ -294,29 +294,29 @@ pipeline:
 
     # Estimate the high-pass filtered delay power spectrum
     # with noise included
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    - type: draco.analysis.delay.DelayPowerSpectrumGibbs
       in: sstack_dfilter
       params:
         dataset: "vis"
         sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 150
-        weight_boost: 1.0e3
+        nsamp: 500
+        weight_boost: 1.0e2
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf_weightboost.h5"
 
     # Estimate the high-pass filtered delay power spectrum
     # with noise removed
-    - type: draco.analysis.delay.DelayPowerSpectrumNRML
+    - type: draco.analysis.delay.DelayPowerSpectrumGibbs
       in: sstack_dfilter
       params:
         dataset: "vis"
         sample_axis: "ra"
         freq_zero: 800.0
         nfreq: {nfreq_delay}
-        nsamp: 150
+        nsamp: 500
         complex_timedomain: true
         save: true
         output_name: "delayspectrum_hpf.h5"
@@ -409,7 +409,7 @@ class QuarterStackProcessing(base.ProcessingType):
         },
         # Job params
         "time": 60,  # How long in minutes?
-        "nodes": 3,  # Number of nodes to use.
+        "nodes": 6,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
     }
