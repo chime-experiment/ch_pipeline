@@ -64,8 +64,23 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         hfb_data = hfb_data.reshape(lfreq, nsubfreq * nbeam, ntime)
         weight = weight.reshape(lfreq, nsubfreq * nbeam, ntime)
 
+        # Take everything we need from the input before the regrid, so the
+        # timestream can be released as soon as _regrid is done.
+        ew_beams, ew_map = np.unique(data.beam // 256, return_inverse=True)
+        ns_beams, ns_map = np.unique(data.beam % 256, return_inverse=True)
+
+        za_deg = self.beam_mdl.reference_angles[ns_beams]
+        el = np.sin(za_deg / 180.0 * np.pi)
+
+        freq = data.index_map["freq"]
+        subfreq = data.index_map["subfreq"]
+        attrs = dict(data.attrs)
+
         # Perform regridding
         _, sts, ni = self._regrid(hfb_data, weight, timestamp_lsd)
+
+        # Release the input timestream before allocating the output.
+        del hfb_data, weight, data
 
         # Get back to the 4D shape we need in here
         sts = sts.reshape(lfreq, nsubfreq, nbeam, nra)
@@ -75,24 +90,17 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         sts = mpiarray.MPIArray.wrap(sts, axis=0)
         ni = mpiarray.MPIArray.wrap(ni, axis=0)
 
-        # Calculate the EW-NS grid covering the beams in the data container (*_beams),
-        # and what indices (*_map) the beams will take in the output
-        ew_beams, ew_map = np.unique(data.beam // 256, return_inverse=True)
-        ns_beams, ns_map = np.unique(data.beam % 256, return_inverse=True)
-
-        # Look up reference zenith angles from beam model and convert to el = sin(za)
-        za_deg = self.beam_mdl.reference_angles[ns_beams]
-        el = np.sin(za_deg / 180.0 * np.pi)
-
         # Create container to hold regridded data
         sdata = HFBRingMap(
-            axes_from=data,
-            attrs_from=data,
+            freq=freq,
+            subfreq=subfreq,
             beam_ew=ew_beams,
             beam_ns=ns_beams,
             el=el,
             ra=self.samples,
         )
+        sdata.attrs.update(attrs)
+
         sdata.redistribute("freq")
         sdata.attrs["lsd"] = self.start
         sdata.attrs["tag"] = f"lsd_{int(self.start)}"

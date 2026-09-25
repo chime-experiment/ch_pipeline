@@ -524,6 +524,13 @@ class HFBHighResRingMapStack(HFBHighResRingMap):
     sidereal days can be stacked together in one container. The distributed axis is
     'csd' (rather than 'el', as in the parent class), since the 'csd' axis grows
     as more days are added.
+
+    Note that the 'el' axis carries a different meaning here than in the parent
+    classes. In :class:'HFBRingMapBase' it holds the sin(za) of the NS beams'
+    fixed reference angles. Here it holds the sin(za) of the beams' true,
+    frequency-dependent positions, evaluated at the absorber's own frequency.
+    The axis keeps the name 'el' because renaming it would mean detaching this
+    container from 'HFBHighResRingMap'.
     """
 
     _axes = ("csd",)

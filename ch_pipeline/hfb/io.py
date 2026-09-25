@@ -2,14 +2,13 @@
 
 import gc
 import json
-import logging
 import os
 from pathlib import Path
 
 import caput.astro.time as ctime
 import h5py
 import numpy as np
-from beam_model.formed import FFTFormedActualBeamModel, FFTFormedBeamModel
+from beam_model.formed import FFTFormedActualBeamModel
 from caput import config
 from caput.containers.tod import concatenate as _concatenate_time
 from caput.pipeline import exceptions
@@ -186,12 +185,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
                     )
 
         # Set up frequency selection.
-        cfreq = np.linspace(
-            self.observer.freq_start,
-            self.observer.freq_end,
-            self.observer.num_freq,
-            endpoint=False,
-        )
+        cfreq = np.linspace(800.0, 400.0, 1024, endpoint=False)
         if self.freq_phys_range:
             freq_phys_start = np.max(self.freq_phys_range)
             freq_phys_stop = np.min(self.freq_phys_range)
@@ -473,7 +467,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
     For each unique (cal_src, coarse channel) pair referenced by an
     absorber, get position from 'combinedps_file', frequency borrowed from that
     absorber (so the same window is extracted downstream), and name
-    "<ra><+/-dec>_<cal_src>", e.g. "141+79_3C_220.3".
+    "<ra><+/-dec>_<cal_src>", e.g. "144+83_3C_220.3".
 
     Attributes
     ----------
@@ -494,7 +488,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
 
         Parameters
         ----------
-        manager :
+        manager : telescope
             An Observer object holding the geographic location of the teles>
         """
         self.observer = get_telescope(manager)
@@ -615,7 +609,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
                     )
                 cra, cdec = positions[cs]
 
-                # Name from the calibrator's own position: e.g. "041+79_3C_220.3".
+                # Name from the calibrator's own position: e.g. "144+83_3C_220.3".
                 # RA and dec are truncated toward zero, so -5.7 and -5.2 both
                 # give -05.
                 base_cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}"
@@ -654,7 +648,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
         return cat
 
 
-class LoadFilesForAbsorbers(BaseLoadFiles):
+class LoadFilesForCatalog(io.BaseLoadFiles):
     """Load HFB data for the absorbers in a catalog.
 
     Works like LoadFiles but computes the frequency selection as the union
@@ -683,7 +677,7 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
 
         Parameters
         ----------
-        manager :
+        manager : telescope
             An Observer object holding the geographic location of the telescope.
         filelists : list
             A specification of the set of files for the day.
@@ -730,16 +724,16 @@ class LoadFilesForAbsorbers(BaseLoadFiles):
         nfreq = len(freq_ax)
 
         # Per-absorber coarse-channel windows
-        self._slices = []
+        _slices = []
         for f0 in freqs:
             i0 = int(np.argmin(np.abs(freq_ax - f0)))
-            self._slices.append(
+            _slices.append(
                 slice(max(0, i0 - self.n_coarse), min(nfreq, i0 + self.n_coarse + 1))
             )
 
         # Union of all absorber channel windows, as a sorted list of indices.
         self.freq_sel = sorted(
-            {ch for sl in self._slices for ch in range(sl.start, sl.stop)}
+            {ch for sl in _slices for ch in range(sl.start, sl.stop)}
         )
 
         self.log.info(
@@ -818,6 +812,9 @@ class UpdateAbsorberStacks(base.ContainerTask):
     must already exist with matching axes: 'beam_ew', 'ra' and 'freq' must equal
     the stack file's axes exactly; 'el' only has to have the same length.
 
+    A csd slot that already holds data is overwritten. When a cutout has weights
+    all zero, nothing is updated.
+
     This task takes the container ExtractAbsorberCutouts produced ('csd' in its attrs,
     one named group per absorber).
 
@@ -846,10 +843,22 @@ class UpdateAbsorberStacks(base.ContainerTask):
 
         error = None
         nsaved = 0
+        nskipped = 0
 
-        if mpitools.rank0:
+        if self.comm.rank == 0:
             for name in names:
                 grp = cont[name]
+                weight = grp["weight"][:]
+
+                # No usable data for this absorber today.
+                if not np.any(weight):
+                    self.log.info(
+                        f"Absorber {name}: all weights zero at csd={csd}, "
+                        "leaving its stack untouched."
+                    )
+                    nskipped += 1
+                    continue
+
                 axes = {
                     "beam_ew": grp["beam_ew"][:],
                     "el": grp["el"][:],
@@ -866,11 +875,13 @@ class UpdateAbsorberStacks(base.ContainerTask):
                     break
 
         # Stop the job cleanly if it failed.
-        error = self.comm.bcast(error, root=0)
+        error, nsaved, nskipped = self.comm.bcast((error, nsaved, nskipped), root=0)
         if error is not None:
             raise RuntimeError(f"UpdateAbsorberStacks failed on rank 0: {error}")
-
-        self.log.info(f"Merged {nsaved}/{len(names)} cutouts into their stacks.")
+        self.log.info(
+            f"Merged {nsaved}/{len(names)} cutouts into their stacks "
+            f"({nskipped} skipped: all weights zero)."
+        )
 
     def _merge_into_stack(self, name, csd, axes, data):
         """Write one absorber's cutout into its stack file. Rank 0 only.
@@ -935,232 +946,224 @@ class UpdateAbsorberStacks(base.ContainerTask):
             stack.close()
 
 
-def create_absorber_stacks(
-    json_files,
-    stack_dir,
-    csd_range,
-    combinedps_file=None,
-    samples=4280,
-    dra_deg=2.0,
-    n_coarse=6,
-    n_el=2,
-    beam_ew=(0, 1, 2),
-    freq_start=800.0,
-    freq_end=400.0,
-    num_freq=1024,
-    nsubfreq=128,
-    overwrite=False,
-    log=None,
-):
+class CreateAbsorberStacks(base.ContainerTask):
     """Create empty per-source stack files for UpdateAbsorberStacks to fill.
 
-    Run once, by hand, before running the search pipeline. Writes one
-    zero-filled <stack_dir>/<name>.h5 per source, with a 'csd' axis spanning
-    'csd_range' and the other axes sized to match what ExtractAbsorberCutouts
-    produces for that source.
+    Takes the catalog from 'MakeAbsorberCatalog' and writes one <stack_dir>/<name>.h5
+    per source, with a 'csd' axis spanning 'csd_range' and the other axes sized to
+    match what 'ExtractAbsorberCutouts' produces for that source.
 
-    Parameters
+    The datasets are created with their full shape but never written, so HDF5
+    leaves their chunks unallocated: a fresh stack is a few kB whatever the
+    length of the csd axis. Chunks are allocated as days are written into it.
+
+    Run this once, on its own, before running the search pipeline. This should not be
+    a part of the daily pipeline several days may be processed concurrently and would
+    race to create the same file.
+
+    The window parameters must match those of the pipeline that fills these files.
+    'UpdateAbsorberStacks' compares each cutout's axes against the stack file,
+    so a mismatch fails.
+
+    Attributes
     ----------
-    json_files : list of str
-        JSON target lists. Each entry needs 'ra' (deg), 'dec' (deg) and
-        'freq' (MHz), and may have a 'cal_src'. Duplicate keys across files
-        are the same object.
-    stack_dir : str or Path
+    stack_dir : str
         Directory to write into. Created if missing.
     csd_range : list
-        [start, stop) CSDs each file spans.
-    combinedps_file : str, optional
-        Point-source table, for looking up 'cal_src' positions.
-    samples : int, optional
+        [start, stop] CSDs each file spans. 'stop' is inclusive. Default is [2600, 6000].
+    samples : int
         RA samples in the sidereal ringmap. Default is 4280.
-    dra_deg : float, optional
-        RA half-width in degrees. Default is 2.0.
-    n_coarse : int, optional
-        Coarse channels either side of the source's own. Default is 6.
-    n_el : int, optional
-        NS beams either side of the one nearest the source. Default is 2.
-    beam_ew : array_like, optional
-        EW beam indices. Default is (0, 1, 2).
-    freq_start : float, optional
-        Frequency (MHz) of the top of the band. Default is 800.0.
-    freq_end : float, optional
-        Frequency (MHz) of the bottom of the band. Default is 400.0.
-    num_freq : int, optional
-        Number of coarse channels across the band. Default is 1024.
-    nsubfreq : int, optional
+    nsubfreq : int
         HFB sub-frequency bins per coarse channel. Default is 128.
-    overwrite : bool, optional
+    dra_deg : float
+        RA half-width in degrees. Default is 2.0.
+    n_coarse : int
+        Coarse channels either side of the source's own. Default is 6.
+    n_el : int
+        NS beams either side of the one nearest the source. Default is 2.
+    beam_ew : list
+        EW beam indices. Default is [0, 1, 2].
+    overwrite : bool
         Replace existing files. Default is False, which skips them.
-    log : logging.Logger, optional
-        Logger for progress messages. Defaults to this module's logger.
-
-    Returns
-    -------
-    created : list of str
-        Paths written.
     """
-    from .analysis import ra_window_pixels
 
-    if log is None:
-        log = logging.getLogger(__name__)
+    stack_dir = config.Property(proptype=str)
+    csd_range = config.Property(proptype=list, default=[2600, 6000])
+    samples = config.Property(proptype=int, default=4280)
+    nsubfreq = config.Property(proptype=int, default=128)
+    dra_deg = config.Property(proptype=float, default=2.0)
+    n_coarse = config.Property(proptype=int, default=6)
+    n_el = config.Property(proptype=int, default=2)
+    beam_ew = config.Property(proptype=list, default=[0, 1, 2])
+    overwrite = config.Property(proptype=bool, default=False)
 
-    if len(csd_range) != 2 or csd_range[1] <= csd_range[0]:
-        raise ValueError(f"csd_range must be increasing, got {csd_range}.")
-    csd_array = np.arange(int(csd_range[0]), int(csd_range[1]))
+    _done = False
 
-    stack_dir = Path(stack_dir)
-    stack_dir.mkdir(parents=True, exist_ok=True)
+    def setup(self, manager, catalog):
+        """Take the telescope and the catalog of sources.
 
-    cfreq = np.linspace(freq_start, freq_end, num_freq, endpoint=False)
-    freq_width = (freq_start - freq_end) / num_freq
+        Parameters
+        ----------
+        manager : telescope
+            Telescope object providing the latitude and frequency grid.
+        catalog : HFBAbsorberCatalog
+            Catalog of sources to create stacks for.
+        """
+        self.observer = get_telescope(manager)
 
-    # Read the sources: (name, ra, dec, freq)
-    if not json_files:
-        raise ValueError("At least one JSON file must be given.")
+        if not isinstance(catalog, HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
 
-    entries = {}
-    for fname in json_files:
-        with open(fname) as f:
-            data = json.load(f)
+        self._names = [str(n) for n in catalog.index_map["object_id"]]
+        self._src_ra = np.asarray(catalog["position"]["ra"][:])
+        self._src_dec = np.asarray(catalog["position"]["dec"][:])
+        self._src_freq = np.asarray(catalog["absorber"]["freq"][:])
 
-        for name, entry in data.items():
-            name = str(name)
-            if name in entries:
-                continue
-            try:
-                entries[name] = (
-                    float(entry["ra"]),
-                    float(entry["dec"]),
-                    float(entry["freq"]),
-                    str(entry.get("cal_src") or ""),
-                )
-            except (KeyError, TypeError, ValueError) as e:
-                raise RuntimeError(
-                    f"Entry {name} in {fname} is missing or has an invalid "
-                    f"required key: {e}."
-                ) from e
+    def process(self):
+        """Create one stack file per source in the catalog."""
+        if self._done:
+            raise exceptions.PipelineStopIteration
+        self._done = True
 
-    sources = [(n, ra, dec, freq) for n, (ra, dec, freq, _) in entries.items()]
-    seen = {n for n, _, _, _ in sources}
-
-    # One entry per unique (cal_src, coarse channel), at the calibrator's own
-    # position but the absorber's frequency, so the same window is extracted.
-    if any(cs for _, _, _, cs in entries.values()):
-        if not combinedps_file:
-            raise ValueError(
-                "Entries have 'cal_src' but no 'combinedps_file' was given."
+        if len(self.csd_range) != 2 or self.csd_range[1] <= self.csd_range[0]:
+            raise config.CaputConfigError(
+                f"'csd_range' must be increasing, got {self.csd_range}."
             )
 
-        # Calibrator positions, keyed by 3C name.
-        with open(combinedps_file) as f:
-            header = f.readline().split()
-            rows = [line.split() for line in f if line.strip()]
+        error = None
+        ncreated = 0
 
-        ira = header.index("RA")
-        idec = header.index("DEC")
-        i3c = header.index("3CNAME")
+        if self.comm.rank == 0:
+            try:
+                ncreated = self._create_all()
+            except Exception as e:
+                self.log.exception(f"Stack creation failed: {e}")
+                error = f"{type(e).__name__}: {e}"
 
-        positions = {}
-        for row in rows:
-            positions.setdefault(row[i3c], (float(row[ira]), float(row[idec])))
+        error, ncreated = self.comm.bcast((error, ncreated), root=0)
+        if error is not None:
+            raise RuntimeError(f"CreateAbsorberStacks failed on rank 0: {error}")
 
-        cal_seen = set()
-        for name, (_, _, freq, cs) in entries.items():
-            if not cs:
-                continue
-            channel = int(np.argmin(np.abs(cfreq - freq)))
-            if (cs, channel) in cal_seen:
-                continue
-            cal_seen.add((cs, channel))
+        self.log.info(f"Created {ncreated}/{len(self._names)} stack files.")
 
-            if cs not in positions:
-                raise RuntimeError(
-                    f"Calibration source {cs} (for {name}) not found in "
-                    f"{combinedps_file}."
-                )
-            cra, cdec = positions[cs]
+    def _create_all(self):
+        """Write the stack files. Rank 0 only.
 
-            cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}"
-            n = 1
-            while cname in seen:
-                n += 1
-                cname = f"{int(cra):03d}{int(cdec):+03d}_{cs}_{n}"
-            seen.add(cname)
+        Returns
+        -------
+        ncreated : int
+            Number of files written.
+        """
+        # Local import: analysis.py imports from this module, so a top-level
+        # import would be circular.
+        from .analysis import ra_window_pixels
 
-            sources.append((cname, cra, cdec, freq))
+        csd_array = np.arange(int(self.csd_range[0]), int(self.csd_range[1]) + 1)
 
-    # Axes shared by every source
-    beam_mdl = FFTFormedBeamModel()
-    latitude = chime.latitude
-    beam_ew = np.asarray(beam_ew)
+        stack_dir = Path(self.stack_dir)
+        stack_dir.mkdir(parents=True, exist_ok=True)
 
-    nbeam_ns = len(beam_mdl.reference_angles)
-    ns_grid = np.arange(nbeam_ns)
-
-    ra_full = np.arange(samples) * (360.0 / samples)
-    ra_step = 360.0 / samples
-
-    subfreq_offset = np.linspace(
-        freq_width / 2, -freq_width / 2, nsubfreq, endpoint=False
-    )
-
-    # Create one file per source
-    created = []
-
-    for name, src_ra, src_dec, src_freq in sources:
-        path = stack_dir / f"{name}.h5"
-        if path.exists() and not overwrite:
-            log.info(f"{name}: {path} exists, skipping.")
-            continue
-
-        # Freq: nearest coarse channel +/- n_coarse, clipped at the band
-        # edges, each expanded to nsubfreq sub-frequencies.
-        ic0 = int(np.argmin(np.abs(cfreq - src_freq)))
-        channels = np.arange(
-            max(0, ic0 - n_coarse), min(cfreq.size, ic0 + n_coarse + 1)
+        cfreq = np.linspace(
+            self.observer.freq_start,
+            self.observer.freq_end,
+            self.observer.num_freq,
+            endpoint=False,
         )
-        freq_win = (cfreq[channels][:, np.newaxis] + subfreq_offset).flatten()
+        freq_width = (
+            self.observer.freq_start - self.observer.freq_end
+        ) / self.observer.num_freq
+        subfreq_offset = np.linspace(
+            freq_width / 2, -freq_width / 2, self.nsubfreq, endpoint=False
+        )
 
-        # RA: nearest pixel +/- n_ra, wrapping through 0/360.
-        n_ra = ra_window_pixels(src_dec, src_freq, dra_deg, ra_step, beam_mdl, latitude)
-        dra = np.abs((ra_full - src_ra + 180.0) % 360.0 - 180.0)
-        ira0 = int(np.argmin(dra))
-        rsel = (ira0 + np.arange(-n_ra, n_ra + 1)) % ra_full.size
+        beam_mdl = FFTFormedActualBeamModel()
+        latitude = self.observer.latitude
+        beam_ew = np.asarray(self.beam_ew)
 
-        # El: the NS beams nearest this source, +/- n_el, clipped at the ends
-        # of the NS beam range.
-        bmy_all = beam_mdl.get_beam_positions(ns_grid, [src_freq])[:, 0, 1]
-        ns0 = int(np.argmin(np.abs(bmy_all - (src_dec - latitude))))
-        beam_ns_win = np.arange(max(0, ns0 - n_el), min(nbeam_ns, ns0 + n_el + 1))
+        nbeam_ns = len(beam_mdl.reference_angles)
+        ns_grid = np.arange(nbeam_ns)
 
-        bmy_win = bmy_all[beam_ns_win]
-        _, dec_grid = bmxy_to_hadec(np.zeros_like(bmy_win), bmy_win)
-        el_win = np.sin(np.radians(dec_grid - latitude))
+        ra_full = np.arange(self.samples) * (360.0 / self.samples)
+        ra_step = 360.0 / self.samples
 
-        # Temp file then rename, so an interrupted run leaves nothing behind.
+        ncreated = 0
+
+        for name, src_ra, src_dec, src_freq in zip(
+            self._names, self._src_ra, self._src_dec, self._src_freq, strict=True
+        ):
+            path = stack_dir / f"{name}.h5"
+            if path.exists() and not self.overwrite:
+                self.log.info(f"{name}: {path} exists, skipping.")
+                continue
+
+            # Freq: nearest coarse channel +/- n_coarse, clipped at the band
+            # edges, each expanded to nsubfreq sub-frequencies.
+            ic0 = int(np.argmin(np.abs(cfreq - src_freq)))
+            channels = np.arange(
+                max(0, ic0 - self.n_coarse), min(cfreq.size, ic0 + self.n_coarse + 1)
+            )
+            freq_win = (cfreq[channels][:, np.newaxis] + subfreq_offset).flatten()
+
+            # RA: nearest pixel +/- n_ra, wrapping through 0/360.
+            n_ra = ra_window_pixels(
+                src_dec, src_freq, self.dra_deg, ra_step, beam_mdl, latitude
+            )
+            dra = np.abs((ra_full - src_ra + 180.0) % 360.0 - 180.0)
+            ira0 = int(np.argmin(dra))
+            rsel = (ira0 + np.arange(-n_ra, n_ra + 1)) % ra_full.size
+
+            # El: the NS beams nearest this source, +/- n_el, clipped at the
+            # ends of the NS beam range.
+            bmy_all = beam_mdl.get_beam_positions(ns_grid, [src_freq])[:, 0, 1]
+            _, dg_all = bmxy_to_hadec(np.zeros_like(bmy_all), bmy_all)
+            ns0 = int(np.argmin(np.abs(dg_all - src_dec)))
+            beam_ns_win = np.arange(
+                max(0, ns0 - self.n_el), min(nbeam_ns, ns0 + self.n_el + 1)
+            )
+            el_win = np.sin(np.radians(dg_all[beam_ns_win] - latitude))
+
+            self._write_stack(
+                path,
+                name,
+                csd_array,
+                beam_ew,
+                beam_ns_win,
+                el_win,
+                ra_full[rsel],
+                freq_win,
+            )
+
+            self.log.info(
+                f"{name}: created {path} (csd={csd_array.size}, "
+                f"el={el_win.size}, ra={rsel.size}, freq={freq_win.size})."
+            )
+            ncreated += 1
+
+        return ncreated
+
+    def _write_stack(self, path, name, csd, beam_ew, beam_ns, el, ra, freq):
+        """Write one empty stack file, via a temp file so a crash leaves nothing."""
         tmp_path = f"{path}.tmp.{os.getpid()}"
+        shape = (csd.size, beam_ew.size, el.size, ra.size, freq.size)
 
         try:
-            shape = (
-                csd_array.size,
-                beam_ew.size,
-                el_win.size,
-                rsel.size,
-                freq_win.size,
-            )
-
             with h5py.File(tmp_path, "w") as fh:
                 imap = fh.create_group("index_map")
-                imap.create_dataset("csd", data=csd_array)
-                imap.create_dataset("beam_ew", data=beam_ew)
-                imap.create_dataset("beam_ns", data=beam_ns_win)
-                imap.create_dataset("el", data=el_win)
-                imap.create_dataset("ra", data=ra_full[rsel])
-                imap.create_dataset("freq", data=freq_win)
+                for axis, values in [
+                    ("csd", csd),
+                    ("beam_ew", beam_ew),
+                    ("beam_ns", beam_ns),
+                    ("el", el),
+                    ("ra", ra),
+                    ("freq", freq),
+                ]:
+                    imap.create_dataset(axis, data=values)
 
                 for dname, dspec in HFBHighResRingMapStack._dataset_spec.items():
                     chunks = dspec.get("chunks")
                     if chunks is not None:
+                        # HDF5 rejects a chunk larger than the dataset.
                         chunks = tuple(
                             min(c, s) for c, s in zip(chunks, shape, strict=True)
                         )
@@ -1181,13 +1184,3 @@ def create_absorber_stacks(
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-
-        log.info(
-            f"{name}: created {path} (csd={csd_array.size}, "
-            f"el={el_win.size}, ra={rsel.size}, freq={freq_win.size})."
-        )
-        created.append(str(path))
-
-    log.info(f"Created {len(created)}/{len(sources)} stack files.")
-
-    return created

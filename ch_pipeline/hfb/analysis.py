@@ -989,20 +989,29 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
     n_beams_ns = config.Property(proptype=int, default=2)
     beam_ew_include = config.Property(proptype=list, default=[0, 1, 2])
 
-    def setup(self, manager):
+    def setup(self, manager, catalog):
         """Load the beam model used to locate the sources' NS beams.
 
         Parameters
         ----------
         manager : Observer
             An Observer object holding the geographic location of the telescope.
+        catalog : containers.HFBAbsorberCatalog
+            Catalog of sources whose beams are to be selected.
         """
-        self.beam_mdl = fm.FFTFormedBeamModel()
+        self.beam_mdl = fm.FFTFormedActualBeamModel()
         self.observer = io.get_telescope(manager)
         self.latitude = self.observer.latitude
 
         # Number of NS beams from the beam model
         self.nbeam_ns = len(self.beam_mdl.reference_angles)
+
+        if not isinstance(catalog, containers.HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
+
+        self.src_dec = np.asarray(catalog["position"]["dec"][:])
+        self.src_freq = np.asarray(catalog["absorber"]["freq"][:])
 
     def process(self, stream):
         """Select the beams around the catalog's sources.
@@ -1018,16 +1027,15 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
         newstream : containers.HFBData
             New container holding only the selected beams.
         """
-        src_dec = np.atleast_1d(stream.attrs["source_dec"])
-        src_freq = np.atleast_1d(stream.attrs["source_freq"])
-
         # Union of the NS-beam neighbourhoods of all absorbers in the catalog.
         ns_beams: set = set()
-        for dec, freq in zip(src_dec, src_freq):
+        for dec, freq in zip(self.src_dec, self.src_freq, strict=True):
             angles = self.beam_mdl.get_beam_positions(
                 np.arange(0, self.nbeam_ns), [freq]
             )
-            ns0 = int(np.argmin(np.abs(angles[:, 0, 1] - (dec - self.latitude))))
+            bmy = angles[:, 0, 1]
+            _, dg = bmxy_to_hadec(np.zeros_like(bmy), bmy)
+            ns0 = int(np.argmin(np.abs(dg - dec)))
             ns_beams.update(
                 range(
                     max(0, ns0 - self.n_beams_ns),
@@ -1043,7 +1051,7 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
         beam_sel = np.sort(beam_sel[np.isin(beam_sel, stream.beam)])
 
         self.log.info(
-            f"Selecting {beam_sel.size} beams for {src_dec.size} absorbers "
+            f"Selecting {beam_sel.size} beams for {self.src_dec.size} absorbers "
             f"({ns_sel.size} NS beams, EW {ew_sel.tolist()})."
         )
 
@@ -1060,6 +1068,82 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
 
         # Copy over datasets
         copy_datasets_filter(stream, newstream, "beam", selindex)
+
+        return newstream
+
+
+class SelectFreqAroundSources(tasklib.base.ContainerTask):
+    """Keep only the coarse channels around each source in a catalog.
+
+    The catalog-driven counterpart of 'draco.core.task.Downselect' for the
+    frequency axis: 'Downselect' takes fixed indices from the config, while
+    the channels wanted here depend on the sources.
+
+    Attributes
+    ----------
+    n_coarse : int
+        Coarse channels either side of the one nearest each source's
+        frequency (i.e. 2 * n_coarse + 1 per source). Default is 6.
+    """
+
+    n_coarse = config.Property(proptype=int, default=6)
+
+    def setup(self, catalog):
+        """Take the source frequencies from the catalog.
+
+        Parameters
+        ----------
+        catalog : containers.HFBAbsorberCatalog
+            Catalog of sources whose channels are to be kept.
+        """
+        if not isinstance(catalog, containers.HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
+
+        self.src_freq = np.asarray(catalog["absorber"]["freq"][:])
+
+    def process(self, stream):
+        """Cut the freq axis down to the union of the sources' windows.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with a freq axis.
+
+        Returns
+        -------
+        newstream : containers.HFBData
+            New container holding only the selected channels.
+        """
+        cfreq = stream.index_map["freq"]["centre"]
+        nfreq = len(cfreq)
+
+        sel = set()
+        for f0 in self.src_freq:
+            i0 = int(np.argmin(np.abs(cfreq - f0)))
+            sel.update(
+                range(max(0, i0 - self.n_coarse), min(nfreq, i0 + self.n_coarse + 1))
+            )
+        fsel = sorted(sel)
+
+        self.log.info(
+            f"Keeping {len(fsel)}/{nfreq} coarse channels for "
+            f"{self.src_freq.size} sources."
+        )
+
+        # freq is the distributed axis, so move the distribution elsewhere
+        # before cutting it.
+        stream.redistribute("time")
+
+        newstream = stream.__class__(
+            axes_from=stream,
+            attrs_from=stream,
+            skip_datasets=True,
+            freq=stream.index_map["freq"][fsel],
+        )
+        copy_datasets_filter(stream, newstream, selection={"freq": fsel})
+
+        newstream.redistribute("freq")
 
         return newstream
 
@@ -1536,7 +1620,7 @@ def ra_window_pixels(dec, freq, dra_deg, ra_step, beam_mdl, latitude, ns_grid=No
         Desired RA half-width, in degrees, at the best-resolution declination.
     ra_step : float
         RA-axis pixel spacing, in degrees (e.g. 360 / 4280).
-    beam_mdl : beam_model.formed.FFTFormedBeamModel
+    beam_mdl : beam_model.formed.FFTFormedActualBeamModel()
         Beam model instance.
     latitude : float
         Latitude of the telescope, in degrees.
@@ -1597,20 +1681,31 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
     n_coarse = config.Property(proptype=int, default=6)
     n_el = config.Property(proptype=int, default=2)
 
-    def setup(self, manager):
+    def setup(self, manager, catalog):
         """Set the local observer's position and load the beam model.
 
         Parameters
         ----------
         manager :
             An Observer object holding the geographic location of the telescope.
+        catalog : containers.HFBAbsorberCatalog
+            Catalog of sources to cut out.
         """
         self.observer = io.get_telescope(manager)
         self.latitude = self.observer.latitude
-        self._beam_mdl = fm.FFTFormedBeamModel()
+        self._beam_mdl = fm.FFTFormedActualBeamModel()
+
+        if not isinstance(catalog, containers.HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
+
+        self._names = [str(n) for n in catalog.index_map["object_id"]]
+        self._src_ra = np.asarray(catalog["position"]["ra"][:]).astype(float)
+        self._src_dec = np.asarray(catalog["position"]["dec"][:]).astype(float)
+        self._src_freq = np.asarray(catalog["absorber"]["freq"][:]).astype(float)
 
     def process(self, stream):
-        """Extract and MPI-combine one cutout per absorber in the catalogue.
+        """Extract and MPI-combine one cutout per absorber in the catalog.
 
         Parameters
         ----------
@@ -1629,11 +1724,11 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
         stream.redistribute("freq")
         rank0 = self.comm.rank == 0
 
-        # Source list and day label from the attributes.
-        names = [str(n) for n in np.atleast_1d(stream.attrs["source_names"])]
-        src_ra = np.atleast_1d(stream.attrs["source_ra"]).astype(float)
-        src_dec = np.atleast_1d(stream.attrs["source_dec"]).astype(float)
-        src_freq = np.atleast_1d(stream.attrs["source_freq"]).astype(float)
+        # Source list from the catalog taken in setup.
+        names = self._names
+        src_ra = self._src_ra
+        src_dec = self._src_dec
+        src_freq = self._src_freq
 
         lsd = stream.attrs.get("lsd", stream.attrs.get("csd", None))
         if lsd is None:
@@ -1726,8 +1821,14 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
             fsel = (bsel[:, np.newaxis] * nsubfreq + np.arange(nsubfreq)).ravel()
 
             # El window: +/- n_el pixels, clipped at edges
-            el_src = np.sin(np.radians(src_dec[iobj] - self.latitude))
-            ie0 = int(np.argmin(np.abs(el - el_src)))
+            bmy_all = self._beam_mdl.get_beam_positions(
+                np.arange(len(self._beam_mdl.reference_angles)), [src_freq[iobj]]
+            )[:, 0, 1]
+            _, dg_all = bmxy_to_hadec(np.zeros_like(bmy_all), bmy_all)
+            ns0 = int(np.argmin(np.abs(dg_all - src_dec[iobj])))
+
+            beam_ns = np.asarray(stream.index_map["beam_ns"])
+            ie0 = int(np.argmin(np.abs(beam_ns - ns0)))
             esel = np.arange(max(0, ie0 - self.n_el), min(nel, ie0 + self.n_el + 1))
 
             # Extract this rank's freq chunk
@@ -1747,6 +1848,9 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
                 weight_cut[..., fsel_out] = weight_local[ix]
 
             # Combine freq chunks from all ranks
+            # (This works for the current cutout sizes, but every rank holds a
+            # full copy, so it may not scale. If that becomes a problem,
+            # consider a Gatherv to rank 0 instead.)
             self.comm.Allreduce(MPI.IN_PLACE, data_cut, op=MPI.SUM)
             self.comm.Allreduce(MPI.IN_PLACE, weight_cut, op=MPI.SUM)
 
