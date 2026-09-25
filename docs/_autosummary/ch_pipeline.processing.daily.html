@@ -1,0 +1,457 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ch_pipeline.processing.daily &mdash; ch_pipeline  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ch_pipeline.synthesis" href="ch_pipeline.synthesis.html" />
+    <link rel="prev" title="ch_pipeline.processing.client" href="ch_pipeline.processing.client.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ch_pipeline
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dev.html">Development Guidelines</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../reference.html">Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../reference.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.analysis.html">ch_pipeline.analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.core.html">ch_pipeline.core</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="ch_pipeline.processing.html">ch_pipeline.processing</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.base.html">ch_pipeline.processing.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.beam.html">ch_pipeline.processing.beam</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ch_pipeline.processing.client.html">ch_pipeline.processing.client</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">ch_pipeline.processing.daily</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ch_pipeline.synthesis.html">ch_pipeline.synthesis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ch_pipeline</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../reference.html">Reference</a></li>
+          <li class="breadcrumb-item"><a href="ch_pipeline.processing.html">ch_pipeline.processing</a></li>
+      <li class="breadcrumb-item active">ch_pipeline.processing.daily</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/_autosummary/ch_pipeline.processing.daily.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-ch_pipeline.processing.daily">
+<span id="ch-pipeline-processing-daily"></span><h1>ch_pipeline.processing.daily<a class="headerlink" href="#module-ch_pipeline.processing.daily" title="Link to this heading"></a></h1>
+<p>Chime Daily Pipeline processing type.</p>
+<p>This processing type is used to run the Chime daily pipeline.</p>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#ch_pipeline.processing.daily.DailyProcessing" title="ch_pipeline.processing.daily.DailyProcessing"><code class="xref py py-class docutils literal notranslate"><span class="pre">DailyProcessing</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ch_pipeline.processing.daily.TestDailyProcessing" title="ch_pipeline.processing.daily.TestDailyProcessing"><code class="xref py py-class docutils literal notranslate"><span class="pre">TestDailyProcessing</span></code></a></p></li>
+</ul>
+</section>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.available_csds" title="ch_pipeline.processing.daily.available_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">available_csds</span></code></a>(csds[, pad, data_coverage, ...])</p></td>
+<td><p>Return the subset of csds in <cite>csds</cite> for whom all files are online.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.db_get_corr_files_in_range" title="ch_pipeline.processing.daily.db_get_corr_files_in_range"><code class="xref py py-obj docutils literal notranslate"><span class="pre">db_get_corr_files_in_range</span></code></a>(start_csd, end_csd)</p></td>
+<td><p>Get the name and start and end times of corrdata files in the CSD range.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.db_get_weather_files_in_range" title="ch_pipeline.processing.daily.db_get_weather_files_in_range"><code class="xref py py-obj docutils literal notranslate"><span class="pre">db_get_weather_files_in_range</span></code></a>(start_csd, end_csd)</p></td>
+<td><p>Get the name and start and end times of weather files in the CSD range.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.expand_csd_range" title="ch_pipeline.processing.daily.expand_csd_range"><code class="xref py py-obj docutils literal notranslate"><span class="pre">expand_csd_range</span></code></a>(start, end[, step])</p></td>
+<td><p>Get the CSDs within a time range.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.files_in_timespan" title="ch_pipeline.processing.daily.files_in_timespan"><code class="xref py py-obj docutils literal notranslate"><span class="pre">files_in_timespan</span></code></a>(start, end, file_times)</p></td>
+<td><p>Iterate over a list of file times and find those in a range.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.get_filenames_used_by_csds" title="ch_pipeline.processing.daily.get_filenames_used_by_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_filenames_used_by_csds</span></code></a>(csds, files[, pad])</p></td>
+<td><p>For a list of CSDS, return all files from <cite>files</cite> which are used by the CSDS.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.get_flagged_csds" title="ch_pipeline.processing.daily.get_flagged_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_flagged_csds</span></code></a>(csds, flags, frac_flagged)</p></td>
+<td><p>Return a subset of csds which are heavily flagged.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.get_recent_csds" title="ch_pipeline.processing.daily.get_recent_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_recent_csds</span></code></a>(csds, ndays)</p></td>
+<td><p>Return CSDs from the last <cite>ndays</cite> chime sidereal days.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.remove_online_csds" title="ch_pipeline.processing.daily.remove_online_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">remove_online_csds</span></code></a>(csds_remove, csds_keep[, pad])</p></td>
+<td><p>Remove online files which are solely used by specified csds.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.request_offline_csds" title="ch_pipeline.processing.daily.request_offline_csds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">request_offline_csds</span></code></a>(csds[, pad])</p></td>
+<td><p>Given a list of csds, request that all required data be copied online.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.DailyProcessing" title="ch_pipeline.processing.daily.DailyProcessing"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DailyProcessing</span></code></a>(revision[, create, root_path])</p></td>
+<td><p>Chime daily processing pipeline processing type.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ch_pipeline.processing.daily.TestDailyProcessing" title="ch_pipeline.processing.daily.TestDailyProcessing"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TestDailyProcessing</span></code></a>(revision[, create, ...])</p></td>
+<td><p>A test version of the daily processing.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.DailyProcessing">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">DailyProcessing</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">revision</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">root_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#DailyProcessing"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.DailyProcessing" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="ch_pipeline.processing.base.html#ch_pipeline.processing.base.ProcessingType" title="ch_pipeline.processing.base.ProcessingType"><code class="xref py py-class docutils literal notranslate"><span class="pre">ProcessingType</span></code></a></p>
+<p>Chime daily processing pipeline processing type.</p>
+<p>Processes individual chimestack files into one CSD in RA, along with
+ringmaps and other data products.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.DailyProcessing.runnable_tags">
+<span class="sig-name descname"><span class="pre">runnable_tags</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">require_online</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#DailyProcessing.runnable_tags"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.DailyProcessing.runnable_tags" title="Link to this definition"></a></dt>
+<dd><p>Return all runnable tags, whether or not the data is available.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.DailyProcessing.update_files">
+<span class="sig-name descname"><span class="pre">update_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">retrieve</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clear</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#DailyProcessing.update_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.DailyProcessing.update_files" title="Link to this definition"></a></dt>
+<dd><p>Update the status of files used by this revision.</p>
+<p>This includes requesting that soon-to-be needed files get brought
+online, and that files that are no longer needed be moved offline.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.TestDailyProcessing">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">TestDailyProcessing</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">revision</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">root_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#TestDailyProcessing"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.TestDailyProcessing" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ch_pipeline.processing.daily.DailyProcessing" title="ch_pipeline.processing.daily.DailyProcessing"><code class="xref py py-class docutils literal notranslate"><span class="pre">DailyProcessing</span></code></a></p>
+<p>A test version of the daily processing.</p>
+<p>Processes only 16 frequencies on a single node.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.available_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">available_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_coverage</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weather_coverage</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">require_online</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#available_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.available_csds" title="Link to this definition"></a></dt>
+<dd><p>Return the subset of csds in <cite>csds</cite> for whom all files are online.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds</strong> – sorted list of csds to check</p></li>
+<li><p><strong>pad</strong> – fraction of a day to pad on either end. This data should also be available
+in order for a day to be considered available</p></li>
+<li><p><strong>data_coverage</strong> – What fraction of the day must exist in order to be considered available.
+This <em>includes</em> the padding fraction, so values greater than 1 are
+permitted. For example, if <cite>pad=0.2</cite>, setting <cite>data_coverage=1.4</cite>
+would indicate that all the data must be available.
+Even if all files are online, if the data coverage is less than this
+fraction, the day shouldn’t be processed.</p></li>
+<li><p><strong>weather_coverage</strong> – What fraction of the day must have weather coverage. Generally,
+weather files are only produced once per day, so this should be
+set to 1.0 unless there are changes to data format.</p></li>
+<li><p><strong>require_online</strong> – If True, a CSD must have all files available online to be considered
+available. Default is True.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>set of all available csds</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>available</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.db_get_corr_files_in_range">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">db_get_corr_files_in_range</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start_csd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_csd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#db_get_corr_files_in_range"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.db_get_corr_files_in_range" title="Link to this definition"></a></dt>
+<dd><p>Get the name and start and end times of corrdata files in the CSD range.</p>
+<p>Return both a list of files which were found on the online node and those
+which were found anywhere. If <cite>has_file</cite> is <cite>N</cite>, these lists should be
+the same.</p>
+<p>Return an empty list if files between start_csd and end_csd are only
+partially available online.</p>
+<p>Total file count is verified by checking files that exist everywhere.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start_csd</strong> – Start date in sidereal day format</p></li>
+<li><p><strong>end_csd</strong> – End date in sidereal day format</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><em>filenames_online</em> – chimestack files available in the timespan, if
+all of them are available online</p></li>
+<li><p><em>filenames_that_exist</em> – all chimestack files available in the timespan</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.db_get_weather_files_in_range">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">db_get_weather_files_in_range</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start_csd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_csd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#db_get_weather_files_in_range"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.db_get_weather_files_in_range" title="Link to this definition"></a></dt>
+<dd><p>Get the name and start and end times of weather files in the CSD range.</p>
+<p>Return both a list of files which were found on the online node and those
+which were found anywhere. If <cite>has_file</cite> is <cite>N</cite>, these lists should be
+the same.</p>
+<p>Return an empty list if files between start_csd and end_csd are only
+partially available online.</p>
+<p>Total file count is verified by checking files that exist everywhere.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start_csd</strong> – Start date in sidereal day format</p></li>
+<li><p><strong>end_csd</strong> – End date in sidereal day format</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><em>filenames_online</em> – chimestack files available in the timespan, if
+all of them are available online</p></li>
+<li><p><em>filenames_that_exist</em> – all chimestack files available in the timespan</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.expand_csd_range">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">expand_csd_range</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">step</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#expand_csd_range"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.expand_csd_range" title="Link to this definition"></a></dt>
+<dd><p>Get the CSDs within a time range.</p>
+<p>The start and end parameters must either be strings of the form “CSDd+”
+(i.e. CSD followed by an int), which specifies an exact CSD start, or a
+form that <cite>caput.astro.time.ensure_unix</cite> understands.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start</strong> (<em>str</em><em> or </em><em>parseable to datetime</em>) – Start of interval. If <cite>None</cite>, use CSD 0</p></li>
+<li><p><strong>end</strong> (<em>str</em><em> or </em><em>parseable to datetime</em>) – End of interval. If <cite>None</cite> use now. Note that for CSD intervals the
+end is <em>inclusive</em> (unlike a <cite>range</cite>).</p></li>
+<li><p><strong>step</strong> (<em>int</em>) – step size to use when traversing interval</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>csds</strong></p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of ints</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.files_in_timespan">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">files_in_timespan</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_times</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#files_in_timespan"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.files_in_timespan" title="Link to this definition"></a></dt>
+<dd><p>Iterate over a list of file times and find those in a range.</p>
+<p>Given a list of file (name start, end) times, iterate over the list and
+find which files fall within start, end</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start</strong> (<em>float</em>) – unix timestamp</p></li>
+<li><p><strong>end</strong> (<em>float</em>) – unix timestamp</p></li>
+<li><p><strong>file_times</strong> (<em>list</em><em> of </em><em>tuples</em>) – tuple: (name, start_time, finish_time)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p>list of elements of <cite>files</cite>, whose start_time and finish_time</p></li>
+<li><p>fall between <cite>start</cite> and <cite>end</cite></p></li>
+<li><p>index of the first file whose <cite>start_time</cite> is after <cite>end</cite></p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.get_filenames_used_by_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">get_filenames_used_by_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#get_filenames_used_by_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.get_filenames_used_by_csds" title="Link to this definition"></a></dt>
+<dd><p>For a list of CSDS, return all files from <cite>files</cite> which are used by the CSDS.</p>
+<p>This only returns the file names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds</strong> – list of integer CSDS</p></li>
+<li><p><strong>files</strong> – list of files in format (name, start_time, end_time). This list
+is searched for files with times overlapping any CSD</p></li>
+<li><p><strong>pad</strong> – A fraction of a full CSD to pad when searching for files - i.e., a
+given CSD may want a small amount of data from adajacent days</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of file names that are needed by the CSDS</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>files_used</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.get_flagged_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">get_flagged_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flags</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frac_flagged</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#get_flagged_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.get_flagged_csds" title="Link to this definition"></a></dt>
+<dd><p>Return a subset of csds which are heavily flagged.</p>
+<p>Return a set of csds from the input list for which more than
+<cite>frac_flagged</cite> of the data is flagged.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds</strong> – List of integer csds to check</p></li>
+<li><p><strong>flags</strong> – List of flag names to consider</p></li>
+<li><p><strong>frac_flagged</strong> – Fraction between 0 and 1 of flagged data for which to
+return a csd</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Subset of days in <cite>csds</cite> for which more than the threshold of
+data is flagged</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>flagged</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.get_recent_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">get_recent_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ndays</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#get_recent_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.get_recent_csds" title="Link to this definition"></a></dt>
+<dd><p>Return CSDs from the last <cite>ndays</cite> chime sidereal days.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds</strong> – List of integer csds</p></li>
+<li><p><strong>ndays</strong> – Number of days to look back</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>CSDs in the past <cite>ndays</cite> sidereal days</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>recent</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.remove_online_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">remove_online_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds_remove</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">csds_keep</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#remove_online_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.remove_online_csds" title="Link to this definition"></a></dt>
+<dd><p>Remove online files which are solely used by specified csds.</p>
+<p>Check the files required by <cite>csds_remove</cite> and check against those used
+by <cite>csds_keep</cite>. Any files which are _only_ used by csds in <cite>csds_remove</cite>
+are removed from the <cite>fir_online</cite> node, provided that a copy exists
+elsewhere.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds_remove</strong> – list of integer csds to clear data where possible</p></li>
+<li><p><strong>csds_keep</strong> – list of integer csds for which all data is still required</p></li>
+<li><p><strong>pad</strong> – fraction of data required by adjacent days. This will prevent
+a csd in <cite>csds_remove</cite> from clearing all its data if that fraction
+of data is needed by an adjacent csd in <cite>csds_keep</cite></p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ch_pipeline.processing.daily.request_offline_csds">
+<span class="sig-prename descclassname"><span class="pre">ch_pipeline.processing.daily.</span></span><span class="sig-name descname"><span class="pre">request_offline_csds</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/ch_pipeline/processing/daily.html#request_offline_csds"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ch_pipeline.processing.daily.request_offline_csds" title="Link to this definition"></a></dt>
+<dd><p>Given a list of csds, request that all required data be copied online.</p>
+<p>Request that all data required by the list of CSDS get copied to the
+fir_online node.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csds</strong> – list of integer csds to copy</p></li>
+<li><p><strong>pad</strong> – fraction of data from adjacent days that should also be copied online</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="ch_pipeline.processing.client.html" class="btn btn-neutral float-left" title="ch_pipeline.processing.client" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ch_pipeline.synthesis.html" class="btn btn-neutral float-right" title="ch_pipeline.synthesis" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015, CHIME collaboration.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
