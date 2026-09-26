@@ -970,7 +970,7 @@ class CreateAbsorberStacks(base.ContainerTask):
     stack_dir : str
         Directory to write into. Created if missing.
     csd_range : list
-        [start, stop] CSDs each file spans. 'stop' is inclusive. Default is [2600, 6000].
+        [start, stop) CSDs each file spans. 'stop' is exclusive. Default is [2600, 6000].
     samples : int
         RA samples in the sidereal ringmap. Default is 4280.
     nsubfreq : int
@@ -1059,7 +1059,7 @@ class CreateAbsorberStacks(base.ContainerTask):
         # import would be circular.
         from .analysis import ra_window_pixels
 
-        csd_array = np.arange(int(self.csd_range[0]), int(self.csd_range[1]) + 1)
+        csd_array = np.arange(int(self.csd_range[0]), int(self.csd_range[1]))
 
         stack_dir = Path(self.stack_dir)
         stack_dir.mkdir(parents=True, exist_ok=True)
