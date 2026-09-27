@@ -488,8 +488,8 @@ class MakeAbsorberCatalog(base.ContainerTask):
 
         Parameters
         ----------
-        manager : telescope
-            An Observer object holding the geographic location of the teles>
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object holding the geographic location of the telescope.
         """
         self.observer = get_telescope(manager)
 
@@ -677,8 +677,8 @@ class LoadFilesForCatalog(io.BaseLoadFiles):
 
         Parameters
         ----------
-        manager : telescope
-            An Observer object holding the geographic location of the telescope.
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object holding the geographic location of the telescope.
         filelists : list
             A specification of the set of files for the day.
         catalog : HFBAbsorberCatalog
@@ -1004,8 +1004,8 @@ class CreateAbsorberStacks(base.ContainerTask):
 
         Parameters
         ----------
-        manager : telescope
-            Telescope object providing the latitude and frequency grid.
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object providing the latitude and frequency grid.
         catalog : HFBAbsorberCatalog
             Catalog of sources to create stacks for.
         """

@@ -340,8 +340,6 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
         out : containers.HFBHighResRingMap
             HFB ringmap container with EW beams aligned in RA.
         """
-        from ch_ephem.coord import bmxy_to_hadec
-
         data = stream.hfb[:]
         weight = stream.weight[:]
 
@@ -994,7 +992,7 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
 
         Parameters
         ----------
-        manager : Observer
+        manager : caput.astro.observer.Observer
             An Observer object holding the geographic location of the telescope.
         catalog : containers.HFBAbsorberCatalog
             Catalog of sources whose beams are to be selected.
@@ -1686,7 +1684,7 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
 
         Parameters
         ----------
-        manager :
+        manager : caput.astro.observer.Observer
             An Observer object holding the geographic location of the telescope.
         catalog : containers.HFBAbsorberCatalog
             Catalog of sources to cut out.
