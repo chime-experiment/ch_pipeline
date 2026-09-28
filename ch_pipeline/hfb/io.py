@@ -17,6 +17,7 @@ from caput.util import mpitools
 from ch_ephem.coord import bmxy_to_hadec
 from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog
+from cora import foreground
 from draco.core.io import get_telescope
 
 from .containers import HFBAbsorberCatalog, HFBData, HFBHighResRingMapStack, HFBReader
@@ -465,7 +466,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
     adopting a later entry's 'cal_src' if it has none itself.)
 
     For each unique (cal_src, coarse channel) pair referenced by an
-    absorber, get position from 'combinedps_file', frequency borrowed from that
+    absorber, get position from 'cora/foreground/data/combinedps', frequency borrowed from that
     absorber (so the same window is extracted downstream), and name
     "<ra><+/-dec>_<cal_src>", e.g. "144+83_3C_220.3".
 
@@ -473,13 +474,9 @@ class MakeAbsorberCatalog(base.ContainerTask):
     ----------
     json_files : list of str
         Paths of the JSON target list files.
-    combinedps_file : str, optional
-        Point-source table for calibrator positions. Required if any
-        entry has a 'cal_src'.
     """
 
     json_files = config.Property(proptype=list)
-    combinedps_file = config.Property(proptype=str, default=None)
 
     _done = False
 
@@ -494,8 +491,17 @@ class MakeAbsorberCatalog(base.ContainerTask):
         self.observer = get_telescope(manager)
 
     def _load_combinedps(self):
-        """Load {name: (ra, dec)} from the combined point-source table."""
-        with open(self.combinedps_file) as f:
+        """Load {name: (ra, dec)} from the combined point-source table.
+
+        The table ships with 'cora', so it is located relative to that
+        package rather than configured, which keeps the path correct
+        whatever environment the pipeline runs in.
+        """
+        combinedps_file = os.path.join(
+            os.path.dirname(foreground.__file__), "data", "combinedps.dat"
+        )
+
+        with open(combinedps_file) as f:
             header = f.readline().split()
             rows = [line.split() for line in f if line.strip()]
 
