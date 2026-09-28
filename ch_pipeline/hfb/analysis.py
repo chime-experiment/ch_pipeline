@@ -1714,8 +1714,8 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
         -------
         cont : caput.memdata.MemDiskGroup
             One group per absorber (cont[name]), each holding
-            beam_ew / el / ra / freq / hfb / weight datasets,
-            plus cont.attrs["csd"]. N
+            beam_ew / el / ra / freq / hfb / weight datasets and a
+            'centre_freq' attribute, plus cont.attrs["csd"].
         """
         # Ensure only the freq axis is distributed. After this,
         # beam_ew, el and ra are complete on every rank.
@@ -1854,6 +1854,7 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
 
             # Fill the output container
             cutout_grp = cont.create_group(name)
+            cutout_grp.attrs["centre_freq"] = float(src_freq[iobj])
             cutout_grp.create_dataset("beam_ew", data=beam_ew)
             cutout_grp.create_dataset("el", data=el[esel])
             cutout_grp.create_dataset("ra", data=ra[rsel])

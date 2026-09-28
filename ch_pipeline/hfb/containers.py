@@ -4,6 +4,7 @@ from functools import cached_property
 from typing import ClassVar
 
 import numpy as np
+from beam_model.formed import FFTFormedActualBeamModel
 from caput import memdata
 from caput.containers import tod
 from ch_util import andata
@@ -408,7 +409,15 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
 
     The el axis corresponds to the sin(za) of the reference angles for the NS beams.
     The true el for a given bit of data also depends on the frequency and can be
-    computed from the NS beam index and frequency using the synthetic beam model.
+    computed from the NS beam index and frequency using the synthetic beam model;
+    see :attr:`el_true`.
+
+    Attributes
+    ----------
+    centre_freq : float or None
+        Frequency in MHz that this map's band can be represented by. Set only
+        for a cutout narrow enough that the beam positions do not change
+        appreciably across the band, and None otherwise.
     """
 
     _axes = ("beam_ns", "el")
@@ -436,6 +445,40 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
         offset in RA that depends on the EW and NS beam index.
         """
         return self.index_map["ra"]
+
+    @property
+    def centre_freq(self) -> float | None:
+        """Frequency in MHz that this map's band can be represented by.
+
+        Set only for a cutout narrow enough that the beam positions do not
+        change appreciably across the band, and None otherwise.
+        """
+        freq = self.attrs.get("centre_freq", None)
+        return None if freq is None else float(freq)
+
+    @centre_freq.setter
+    def centre_freq(self, value: float) -> None:
+        self.attrs["centre_freq"] = float(value)
+
+    @property
+    def el_true(self) -> np.ndarray | None:
+        """The el = sin(za) of each NS beam at this map's centre frequency.
+
+        The `el` axis holds the beam reference angles, which are the same at every
+        frequency. This instead evaluates the beam positions at `centre_freq`,
+        giving the el the data actually corresponds to.
+
+        Returns None when `centre_freq` is unset, which is the case for any map
+        spanning too wide a band for one frequency to describe it.
+        """
+        if self.centre_freq is None:
+            return None
+
+        za = FFTFormedActualBeamModel().get_beam_positions(
+            self.beam_ns, [self.centre_freq]
+        )[:, 0, 1]
+
+        return np.sin(np.radians(za))
 
 
 class HFBBeamRingMap(HFBRingMapBase):
@@ -524,13 +567,6 @@ class HFBHighResRingMapStack(HFBHighResRingMap):
     sidereal days can be stacked together in one container. The distributed axis is
     'csd' (rather than 'el', as in the parent class), since the 'csd' axis grows
     as more days are added.
-
-    Note that the 'el' axis carries a different meaning here than in the parent
-    classes. In :class:'HFBRingMapBase' it holds the sin(za) of the NS beams'
-    fixed reference angles. Here it holds the sin(za) of the beams' true,
-    frequency-dependent positions, evaluated at the absorber's own frequency.
-    The axis keeps the name 'el' because renaming it would mean detaching this
-    container from 'HFBHighResRingMap'.
     """
 
     _axes = ("csd",)
@@ -545,7 +581,7 @@ class HFBHighResRingMapStack(HFBHighResRingMap):
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
             "chunks": (20, 3, 5, 2000, 1664),
-            "truncate": False,
+            "truncate": True,
         },
         "weight": {
             "axes": ["csd", "beam_ew", "el", "ra", "freq"],
@@ -556,7 +592,7 @@ class HFBHighResRingMapStack(HFBHighResRingMap):
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
             "chunks": (20, 3, 5, 2000, 1664),
-            "truncate": False,
+            "truncate": True,
         },
         "nsample": {
             "axes": ["csd", "beam_ew", "el", "ra", "freq"],
@@ -564,9 +600,10 @@ class HFBHighResRingMapStack(HFBHighResRingMap):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "csd",
-            "compression": "gzip",
-            "compression_opts": 4,
-            "chunks": (20, 3, 5, 2000, 13),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 3, 5, 2000, 1664),
+            "truncate": True,
         },
     }
 

@@ -1132,6 +1132,7 @@ class CreateAbsorberStacks(base.ContainerTask):
                 el_win,
                 ra_full[rsel],
                 freq_win,
+                src_freq,
             )
 
             self.log.info(
@@ -1142,8 +1143,14 @@ class CreateAbsorberStacks(base.ContainerTask):
 
         return ncreated
 
-    def _write_stack(self, path, name, csd, beam_ew, beam_ns, el, ra, freq):
-        """Write one empty stack file, via a temp file so a crash leaves nothing."""
+    def _write_stack(
+        self, path, name, csd, beam_ew, beam_ns, el, ra, freq, centre_freq
+    ):
+        """Write one empty stack file, via a temp file so a crash leaves nothing.
+
+        'centre_freq' is the source's frequency, stored as a file attribute so
+        the container's 'el_true' property can evaluate the beam positions there.
+        """
         tmp_path = f"{path}.tmp.{os.getpid()}"
         shape = (csd.size, beam_ew.size, el.size, ra.size, freq.size)
 
@@ -1179,6 +1186,7 @@ class CreateAbsorberStacks(base.ContainerTask):
                     dset.attrs["axis"] = np.array(dspec["axes"], dtype="S")
 
                 fh.attrs["object_id"] = name
+                fh.attrs["centre_freq"] = float(centre_freq)
 
             os.replace(tmp_path, path)
         finally:
