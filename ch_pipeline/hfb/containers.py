@@ -4,6 +4,7 @@ from functools import cached_property
 from typing import ClassVar
 
 import numpy as np
+from beam_model.formed import FFTFormedActualBeamModel
 from caput import memdata
 from caput.containers import tod
 from ch_util import andata
@@ -12,6 +13,7 @@ from draco.core.containers import (
     COMPRESSION_OPTS,
     DataWeightContainer,
     SiderealContainer,
+    SourceCatalog,
     TODContainer,
 )
 
@@ -407,7 +409,15 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
 
     The el axis corresponds to the sin(za) of the reference angles for the NS beams.
     The true el for a given bit of data also depends on the frequency and can be
-    computed from the NS beam index and frequency using the synthetic beam model.
+    computed from the NS beam index and frequency using the synthetic beam model;
+    see :attr:`el_true`.
+
+    Attributes
+    ----------
+    centre_freq : float or None
+        Frequency in MHz that this map's band can be represented by. Set only
+        for a cutout narrow enough that the beam positions do not change
+        appreciably across the band, and None otherwise.
     """
 
     _axes = ("beam_ns", "el")
@@ -435,6 +445,40 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
         offset in RA that depends on the EW and NS beam index.
         """
         return self.index_map["ra"]
+
+    @property
+    def centre_freq(self) -> float | None:
+        """Frequency in MHz that this map's band can be represented by.
+
+        Set only for a cutout narrow enough that the beam positions do not
+        change appreciably across the band, and None otherwise.
+        """
+        freq = self.attrs.get("centre_freq", None)
+        return None if freq is None else float(freq)
+
+    @centre_freq.setter
+    def centre_freq(self, value: float) -> None:
+        self.attrs["centre_freq"] = float(value)
+
+    @property
+    def el_true(self) -> np.ndarray | None:
+        """The el = sin(za) of each NS beam at this map's centre frequency.
+
+        The `el` axis holds the beam reference angles, which are the same at every
+        frequency. This instead evaluates the beam positions at `centre_freq`,
+        giving the el the data actually corresponds to.
+
+        Returns None when `centre_freq` is unset, which is the case for any map
+        spanning too wide a band for one frequency to describe it.
+        """
+        if self.centre_freq is None:
+            return None
+
+        za = FFTFormedActualBeamModel().get_beam_positions(
+            self.beam_ns, [self.centre_freq]
+        )[:, 0, 1]
+
+        return np.sin(np.radians(za))
 
 
 class HFBBeamRingMap(HFBRingMapBase):
@@ -513,6 +557,60 @@ class HFBHighResRingMap(HFBBeamRingMap, HFBHighResContainer):
             "distributed_axis": "el",
         },
     }
+
+
+class HFBHighResRingMapStack(HFBHighResRingMap):
+    """Container for holding high-resolution ringmap cutouts from multiple days.
+
+    With respect to HFBHighResRingMap, a 'csd' axis is added in front of
+    the other axes, so that ringmap cutouts around the same absorber from several
+    sidereal days can be stacked together in one container. The distributed axis is
+    'csd' (rather than 'el', as in the parent class), since the 'csd' axis grows
+    as more days are added.
+    """
+
+    _axes = ("csd",)
+
+    _dataset_spec: ClassVar = {
+        "hfb": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 3, 5, 2000, 1664),
+            "truncate": True,
+        },
+        "weight": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 3, 5, 2000, 1664),
+            "truncate": True,
+        },
+        "nsample": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": np.uint16,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 3, 5, 2000, 1664),
+            "truncate": True,
+        },
+    }
+
+    @property
+    def csd(self):
+        """The csd indices of the csd axis."""
+        return self.index_map["csd"]
 
 
 class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
@@ -783,3 +881,62 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
     def get_frac_rfi(self, sigma_key: float) -> np.ndarray:
         """Get the fraction of HFB subfrequency channels detecting RFI for a given sigma value."""
         return self.get_subfreq_rfi(sigma_key) / 128
+
+
+class HFBAbsorberCatalog(SourceCatalog):
+    """A catalog of absorbers (confirmed and candidate) and calibration sources.
+
+    Required per-entry values are: 'ra' (degrees), 'dec' (degrees), and 'freq' (MHz).
+    """
+
+    _table_spec: ClassVar = {
+        "absorber": {
+            "columns": [
+                ["freq", np.float64],
+            ],
+            "axis": "object_id",
+        },
+    }
+
+    def validate(self):
+        """Check that all entries hold valid values."""
+        names = self.index_map["object_id"]
+
+        # Required columns:
+        ra = self["position"]["ra"][:]
+        dec = self["position"]["dec"][:]
+        freq = self["absorber"]["freq"][:]
+
+        for field, values, ok in [
+            ("ra", ra, (ra >= 0.0) & (ra <= 360.0)),
+            ("dec", dec, (dec > -90.0) & (dec < 90.0)),
+            ("freq", freq, (freq >= 400.0) & (freq <= 800.0)),
+        ]:
+            bad = ~ok
+            if bad.any():
+                raise ValueError(
+                    f"Required column '{field}' has missing or out-of-range "
+                    f"values for entries {names[bad].tolist()}: "
+                    f"{values[bad].tolist()}. "
+                    "Expected 0 <= ra <= 360, -90 < dec < 90, 400 <= freq <= 800 (MHz)."
+                )
+
+    @property
+    def id(self) -> np.ndarray:
+        """The names/IDs of the absorbers."""
+        return self.index_map["object_id"]
+
+    @property
+    def ra(self) -> np.ndarray:
+        """Right ascension of each absorber."""
+        return self["position"]["ra"]
+
+    @property
+    def dec(self) -> np.ndarray:
+        """Declination of each absorber."""
+        return self["position"]["dec"]
+
+    @property
+    def freq(self) -> np.ndarray:
+        """Observed frequency (MHz) of the absorption feature."""
+        return self["absorber"]["freq"]
