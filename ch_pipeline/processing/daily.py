@@ -234,6 +234,7 @@ pipeline:
       in: sensitivity
       out: sensitivity_day
       params:
+        min_day_length: 0.2 # ensures that adjacent CSDs are not processed
         save: true
         output_name: "sensitivity_{{tag}}.h5"
 
