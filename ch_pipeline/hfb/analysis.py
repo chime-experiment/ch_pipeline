@@ -1,8 +1,7 @@
 """Tasks for HFB analysis."""
 
-import beam_model.formed as fm
+import cfbm
 import numpy as np
-from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from caput import config, mpiarray
 from caput.algorithms import median
 from caput.containers import copy_datasets_filter, empty_like
@@ -318,12 +317,10 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
 
     def setup(self):
         """Load offsets and reference angles from CHIME/FRB beam model."""
-        from beam_model.formed import FFTFormedActualBeamModel
-
         # Get the offsets in CHIME/FRB x coord (in deg) of the EW beams and the
         # reference zenith angles (CHIME/FRB y coord; in deg) of the NS beams
         # from the CHIME/FRB beam model
-        beam_mdl = FFTFormedActualBeamModel()
+        beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
         self.ew_beam_offset_deg = beam_mdl.config["ew_spacing"]
         self.ns_reference_angles_deg = beam_mdl.reference_angles
 
@@ -799,7 +796,7 @@ class HFBSelectTransit(tasklib.base.ContainerTask):
         phys_freq = (freq.reshape(nfreq, 1) + subfreq).flatten()
 
         # Extract beam indices, then change format for sensitivity calculations.
-        # The beam_model package uses a format (referred to here as `beam_number`)
+        # The cfbm package uses a format (referred to here as `beam_number`)
         # where the EW beam index is indicated by thousands, and the NS beam index
         # by the remaining digits (a number ranging form 0 and 255). For example,
         # the indices [12, 268, 524, 780] will be changed to [12, 1012, 2012, 3012]
@@ -817,7 +814,8 @@ class HFBSelectTransit(tasklib.base.ContainerTask):
         # positions and beam widths, and for finding source positions in beam-model
         # xy-coordinates. Set `interpolate_bad_freq=True` to avoid issues at
         # frequencies where the data-driven primary-beam model lacks data.
-        beam_mdl = FutureMostAccurateCompositeBeamModel(interpolate_bad_freq=True)
+        # TODO: Avoid use of approximate model for formed beams
+        beam_mdl = cfbm.composite.CompositeBeamModel(interpolate_bad_freq=True)
 
         # Obtain the track of the source in beam-model xy-coordinates from its
         # equatorial position and time. The array has shape (ntime, 2).
@@ -997,7 +995,7 @@ class SelectBeamsAroundSources(tasklib.base.ContainerTask):
         catalog : containers.HFBAbsorberCatalog
             Catalog of sources whose beams are to be selected.
         """
-        self.beam_mdl = fm.FFTFormedActualBeamModel()
+        self.beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
         self.observer = io.get_telescope(manager)
         self.latitude = self.observer.latitude
 
@@ -1691,7 +1689,7 @@ class ExtractAbsorberCutouts(tasklib.base.ContainerTask):
         """
         self.observer = io.get_telescope(manager)
         self.latitude = self.observer.latitude
-        self._beam_mdl = fm.FFTFormedActualBeamModel()
+        self._beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
 
         if not isinstance(catalog, containers.HFBAbsorberCatalog):
             raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
