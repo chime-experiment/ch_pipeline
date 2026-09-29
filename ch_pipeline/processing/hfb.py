@@ -99,7 +99,7 @@ pipeline:
 
     # Query for all the data for the sidereal day we are processing
     - type: ch_pipeline.core.dataquery.QueryDatabase
-      out: filelist_hfb
+      out: qfilelist
       params:
         start_csd: {csd[0]:.2f}
         end_csd: {csd[1]:.2f}
@@ -110,7 +110,7 @@ pipeline:
 
     # Load HFB files
     - type: ch_pipeline.hfb.io.LoadFiles
-      requires: filelist_hfb
+      requires: qfilelist
       out: tstream_hfb
       params:
         distributed: true
@@ -123,6 +123,9 @@ pipeline:
       params:
         sigma: {sigma_list}
 
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream_hfb
+
     # Group into one sidereal-day container
     - type: draco.analysis.sidereal.SiderealGrouper
       requires: manager
@@ -134,6 +137,178 @@ pipeline:
             chunks: [64, 128, 512]
         save: true
         output_name: "rfibitmap_hfb_{{tag}}.h5"
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: rfibitmap_hfb
+
+    # Hold the file list until narrowband RFI detection is finished,
+    # so memory peaks never overlap.
+    - type: caput.pipeline.tasklib.flow.WaitUntil
+      requires: rfibitmap_hfb_grouped
+      in: qfilelist
+      out: qfilelist2
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: rfibitmap_hfb_grouped
+
+    # Build the source catalog from the JSON lists, resolving calibrators.
+    - type: ch_pipeline.hfb.io.MakeAbsorberCatalog
+      requires: manager
+      out: abscat
+      params:
+        json_files:
+        - "{json_files[0]}"
+        - "{json_files[1]}"
+        - "{json_files[2]}"
+
+    # Re-read the same files, keeping the union of the sources' freq windows.
+    - type: ch_pipeline.hfb.io.LoadFilesForCatalog
+      requires: [manager, qfilelist2, abscat]
+      out: tstream_chunk
+      params:
+        distributed: true
+        n_coarse: {n_coarse}
+
+    # Mask samples with pathologically large weights.
+    - type: draco.analysis.flagging.SanitizeWeights
+      in: tstream_chunk
+      out: masked_weights
+      params:
+        max_thresh: 100
+
+    # Flag samples whose noise exceeds the radiometer expectation.
+    - type: ch_pipeline.hfb.flagging.HFBRadiometerRFIFlagging
+      in: masked_weights
+      out: rfimask
+      params:
+        threshold: 1.7
+
+    # Apply the RFI mask.
+    - type: ch_pipeline.hfb.flagging.ApplyHFBMask
+      in: [tstream_chunk, rfimask]
+      out: masked_tstream
+      params:
+        zero_data: No
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream_chunk
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: masked_weights
+
+    # Subtract the median over beams to remove the common bandpass shape.
+    - type: ch_pipeline.hfb.analysis.HFBMedianSubtraction
+      in: masked_tstream
+      out: diff
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: masked_tstream
+
+    # Keep only the NS beams near a source, in the chosen EW columns.
+    - type: ch_pipeline.hfb.analysis.SelectBeamsAroundSources
+      requires: [manager, abscat]
+      in: diff
+      out: sel_diff
+      params:
+        n_beams_ns: {n_beams_ns}
+        beam_ew_include: [0, 1, 2]
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: diff
+
+    # Concatenate the day's chunks into one sidereal-day container.
+    - type: draco.analysis.sidereal.SiderealGrouper
+      requires: manager
+      in: sel_diff
+      out: grouped_tstream
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: sel_diff
+
+    - type: ch_pipeline.analysis.flagging.MaskSun
+      in: grouped_tstream
+      out: tstream2
+      params:
+        nsigma: 10.0
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: grouped_tstream
+
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: tstream2
+      out: tstream3
+      params:
+        nsigma: 2.0
+        source: "CYG_A"
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream2
+
+    - type: ch_pipeline.analysis.flagging.MaskSource
+      in: tstream3
+      out: tstream4
+      params:
+        nsigma: 1.0
+        source: ["TAU_A", "CAS_A"]
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream3
+
+    # High-pass filter in time to remove slow gain drifts.
+    - type: draco.analysis.transform.HPFTimeStream
+      in: tstream4
+      out: tstream5
+      params:
+        prior: 1.0
+        tau: 5400.0
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream4
+
+    # Resample from unix time onto a regular sidereal RA grid.
+    - type: ch_pipeline.hfb.sidereal.HFBSiderealRegridder
+      in: tstream5
+      out: tstream6
+      params:
+        samples: 4280
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream5
+
+    # Divide out the PFB shape across each coarse channel.
+    - type: ch_pipeline.hfb.analysis.HFBDividePFB
+      in: tstream6
+      out: flat_stream
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: tstream6
+
+    # Fold subfreq into freq to give one high-resolution frequency axis.
+    - type: ch_pipeline.hfb.analysis.MakeHighFreqResRingMap
+      in: flat_stream
+      out: highres_stream
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: flat_stream
+
+    # Cut out each source's RA / el / freq window from the ringmap.
+    - type: ch_pipeline.hfb.analysis.ExtractAbsorberCutouts
+      requires: [manager, abscat]
+      in: highres_stream
+      out: cutouts
+      params:
+        dra_deg: {dra_deg}
+        n_coarse: {n_coarse}
+        n_el: {n_el}
+
+    - type: caput.pipeline.tasklib.flow.Delete
+      in: highres_stream
+
+    # Write each cutout into its day's slot in the per-source stack file.
+    - type: ch_pipeline.hfb.io.UpdateAbsorberStacks
+      in: cutouts
+      params:
+        stack_dir: "{stack_dir}"
 """
 
 
@@ -177,10 +352,24 @@ class HFBDailyProcessing(base.ProcessingType):
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
         "modlist": "chime/python/2025.10",
         # RFI detection significance params
-        "sigma_list": [2, 4, 5, 7],
+        "sigma_list": [4, 5, 6, 7],
+        # JSON target lists defining the absorbers to extract
+        "json_files": [
+            "/project/rpp-chime/chime/catalogs/ch_hfbcat/ch_hfbcat/ch_hfbcat/confirmed_absorbers.json",
+            "/project/rpp-chime/chime/catalogs/ch_hfbcat/ch_hfbcat/ch_hfbcat/intensity_mapping_absorbers.json",
+            "/project/rpp-chime/chime/catalogs/ch_hfbcat/ch_hfbcat/ch_hfbcat/literature_absorbers.json",
+        ],
+        # Directory holding the per-source stack files, created beforehand
+        # with CreateAbsorberStacks
+        "stack_dir": "/project/rpp-chime/yuchibor/Absorbers/All",
+        # Cutout windows
+        "n_coarse": 6,  # Coarse channels either side of the source's own
+        "n_el": 2,  # NS beams either side of the source's own
+        "n_beams_ns": 2,  # NS beams kept per source before gridding
+        "dra_deg": 2.0,  # RA half-width in degrees
         # Job params
-        "time": 40,  # How long in minutes?
-        "nodes": 4,  # Number of nodes to use.
+        "time": 60,  # How long in minutes?
+        "nodes": 8,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
     }
@@ -188,7 +377,7 @@ class HFBDailyProcessing(base.ProcessingType):
     # Make sure not to remove hfb files corresponding to CSDs below
     # Absorber search for October 2021
     daemon_config: ClassVar = {
-        "keep_online": {"start": "CSD2872", "end": "CSD2943"},
+        "keep_online": {"start": "CSD2883", "end": "CSD2915"},
     }
 
     def _create_hook(self):
