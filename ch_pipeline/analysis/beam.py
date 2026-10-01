@@ -14,7 +14,7 @@ from ch_ephem import sources
 from ch_ephem.observers import chime
 from ch_util import holography, tools
 from chimedb.core import connect as connect_database
-from draco.analysis.transform import Regridder
+from draco.analysis.transform import LanczosRegridder
 from draco.core import io
 from draco.core.containers import SiderealStream, TimeStream, TrackBeam
 from draco.util import regrid
@@ -234,7 +234,7 @@ class TransitGrouper(tasklib.base.ContainerTask):
             self.obs_id = this_run[0][0]
 
 
-class TransitRegridder(Regridder):
+class TransitRegridder(LanczosRegridder):
     """Interpolate TimeStream transits onto a regular grid in hour angle.
 
     Attributes
