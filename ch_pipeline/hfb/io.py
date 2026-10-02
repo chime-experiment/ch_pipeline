@@ -497,11 +497,11 @@ class MakeAbsorberCatalog(base.ContainerTask):
         package rather than configured, which keeps the path correct
         whatever environment the pipeline runs in.
         """
-        combinedps_file = os.path.join(
+        self.combinedps_file = os.path.join(
             os.path.dirname(foreground.__file__), "data", "combinedps.dat"
         )
 
-        with open(combinedps_file) as f:
+        with open(self.combinedps_file) as f:
             header = f.readline().split()
             rows = [line.split() for line in f if line.strip()]
 
@@ -594,11 +594,6 @@ class MakeAbsorberCatalog(base.ContainerTask):
         # is extracted downstream.
         cal_entries = []
         if any(e["cal_src"] for e in entry_list):
-            if not self.combinedps_file:
-                raise config.CaputConfigError(
-                    "Entries have 'cal_src' but no 'combinedps_file' was "
-                    "given to look up calibrator positions."
-                )
             positions = self._load_combinedps()
 
             cal_seen = set()
