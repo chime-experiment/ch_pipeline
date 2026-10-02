@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 
 import caput.astro.time as ctime
+import cfbm
 import h5py
 import numpy as np
-from beam_model.formed import FFTFormedActualBeamModel
 from caput import config
 from caput.containers.tod import concatenate as _concatenate_time
 from caput.pipeline import exceptions
@@ -233,7 +233,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
         src_y = self.source_dec - chime.latitude
 
         # Choose beam model
-        mdl = FFTFormedActualBeamModel()
+        beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
 
         # Grid of beam numbers with EW beam number 1
         beams_ind = np.arange(1000, 1256)
@@ -247,7 +247,7 @@ class BaseLoadFiles(BeamSelectionMixin, io.BaseLoadFiles):
             freq = 600.0
 
         # Find beam positions
-        beams_xy = mdl.get_beam_positions(beams_ind, freq).squeeze()
+        beams_xy = beam_mdl.get_beam_positions(beams_ind, freq).squeeze()
 
         # Find NS beam number of beam closest to calibration source
         return np.abs(beams_xy[:, 1] - src_y).argmin()
@@ -1078,7 +1078,7 @@ class CreateAbsorberStacks(base.ContainerTask):
             freq_width / 2, -freq_width / 2, self.nsubfreq, endpoint=False
         )
 
-        beam_mdl = FFTFormedActualBeamModel()
+        beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
         latitude = self.observer.latitude
         beam_ew = np.asarray(self.beam_ew)
 
