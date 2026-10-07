@@ -478,7 +478,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
     ----------
     json_files : list of str
         Paths of the JSON target list files.
-    rfi_mask : bool
+    exclude_rfi_bands : bool
         If True, drop absorbers whose coarse channel overlaps a known bad band
         (ch_util.rfi.BAD_FREQUENCIES). Default is False.
     rfi_csd : float, optional
@@ -487,7 +487,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
     """
 
     json_files = config.Property(proptype=list)
-    rfi_mask = config.Property(proptype=bool, default=False)
+    exclude_rfi_bands = config.Property(proptype=bool, default=False)
     rfi_csd = config.Property(proptype=float, default=None)
 
     _done = False
@@ -620,7 +620,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
         # This is done before building calibrator entries, so no calibrator is
         # made for a dropped absorber.
         nrfi = 0
-        if self.rfi_mask and entry_list:
+        if self.exclude_rfi_bands and entry_list:
             bad = self._rfi_masked([e["channel"] for e in entry_list], cfreq)
             nrfi = int(bad.sum())
             for e in (e for e, b in zip(entry_list, bad) if b):
