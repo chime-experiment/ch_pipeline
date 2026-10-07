@@ -1,6 +1,6 @@
 """HFB Tasks for flagging data."""
 
-import beam_model.formed as fm
+import cfbm
 import numpy as np
 from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
@@ -272,8 +272,10 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
         rfimaskbitmap.redistribute("freq")
 
         # Convert beam_ns indices to elevation angles (sin(theta))
-        v = fm.FFTFormedBeamModel()
-        angles = v.get_beam_positions(rfimaskbitmap.beam_ns[:], rfimaskbitmap.freq[:])
+        beam_model = cfbm.formed.FFTFormedActualBeamModel()
+        angles = beam_model.get_beam_positions(
+            rfimaskbitmap.beam_ns[:], rfimaskbitmap.freq[:]
+        )
         el = np.sin(np.deg2rad(angles.T[1]))  # shape (freq, beam_ns)
 
         # Create new elevation axis, restricting to overlapping region with original beams

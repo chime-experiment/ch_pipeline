@@ -3,8 +3,8 @@
 from functools import cached_property
 from typing import ClassVar
 
+import cfbm
 import numpy as np
-from beam_model.formed import FFTFormedActualBeamModel
 from caput import memdata
 from caput.containers import tod
 from ch_util import andata
@@ -474,7 +474,7 @@ class HFBRingMapBase(SiderealContainer, HFBContainer):
         if self.centre_freq is None:
             return None
 
-        za = FFTFormedActualBeamModel().get_beam_positions(
+        za = cfbm.formed.FFTFormedActualBeamModel().get_beam_positions(
             self.beam_ns, [self.centre_freq]
         )[:, 0, 1]
 
