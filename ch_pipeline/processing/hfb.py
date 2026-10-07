@@ -160,6 +160,8 @@ pipeline:
         - "{json_files[0]}"
         - "{json_files[1]}"
         - "{json_files[2]}"
+        rfi_mask: {rfi_mask_catalog}
+        rfi_csd: {csd[0]:.2f}
 
     # Re-read the same files, keeping the union of the sources' freq windows.
     - type: ch_pipeline.hfb.io.LoadFilesForCatalog
@@ -359,6 +361,8 @@ class HFBDailyProcessing(base.ProcessingType):
             "/project/rpp-chime/chime/catalogs/ch_hfbcat/ch_hfbcat/ch_hfbcat/intensity_mapping_absorbers.json",
             "/project/rpp-chime/chime/catalogs/ch_hfbcat/ch_hfbcat/ch_hfbcat/literature_absorbers.json",
         ],
+        # Drop absorbers whose coarse channel overlaps a known persistent RFI band
+        "rfi_mask_catalog": True,
         # Directory holding the per-source stack files, created beforehand
         # with CreateAbsorberStacks
         "stack_dir": "/project/rpp-chime/yuchibor/Absorbers/All",
