@@ -18,6 +18,10 @@ Containers
 - :py:class:`SunTransit`
 - :py:class:`RingMap`
 - :py:class:`Photometry`
+- :py:class:`MFilteredHybridVisStream`
+- :py:class:`TransientMatchedFilter`
+- :py:class:`TransientMatchedFilterTrials`
+- :py:class:`TransientCandidateMap`
 """
 
 # Ignore missing docstrings in container @property methods.
@@ -33,8 +37,13 @@ from caput.containers import Container, ContainerPrototype
 from caput.util import typeutils
 from ch_util import andata
 from draco.core.containers import (
+    COMPRESSION,
+    COMPRESSION_OPTS,
+    DataWeightContainer,
     FormedBeam,
     FreqContainer,
+    HybridVisStream,
+    SiderealContainer,
     SpectroscopicCatalog,
     StaticGainData,
     TimeStream,
@@ -992,6 +1001,295 @@ class SpectralLineCatalog(SpectroscopicCatalog):
             "axis": "object_id",
         },
     }
+
+
+class MFilteredHybridVisStream(HybridVisStream):
+    """Hybrid beamformed visibilities after an m-mode filter.
+
+    For a filter ``y -> (I - P) y`` along right ascension, this also holds the
+    elements of the filter near the diagonal, ``P[t, t + lag]``, and the inverse
+    variance of the visibilities before filtering.
+    """
+
+    _axes = ("lag",)
+
+    _dataset_spec: ClassVar = {
+        "ra_response": {
+            "axes": ["pol", "freq", "ew", "ra", "lag"],
+            "dtype": np.complex64,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 32, 1, 2048, 64),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "noise_weight": {
+            "axes": ["pol", "freq", "ew", "ra"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 32, 4, 2048),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+    }
+
+    @property
+    def ra_response(self):
+        return self.datasets["ra_response"]
+
+    @property
+    def noise_weight(self):
+        return self.datasets["noise_weight"]
+
+
+class TransientMatchedFilter(FreqContainer, SiderealContainer, DataWeightContainer):
+    """Transient matched filter for each band.
+
+    The ``freq`` axis holds the centre and width of each band.  The ``ra`` axis is
+    the start of the transient, ``x`` is its telescope-x at the start, and ``ha``
+    and ``dec`` give the hour angle and declination of each ``(el, x)``.
+    """
+
+    _axes = ("pol", "duration", "el", "x")
+
+    _dataset_spec: ClassVar = {
+        "amplitude": {
+            "axes": ["pol", "duration", "freq", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 8, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "weight": {
+            "axes": ["pol", "duration", "freq", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 8, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "amplitude_imag": {
+            "axes": ["pol", "duration", "freq", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 8, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "ha": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "dec": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    _data_dset_name = "amplitude"
+    _weight_dset_name = "weight"
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def amplitude_imag(self):
+        return self.datasets["amplitude_imag"]
+
+    @property
+    def pol(self):
+        return self.index_map["pol"]
+
+    @property
+    def el(self):
+        return self.index_map["el"]
+
+    @property
+    def x(self):
+        return self.index_map["x"]
+
+
+class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
+    """Transient matched filter for each duration and spectral index.
+
+    The amplitude is the flux density at the frequency in the ``reference_freq``
+    attribute.  The ``ra`` axis is the start of the transient, ``x`` is its
+    telescope-x at the start, and ``ha`` and ``dec`` give the hour angle and
+    declination of each ``(el, x)``.
+    """
+
+    _axes = ("pol", "duration", "spectral_index", "el", "x")
+
+    _dataset_spec: ClassVar = {
+        "amplitude": {
+            "axes": ["pol", "duration", "spectral_index", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 1, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "weight": {
+            "axes": ["pol", "duration", "spectral_index", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 1, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "amplitude_imag": {
+            "axes": ["pol", "duration", "spectral_index", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 1, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "ha": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "dec": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    _data_dset_name = "amplitude"
+    _weight_dset_name = "weight"
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def amplitude_imag(self):
+        return self.datasets["amplitude_imag"]
+
+    @property
+    def x(self):
+        return self.index_map["x"]
+
+
+class TransientCandidateMap(SiderealContainer, DataWeightContainer):
+    """Best transient trial at each elevation and start time."""
+
+    _axes = ("pol", "el", "x")
+
+    _dataset_spec: ClassVar = {
+        "snr": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "amplitude": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "weight": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "duration": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.int32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "spectral_index": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "x_index": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.int16,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "ha": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "dec": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    _data_dset_name = "snr"
+    _weight_dset_name = "weight"
+
+    @property
+    def snr(self):
+        return self.datasets["snr"]
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def x(self):
+        return self.index_map["x"]
 
 
 class RawContainer(TODContainer):
