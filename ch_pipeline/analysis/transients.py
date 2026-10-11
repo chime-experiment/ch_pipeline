@@ -8,7 +8,6 @@ import numpy as np
 import scipy.constants
 import scipy.interpolate
 from caput import config, mpiarray
-from caput.astro.coordinates import spherical
 from caput.pipeline import tasklib
 from draco.analysis.beamform import BeamFormExternalMixin
 from draco.analysis.ringmapmaker import find_grid_indices
@@ -1833,6 +1832,26 @@ def _is_full_day(ra):
     return bool(np.abs(ra.size * dra - 360.0) < 1e-3 * dra)
 
 
+def _ground_to_sph_clipped(x, y, lat):
+    """Hour angle and declination in radians of telescope coordinates (x, y).
+
+    As :func:`caput.astro.coordinates.spherical.ground_to_sph`, but directions
+    with ``x^2 + y^2 > 1`` are moved to the nearest point on the horizon.
+    """
+    r2 = x**2 + y**2
+    scale = np.where(r2 > 1.0, 1.0 / np.sqrt(np.where(r2 > 0, r2, 1.0)), 1.0)
+    x, y = x * scale, y * scale
+    z = np.sqrt(np.maximum(1.0 - x**2 - y**2, 0.0))
+
+    xe = z * np.cos(lat) - y * np.sin(lat)
+    ze = y * np.cos(lat) + z * np.sin(lat)
+
+    ha = -np.arctan2(x, xe)
+    dec = np.arctan2(ze, np.sqrt(xe**2 + x**2))
+
+    return ha, dec
+
+
 def stopband_mmode_index(nra, m_centre, m_width):
     """Return the FFT bins of the integer m-modes inside a set of stop bands.
 
@@ -2322,10 +2341,11 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         # distributed over elevation to match the data
         pbeam = self._evaluate_beam(freq, [pol[ii] for ii in ipol], el, x)
 
-        # Hour angle and declination of every (el, x)
+        # Hour angle and declination of every (el, x).  Directions below the
+        # horizon are given the coordinates of the horizon and zero weight.
         xx, yy = np.meshgrid(x, el, indexing="xy")
-        with np.errstate(invalid="ignore"):
-            ha, dec = spherical.ground_to_sph(xx, yy, self.latitude)
+        visible = xx**2 + yy**2 < 1.0
+        ha, dec = _ground_to_sph_clipped(xx, yy, self.latitude)
 
         # Noise weights have no elevation axis, so they remain distributed over
         # frequency when the stream is redistributed.  Gather them.
@@ -2387,7 +2407,10 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         bimag = bands.amplitude_imag[:].local_array if self.save_imag else None
 
         # Track of a source starting at each (el, x): grid index of x after j samples
-        track = self._tracks(ha[el_slc], dec[el_slc], x, dra, wmax)  # [j, el, x]
+        track = self._tracks(ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax)
+
+        # Zero template below the horizon
+        pbeam *= visible[el_slc][np.newaxis, np.newaxis]
 
         lmbda = scipy.constants.c / (freq * 1e6)
         u = ew[iew][np.newaxis, :] / lmbda[:, np.newaxis]  # freq, ew
@@ -2492,8 +2515,10 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _tracks(ha, dec, x, dra, wmax):
+    def _tracks(ha, dec, visible, x, dra, wmax):
         """Index of the x grid along the track of a source starting at each (el, x).
+
+        Tracks that start below the horizon (``visible`` is False) are invalid.
 
         Returns
         -------
@@ -2505,7 +2530,7 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         with np.errstate(invalid="ignore"):
             xj = -np.cos(dec)[np.newaxis] * np.sin(ha[np.newaxis] + j * dra)
             idx = np.rint((xj - x[0]) / dx)
-        ok = np.isfinite(idx) & (idx >= 0) & (idx < x.size)
+        ok = np.isfinite(idx) & (idx >= 0) & (idx < x.size) & visible[np.newaxis]
         return np.where(ok, idx, -1).astype(np.int64)
 
     @staticmethod
