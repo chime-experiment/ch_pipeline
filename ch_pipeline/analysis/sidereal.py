@@ -20,6 +20,7 @@ import caput.astro.time as ctime
 import numpy as np
 from caput import config
 from caput.algorithms.median import weighted_median
+from caput.containers import copy_datasets_filter
 from caput.containers import tod
 from caput.pipeline import exceptions, tasklib
 from ch_ephem import sources
@@ -567,6 +568,57 @@ class ChangeSiderealMean(tasklib.base.ContainerTask):
 
         # Return sidereal stream with modified offset
         return sstream
+
+
+class SelectSiderealDay(tasklib.base.ContainerTask):
+
+    def setup(self, observer=None):
+        """Set up the observer.
+
+        Parameters
+        ----------
+        observer : caput.time.Observer, optional
+            Observer details. Defaults to CHIME.
+        """
+        self.observer = chime if observer is None else observer
+
+    def process(self, data):
+        """Remove samples outside the nominal local sidereal day."""
+        data.redistribute("freq")
+
+        lsd = data.attrs["lsd"]
+
+        if "ra" in data.index_map:
+            arr_lsd = lsd + data.ra / 360.0
+            axis = "ra"
+        else:
+            arr_lsd = self.observer.unix_to_lsd(data.time)
+            axis = "time"
+
+        index = np.flatnonzero(
+            (arr_lsd >= lsd) & (arr_lsd < lsd + 1)
+        )
+        selection = slice(index[0], index[-1] + 1)
+
+        out = data.__class__(
+            axes_from=data,
+            attrs_from=data,
+            skip_datasets=True,
+            distributed=data.distributed,
+            comm=data.comm,
+            **{axis: data.index_map[axis][selection]},
+        )
+
+        copy_datasets_filter(
+            data,
+            out,
+            selection={axis: selection},
+            copy_without_selection=True,
+        )
+
+        out.redistribute("freq")
+
+        return out
 
 
 def get_times(acq_files):
