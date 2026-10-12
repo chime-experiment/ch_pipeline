@@ -1826,6 +1826,217 @@ class CorrectFilterGain(tasklib.base.ContainerTask):
         return stream
 
 
+class SubtractElevationMedian(tasklib.base.ContainerTask):
+    """Subtract the median over elevation from hybrid beamformed visibilities.
+
+    This removes structure that is common to all elevations at a given frequency and
+    time, such as the fluctuations of the autocorrelations on the 0 m baseline.  The
+    real and imaginary parts are treated separately.
+
+    Attributes
+    ----------
+    pol : list of str
+        Polarisations to process.  Default is all.
+    ew_index : list of int
+        Indices of the east-west baselines to process.  Default is all.
+    in_place : bool
+        Modify the input.  This is only safe if no other task uses the input.
+        Default is False.
+    """
+
+    pol = config.list_type(str, default=None)
+    ew_index = config.list_type(int, default=None)
+    in_place = config.Property(proptype=bool, default=False)
+
+    def process(self, stream):
+        """Subtract the median.
+
+        Parameters
+        ----------
+        stream : draco.core.containers.HybridVisStream
+            Hybrid beamformed visibilities, for example the output of
+            :class:`LSQMFilterHybridVis`.
+
+        Returns
+        -------
+        stream : draco.core.containers.HybridVisStream
+            Visibilities with the median over elevation subtracted.
+        """
+        if not self.in_place:
+            stream = stream.copy()
+
+        stream.redistribute("freq")
+
+        pol = list(stream.index_map["pol"])
+        ipol = (
+            list(range(len(pol)))
+            if self.pol is None
+            else [pol.index(p) for p in self.pol]
+        )
+        new = stream.index_map["ew"].size
+        iew = list(range(new)) if self.ew_index is None else list(self.ew_index)
+
+        vis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        for ff in range(vis.shape[1]):
+            for pp in ipol:
+                for ee in iew:
+                    v = vis[pp, ff, ee]
+                    med = np.median(v.real, axis=0)
+                    if np.iscomplexobj(v):
+                        med = med + 1.0j * np.median(v.imag, axis=0)
+                    v -= med[np.newaxis, :]
+
+        stream.attrs["elevation_median_subtracted"] = True
+
+        return stream
+
+
+class EstimateElevationNoiseScale(tasklib.base.ContainerTask):
+    """Measure how the noise of hybrid visibilities depends on elevation.
+
+    For each polarisation, frequency, east-west baseline and elevation, the
+    visibilities are put in units of the noise expected from their weights, and the
+    scale is the square of their median absolute deviation over right ascension
+    (times 1.4826), i.e. the ratio of the measured to the expected noise variance.
+    The real part of the noise has variance ``1 / (2 w)``, except on the 0 m baseline,
+    where the co-polar hybrid visibilities are real and it is ``1 / w``.  Elsewhere
+    the imaginary part is used as well.
+
+    Attributes
+    ----------
+    min_samples : int
+        Minimum number of samples for an estimate.  Elevations with fewer are given a
+        scale of zero.  Default is 100.
+    """
+
+    min_samples = config.Property(proptype=int, default=100)
+
+    def process(self, stream):
+        """Estimate the scale.
+
+        Parameters
+        ----------
+        stream : draco.core.containers.HybridVisStream
+            Hybrid beamformed visibilities with weights that do not depend on
+            elevation, for example the output of :class:`LSQMFilterHybridVis`.
+
+        Returns
+        -------
+        scale : ch_pipeline.core.containers.HybridVisNoiseScale
+            Ratio of the measured to the expected noise variance.
+        """
+        if "elevation_vis_weight" in stream.datasets:
+            raise ValueError("Elevation-dependent weights are not supported.")
+
+        stream.redistribute("freq")
+
+        out = containers.HybridVisNoiseScale(
+            axes_from=stream,
+            attrs_from=stream,
+            distributed=stream.distributed,
+            comm=stream.comm,
+        )
+        out.redistribute("freq")
+        scale = out.scale[:].local_array
+        nsample = out.nsample[:].local_array
+        scale[:] = 0.0
+        nsample[:] = 0
+
+        self_conj = _self_conjugate(stream.index_map["pol"], stream.index_map["ew"][:])
+
+        vis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        weight = stream.weight[:].local_array  # pol, freq, ew, ra
+
+        for pp in range(vis.shape[0]):
+            for ff in range(vis.shape[1]):
+                for ee in range(vis.shape[2]):
+                    valid = weight[pp, ff, ee] > 0.0
+                    if valid.sum() < self.min_samples:
+                        continue
+
+                    # Visibilities in units of the expected noise of the real part
+                    real_only = self_conj[pp, ee]
+                    sw = np.sqrt(
+                        (1.0 if real_only else 2.0) * weight[pp, ff, ee, valid]
+                    )
+                    v = vis[pp, ff, ee][:, valid]
+                    s = v.real * sw
+                    if not real_only:
+                        s = np.concatenate([s, v.imag * sw], axis=1)
+
+                    med = np.median(s, axis=1, keepdims=True)
+                    mad = np.median(np.abs(s - med), axis=1)
+                    scale[pp, ff, ee] = (1.4826 * mad) ** 2
+                    nsample[pp, ff, ee] = s.shape[1]
+
+        return out
+
+
+class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
+    """Attach an elevation-dependent noise scale to m-mode filtered visibilities.
+
+    The scale is stored in the ``noise_scale`` dataset, which
+    :class:`TransientMatchedFilter` uses to divide the noise weights at each
+    elevation.  Entries without a valid scale are given a scale of one.  The input is
+    modified.
+    """
+
+    def process(self, stream, scale):
+        """Attach the scale.
+
+        Parameters
+        ----------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            Output of :class:`LSQMFilterHybridVis`.
+        scale : ch_pipeline.core.containers.HybridVisNoiseScale
+            Output of :class:`EstimateElevationNoiseScale`, for example from another
+            day or an average over days.
+
+        Returns
+        -------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The input with the ``noise_scale`` dataset.
+        """
+        for ax in ("pol", "ew", "el"):
+            a = np.asarray(stream.index_map[ax][:])
+            b = np.asarray(scale.index_map[ax][:])
+            same = (
+                np.array_equal(a.astype(str), b.astype(str))
+                if ax == "pol"
+                else a.shape == b.shape and np.allclose(a, b)
+            )
+            if not same:
+                raise ValueError(f"The {ax} axes of the stream and scale differ.")
+        if not np.allclose(stream.freq, scale.freq):
+            raise ValueError("The frequency axes of the stream and scale differ.")
+
+        stream.redistribute("freq")
+        scale.redistribute("freq")
+
+        if "noise_scale" not in stream.datasets:
+            stream.add_dataset("noise_scale")
+
+        s = scale.scale[:].local_array
+        good = np.isfinite(s) & (s > 0.0)
+        stream.noise_scale[:].local_array[:] = np.where(good, s, 1.0)
+
+        nbad = self.comm.allreduce(int((~good).sum()))
+        if nbad:
+            self.log.info(f"{nbad} entries without a valid noise scale set to one.")
+
+        return stream
+
+
+def _self_conjugate(pol, ew):
+    """Which [pol, ew] hybrid visibilities are formed with their own conjugate.
+
+    On the 0 m baseline the co-polar hybrid visibilities are the sum of each baseline
+    and its conjugate (see draco's MakeVisGrid), so they are real.
+    """
+    copol = np.array([p[0] == p[1] for p in pol])
+    return copol[:, np.newaxis] & (np.asarray(ew) == 0.0)[np.newaxis, :]
+
+
 def _is_full_day(ra):
     """Whether a uniform RA axis in degrees spans one sidereal day."""
     dra = np.median(np.diff(ra))
@@ -2171,7 +2382,9 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
     the inverse noise variance, using the elements of ``P`` near the diagonal from
     the input.  Frequencies are combined within bands, by default the 6 MHz
     television channels starting at 398 MHz, and the bands are combined for each
-    spectral index.
+    spectral index.  If the input has a ``noise_scale`` dataset (see
+    :class:`ApplyElevationNoiseScale`), the noise weights at each elevation are
+    divided by it.
 
     Attributes
     ----------
@@ -2360,10 +2573,7 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         # all of the noise is in the real part: Var(Re) = 1 / w rather than the
         # 1 / (2 w) of circular noise assumed below.  Halving their weight makes
         # the two equivalent.
-        self_conj = (
-            np.array([pol[ii][0] == pol[ii][1] for ii in ipol])[:, np.newaxis]
-            & (ew[iew] == 0.0)[np.newaxis, :]
-        )
+        self_conj = _self_conjugate([pol[ii] for ii in ipol], ew[iew])
         weight_all *= np.where(self_conj, 0.5, 1.0).astype(np.float32)[
             :, np.newaxis, :, np.newaxis
         ]
@@ -2374,6 +2584,21 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         el_slc = hvis.vis[:].local_bounds
         el_local = el[el_slc]
         nel_local = el_local.size
+
+        # Elevation-dependent scale of the noise variance, if present.  Dividing the
+        # weights by it is equivalent to dividing the template and data by its square
+        # root.
+        if "noise_scale" in hvis.datasets:
+            ns = hvis.noise_scale[:]
+            if ns.local_bounds != el_slc:
+                raise RuntimeError("noise_scale is not distributed like the data.")
+            inv_sqrt_scale = tools.invert_no_zero(
+                np.sqrt(ns.local_array[np.ix_(ipol, np.arange(freq.size), iew)])
+            ).astype(
+                np.float32
+            )  # pol, freq, ew, el
+        else:
+            inv_sqrt_scale = None
 
         # Output containers
         common = {
@@ -2466,6 +2691,11 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
                 data = vis[:, :, :, esl][
                     np.ix_(ipol, fsel, iew)
                 ]  # pol, freq, ew, el, ra
+
+                if inv_sqrt_scale is not None:
+                    isq = inv_sqrt_scale[:, fsel][..., esl, np.newaxis]
+                    template = template * isq
+                    data = data * isq
 
                 for gg, grp in enumerate(groups):
                     tc = template[grp].reshape(-1, *template.shape[3:])  # k, el, x

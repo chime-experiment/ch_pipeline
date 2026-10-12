@@ -1034,6 +1034,16 @@ class MFilteredHybridVisStream(HybridVisStream):
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
         },
+        "noise_scale": {
+            "axes": ["pol", "freq", "ew", "el"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 32, 4, 512),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
     }
 
     @property
@@ -1043,6 +1053,52 @@ class MFilteredHybridVisStream(HybridVisStream):
     @property
     def noise_weight(self):
         return self.datasets["noise_weight"]
+
+    @property
+    def noise_scale(self):
+        return self.datasets["noise_scale"]
+
+
+class HybridVisNoiseScale(FreqContainer):
+    """Ratio of the measured to the expected noise variance of hybrid visibilities.
+
+    The ``scale`` dataset multiplies the noise variance implied by the weights, as a
+    function of polarisation, frequency, east-west baseline and elevation.
+    ``nsample`` is the number of samples it was estimated from.
+    """
+
+    _axes = ("pol", "ew", "el")
+
+    _dataset_spec: ClassVar = {
+        "scale": {
+            "axes": ["pol", "freq", "ew", "el"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 32, 4, 512),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "nsample": {
+            "axes": ["pol", "freq", "ew", "el"],
+            "dtype": np.int32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 32, 4, 512),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+    }
+
+    @property
+    def scale(self):
+        return self.datasets["scale"]
+
+    @property
+    def nsample(self):
+        return self.datasets["nsample"]
 
 
 class TransientMatchedFilter(FreqContainer, SiderealContainer, DataWeightContainer):
