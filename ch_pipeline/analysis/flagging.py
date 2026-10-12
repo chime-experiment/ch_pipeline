@@ -1496,11 +1496,16 @@ class MaskDay(tasklib.base.ContainerTask):
     outer_taper : bool, optional
         If outer_taper is True, then the taper occurs in the unmasked region.
         If outer_taper is False, then the taper occurs in the masked region.
+    csd : list, optional
+        Override `csd` or `lsd` attribute of input container, using this
+        list of CSDs instead. Must be specified if input container does
+        not have one of these attributes. Default: None.
     """
 
     zero_data = config.Property(proptype=bool, default=False)
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
+    csd = config.Property(proptype=list, default=None)
 
     def process(self, dstream):
         """Set the weight to zero during day time.
@@ -1526,14 +1531,26 @@ class MaskDay(tasklib.base.ContainerTask):
             flag = self._flag(time)
 
         else:
-            # Fetch either the LSD or CSD attribute.  In the case of a SidrealStack,
+            # Check for CSD property. If absent, attempt to fetch either the LSD or
+            # CSD attribute of the input container. In the case of a SiderealStack,
             # there will be multiple LSDs and the flag will be the logical OR of the
             # flag from each individual LSD.
-            csd = (
-                dstream.attrs["lsd"] if "lsd" in dstream.attrs else dstream.attrs["csd"]
-            )
-            if not hasattr(csd, "__iter__"):
-                csd = [csd]
+            if self.csd is not None:
+                csd = self.csd
+            else:
+                try:
+                    csd = (
+                        dstream.attrs["lsd"]
+                        if "lsd" in dstream.attrs
+                        else dstream.attrs["csd"]
+                    )
+                    if not hasattr(csd, "__iter__"):
+                        csd = [csd]
+                except KeyError:
+                    raise KeyError(
+                        "Must specify csd in masking task if input container "
+                        "has no csd or lsd attribute"
+                    )
 
             ra = dstream.ra[:]
             ntaper = int(
