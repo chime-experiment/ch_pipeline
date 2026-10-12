@@ -2355,6 +2355,19 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
             raise ValueError("Elevation-dependent weights are not supported.")
         weight_all = hvis[wname][:].allgather()[ipol][:, :, iew].astype(np.float32)
 
+        # On the 0 m baseline, the co-polar hybrid visibilities are formed from each
+        # baseline and its conjugate (see draco's MakeVisGrid), so they are real and
+        # all of the noise is in the real part: Var(Re) = 1 / w rather than the
+        # 1 / (2 w) of circular noise assumed below.  Halving their weight makes
+        # the two equivalent.
+        self_conj = (
+            np.array([pol[ii][0] == pol[ii][1] for ii in ipol])[:, np.newaxis]
+            & (ew[iew] == 0.0)[np.newaxis, :]
+        )
+        weight_all *= np.where(self_conj, 0.5, 1.0).astype(np.float32)[
+            :, np.newaxis, :, np.newaxis
+        ]
+
         # Datasets without an el axis stay distributed over freq
         hvis.redistribute(["el", "freq"])
         vis = hvis.vis[:].local_array
