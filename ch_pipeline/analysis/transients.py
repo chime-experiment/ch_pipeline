@@ -3928,3 +3928,66 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         out.datasets["dec"][:] = trials.datasets["dec"][:]
 
         return out
+
+
+class SelectRARange(tasklib.base.ContainerTask):
+    """Keep the samples of a container whose right ascension is within a range.
+
+    For example, to keep only the candidates within the nominal sidereal day when
+    the whole daily file (which extends a little beyond it) was processed, so that
+    neighbouring days do not report the same samples.  Datasets without an RA
+    axis are copied unchanged.
+
+    Attributes
+    ----------
+    ra_min, ra_max : float
+        Keep samples with ``ra_min <= ra < ra_max``, in degrees.  Defaults are 0
+        and 360.
+    """
+
+    ra_min = config.Property(proptype=float, default=0.0)
+    ra_max = config.Property(proptype=float, default=360.0)
+
+    def process(self, cont):
+        """Select the samples.
+
+        Parameters
+        ----------
+        cont : container with an ``ra`` axis
+            For example a TransientCandidateMap.
+
+        Returns
+        -------
+        out : same type as ``cont``
+            The samples within the range.
+        """
+        from caput.containers import copy_datasets_filter
+
+        ra = cont.index_map["ra"][:]
+        keep = np.flatnonzero((ra >= self.ra_min) & (ra < self.ra_max))
+        if keep.size == 0:
+            raise ValueError(
+                f"No samples with {self.ra_min} <= RA < {self.ra_max} "
+                f"(the axis spans {ra.min():.2f} to {ra.max():.2f})."
+            )
+        if np.any(np.diff(keep) != 1):
+            raise ValueError("The RA axis is not monotonic within the range.")
+        sel = slice(keep[0], keep[-1] + 1)
+
+        out = cont.__class__(
+            axes_from=cont,
+            attrs_from=cont,
+            ra=ra[sel],
+            skip_datasets=True,
+            distributed=cont.distributed,
+            comm=cont.comm,
+        )
+        copy_datasets_filter(
+            cont, out, selection={"ra": sel}, copy_without_selection=True
+        )
+
+        self.log.info(
+            f"Kept {keep.size} of {ra.size} samples "
+            f"(RA {ra[sel][0]:.2f} to {ra[sel][-1]:.2f} deg)."
+        )
+        return out
