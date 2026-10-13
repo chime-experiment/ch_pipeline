@@ -1101,6 +1101,86 @@ class HybridVisNoiseScale(FreqContainer):
         return self.datasets["nsample"]
 
 
+class HybridVisSourceCutouts(FreqContainer):
+    """Hybrid beamformed visibilities in windows around the transits of sources.
+
+    Each source has a window of ``ra_offset`` samples centred on the sample nearest
+    its transit, and ``el_offset`` elevations centred on the elevation nearest its
+    transit.  The ``ra_index`` and ``el_index`` datasets give the indices of the
+    window into the original stream, with -1 where the window extends past the end of
+    a stream that does not cover a full day.  The weights there are zero.
+    """
+
+    _axes = ("source", "pol", "ew", "el_offset", "ra_offset")
+
+    _dataset_spec: ClassVar = {
+        "vis": {
+            "axes": ["source", "pol", "freq", "ew", "el_offset", "ra_offset"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 1, 32, 4, 64, 128),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "vis_weight": {
+            "axes": ["source", "pol", "freq", "ew", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 1, 32, 4, 128),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "ra": {
+            "axes": ["source", "ra_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el": {
+            "axes": ["source", "el_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ra_index": {
+            "axes": ["source", "ra_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el_index": {
+            "axes": ["source", "el_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "source_ra": {
+            "axes": ["source"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "source_dec": {
+            "axes": ["source"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def vis(self):
+        return self.datasets["vis"]
+
+    @property
+    def weight(self):
+        return self.datasets["vis_weight"]
+
+
 class TransientMatchedFilter(FreqContainer, SiderealContainer, DataWeightContainer):
     """Transient matched filter for each band.
 

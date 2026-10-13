@@ -2044,6 +2044,140 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
         return stream
 
 
+class ExtractSourceCutouts(tasklib.base.ContainerTask):
+    """Extract hybrid visibilities in windows around the transits of sources.
+
+    Attributes
+    ----------
+    sources : list of str
+        Names of the sources in `ch_ephem.sources.source_dictionary`, or "sun".
+    positions : dict
+        Additional windows, as {name: [ra, dec]} in degrees (CIRS).
+    ra_width : float
+        Half-width of the window in right ascension in degrees.  Default is 15.
+    el_width : int
+        Half-width of the window in number of elevations.  Default is 32.
+    """
+
+    sources = config.list_type(
+        type_=str, default=["sun", "CYG_A", "CAS_A", "TAU_A", "VIR_A"]
+    )
+    positions = config.Property(proptype=dict, default={})
+    ra_width = config.Property(proptype=float, default=15.0)
+    el_width = config.Property(proptype=int, default=32)
+
+    def process(self, stream):
+        """Extract the windows.
+
+        Parameters
+        ----------
+        stream : draco.core.containers.HybridVisStream
+            Hybrid beamformed visibilities on a uniform RA grid.  The ``lsd``
+            attribute sets the epoch of the source positions.
+
+        Returns
+        -------
+        out : ch_pipeline.core.containers.HybridVisSourceCutouts
+            The windows around each source.
+        """
+        from caput.astro.skyfield import skyfield_wrapper
+        from ch_ephem import sources as ch_sources
+        from ch_ephem.observers import chime
+
+        stream.redistribute("freq")
+
+        ra = stream.ra[:]
+        el = stream.index_map["el"][:]
+        nra, nel = ra.size, el.size
+        dra = np.median(np.diff(ra))
+        wrap = _is_full_day(ra)
+
+        lsd = stream.attrs.get("lsd", stream.attrs.get("csd"))
+        if lsd is None:
+            raise ValueError("The stream has no lsd attribute.")
+        lsd = float(np.atleast_1d(lsd)[0])
+
+        # Apparent positions at transit
+        names, src_ra, src_dec = [], [], []
+        for name in self.sources:
+            if name.lower() == "sun":
+                body = skyfield_wrapper.ephemeris["sun"]
+            else:
+                body = ch_sources.source_dictionary[name]
+            r, d = chime.object_coords(body, chime.lsd_to_unix(lsd + 0.5), deg=True)
+            # Iterate once, so moving bodies are evaluated at their own transit
+            r, d = chime.object_coords(
+                body, chime.lsd_to_unix(lsd + r / 360.0), deg=True
+            )
+            names.append(name)
+            src_ra.append(r)
+            src_dec.append(d)
+        for name, (r, d) in self.positions.items():
+            names.append(name)
+            src_ra.append(float(r))
+            src_dec.append(float(d))
+        src_ra = np.array(src_ra) % 360.0
+        src_dec = np.array(src_dec)
+        src_el = np.sin(np.radians(src_dec - chime.latitude))
+
+        nw_ra = int(np.round(self.ra_width / dra))
+        ra_off = np.arange(-nw_ra, nw_ra + 1)
+        el_off = np.arange(-self.el_width, self.el_width + 1)
+
+        out = containers.HybridVisSourceCutouts(
+            source=np.array(names),
+            ra_offset=ra_off,
+            el_offset=el_off,
+            axes_from=stream,
+            attrs_from=stream,
+            distributed=stream.distributed,
+            comm=stream.comm,
+        )
+        out.redistribute("freq")
+        out.attrs["ra_width"] = self.ra_width
+        out.attrs["ra_periodic"] = wrap
+
+        vis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        weight = stream.weight[:].local_array  # pol, freq, ew, ra
+        ovis = out.vis[:].local_array
+        oweight = out.weight[:].local_array
+        ovis[:] = 0.0
+        oweight[:] = 0.0
+
+        for ss in range(len(names)):
+            ira0 = int(np.round(((src_ra[ss] - ra[0]) % 360.0) / dra))
+            iel0 = int(np.argmin(np.abs(el - src_el[ss])))
+
+            ira = ira0 + ra_off
+            if wrap:
+                ira %= nra
+            iel = iel0 + el_off
+            ira = np.where((ira >= 0) & (ira < nra), ira, -1)
+            iel = np.where((iel >= 0) & (iel < nel), iel, -1)
+
+            out.datasets["ra_index"][ss] = ira
+            out.datasets["el_index"][ss] = iel
+            out.datasets["ra"][ss] = np.where(ira >= 0, ra[ira], np.nan)
+            out.datasets["el"][ss] = np.where(iel >= 0, el[iel], np.nan)
+            out.datasets["source_ra"][ss] = src_ra[ss]
+            out.datasets["source_dec"][ss] = src_dec[ss]
+
+            vr = ira >= 0
+            ve = iel >= 0
+            if not vr.any() or not ve.any():
+                continue
+
+            block = vis[..., iel[ve], :][..., ira[vr]]
+            ovis[ss][..., np.flatnonzero(ve)[:, None], np.flatnonzero(vr)] = block
+            oweight[ss][..., vr] = weight[..., ira[vr]]
+
+        self.log.info(
+            f"Extracted {len(names)} windows of {el_off.size} x {ra_off.size} samples."
+        )
+
+        return out
+
+
 def _self_conjugate(pol, ew):
     """Which [pol, ew] hybrid visibilities are formed with their own conjugate.
 
