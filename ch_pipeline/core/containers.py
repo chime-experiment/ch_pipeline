@@ -1101,6 +1101,98 @@ class HybridVisNoiseScale(FreqContainer):
         return self.datasets["nsample"]
 
 
+class HybridVisSkyNoise(FreqContainer):
+    """Fit of the noise of m-mode filtered visibilities that scales with the sky.
+
+    The model for the filtered visibility of channel ``c`` and polarisation ``p`` at
+    a given elevation and time, with unfiltered visibility ``S_cp``, is
+
+        r_cp = n_cp + kappa_coh e S_cp + kappa_inc e_cp S_cp
+
+    where ``n_cp`` is the noise expected from the weights and noise scale (scaled by
+    ``alpha``), ``e`` is a unit fluctuation common to every channel in a band (with
+    correlation ``rho_pol`` between polarisations), and ``e_cp`` is independent
+    between channels.  ``kappa2_tot = kappa_coh**2 + kappa_inc**2``.
+
+    The ``freq`` axis holds the centre and width of each band.  Datasets ending in
+    ``_block`` are fits within blocks of right ascension (starting at the RA given by
+    the ``block`` axis), and those ending in ``_source`` are fits within windows
+    around the transit of each source.  Both have the ``alpha`` coefficients fixed
+    at the values for the whole day.  ``count``, ``excess`` and ``model`` give, in
+    bins of the modelled sky term of the band sum (``qbin`` is the upper edge, in
+    units of the noise of the band sum), the number of samples and the mean
+    measured and modelled power of the band sum in the same units.
+    """
+
+    _axes = ("ew", "block", "source", "qbin")
+
+    _dataset_spec: ClassVar = {
+        **{
+            name: {
+                "axes": ["freq", "ew"],
+                "dtype": np.float64,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name in (
+                "alpha_single",
+                "kappa2_tot",
+                "kappa2_tot_err",
+                "alpha_band",
+                "kappa2_coh",
+                "kappa2_coh_err",
+                "alpha_pol",
+                "rho_pol",
+                "rho_pol_err",
+                "nsample",
+            )
+        },
+        **{
+            name: {
+                "axes": ["freq", "ew", "block"],
+                "dtype": np.float64,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name in (
+                "kappa2_tot_block",
+                "kappa2_tot_block_err",
+                "kappa2_coh_block",
+                "kappa2_coh_block_err",
+            )
+        },
+        **{
+            name: {
+                "axes": ["freq", "ew", "source"],
+                "dtype": np.float64,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name in (
+                "kappa2_tot_source",
+                "kappa2_tot_source_err",
+                "kappa2_coh_source",
+                "kappa2_coh_source_err",
+            )
+        },
+        **{
+            name: {
+                "axes": ["freq", "ew", "qbin"],
+                "dtype": np.float64,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name in ("count", "excess", "model")
+        },
+        "kappa2_self": {
+            "axes": ["freq"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+
 class HybridVisSourceCutouts(FreqContainer):
     """Hybrid beamformed visibilities in windows around the transits of sources.
 

@@ -2080,8 +2080,6 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
         out : ch_pipeline.core.containers.HybridVisSourceCutouts
             The windows around each source.
         """
-        from caput.astro.skyfield import skyfield_wrapper
-        from ch_ephem import sources as ch_sources
         from ch_ephem.observers import chime
 
         stream.redistribute("freq")
@@ -2092,32 +2090,9 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
         dra = np.median(np.diff(ra))
         wrap = _is_full_day(ra)
 
-        lsd = stream.attrs.get("lsd", stream.attrs.get("csd"))
-        if lsd is None:
-            raise ValueError("The stream has no lsd attribute.")
-        lsd = float(np.atleast_1d(lsd)[0])
-
-        # Apparent positions at transit
-        names, src_ra, src_dec = [], [], []
-        for name in self.sources:
-            if name.lower() == "sun":
-                body = skyfield_wrapper.ephemeris["sun"]
-            else:
-                body = ch_sources.source_dictionary[name]
-            r, d = chime.object_coords(body, chime.lsd_to_unix(lsd + 0.5), deg=True)
-            # Iterate once, so moving bodies are evaluated at their own transit
-            r, d = chime.object_coords(
-                body, chime.lsd_to_unix(lsd + r / 360.0), deg=True
-            )
-            names.append(name)
-            src_ra.append(r)
-            src_dec.append(d)
-        for name, (r, d) in self.positions.items():
-            names.append(name)
-            src_ra.append(float(r))
-            src_dec.append(float(d))
-        src_ra = np.array(src_ra) % 360.0
-        src_dec = np.array(src_dec)
+        names, src_ra, src_dec = _source_positions(
+            self.sources, self.positions, _stream_lsd(stream)
+        )
         src_el = np.sin(np.radians(src_dec - chime.latitude))
 
         nw_ra = int(np.round(self.ra_width / dra))
@@ -2176,6 +2151,56 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
         )
 
         return out
+
+
+def _stream_lsd(stream):
+    """The sidereal day of a stream, from its ``lsd`` or ``csd`` attribute."""
+    lsd = stream.attrs.get("lsd", stream.attrs.get("csd"))
+    if lsd is None:
+        raise ValueError("The stream has no lsd attribute.")
+    return float(np.atleast_1d(lsd)[0])
+
+
+def _source_positions(sources, positions, lsd):
+    """Apparent (CIRS) positions of sources at their transit on a sidereal day.
+
+    Parameters
+    ----------
+    sources : list of str
+        Names in `ch_ephem.sources.source_dictionary`, or "sun".
+    positions : dict
+        Additional positions, as {name: [ra, dec]} in degrees.
+    lsd : float
+        Sidereal day.
+
+    Returns
+    -------
+    names : list of str
+    ra, dec : np.ndarray
+        Right ascension and declination in degrees.
+    """
+    from caput.astro.skyfield import skyfield_wrapper
+    from ch_ephem import sources as ch_sources
+    from ch_ephem.observers import chime
+
+    names, ra, dec = [], [], []
+    for name in sources:
+        if name.lower() == "sun":
+            body = skyfield_wrapper.ephemeris["sun"]
+        else:
+            body = ch_sources.source_dictionary[name]
+        r, d = chime.object_coords(body, chime.lsd_to_unix(lsd + 0.5), deg=True)
+        # Iterate once, so moving bodies are evaluated at their own transit
+        r, d = chime.object_coords(body, chime.lsd_to_unix(lsd + r / 360.0), deg=True)
+        names.append(name)
+        ra.append(r)
+        dec.append(d)
+    for name, (r, d) in positions.items():
+        names.append(name)
+        ra.append(float(r))
+        dec.append(float(d))
+
+    return names, np.array(ra) % 360.0, np.array(dec, dtype=np.float64)
 
 
 def _self_conjugate(pol, ew):
@@ -2522,7 +2547,555 @@ class MaskedLSQFIRFilter:
 # -----------------------------------------------------------------------------
 
 
-class TransientMatchedFilter(tasklib.base.ContainerTask):
+class _BandMixin:
+    """Group frequency channels into bands.
+
+    Attributes
+    ----------
+    band_start : float
+        Lower edge of the first band in MHz.  Default is 398.
+    band_width : float
+        Width of each band in MHz.  Default is 6.
+    band_edges : list of float
+        Explicit band edges in MHz.  Overrides band_start and band_width.
+    single_band : bool
+        Combine all frequencies into a single band.  Default is False.
+    """
+
+    band_start = config.Property(proptype=float, default=398.0)
+    band_width = config.Property(proptype=float, default=6.0)
+    band_edges = config.list_type((int, float), default=None)
+    single_band = config.Property(proptype=bool, default=False)
+
+    def _assign_bands(self, freq):
+        """Assign each frequency channel to a band.
+
+        Returns
+        -------
+        band_index : np.ndarray[nfreq]
+            Band of each channel, or -1 if it is in none.
+        band_map : np.ndarray[nband]
+            Structured array with the centre and width of each populated band.
+        """
+        if self.single_band:
+            df = np.median(np.abs(np.diff(freq))) if freq.size > 1 else 0.0
+            edges = np.array([freq.min() - 0.5 * df, freq.max() + 0.5 * df])
+        elif self.band_edges is not None:
+            edges = np.sort(np.array(self.band_edges, dtype=np.float64))
+        else:
+            nedge = int(np.ceil((freq.max() - self.band_start) / self.band_width)) + 1
+            edges = self.band_start + self.band_width * np.arange(max(nedge, 2))
+
+        raw = np.searchsorted(edges, freq, side="right") - 1
+        raw[(raw < 0) | (raw >= edges.size - 1) | (freq == edges[-1])] = -1
+
+        # Drop bands without channels, preserving order of decreasing frequency
+        # to match the CHIME frequency axis.
+        used = np.unique(raw[raw >= 0])[::-1]
+        band_index = np.full(freq.size, -1, dtype=int)
+        for bb, rb in enumerate(used):
+            band_index[raw == rb] = bb
+
+        band_map = np.zeros(
+            used.size, dtype=[("centre", np.float64), ("width", np.float64)]
+        )
+        band_map["centre"] = 0.5 * (edges[used] + edges[used + 1])
+        band_map["width"] = edges[used + 1] - edges[used]
+
+        return band_index, band_map
+
+
+class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
+    """Fit the noise of m-mode filtered visibilities that scales with the sky.
+
+    Bright sources leave a residual after the m-mode filter that is a small,
+    rapidly fluctuating fraction of their unfiltered signal.  Part of it is common to
+    all channels and both polarisations, and part is independent between channels
+    (the self-noise of the source).  This task fits the model described in
+    :class:`ch_pipeline.core.containers.HybridVisSkyNoise`, separately for each band
+    and east-west baseline, using the unfiltered visibilities as the sky term.
+
+    Three statistics are fitted in turn, by maximum likelihood for exponentially
+    distributed powers (iteratively reweighted least squares), leaving out samples
+    whose power is more than ``clip`` times the model:
+
+    1. the power of single channels, for ``alpha_single`` and ``kappa2_tot``;
+    2. the power of the sum over the channels in a band, weighted by their inverse
+       noise variance, for each polarisation, for ``alpha_band`` and ``kappa2_coh``
+       with ``kappa2_tot`` fixed;
+    3. the power of that sum over both polarisations, for ``alpha_pol`` and
+       ``rho_pol`` with the others fixed.
+
+    Samples whose sky term is negligible (below 1e-3 of the noise for a coefficient
+    of ``kappa_prior``) only constrain ``alpha``, so a random fraction
+    ``noise_fraction`` of them is used.  Uncertainties for the whole day are from a
+    jackknife over the blocks of right ascension.  Those of the fits within blocks
+    and around sources are from the Fisher matrix, which ignores the correlation of
+    neighbouring elevations and channels, so they are underestimates.
+
+    The 0 m baseline is excluded by default: its co-polar visibilities are real and
+    its unfiltered visibilities are dominated by the receiver noise rather than the
+    sky.
+
+    Attributes
+    ----------
+    pol : list of str
+        Polarisations to use.  Default is ["XX", "YY"].
+    ew_index : list of int
+        Indices of the east-west baselines to fit.  Default is all except 0 m.
+    nblock : int
+        Number of blocks of right ascension.  Default is 12.
+    clip : float
+        Leave out samples with power above this multiple of the model.  Default 20.
+    niter : int
+        Maximum number of reweighting iterations.  Default is 20.
+    kappa_prior : float
+        Typical coefficient, used to select the samples with a significant sky term.
+        Default is 1e-3.
+    noise_fraction : float
+        Fraction of the other samples to use.  Default is 0.02.
+    sources : list of str
+        Sources (names in `ch_ephem.sources.source_dictionary`, or "sun") around
+        whose transit the coefficients are also fitted.  Default is none.
+    positions : dict
+        Additional positions, as {name: [ra, dec]} in degrees.
+    source_el_width : int
+        Half-width of the window around each source in elevations.  Default is 10.
+    source_ra_width : float
+        Half-width of the window around each source in degrees.  Default is 3.
+    qmin, qmax : float
+        Range of the sky term (in units of the noise) for the binned diagnostics.
+        Defaults are 1e-2 and 1e8.
+    nqbin : int
+        Number of logarithmic bins.  The first bin also contains everything below
+        ``qmin``.  Default is 40.
+    seed : int
+        Seed for the random selection of samples.  Default is 0.
+    """
+
+    pol = config.list_type(str, default=["XX", "YY"])
+    ew_index = config.list_type(int, default=None)
+    nblock = config.Property(proptype=int, default=12)
+    clip = config.Property(proptype=float, default=20.0)
+    niter = config.Property(proptype=int, default=20)
+    kappa_prior = config.Property(proptype=float, default=1e-3)
+    noise_fraction = config.Property(proptype=float, default=0.02)
+    sources = config.list_type(str, default=[])
+    positions = config.Property(proptype=dict, default={})
+    source_el_width = config.Property(proptype=int, default=10)
+    source_ra_width = config.Property(proptype=float, default=3.0)
+    qmin = config.Property(proptype=float, default=1e-2)
+    qmax = config.Property(proptype=float, default=1e8)
+    nqbin = config.Property(proptype=int, default=40)
+    seed = config.Property(proptype=int, default=0)
+
+    def process(self, stream, unfiltered):
+        """Fit the coefficients.
+
+        Parameters
+        ----------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            m-mode filtered visibilities, with the ``noise_scale`` dataset if the
+            noise is to be measured relative to it.
+        unfiltered : draco.core.containers.HybridVisStream
+            The visibilities before filtering, on the same grid.
+
+        Returns
+        -------
+        out : ch_pipeline.core.containers.HybridVisSkyNoise
+            The fitted coefficients and diagnostics.
+        """
+        from ch_ephem.observers import chime
+
+        # Check that the two streams are on the same grid
+        ra = stream.ra[:]
+        el = stream.index_map["el"][:]
+        if ra.shape != unfiltered.ra.shape or not np.allclose(ra, unfiltered.ra[:]):
+            raise ValueError("The RA axes of the streams differ.")
+        if el.shape != unfiltered.index_map["el"].shape or not np.allclose(
+            el, unfiltered.index_map["el"][:]
+        ):
+            raise ValueError("The el axes of the streams differ.")
+        freq = stream.freq[:]
+        if freq.shape != unfiltered.freq.shape or not np.allclose(
+            freq, unfiltered.freq[:]
+        ):
+            raise ValueError("The frequency axes of the streams differ.")
+
+        fpol = list(stream.index_map["pol"])
+        upol = list(unfiltered.index_map["pol"])
+        ipf = [fpol.index(p) for p in self.pol]
+        ipu = [upol.index(p) for p in self.pol]
+
+        ew = stream.index_map["ew"][:]
+        ewu = unfiltered.index_map["ew"][:]
+        iew = (
+            [ii for ii in range(ew.size) if ew[ii] != 0.0]
+            if self.ew_index is None
+            else list(self.ew_index)
+        )
+        iewu = []
+        for ii in iew:
+            match = np.flatnonzero(np.isclose(ewu, ew[ii]))
+            if match.size != 1:
+                raise ValueError(f"No unfiltered baseline matches ew = {ew[ii]} m.")
+            iewu.append(int(match[0]))
+        if any(ew[ii] == 0.0 for ii in iew):
+            self.log.warning(
+                "Fitting the 0 m baseline: its noise is not circular and its sky term "
+                "includes the receiver noise, so the fit is not meaningful."
+            )
+
+        band_index, band_map = self._assign_bands(freq)
+        nband = band_map.size
+
+        nra = ra.size
+        dra = np.median(np.diff(ra))
+        block = (np.arange(nra) * self.nblock) // nra
+        block_start = ra[np.searchsorted(block, np.arange(self.nblock))]
+
+        # Source windows
+        lsd = _stream_lsd(stream) if (self.sources or self.positions) else None
+        if lsd is not None:
+            names, src_ra, src_dec = _source_positions(
+                self.sources, self.positions, lsd
+            )
+        else:
+            names, src_ra, src_dec = [], np.zeros(0), np.zeros(0)
+        nsrc = len(names)
+
+        # Weights of the filtered data have no el axis: gather them
+        stream.redistribute("freq")
+        weight = stream.weight[:].allgather()  # pol, freq, ew, ra
+
+        stream.redistribute(["el", "freq"])
+        unfiltered.redistribute(["el", "freq"])
+        vf = stream.vis[:].local_array
+        vr = unfiltered.vis[:].local_array
+        el_slc = stream.vis[:].local_bounds
+        if unfiltered.vis[:].local_bounds != el_slc:
+            raise RuntimeError("The streams are not distributed in the same way.")
+        iel = np.arange(el.size)[el_slc]
+        nel_local = iel.size
+
+        if "noise_scale" in stream.datasets:
+            ns = stream.noise_scale[:]
+            if ns.local_bounds != el_slc:
+                raise RuntimeError("noise_scale is not distributed like the data.")
+            scale = ns.local_array  # pol, freq, ew, el
+        else:
+            self.log.info("No noise_scale dataset: using the weights alone.")
+            scale = None
+
+        src_mask = np.zeros((nsrc, nel_local, nra), dtype=bool)
+        ra_off = ((ra[np.newaxis, :] - src_ra[:, np.newaxis] + 180.0) % 360.0) - 180.0
+        src_y = np.sin(np.radians(src_dec - chime.latitude))
+        for ss in range(nsrc):
+            e0 = int(np.argmin(np.abs(el - src_y[ss])))
+            in_el = np.abs(iel - e0) <= self.source_el_width
+            in_ra = np.abs(ra_off[ss]) <= self.source_ra_width
+            src_mask[ss] = in_el[:, np.newaxis] & in_ra[np.newaxis, :]
+
+        qedges = np.concatenate(
+            [[0.0], np.logspace(np.log10(self.qmin), np.log10(self.qmax), self.nqbin)]
+        )
+
+        out = containers.HybridVisSkyNoise(
+            freq=band_map,
+            ew=ew[iew],
+            block=block_start,
+            source=np.array(names, dtype=str),
+            qbin=qedges[1:],
+            attrs_from=stream,
+        )
+        for name in out.datasets:
+            out.datasets[name][:] = np.nan
+        out.attrs["pol_used"] = list(self.pol)
+        out.attrs["kappa_prior"] = self.kappa_prior
+
+        # Expected self-noise: one over the number of samples in a channel
+        tsamp = 86164.0905 * dra / 360.0
+        fmap = stream.index_map["freq"][:]
+        width = fmap["width"] if fmap.dtype.names else np.full(freq.size, np.nan)
+        for bb in range(nband):
+            chans = band_index == bb
+            out.datasets["kappa2_self"][bb] = 1.0 / (
+                np.median(width[chans]) * 1e6 * tsamp
+            )
+
+        kp2 = self.kappa_prior**2
+        rng = np.random.default_rng([self.seed, self.comm.rank])
+
+        def subsample(valid, informative):
+            keep = rng.random(valid.shape, dtype=np.float32) < self.noise_fraction
+            return valid & (informative | keep)
+
+        for oe, (xf, xu) in enumerate(zip(iew, iewu)):
+            for bb in range(nband):
+                chans = np.flatnonzero(band_index == bb)
+                t0 = time.time()
+
+                # Gather the samples for the single-channel fit, and form the band
+                # sums for each polarisation
+                s1 = {k: [] for k in ("X", "N", "R2", "t", "e")}
+                sums = []
+                for pf, pu in zip(ipf, ipu):
+                    F = vf[pf, chans, xf]  # chan, el, ra
+                    R = vr[pu, chans, xu]
+                    w = weight[pf, chans, xf]  # chan, ra
+                    sc = (
+                        scale[pf, chans, xf]
+                        if scale is not None
+                        else np.ones((chans.size, nel_local), dtype=np.float32)
+                    )
+                    N = sc[:, :, np.newaxis] * tools.invert_no_zero(w)[:, np.newaxis, :]
+                    valid = (
+                        (w > 0)[:, np.newaxis, :]
+                        & (sc > 0)[:, :, np.newaxis]
+                        & np.isfinite(F)
+                        & np.isfinite(R)
+                    )
+                    X = np.abs(F) ** 2
+                    R2 = np.abs(R) ** 2
+
+                    keep = subsample(valid, R2 * kp2 > 1e-3 * N)
+                    _, ke, kt = np.nonzero(keep)
+                    s1["X"].append(X[keep].astype(np.float64))
+                    s1["N"].append(N[keep].astype(np.float64))
+                    s1["R2"].append(R2[keep].astype(np.float64))
+                    s1["e"].append(ke)
+                    s1["t"].append(kt)
+
+                    a = np.where(valid, tools.invert_no_zero(N), 0.0)
+                    nvalid = valid.sum(axis=0)
+                    sums.append(
+                        {
+                            "m": np.sum(a * np.where(valid, F, 0.0), axis=0),
+                            "Rb": np.sum(a * np.where(valid, R, 0.0), axis=0),
+                            "A": np.sum(a, axis=0),
+                            "B": np.sum(a**2 * np.where(valid, R2, 0.0), axis=0),
+                            "ok": nvalid >= max(2, (chans.size + 1) // 2),
+                        }
+                    )
+                    del F, R, N, X, R2, a, valid, keep
+
+                s1 = {k: np.concatenate(v) for k, v in s1.items()}
+                if self.comm.allreduce(s1["X"].size) == 0:
+                    continue
+
+                # 1. Single channels: X = alpha N + kappa2_tot |R|^2
+                cols = np.stack([s1["N"], s1["R2"]], axis=1)
+                fit1 = self._fit(s1["X"], cols, np.zeros_like(s1["X"]), [1.0, kp2])
+                alpha1, kt2 = fit1["theta"]
+                self._store(
+                    out,
+                    "kappa2_tot",
+                    bb,
+                    oe,
+                    fit1,
+                    1,
+                    s1["t"],
+                    s1["e"],
+                    block,
+                    src_mask,
+                )
+                out.datasets["alpha_single"][bb, oe] = alpha1
+
+                if chans.size < 2:
+                    continue
+
+                # 2. Band sums for each pol:
+                #    X = alpha A + kappa2_tot B + kappa2_coh (|Rb|^2 - B)
+                s2 = {k: [] for k in ("X", "A", "Q", "off", "t", "e")}
+                ninf = 0
+                for sm in sums:
+                    rb2 = np.abs(sm["Rb"]) ** 2
+                    inf = rb2 * kp2 > 1e-3 * sm["A"]
+                    keep = subsample(sm["ok"], inf)
+                    ninf += int((sm["ok"] & inf).sum())
+                    ke, kt = np.nonzero(keep)
+                    s2["X"].append(np.abs(sm["m"][keep]) ** 2)
+                    s2["A"].append(sm["A"][keep])
+                    s2["Q"].append(rb2[keep] - sm["B"][keep])
+                    s2["off"].append(kt2 * sm["B"][keep])
+                    s2["e"].append(ke)
+                    s2["t"].append(kt)
+                s2 = {
+                    k: (
+                        np.concatenate(v).astype(np.float64)
+                        if k not in ("t", "e")
+                        else np.concatenate(v)
+                    )
+                    for k, v in s2.items()
+                }
+                out.datasets["nsample"][bb, oe] = self.comm.allreduce(ninf)
+
+                cols = np.stack([s2["A"], s2["Q"]], axis=1)
+                fit2 = self._fit(s2["X"], cols, s2["off"], [alpha1, kp2])
+                alpha2, kc2 = fit2["theta"]
+                self._store(
+                    out,
+                    "kappa2_coh",
+                    bb,
+                    oe,
+                    fit2,
+                    1,
+                    s2["t"],
+                    s2["e"],
+                    block,
+                    src_mask,
+                )
+                out.datasets["alpha_band"][bb, oe] = alpha2
+
+                # Binned diagnostics of the band sums, for all valid samples, in bins of
+                # the modelled sky term so that each bin has a similar expected power
+                cnt = np.zeros(self.nqbin)
+                exc = np.zeros(self.nqbin)
+                mod = np.zeros(self.nqbin)
+                for sm in sums:
+                    ok = sm["ok"] & (sm["A"] > 0)
+                    A = sm["A"][ok]
+                    rb2 = np.abs(sm["Rb"][ok]) ** 2
+                    B = sm["B"][ok]
+                    X = np.abs(sm["m"][ok]) ** 2
+                    mu = alpha2 * A + kt2 * B + kc2 * (rb2 - B)
+                    good = X < self.clip * np.maximum(mu, 0.5 * alpha2 * A)
+                    q = (mu - alpha2 * A) / A
+                    ib = np.clip(
+                        np.searchsorted(qedges, q, side="right") - 1, 0, self.nqbin - 1
+                    )[good]
+                    cnt += np.bincount(ib, minlength=self.nqbin)
+                    exc += np.bincount(ib, weights=(X / A)[good], minlength=self.nqbin)
+                    mod += np.bincount(ib, weights=(mu / A)[good], minlength=self.nqbin)
+                cnt = self.comm.allreduce(cnt)
+                exc = self.comm.allreduce(exc)
+                mod = self.comm.allreduce(mod)
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    out.datasets["count"][bb, oe] = cnt
+                    out.datasets["excess"][bb, oe] = exc / cnt
+                    out.datasets["model"][bb, oe] = mod / cnt
+
+                # 3. Sum over both polarisations:
+                #    X = alpha (A_X + A_Y) + [fixed] + rho kappa2_coh 2 Re(Rb_X Rb_Y*)
+                if len(sums) == 2 and np.isfinite(kc2) and kc2 > 0:
+                    sx, sy = sums
+                    ok = sx["ok"] & sy["ok"]
+                    M = sx["m"] + sy["m"]
+                    A = sx["A"] + sy["A"]
+                    fixed = sum(
+                        kt2 * s["B"] + kc2 * (np.abs(s["Rb"]) ** 2 - s["B"])
+                        for s in (sx, sy)
+                    )
+                    cross = 2.0 * (sx["Rb"] * np.conj(sy["Rb"])).real
+                    rb2 = np.abs(sx["Rb"] + sy["Rb"]) ** 2
+                    keep = subsample(ok, rb2 * kp2 > 1e-3 * A)
+                    ke, kt = np.nonzero(keep)
+                    cols = np.stack([A[keep], cross[keep]], axis=1).astype(np.float64)
+                    fit3 = self._fit(
+                        (np.abs(M[keep]) ** 2).astype(np.float64),
+                        cols,
+                        fixed[keep].astype(np.float64),
+                        [alpha2, kc2],
+                    )
+                    out.datasets["alpha_pol"][bb, oe] = fit3["theta"][0]
+                    out.datasets["rho_pol"][bb, oe] = fit3["theta"][1] / kc2
+                    out.datasets["rho_pol_err"][bb, oe] = (
+                        self._jackknife(fit3, 1, block[kt]) / kc2
+                    )
+
+                self.log.debug(
+                    f"ew {ew[xf]:.0f} m, band {band_map['centre'][bb]:.1f} MHz: "
+                    f"kappa_tot^2 {kt2:.3g}, kappa_coh^2 {kc2:.3g} "
+                    f"({time.time() - t0:.1f} s)"
+                )
+
+        return out
+
+    def _fit(self, X, cols, offset, theta0):
+        """Maximum-likelihood fit of mean = offset + cols @ theta for exponential X.
+
+        Returns the parameters, and what is needed to form the normal equations for
+        subsets of the samples: the regressors, the final weights and the data minus
+        the offset.
+        """
+        theta = np.array(theta0, dtype=np.float64)
+        floor = 0.5 * np.abs(theta[0]) * cols[:, 0]
+        for _ in range(self.niter):
+            mu = np.maximum(offset + cols @ theta, floor)
+            good = (mu > 0) & (X < self.clip * mu)
+            wt = np.where(good, tools.invert_no_zero(mu) ** 2, 0.0)
+            G = self.comm.allreduce((cols * wt[:, np.newaxis]).T @ cols)
+            b = self.comm.allreduce((cols * wt[:, np.newaxis]).T @ (X - offset))
+            try:
+                new = np.linalg.solve(G, b)
+            except np.linalg.LinAlgError:
+                new = np.full_like(theta, np.nan)
+                break
+            done = np.allclose(new, theta, rtol=1e-4, atol=0.0)
+            theta = new
+            if done:
+                break
+        return {
+            "theta": theta,
+            "wt": wt,
+            "cols": cols,
+            "resid": X - offset,
+        }
+
+    def _normal(self, fit, sel):
+        """Normal equations restricted to a subset of the samples (summed over ranks)."""
+        cw = fit["cols"][sel] * fit["wt"][sel, np.newaxis]
+        G = self.comm.allreduce(cw.T @ fit["cols"][sel])
+        b = self.comm.allreduce(cw.T @ fit["resid"][sel])
+        return G, b
+
+    def _jackknife(self, fit, ip, blk):
+        """Jackknife error of parameter ``ip`` over the RA blocks."""
+        if not np.all(np.isfinite(fit["theta"])):
+            return np.nan
+        G, b = self._normal(fit, np.ones(blk.size, dtype=bool))
+        jack = []
+        for kk in range(self.nblock):
+            Gk, bk = self._normal(fit, blk == kk)
+            if Gk[ip, ip] > 0:
+                try:
+                    jack.append(np.linalg.solve(G - Gk, b - bk)[ip])
+                except np.linalg.LinAlgError:
+                    pass
+        if len(jack) < 2:
+            return np.nan
+        jack = np.array(jack)
+        n = jack.size
+        return np.sqrt((n - 1) / n * np.sum((jack - jack.mean()) ** 2))
+
+    def _store(self, out, name, bb, oe, fit, ip, t, e, block, src_mask):
+        """Store a coefficient with its jackknife error, and the block and source fits.
+
+        The block and source fits keep the other parameters at the whole-day values.
+        """
+        theta = fit["theta"]
+        out.datasets[name][bb, oe] = theta[ip]
+        if not np.all(np.isfinite(theta)):
+            return
+
+        blk = block[t]
+        for kk in range(self.nblock):
+            Gk, bk = self._normal(fit, blk == kk)
+            if Gk[ip, ip] > 0:
+                other = bk[ip] - np.dot(np.delete(Gk[ip], ip), np.delete(theta, ip))
+                out.datasets[f"{name}_block"][bb, oe, kk] = other / Gk[ip, ip]
+                out.datasets[f"{name}_block_err"][bb, oe, kk] = Gk[ip, ip] ** -0.5
+        out.datasets[f"{name}_err"][bb, oe] = self._jackknife(fit, ip, blk)
+
+        for ss in range(src_mask.shape[0]):
+            Gs, bs = self._normal(fit, src_mask[ss][e, t])
+            if Gs[ip, ip] > 0:
+                other = bs[ip] - np.dot(np.delete(Gs[ip], ip), np.delete(theta, ip))
+                out.datasets[f"{name}_source"][bb, oe, ss] = other / Gs[ip, ip]
+                out.datasets[f"{name}_source_err"][bb, oe, ss] = Gs[ip, ip] ** -0.5
+
+
+class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     """Matched filter for transients in m-mode filtered hybrid beamformed visibilities.
 
     Searches over the start time, duration, telescope-x, and spectral index of a
@@ -2586,10 +3159,6 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
     )
     reference_freq = config.Property(proptype=float, default=600.0)
     band_durations = config.list_type(int, default=[1])
-    band_start = config.Property(proptype=float, default=398.0)
-    band_width = config.Property(proptype=float, default=6.0)
-    band_edges = config.list_type((int, float), default=None)
-    single_band = config.Property(proptype=bool, default=False)
     pol = config.list_type(str, default=["XX", "YY"])
     combine_pol = config.Property(proptype=bool, default=True)
     ew_index = config.list_type(int, default=None)
@@ -3048,43 +3617,6 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
                 coeff[:, :, :, wmax - 1 + d] -= wb * resp[..., lag_index[d]]
 
         return coeff
-
-    def _assign_bands(self, freq):
-        """Assign each frequency channel to a band.
-
-        Returns
-        -------
-        band_index : np.ndarray[nfreq]
-            Band of each channel, or -1 if it is in none.
-        band_map : np.ndarray[nband]
-            Structured array with the centre and width of each populated band.
-        """
-        if self.single_band:
-            df = np.median(np.abs(np.diff(freq))) if freq.size > 1 else 0.0
-            edges = np.array([freq.min() - 0.5 * df, freq.max() + 0.5 * df])
-        elif self.band_edges is not None:
-            edges = np.sort(np.array(self.band_edges, dtype=np.float64))
-        else:
-            nedge = int(np.ceil((freq.max() - self.band_start) / self.band_width)) + 1
-            edges = self.band_start + self.band_width * np.arange(max(nedge, 2))
-
-        raw = np.searchsorted(edges, freq, side="right") - 1
-        raw[(raw < 0) | (raw >= edges.size - 1) | (freq == edges[-1])] = -1
-
-        # Drop bands without channels, preserving order of decreasing frequency
-        # to match the CHIME frequency axis.
-        used = np.unique(raw[raw >= 0])[::-1]
-        band_index = np.full(freq.size, -1, dtype=int)
-        for bb, rb in enumerate(used):
-            band_index[raw == rb] = bb
-
-        band_map = np.zeros(
-            used.size, dtype=[("centre", np.float64), ("width", np.float64)]
-        )
-        band_map["centre"] = 0.5 * (edges[used] + edges[used + 1])
-        band_map["width"] = edges[used + 1] - edges[used]
-
-        return band_index, band_map
 
     def _beam_profile_hwhm(self, freq, pol):
         """Half width at half maximum of the beam in x at zenith, per frequency."""
