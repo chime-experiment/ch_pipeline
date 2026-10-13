@@ -2689,6 +2689,9 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         ``qmin``.  Default is 40.
     seed : int
         Seed for the random selection of samples.  Default is 0.
+    nan_check : bool
+        Check the output for NaNs.  Default is False, since NaN marks the
+        coefficients that could not be fitted.
     """
 
     pol = config.list_type(str, default=["XX", "YY"])
@@ -2706,6 +2709,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     qmax = config.Property(proptype=float, default=1e8)
     nqbin = config.Property(proptype=int, default=40)
     seed = config.Property(proptype=int, default=0)
+
+    # NaN marks coefficients that could not be fitted (for example bands without
+    # data), so the output is saved rather than treated as bad
+    nan_check = config.Property(proptype=bool, default=False)
 
     def process(self, stream, unfiltered):
         """Fit the coefficients.

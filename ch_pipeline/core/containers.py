@@ -1121,7 +1121,8 @@ class HybridVisSkyNoise(FreqContainer):
     at the values for the whole day.  ``count``, ``excess`` and ``model`` give, in
     bins of the modelled sky term of the band sum (``qbin`` is the upper edge, in
     units of the noise of the band sum), the number of samples and the mean
-    measured and modelled power of the band sum in the same units.
+    measured and modelled power of the band sum in the same units.  Coefficients
+    that could not be fitted (for example in bands without data) are NaN.
     """
 
     _axes = ("ew", "block", "source", "qbin")
