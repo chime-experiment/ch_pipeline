@@ -1121,8 +1121,12 @@ class HybridVisSkyNoise(FreqContainer):
     at the values for the whole day.  ``count``, ``excess`` and ``model`` give, in
     bins of the modelled sky term of the band sum (``qbin`` is the upper edge, in
     units of the noise of the band sum), the number of samples and the mean
-    measured and modelled power of the band sum in the same units.  Coefficients
-    that could not be fitted (for example in bands without data) are NaN.
+    measured and modelled power of the band sum in the same units.
+
+    Datasets ending in ``_weight`` are inverse variances; coefficients that could
+    not be fitted (for example in bands without data) are zero with zero weight.
+    ``alpha_single``, ``alpha_band`` and ``alpha_pol`` are valid where the weights
+    of ``kappa2_tot``, ``kappa2_coh`` and ``rho_pol`` are non-zero.
     """
 
     _axes = ("ew", "block", "source", "qbin")
@@ -1138,13 +1142,13 @@ class HybridVisSkyNoise(FreqContainer):
             for name in (
                 "alpha_single",
                 "kappa2_tot",
-                "kappa2_tot_err",
+                "kappa2_tot_weight",
                 "alpha_band",
                 "kappa2_coh",
-                "kappa2_coh_err",
+                "kappa2_coh_weight",
                 "alpha_pol",
                 "rho_pol",
-                "rho_pol_err",
+                "rho_pol_weight",
                 "nsample",
             )
         },
@@ -1157,9 +1161,9 @@ class HybridVisSkyNoise(FreqContainer):
             }
             for name in (
                 "kappa2_tot_block",
-                "kappa2_tot_block_err",
+                "kappa2_tot_block_weight",
                 "kappa2_coh_block",
-                "kappa2_coh_block_err",
+                "kappa2_coh_block_weight",
             )
         },
         **{
@@ -1171,9 +1175,9 @@ class HybridVisSkyNoise(FreqContainer):
             }
             for name in (
                 "kappa2_tot_source",
-                "kappa2_tot_source_err",
+                "kappa2_tot_source_weight",
                 "kappa2_coh_source",
-                "kappa2_coh_source_err",
+                "kappa2_coh_source_weight",
             )
         },
         **{

@@ -2132,8 +2132,8 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
 
             out.datasets["ra_index"][ss] = ira
             out.datasets["el_index"][ss] = iel
-            out.datasets["ra"][ss] = np.where(ira >= 0, ra[ira], np.nan)
-            out.datasets["el"][ss] = np.where(iel >= 0, el[iel], np.nan)
+            out.datasets["ra"][ss] = np.where(ira >= 0, ra[ira], 0.0)
+            out.datasets["el"][ss] = np.where(iel >= 0, el[iel], 0.0)
             out.datasets["source_ra"][ss] = src_ra[ss]
             out.datasets["source_dec"][ss] = src_dec[ss]
 
@@ -2151,6 +2151,11 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
         )
 
         return out
+
+
+def _inv_var(err):
+    """Inverse variance from a standard error, or zero if it is not finite."""
+    return 1.0 / err**2 if np.isfinite(err) and err > 0 else 0.0
 
 
 def _stream_lsd(stream):
@@ -2646,10 +2651,12 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
 
     Samples whose sky term is negligible (below 1e-3 of the noise for a coefficient
     of ``kappa_prior``) only constrain ``alpha``, so a random fraction
-    ``noise_fraction`` of them is used.  Uncertainties for the whole day are from a
-    jackknife over the blocks of right ascension.  Those of the fits within blocks
+    ``noise_fraction`` of them is used.  Band sums use the samples with at least
+    two valid channels.  The weights (inverse variances) for the whole day are from
+    a jackknife over the blocks of right ascension.  Those of the fits within blocks
     and around sources are from the Fisher matrix, which ignores the correlation of
-    neighbouring elevations and channels, so they are underestimates.
+    neighbouring elevations and channels, so they overestimate the precision.
+    Coefficients that could not be fitted have zero weight.
 
     The 0 m baseline is excluded by default: its co-polar visibilities are real and
     its unfiltered visibilities are dominated by the receiver noise rather than the
@@ -2689,9 +2696,6 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         ``qmin``.  Default is 40.
     seed : int
         Seed for the random selection of samples.  Default is 0.
-    nan_check : bool
-        Check the output for NaNs.  Default is False, since NaN marks the
-        coefficients that could not be fitted.
     """
 
     pol = config.list_type(str, default=["XX", "YY"])
@@ -2709,10 +2713,6 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     qmax = config.Property(proptype=float, default=1e8)
     nqbin = config.Property(proptype=int, default=40)
     seed = config.Property(proptype=int, default=0)
-
-    # NaN marks coefficients that could not be fitted (for example bands without
-    # data), so the output is saved rather than treated as bad
-    nan_check = config.Property(proptype=bool, default=False)
 
     def process(self, stream, unfiltered):
         """Fit the coefficients.
@@ -2834,7 +2834,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             attrs_from=stream,
         )
         for name in out.datasets:
-            out.datasets[name][:] = np.nan
+            out.datasets[name][:] = 0.0
         out.attrs["pol_used"] = list(self.pol)
         out.attrs["kappa_prior"] = self.kappa_prior
 
@@ -2899,7 +2899,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                             "Rb": np.sum(a * np.where(valid, R, 0.0), axis=0),
                             "A": np.sum(a, axis=0),
                             "B": np.sum(a**2 * np.where(valid, R2, 0.0), axis=0),
-                            "ok": nvalid >= max(2, (chans.size + 1) // 2),
+                            "ok": nvalid >= 2,
                         }
                     )
                     del F, R, N, X, R2, a, valid, keep
@@ -2912,6 +2912,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 cols = np.stack([s1["N"], s1["R2"]], axis=1)
                 fit1 = self._fit(s1["X"], cols, np.zeros_like(s1["X"]), [1.0, kp2])
                 alpha1, kt2 = fit1["theta"]
+                if not np.all(np.isfinite(fit1["theta"])):
+                    continue
                 self._store(
                     out,
                     "kappa2_tot",
@@ -2958,6 +2960,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 cols = np.stack([s2["A"], s2["Q"]], axis=1)
                 fit2 = self._fit(s2["X"], cols, s2["off"], [alpha1, kp2])
                 alpha2, kc2 = fit2["theta"]
+                if not np.all(np.isfinite(fit2["theta"])):
+                    continue
                 self._store(
                     out,
                     "kappa2_coh",
@@ -2995,14 +2999,13 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 cnt = self.comm.allreduce(cnt)
                 exc = self.comm.allreduce(exc)
                 mod = self.comm.allreduce(mod)
-                with np.errstate(invalid="ignore", divide="ignore"):
-                    out.datasets["count"][bb, oe] = cnt
-                    out.datasets["excess"][bb, oe] = exc / cnt
-                    out.datasets["model"][bb, oe] = mod / cnt
+                out.datasets["count"][bb, oe] = cnt
+                out.datasets["excess"][bb, oe] = exc * tools.invert_no_zero(cnt)
+                out.datasets["model"][bb, oe] = mod * tools.invert_no_zero(cnt)
 
                 # 3. Sum over both polarisations:
                 #    X = alpha (A_X + A_Y) + [fixed] + rho kappa2_coh 2 Re(Rb_X Rb_Y*)
-                if len(sums) == 2 and np.isfinite(kc2) and kc2 > 0:
+                if len(sums) == 2 and kc2 > 0:
                     sx, sy = sums
                     ok = sx["ok"] & sy["ok"]
                     M = sx["m"] + sy["m"]
@@ -3022,11 +3025,11 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                         fixed[keep].astype(np.float64),
                         [alpha2, kc2],
                     )
-                    out.datasets["alpha_pol"][bb, oe] = fit3["theta"][0]
-                    out.datasets["rho_pol"][bb, oe] = fit3["theta"][1] / kc2
-                    out.datasets["rho_pol_err"][bb, oe] = (
-                        self._jackknife(fit3, 1, block[kt]) / kc2
-                    )
+                    if np.all(np.isfinite(fit3["theta"])):
+                        err = self._jackknife(fit3, 1, block[kt]) / kc2
+                        out.datasets["alpha_pol"][bb, oe] = fit3["theta"][0]
+                        out.datasets["rho_pol"][bb, oe] = fit3["theta"][1] / kc2
+                        out.datasets["rho_pol_weight"][bb, oe] = _inv_var(err)
 
                 self.log.debug(
                     f"ew {ew[xf]:.0f} m, band {band_map['centre'][bb]:.1f} MHz: "
@@ -3039,7 +3042,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     def _fit(self, X, cols, offset, theta0):
         """Maximum-likelihood fit of mean = offset + cols @ theta for exponential X.
 
-        Returns the parameters, and what is needed to form the normal equations for
+        Returns the parameters (NaN if the fit is singular, for example without
+        samples), and what is needed to form the normal equations for
         subsets of the samples: the regressors, the final weights and the data minus
         the offset.
         """
@@ -3054,7 +3058,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             try:
                 new = np.linalg.solve(G, b)
             except np.linalg.LinAlgError:
-                new = np.full_like(theta, np.nan)
+                theta = np.full_like(theta, np.nan)
                 break
             done = np.allclose(new, theta, rtol=1e-4, atol=0.0)
             theta = new
@@ -3094,14 +3098,14 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         return np.sqrt((n - 1) / n * np.sum((jack - jack.mean()) ** 2))
 
     def _store(self, out, name, bb, oe, fit, ip, t, e, block, src_mask):
-        """Store a coefficient with its jackknife error, and the block and source fits.
+        """Store a coefficient with its weight, and the block and source fits.
 
-        The block and source fits keep the other parameters at the whole-day values.
+        The weight is the inverse of the jackknife variance, or zero if that could
+        not be formed.  The block and source fits keep the other parameters at the
+        whole-day values, with inverse-variance weights from the Fisher matrix.
         """
         theta = fit["theta"]
         out.datasets[name][bb, oe] = theta[ip]
-        if not np.all(np.isfinite(theta)):
-            return
 
         blk = block[t]
         for kk in range(self.nblock):
@@ -3109,15 +3113,15 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             if Gk[ip, ip] > 0:
                 other = bk[ip] - np.dot(np.delete(Gk[ip], ip), np.delete(theta, ip))
                 out.datasets[f"{name}_block"][bb, oe, kk] = other / Gk[ip, ip]
-                out.datasets[f"{name}_block_err"][bb, oe, kk] = Gk[ip, ip] ** -0.5
-        out.datasets[f"{name}_err"][bb, oe] = self._jackknife(fit, ip, blk)
+                out.datasets[f"{name}_block_weight"][bb, oe, kk] = Gk[ip, ip]
+        out.datasets[f"{name}_weight"][bb, oe] = _inv_var(self._jackknife(fit, ip, blk))
 
         for ss in range(src_mask.shape[0]):
             Gs, bs = self._normal(fit, src_mask[ss][e, t])
             if Gs[ip, ip] > 0:
                 other = bs[ip] - np.dot(np.delete(Gs[ip], ip), np.delete(theta, ip))
                 out.datasets[f"{name}_source"][bb, oe, ss] = other / Gs[ip, ip]
-                out.datasets[f"{name}_source_err"][bb, oe, ss] = Gs[ip, ip] ** -0.5
+                out.datasets[f"{name}_source_weight"][bb, oe, ss] = Gs[ip, ip]
 
 
 class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
