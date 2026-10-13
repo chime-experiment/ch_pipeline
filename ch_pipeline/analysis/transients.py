@@ -2120,7 +2120,7 @@ class ExtractSourceCutouts(tasklib.base.ContainerTask):
         oweight[:] = 0.0
 
         for ss in range(len(names)):
-            ira0 = int(np.round(((src_ra[ss] - ra[0]) % 360.0) / dra))
+            ira0 = _nearest_ra_index(ra, src_ra[ss])
             iel0 = int(np.argmin(np.abs(el - src_el[ss])))
 
             ira = ira0 + ra_off
@@ -2201,6 +2201,24 @@ def _source_positions(sources, positions, lsd):
         dec.append(float(d))
 
     return names, np.array(ra) % 360.0, np.array(dec, dtype=np.float64)
+
+
+def _nearest_ra_index(ra, ra0):
+    """Index of a right ascension on a uniform RA axis, modulo 360 degrees.
+
+    An RA axis that extends below 0 or above 360 degrees has two samples near some
+    right ascensions; the one within [0, 360) is preferred.  If the RA is not
+    covered, the index is outside the axis, on the side nearest to it.
+    """
+    dra = np.median(np.diff(ra))
+    best = None
+    for shift in (0.0, -360.0, 360.0):
+        k = int(np.round((ra0 % 360.0 + shift - ra[0]) / dra))
+        outside = max(0, -k, k - (ra.size - 1))
+        key = (outside, shift != 0.0)
+        if best is None or key < best[0]:
+            best = (key, k)
+    return best[1]
 
 
 def _self_conjugate(pol, ew):
