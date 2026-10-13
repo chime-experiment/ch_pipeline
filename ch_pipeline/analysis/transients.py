@@ -1711,6 +1711,8 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
                         continue
                 else:
                     mmode_index = stopband_mmode_index(nra, mc, mw)
+                    # Built for each polarisation below; None if no data
+                    filt = None
 
                 for opp, pp in enumerate(ipol):
                     w = weight_in[pp, ff, xx].astype(np.float64)
@@ -1745,10 +1747,11 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
                     noise_weight[opp, ff, oxx] = w * valid
                     response[opp, ff, oxx] = filt.response(max_lag)
 
-                self.log.debug(
-                    f"Filtered freq {nu:0.2f} MHz, ew {ew[xx]:0.1f} m "
-                    f"({filt.nmode} modes) in {time.time() - t0:0.2f} seconds."
-                )
+                if filt is not None:
+                    self.log.debug(
+                        f"Filtered freq {nu:0.2f} MHz, ew {ew[xx]:0.1f} m "
+                        f"({filt.nmode} modes) in {time.time() - t0:0.2f} seconds."
+                    )
 
         return out
 
