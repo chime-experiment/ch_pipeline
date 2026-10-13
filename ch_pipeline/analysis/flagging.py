@@ -1563,7 +1563,7 @@ class MaskDay(tasklib.base.ContainerTask):
                 time = chime.lsd_to_unix(cc + ra / 360.0)
                 flag |= self._flag(time)
 
-        # Log how much data were masking
+        # Log how much data we're masking
         self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
 
         # Apply the mask
@@ -1699,7 +1699,7 @@ class MaskRA(tasklib.base.ContainerTask):
     remove_average = config.Property(proptype=bool, default=True)
 
     def process(self, sstream):
-        """Apply a day time mask.
+        """Apply an RA mask.
 
         Parameters
         ----------
@@ -1719,14 +1719,14 @@ class MaskRA(tasklib.base.ContainerTask):
         # Crudely mask the on and off regions
         mask_bool = ra_shift > end_shift
 
-        # Put in the transition at the start of the day
+        # Put in the transition at the start of the RA range
         mask = np.where(
             ra_shift < self.width,
             0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
             mask_bool,
         )
 
-        # Put the transition at the end of the day
+        # Put in the transition at the end of the RA range
         mask = np.where(
             np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
             0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
