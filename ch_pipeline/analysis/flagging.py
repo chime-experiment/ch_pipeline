@@ -1347,7 +1347,7 @@ class BadNodeFlagger(tasklib.base.ContainerTask):
         if this_acq in self.nodes_by_acq:
             # Grab list of nodes from input dictionary
             nodes_to_flag = self.nodes_by_acq[this_acq]
-            if not hasattr(nodes_to_flag, "__iter__"):
+            if not isinstance(nodes_to_flag, list | tuple):
                 nodes_to_flag = [nodes_to_flag]
 
             # Loop over nodes and perform flagging
@@ -1544,7 +1544,7 @@ class MaskDay(tasklib.base.ContainerTask):
                         if "lsd" in dstream.attrs
                         else dstream.attrs["csd"]
                     )
-                    if not hasattr(csd, "__iter__"):
+                    if not isinstance(csd, list | tuple):
                         csd = [csd]
                 except KeyError:
                     raise KeyError(
