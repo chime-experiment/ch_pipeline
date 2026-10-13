@@ -420,6 +420,9 @@ class DayenuMFilterHybridVis(tasklib.base.ContainerTask):
                     )
                     t0 = time.time()
 
+        # The DAYENU covariance uses unwrapped RA differences
+        stream.attrs["ra_periodic"] = False
+
         return stream
 
     def _get_cut(self, freq, xsep, el, is_fringestopped):
@@ -1565,6 +1568,12 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
         window, which cannot cut as sharply in m.  Default is 0.
     weighted : bool
         Weight the full-day fit by the inverse variance.  Default is True.
+    wrap_ra : bool
+        Treat a full sidereal day as periodic, with the last sample next to the
+        first.  The two ends of a single day were observed 24 hours apart, so the
+        data generally jump there, and wrapping spreads that jump into the filtered
+        data around the boundary.  Required by the full-day fit, which is periodic
+        by construction.  Default is False.
     pol : list of str
         Polarisations to filter.  Default is all.
     ew_index : list of int
@@ -1578,6 +1587,7 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
     fir_length = config.Property(proptype=int, default=0)
     fir_margin = config.Property(proptype=float, default=0.0)
     weighted = config.Property(proptype=bool, default=True)
+    wrap_ra = config.Property(proptype=bool, default=False)
     pol = config.list_type(str, default=None)
     ew_index = config.list_type(int, default=None)
     response_max_lag = config.Property(proptype=int, default=31)
@@ -1620,12 +1630,13 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
         dra = np.median(np.diff(ra))
         if not np.allclose(np.diff(ra), dra, rtol=1e-4):
             raise ValueError("LSQMFilterHybridVis requires a uniform RA axis.")
-        periodic = _is_full_day(ra)
-        if self.fir_length == 0 and not periodic:
+        full_day = _is_full_day(ra)
+        if self.fir_length == 0 and not (full_day and self.wrap_ra):
             raise ValueError(
-                "The global filter requires a full sidereal day. "
-                "Set fir_length to filter a partial day."
+                "The global filter requires a full sidereal day and wrap_ra = True. "
+                "Set fir_length to filter a partial day or without wrapping."
             )
+        periodic = full_day and self.wrap_ra
         dra_rad = np.radians(dra)
 
         fir_length = (
@@ -1665,6 +1676,9 @@ class LSQMFilterHybridVis(DayenuMFilterHybridVis):
         out.add_dataset("ra_response")
         out.add_dataset("noise_weight")
         out.redistribute("freq")
+        # Record whether the filter treated the RA axis as periodic, so that the
+        # matched filter does not combine samples across the boundary otherwise
+        out.attrs["ra_periodic"] = periodic
 
         fslc = stream.vis[:].local_bounds
         freq = stream.freq[fslc]
@@ -2543,7 +2557,9 @@ class TransientMatchedFilter(tasklib.base.ContainerTask):
         ra = hvis.ra[:]
         nra = ra.size
         dra = np.radians(np.median(np.diff(ra)))
-        periodic = _is_full_day(ra)
+        # Combine samples across the RA boundary only if the data are periodic and
+        # the filter treated them as such
+        periodic = _is_full_day(ra) and bool(hvis.attrs.get("ra_periodic", True))
 
         # Telescope-x grid
         x = self._x_grid(freq, ew[iew])
