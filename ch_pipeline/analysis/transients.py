@@ -3886,9 +3886,10 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
     """Sum the single-sample matched filter over groups of bands.
 
     For each group, the bands are combined as in :class:`CollapseMatchedFilterBands`
-    at every telescope-x, and the best S/N over x and spectral index is kept.  This
-    gives maps that are much smaller than the per-band output, for example for
-    sub-bands, or for every band on its own.
+    at every telescope-x.  Either the best S/N over x and spectral index is kept, or
+    the (signed) S/N at a single telescope-x.  This gives maps that are much smaller
+    than the per-band output, for example for sub-bands, or for every band on its
+    own.
 
     Attributes
     ----------
@@ -3904,6 +3905,10 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
         Reference frequency for the spectral index in MHz.  Default is 600.
     duration : int
         Duration (in samples) of the trials to use.  Default is 1.
+    x_reduce : str or float
+        "max" to keep the best telescope-x (stored in ``x_index``), or a value of
+        telescope-x to keep the S/N at the nearest x on the grid, which requires a
+        single spectral index.  Default is "max".
     nel_chunk : int
         Number of elevations to process at once.  Default is 16.
     """
@@ -3913,6 +3918,7 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
     spectral_indices = config.list_type((int, float), default=[0.0])
     reference_freq = config.Property(proptype=float, default=600.0)
     duration = config.Property(proptype=int, default=1)
+    x_reduce = config.Property(default="max")
     nel_chunk = config.Property(proptype=int, default=16)
 
     def process(self, mf):
@@ -3926,9 +3932,20 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
         Returns
         -------
         out : ch_pipeline.core.containers.TransientBandGroupMap
-            Best S/N for each group of bands.
+            S/N for each group of bands.
         """
         mf.redistribute("el")
+
+        x = mf.index_map["x"][:]
+        if isinstance(self.x_reduce, str) and self.x_reduce.strip().lower() == "max":
+            xsel = slice(None)
+            fixed_x = None
+        else:
+            ix0 = int(np.argmin(np.abs(x - float(self.x_reduce))))
+            xsel = slice(ix0, ix0 + 1)
+            fixed_x = x[ix0]
+            if len(self.spectral_indices) > 1:
+                raise ValueError("A fixed telescope-x needs a single spectral index.")
 
         centre = mf.index_map["freq"]["centre"][:]
         durations = list(mf.index_map["duration"][:])
@@ -3964,6 +3981,8 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
             distributed=mf.distributed,
             comm=mf.comm,
         )
+        if fixed_x is None:
+            out.add_dataset("x_index")
         if len(alphas) > 1:
             out.add_dataset("spectral_index")
         out.redistribute("el")
@@ -3972,17 +3991,19 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
         out.datasets["dec"][:] = mf.datasets["dec"][:]
         out.attrs["duration"] = self.duration
         out.attrs["reference_freq"] = self.reference_freq
+        out.attrs["x_reduce"] = "max" if fixed_x is None else float(fixed_x)
 
-        amp = mf.amplitude[:].local_array[:, idur]  # pol, band, el, ra, x
-        wgt = mf.weight[:].local_array[:, idur]
+        amp = mf.amplitude[:].local_array[:, idur, ..., xsel]  # pol, band, el, ra, x
+        wgt = mf.weight[:].local_array[:, idur, ..., xsel]
 
         osnr = out.snr[:].local_array
-        oix = out.datasets["x_index"][:].local_array
+        oix = out.datasets["x_index"][:].local_array if fixed_x is None else None
         oalpha = (
             out.datasets["spectral_index"][:].local_array if len(alphas) > 1 else None
         )
         osnr[:] = 0.0
-        oix[:] = 0
+        if oix is not None:
+            oix[:] = 0
         if oalpha is not None:
             oalpha[:] = 0.0
 
@@ -4013,11 +4034,13 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
                                 np.where(better, alphas[aa], best[2]),
                             )
                     osnr[pp, gg, esl] = best[0]
-                    oix[pp, gg, esl] = best[1]
+                    if oix is not None:
+                        oix[pp, gg, esl] = best[1]
                     if oalpha is not None:
                         oalpha[pp, gg, esl] = best[2]
 
-        self.log.info(f"Made maps for {len(names)} groups of bands.")
+        where = "best telescope-x" if fixed_x is None else f"telescope-x {fixed_x:+.4f}"
+        self.log.info(f"Made maps for {len(names)} groups of bands, at the {where}.")
 
         return out
 

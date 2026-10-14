@@ -1420,12 +1420,13 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
 class TransientBandGroupMap(FreqContainer, SiderealContainer):
     """Single-sample matched filter summed over groups of bands.
 
-    For each group of bands, the S/N of the sum over the bands in the group, at the
-    best telescope-x and spectral index, at every elevation and start time.  The
+    For each group of bands, the S/N of the sum over the bands in the group, at every
+    elevation and start time, either at the best telescope-x and spectral index or
+    at a single telescope-x (the ``x_reduce`` attribute is "max" or that x).  The
     ``freq`` axis holds the centre and width of the bands, and ``band_used`` which
-    of them are in each group.  ``x_index`` gives the best telescope-x, and
-    ``spectral_index`` (only present if more than one was searched) the best
-    spectral index.  ``ha`` and ``dec`` give the hour angle and declination of each
+    of them are in each group.  ``x_index`` (only for "max") gives the best
+    telescope-x, and ``spectral_index`` (only present if more than one was searched)
+    the best spectral index.  ``ha`` and ``dec`` give the hour angle and declination of each
     ``(el, x)``.
 
     The maps are stored without chunking or compression.  Writing compressed
@@ -1447,7 +1448,7 @@ class TransientBandGroupMap(FreqContainer, SiderealContainer):
         "x_index": {
             "axes": ["pol", "group", "el", "ra"],
             "dtype": np.int16,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "el",
         },
