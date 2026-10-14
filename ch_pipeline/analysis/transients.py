@@ -2647,7 +2647,13 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
        noise variance, for each polarisation, for ``alpha_band`` and ``kappa2_coh``
        with ``kappa2_tot`` fixed;
     3. the power of that sum over both polarisations, for ``alpha_pol`` and
-       ``rho_pol`` with the others fixed.
+       ``rho_pol`` with the others fixed;
+    4. the product of the band sums of two bands, for ``rho_band``, the
+       correlation of the common term between the bands.  Its expectation is
+       ``rho_band kappa_coh,b kappa_coh,b' Rb_b Rb_b'^*``, with ``kappa_coh`` from
+       the block fits, and it is fitted by weighted least squares over the samples
+       where the sky term is significant in both bands, with a jackknife error
+       over the blocks of right ascension.
 
     Samples whose sky term is negligible (below 1e-3 of the noise for a coefficient
     of ``kappa_prior``) only constrain ``alpha``, so a random fraction
@@ -2827,12 +2833,15 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
 
         out = containers.HybridVisSkyNoise(
             freq=band_map,
+            band=band_map["centre"],
             ew=ew[iew],
             block=block_start,
             source=np.array(names, dtype=str),
             qbin=qedges[1:],
             attrs_from=stream,
         )
+        out.add_dataset("rho_band")
+        out.add_dataset("rho_band_weight")
         for name in out.datasets:
             out.datasets[name][:] = 0.0
         out.attrs["pol_used"] = list(self.pol)
@@ -2856,6 +2865,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             return valid & (informative | keep)
 
         for oe, (xf, xu) in enumerate(zip(iew, iewu)):
+            # Band sums of each band, kept for the correlation between bands
+            kept = {}
             for bb in range(nband):
                 chans = np.flatnonzero(band_index == bb)
                 t0 = time.time()
@@ -2976,6 +2987,22 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 )
                 out.datasets["alpha_band"][bb, oe] = alpha2
 
+                if kc2 > 0:
+                    kept[bb] = [
+                        {
+                            "m": sm["m"].astype(np.complex64),
+                            "Rb": sm["Rb"].astype(np.complex64),
+                            "mu": (
+                                alpha2 * sm["A"]
+                                + kt2 * sm["B"]
+                                + kc2 * (np.abs(sm["Rb"]) ** 2 - sm["B"])
+                            ).astype(np.float32),
+                            "A": sm["A"].astype(np.float32),
+                            "ok": sm["ok"],
+                        }
+                        for sm in sums
+                    ]
+
                 # Binned diagnostics of the band sums, for all valid samples, in bins of
                 # the modelled sky term so that each bin has a similar expected power
                 cnt = np.zeros(self.nqbin)
@@ -3037,7 +3064,90 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                     f"({time.time() - t0:.1f} s)"
                 )
 
+            # 4. Correlation of the common term between bands
+            t0 = time.time()
+            self._fit_rho_band(out, oe, kept, block)
+            self.log.info(
+                f"ew {ew[xf]:.0f} m: correlation between {len(kept)} bands "
+                f"({time.time() - t0:.1f} s)"
+            )
+            del kept
+
         return out
+
+    def _fit_rho_band(self, out, oe, kept, block):
+        """Fit the correlation of the common term between every pair of bands.
+
+        For bands ``b`` and ``b'`` the cross product of the band sums has expectation
+        ``rho k_b k_b' Rb_b Rb_b'^*``, where ``k`` is ``kappa_coh`` in the block of each
+        sample.  ``rho`` is the weighted least-squares fit over samples where the sky
+        term of both bands is significant, with weights ``1 / (mu_b mu_b')`` from the
+        modelled power of each band sum.  The error is a jackknife over blocks.
+        """
+        d = out.datasets
+        nblk = self.nblock
+        bands = sorted(kept)
+        nb = len(bands)
+        for bb in range(d["rho_band"].shape[0]):
+            d["rho_band"][bb, bb, oe] = 1.0
+        if nb < 2:
+            return
+
+        # kappa_coh of each band in the block of each sample
+        kblk = {}
+        for bb in bands:
+            k2 = np.where(
+                d["kappa2_coh_block_weight"][bb, oe] > 0,
+                d["kappa2_coh_block"][bb, oe],
+                d["kappa2_coh"][bb, oe],
+            )
+            kblk[bb] = np.sqrt(np.clip(k2, 0.0, None))[block]  # ra
+
+        kp2 = self.kappa_prior**2
+        pairs = [(b1, b2) for i, b1 in enumerate(bands) for b2 in bands[i + 1 :]]
+        num = np.zeros((len(pairs), nblk))
+        den = np.zeros((len(pairs), nblk))
+        for ip, (b1, b2) in enumerate(pairs):
+            k12 = (kblk[b1] * kblk[b2])[np.newaxis, :]
+            for s1, s2 in zip(kept[b1], kept[b2]):
+                ok = s1["ok"] & s2["ok"]
+                ok &= np.abs(s1["Rb"]) ** 2 * kp2 > 1e-3 * s1["A"]
+                ok &= np.abs(s2["Rb"]) ** 2 * kp2 > 1e-3 * s2["A"]
+                if not ok.any():
+                    continue
+                wt = np.where(ok, tools.invert_no_zero(s1["mu"] * s2["mu"]), 0.0)
+                q = s1["Rb"] * np.conj(s2["Rb"])  # el, ra
+                y = s1["m"] * np.conj(s2["m"])
+                n = (wt * (y * np.conj(q)).real * k12).sum(axis=0)
+                dd = (wt * np.abs(q) ** 2 * k12**2).sum(axis=0)
+                num[ip] += np.bincount(block, weights=n, minlength=nblk)
+                den[ip] += np.bincount(block, weights=dd, minlength=nblk)
+        num = self.comm.allreduce(num)
+        den = self.comm.allreduce(den)
+
+        tot_n, tot_d = num.sum(axis=1), den.sum(axis=1)
+        for ip, (b1, b2) in enumerate(pairs):
+            if tot_d[ip] <= 0:
+                continue
+            rho = tot_n[ip] / tot_d[ip]
+            # Jackknife over the blocks that have samples
+            have = den[ip] > 0
+            jack = np.array(
+                [
+                    (tot_n[ip] - num[ip, k]) / (tot_d[ip] - den[ip, k])
+                    for k in np.flatnonzero(have)
+                    if tot_d[ip] - den[ip, k] > 0
+                ]
+            )
+            if jack.size >= 2:
+                n = jack.size
+                err = np.sqrt((n - 1) / n * np.sum((jack - jack.mean()) ** 2))
+                wgt = _inv_var(err)
+            else:
+                wgt = 0.0
+            for i, j in ((b1, b2), (b2, b1)):
+                d["rho_band"][i, j, oe] = rho
+                d["rho_band_weight"][i, j, oe] = wgt
 
     def _fit(self, X, cols, offset, theta0):
         """Maximum-likelihood fit of mean = offset + cols @ theta for exponential X.
@@ -3780,6 +3890,666 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         return np.ascontiguousarray(pb.local_array.transpose(1, 0, 2, 3))
 
 
+def _shrink_blocks(day, val, wgt, shrink=True, floor=0.0):
+    """Block values of a coefficient, shrunk towards the whole-day value.
+
+    Each block value is combined with the day value weighted by the inverse of the
+    scatter of the blocks about the day value beyond their own errors.  If the
+    blocks agree with the day value within their errors, every block gets the day
+    value; blocks that could not be fitted always do.  The result is at least
+    ``floor`` times the day value, since a fit near zero in one block is more
+    likely a poor fit than an absence of the effect.
+    """
+    ok = (wgt > 0) & np.isfinite(val)
+    out = np.full(val.shape, day, dtype=np.float64)
+    if ok.any() and not shrink:
+        out[ok] = val[ok]
+    elif ok.any():
+        var = 1.0 / wgt[ok]
+        tau2 = np.mean((val[ok] - day) ** 2 - var)
+        if tau2 > 0:
+            out[ok] = (val[ok] / var + day / tau2) / (1.0 / var + 1.0 / tau2)
+    return np.maximum(out, floor * day)
+
+
+def _nearest_psd_correlation(rho):
+    """Clip the negative eigenvalues of a correlation matrix and renormalise it."""
+    lam, vec = np.linalg.eigh(0.5 * (rho + rho.T))
+    c = (vec * np.clip(lam, 0.0, None)) @ vec.T
+    d = np.sqrt(np.clip(np.diag(c), 1e-12, None))
+    return c / d[:, np.newaxis] / d[np.newaxis, :]
+
+
+class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
+    """Single-sample matched filter including the noise that scales with the sky.
+
+    The filtered data are modelled as thermal noise plus the residual fitted by
+    :class:`EstimateSkyNoise`: for visibility ``k`` (polarisation, channel and
+    baseline) with unfiltered visibility ``S_k``, ``kappa_coh e S_k + kappa_inc e_k
+    S_k``.  ``e`` is common to the channels and baselines of a band, with
+    correlation ``rho_pol`` between polarisations and ``rho_band`` between bands,
+    and ``e_k`` is independent.  Both are assumed independent between samples.
+
+    The weights are the inverse of the total variance of each visibility,
+    ``W_k = 1 / (sigma_k^2 + kappa_tot^2 |S_k|^2)``, where ``sigma_k^2`` is the
+    thermal variance from the weights and the noise scale.  For a template ``g`` at
+    one sample the numerator is ``N = sum_k g_k^* W_k d_k`` and the response to a
+    transient of unit amplitude is ``R = sum_k |g_k|^2 W_k (1 - P_kk)``, so the
+    amplitude is ``Re N / R`` and
+
+        Var(Re N) = 1/2 [sum_k |g_k|^2 W_k^2 (sigma_k^2 (1 - P_kk) + kappa_inc^2 |S_k|^2)
+                         + sum_bb' rho_bb' Re(V_b V_b'^*)]
+
+    where ``V_b`` is ``kappa_coh`` times the numerator of band ``b`` applied to the
+    unfiltered data, combined over the polarisations with ``rho_pol``.  For each
+    spectral index the bands are weighted by ``s_b = (nu_b / nu_ref)^alpha`` as in
+    :class:`TransientMatchedFilter`.  With ``kappa = 0`` the result is that of
+    :class:`TransientMatchedFilter` for single-sample trials.
+
+    The sub-band maps of :class:`CollapseBandsToGroups` are made here too, since
+    the correlation between bands is needed for their noise.  Each entry of
+    ``group_x_reduce`` gives one ``TransientBandGroupMap``, returned after the
+    trials and the bands.  The single-band maps can still be made from the band
+    output with :class:`CollapseBandsToGroups`.
+
+    The coefficients are the fits within blocks of right ascension, shrunk towards
+    the whole-day value and kept above ``kappa_floor`` times it (see
+    :func:`_shrink_blocks`), and interpolated linearly between the block centres.
+    Bands or baselines without a fit have no sky term.
+
+    Attributes
+    ----------
+    groups : dict
+        Groups of bands, as {name: [[lo, hi], ...]} in MHz (see
+        :class:`CollapseBandsToGroups`).  Default is none.
+    group_x_reduce : list
+        For each group map, "max" for the best telescope-x or a value of telescope-x.
+        Default is ["max"].
+    group_spectral_index : float
+        Spectral index of the group maps.  Default is 0.
+    shrink_blocks : bool
+        Shrink the block fits towards the whole-day value.  Default is True.
+    kappa_floor : float
+        Lower limit of the block values of ``kappa^2``, as a fraction of the
+        whole-day value.  Default is 0.1.
+    rho_band_default : float
+        Correlation between bands where it was not measured.  Default is 1, which
+        overestimates the noise of band sums if the bands decorrelate.
+    rho_pol_default : float
+        Correlation between polarisations where it was not measured.  Default is 1.
+    """
+
+    groups = config.Property(proptype=dict, default={})
+    group_x_reduce = config.Property(proptype=list, default=["max"])
+    group_spectral_index = config.Property(proptype=float, default=0.0)
+    shrink_blocks = config.Property(proptype=bool, default=True)
+    kappa_floor = config.Property(proptype=float, default=0.1)
+    rho_band_default = config.Property(proptype=float, default=1.0)
+    rho_pol_default = config.Property(proptype=float, default=1.0)
+
+    def process(self, hvis, unfiltered, sky):
+        """Apply the matched filter.
+
+        Parameters
+        ----------
+        hvis : ch_pipeline.core.containers.MFilteredHybridVisStream
+            Output of :class:`LSQMFilterHybridVis`.
+        unfiltered : draco.core.containers.HybridVisStream
+            The visibilities before filtering, on the same grid.
+        sky : ch_pipeline.core.containers.HybridVisSkyNoise
+            Output of :class:`EstimateSkyNoise` for the same data.
+
+        Returns
+        -------
+        trials : ch_pipeline.core.containers.TransientMatchedFilterTrials
+            Result for each spectral index.
+        bands : ch_pipeline.core.containers.TransientMatchedFilter
+            Result for each band.
+        groups : ch_pipeline.core.containers.TransientBandGroupMap
+            One for each entry of ``group_x_reduce``, if ``groups`` is set.
+        """
+        if sorted(set(self.durations)) != [1] or sorted(set(self.band_durations)) != [
+            1
+        ]:
+            raise ValueError(
+                "Only single-sample trials are supported with the sky noise."
+            )
+        alphas = np.array(self.spectral_indices, dtype=np.float64)
+
+        _check_same_grid(hvis, unfiltered)
+
+        has_response = "ra_response" in hvis.datasets
+        if has_response:
+            lag_index = {d: ii for ii, d in enumerate(hvis.index_map["lag"])}
+
+        pol = list(hvis.index_map["pol"])
+        ipol = [pol.index(p) for p in self.pol]
+        upol = list(unfiltered.index_map["pol"])
+        ipu = [upol.index(pol[ii]) for ii in ipol]
+        pgroups = (
+            [list(range(len(ipol)))]
+            if self.combine_pol
+            else [[pp] for pp in range(len(ipol))]
+        )
+        opol = np.array(["co"]) if self.combine_pol else np.array(self.pol)
+        ngp = len(pgroups)
+
+        ew = hvis.index_map["ew"][:]
+        iew = list(range(ew.size)) if self.ew_index is None else list(self.ew_index)
+        ewu = unfiltered.index_map["ew"][:]
+        iewu = []
+        for ii in iew:
+            match = np.flatnonzero(np.isclose(ewu, ew[ii]))
+            if match.size != 1:
+                raise ValueError(f"No unfiltered baseline matches ew = {ew[ii]} m.")
+            iewu.append(int(match[0]))
+
+        freq = hvis.freq[:]
+        band_index, band_map = self._assign_bands(freq)
+        nband = len(band_map)
+        scale = (band_map["centre"][:, np.newaxis] / self.reference_freq) ** alphas
+
+        el = hvis.index_map["el"][:]
+        ra = hvis.ra[:]
+        nra = ra.size
+        dra = np.radians(np.median(np.diff(ra)))
+
+        x = self._x_grid(freq, ew[iew])
+        nx = x.size
+        self.log.info(f"Using {nx} telescope-x samples spanning +/-{x[-1]:0.4f}.")
+        pbeam = self._evaluate_beam(freq, [pol[ii] for ii in ipol], el, x)
+
+        xx, yy = np.meshgrid(x, el, indexing="xy")
+        visible = xx**2 + yy**2 < 1.0
+        ha, dec = _ground_to_sph_clipped(xx, yy, self.latitude)
+
+        # Coefficients of the sky term, interpolated onto the RA axis
+        k2coh, k2tot, rho_pol, rho_band = self._sky_coefficients(
+            sky, band_map, ew[iew], ra
+        )
+        k2inc = np.clip(k2tot - k2coh, 0.0, None)
+        kcoh = np.sqrt(k2coh)  # band, ew, ra
+        lam, qvec = self._modes(rho_band)
+
+        # Thermal weights, gathered over frequency
+        hvis.redistribute("freq")
+        wname = "noise_weight" if has_response else hvis._weight_dset_name
+        if "elevation_vis_weight" in hvis.datasets:
+            raise ValueError("Elevation-dependent weights are not supported.")
+        weight_all = hvis[wname][:].allgather()[ipol][:, :, iew].astype(np.float32)
+        self_conj = _self_conjugate([pol[ii] for ii in ipol], ew[iew])
+        weight_all *= np.where(self_conj, 0.5, 1.0).astype(np.float32)[
+            :, np.newaxis, :, np.newaxis
+        ]
+
+        hvis.redistribute(["el", "freq"])
+        unfiltered.redistribute(["el", "freq"])
+        vis = hvis.vis[:].local_array
+        uvis = unfiltered.vis[:].local_array
+        el_slc = hvis.vis[:].local_bounds
+        if unfiltered.vis[:].local_bounds != el_slc:
+            raise RuntimeError("The streams are not distributed in the same way.")
+        el_local = el[el_slc]
+        nel_local = el_local.size
+
+        if "noise_scale" in hvis.datasets:
+            ns = hvis.noise_scale[:]
+            if ns.local_bounds != el_slc:
+                raise RuntimeError("noise_scale is not distributed like the data.")
+            nscale = ns.local_array[np.ix_(ipol, np.arange(freq.size), iew)]
+        else:
+            nscale = np.ones((len(ipol), freq.size, len(iew), nel_local), np.float32)
+
+        common = {
+            "pol": opol,
+            "x": x,
+            "axes_from": hvis,
+            "attrs_from": hvis,
+            "distributed": hvis.distributed,
+            "comm": hvis.comm,
+        }
+        trials = containers.TransientMatchedFilterTrials(
+            duration=np.array([1]), spectral_index=alphas, **common
+        )
+        bands = containers.TransientMatchedFilter(
+            freq=band_map, duration=np.array([1]), **common
+        )
+        for cont in (trials, bands):
+            if self.save_imag:
+                cont.add_dataset("amplitude_imag")
+            cont.redistribute("el")
+            cont.datasets["ha"][:] = np.degrees(ha)
+            cont.datasets["dec"][:] = np.degrees(dec)
+            cont.attrs["ew_used"] = ew[iew]
+            cont.attrs["pol_used"] = [pol[ii] for ii in ipol]
+            cont.attrs["duration_unit_seconds"] = 86164.0905 / 360.0 * np.degrees(dra)
+            cont.attrs["time_axis"] = "start of the transient"
+            cont.attrs["sky_noise"] = True
+        trials.attrs["reference_freq"] = self.reference_freq
+        bands.attrs["band_start"] = self.band_start
+        bands.attrs["band_width"] = self.band_width
+
+        # Per-band sums kept for combining the bands: [pol group, band, el, x, ra]
+        shp = (ngp, nband, nel_local, nx, nra)
+        numer = np.zeros(shp, dtype=np.float32)
+        numer_im = np.zeros(shp, dtype=np.float32) if self.save_imag else None
+        resp = np.zeros(shp, dtype=np.float32)
+        vinc = np.zeros(shp, dtype=np.float32)
+        vplus = np.zeros(shp, dtype=np.complex64)
+        two_pol = any(len(g) == 2 for g in pgroups)
+        vminus = np.zeros(shp, dtype=np.complex64) if two_pol else None
+
+        pbeam *= visible[el_slc][np.newaxis, np.newaxis]
+        lmbda = scipy.constants.c / (freq * 1e6)
+        u = ew[iew][np.newaxis, :] / lmbda[:, np.newaxis]  # freq, ew
+
+        for bb in range(nband):
+            fsel = np.flatnonzero(band_index == bb)
+            wb = weight_all[:, fsel]  # pol, freq, ew, ra
+            if has_response:
+                resp_t = self._gather_freq(hvis.ra_response, fsel)[ipol][:, :, iew]
+                one_m_p = (1.0 - resp_t[..., lag_index[0]].real).astype(np.float32)
+            else:
+                one_m_p = np.ones(wb.shape, dtype=np.float32)
+            kt = k2tot[bb][np.newaxis, np.newaxis, :, np.newaxis, :]  # ew, ra
+            ki = k2inc[bb][np.newaxis, np.newaxis, :, np.newaxis, :]
+            kc = kcoh[bb][np.newaxis, :, np.newaxis, :]  # (freq), ew, el, ra
+            inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
+            omp = one_m_p[:, :, :, np.newaxis, :]
+
+            for e0 in range(0, nel_local, self.nel_chunk):
+                esl = slice(e0, min(e0 + self.nel_chunk, nel_local))
+                yel = el_local[esl]
+                phase = (
+                    2.0
+                    * np.pi
+                    * u[fsel][:, :, np.newaxis, np.newaxis]
+                    * (
+                        np.cos(self.rot) * x[np.newaxis, :]
+                        + np.sin(self.rot) * yel[:, np.newaxis]
+                    )
+                )
+                template = (
+                    pbeam[:, fsel][:, :, np.newaxis, esl] * np.exp(1.0j * phase)
+                ).astype(
+                    np.complex64
+                )  # pol, freq, ew, el, x
+
+                data = vis[:, :, :, esl][
+                    np.ix_(ipol, fsel, iew)
+                ]  # pol, freq, ew, el, ra
+                sky_v = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
+                var_th = nscale[:, fsel][..., esl, np.newaxis] * inv_w
+                s2 = np.abs(sky_v) ** 2
+                ok = (
+                    (inv_w > 0)
+                    & (nscale[:, fsel][..., esl, np.newaxis] > 0)
+                    & np.isfinite(data)
+                    & np.isfinite(sky_v)
+                )
+                wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
+                data = np.where(ok, data, 0.0)
+                sky_v = np.where(ok, sky_v, 0.0)
+
+                wd = (wt * data).astype(np.complex64)
+                wr = (wt * omp).astype(np.float32)
+                wv = (wt**2 * (var_th * omp + ki * s2)).astype(np.float32)
+                ws = (wt * kc * sky_v).astype(np.complex64)
+
+                for gg, grp in enumerate(pgroups):
+                    tc = template[grp].reshape(-1, *template.shape[3:])  # k, el, x
+                    tch = tc.transpose(1, 2, 0).conj()  # el, x, k
+                    g2 = np.abs(tch) ** 2
+
+                    def kmat(a, g=grp):
+                        return (
+                            a[g].reshape(-1, *a.shape[3:]).transpose(1, 0, 2)
+                        )  # el, k, ra
+
+                    n1 = np.matmul(tch, kmat(wd))  # el, x, ra
+                    numer[gg, bb, esl] = n1.real
+                    if numer_im is not None:
+                        numer_im[gg, bb, esl] = n1.imag
+                    resp[gg, bb, esl] = np.matmul(g2, kmat(wr))
+                    vinc[gg, bb, esl] = np.matmul(g2, kmat(wv))
+
+                    vp = []
+                    for pp in grp:
+                        tp = template[pp].reshape(-1, *template.shape[3:])
+                        vp.append(
+                            np.matmul(
+                                tp.transpose(1, 2, 0).conj(),
+                                ws[pp].reshape(-1, *ws.shape[3:]).transpose(1, 0, 2),
+                            )
+                        )
+                    if len(vp) == 2:
+                        r = rho_pol[bb]
+                        vplus[gg, bb, esl] = (vp[0] + vp[1]) * np.sqrt(0.5 * (1 + r))
+                        vminus[gg, bb, esl] = (vp[0] - vp[1]) * np.sqrt(0.5 * (1 - r))
+                    else:
+                        vplus[gg, bb, esl] = vp[0]
+
+        # Each band on its own
+        bamp = bands.amplitude[:].local_array
+        bwgt = bands.weight[:].local_array
+        bimag = bands.amplitude_imag[:].local_array if self.save_imag else None
+        for gg in range(ngp):
+            for bb in range(nband):
+                var = 0.5 * (vinc[gg, bb] + np.abs(vplus[gg, bb]) ** 2)
+                if vminus is not None:
+                    var += 0.5 * np.abs(vminus[gg, bb]) ** 2
+                amp, wgt = self._amp_weight(numer[gg, bb], resp[gg, bb], var)
+                bamp[gg, 0, bb] = amp.transpose(0, 2, 1)
+                bwgt[gg, 0, bb] = wgt.transpose(0, 2, 1)
+                if bimag is not None:
+                    im, _ = self._amp_weight(numer_im[gg, bb], resp[gg, bb], var)
+                    bimag[gg, 0, bb] = im.transpose(0, 2, 1)
+
+        # All bands, for each spectral index
+        tamp = trials.amplitude[:].local_array
+        twgt = trials.weight[:].local_array
+        timag = trials.amplitude_imag[:].local_array if self.save_imag else None
+        allb = np.arange(nband)
+        for ia in range(alphas.size):
+            sb = scale[:, ia]
+            for gg in range(ngp):
+                for ee in range(nel_local):
+                    nm, rs, vr, ni = self._combine(
+                        gg,
+                        ee,
+                        allb,
+                        sb,
+                        lam,
+                        qvec,
+                        numer,
+                        numer_im,
+                        resp,
+                        vinc,
+                        vplus,
+                        vminus,
+                    )
+                    amp, wgt = self._amp_weight(nm, rs, vr)
+                    tamp[gg, 0, ia, ee] = amp.T
+                    twgt[gg, 0, ia, ee] = wgt.T
+                    if timag is not None:
+                        im, _ = self._amp_weight(ni, rs, vr)
+                        timag[gg, 0, ia, ee] = im.T
+
+        group_maps = self._group_maps(
+            hvis,
+            band_map,
+            x,
+            opol,
+            ha,
+            dec,
+            numer,
+            resp,
+            vinc,
+            vplus,
+            vminus,
+            rho_band,
+            nel_local,
+        )
+        return (trials, bands, *group_maps)
+
+    @staticmethod
+    def _amp_weight(numer, resp, var):
+        """Amplitude ``Re N / R`` and its inverse variance ``R^2 / Var(Re N)``."""
+        valid = (resp > 0) & (var > 0)
+        amp = np.where(valid, numer * tools.invert_no_zero(resp), 0.0)
+        wgt = np.where(valid, resp**2 * tools.invert_no_zero(var), 0.0)
+        return amp.astype(np.float32), wgt.astype(np.float32)
+
+    @staticmethod
+    def _modes(rho):
+        """Eigen-decomposition of the correlation between bands, without null modes."""
+        lam, vec = np.linalg.eigh(rho)
+        keep = lam > 1e-6 * max(lam.max(), 1e-30)
+        return lam[keep], vec[:, keep]
+
+    @staticmethod
+    def _combine(
+        gg, ee, idx, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus
+    ):
+        """Sum the bands ``idx`` with weights ``sb`` at one elevation.
+
+        Returns the real and imaginary numerator, the response and the variance of
+        the real part, each [x, ra].
+        """
+        s = sb[idx].astype(np.float64)
+        nm = np.tensordot(s, numer[gg, idx, ee], axes=1)
+        ni = (
+            np.tensordot(s, numer_im[gg, idx, ee], axes=1)
+            if numer_im is not None
+            else None
+        )
+        rs = np.tensordot(s**2, resp[gg, idx, ee], axes=1)
+        var = np.tensordot(s**2, vinc[gg, idx, ee], axes=1)
+        coeff = (s[:, np.newaxis] * qvec) * np.sqrt(lam)[np.newaxis, :]  # band, mode
+        for vv in (vplus, vminus):
+            if vv is None:
+                continue
+            y = np.tensordot(coeff.T.astype(np.complex64), vv[gg, idx, ee], axes=1)
+            var = var + np.sum(np.abs(y) ** 2, axis=0)
+        return nm, rs, 0.5 * var, ni
+
+    def _group_maps(
+        self,
+        hvis,
+        band_map,
+        x,
+        opol,
+        ha,
+        dec,
+        numer,
+        resp,
+        vinc,
+        vplus,
+        vminus,
+        rho_band,
+        nel_local,
+    ):
+        """S/N maps for the groups of bands, one for each entry of group_x_reduce."""
+        if not self.groups:
+            return []
+        centre = band_map["centre"]
+        names, used = [], []
+        for name, ranges in self.groups.items():
+            inc = np.zeros(centre.size, dtype=bool)
+            for lo, hi in ranges:
+                inc |= (centre >= lo) & (centre < hi)
+            if not inc.any():
+                self.log.info(f"Skipping group {name}, which contains no bands.")
+                continue
+            names.append(str(name))
+            used.append(inc)
+        used = np.array(used)
+
+        fixed = []
+        for xr in self.group_x_reduce:
+            if isinstance(xr, str) and xr.strip().lower() == "max":
+                fixed.append(None)
+            else:
+                fixed.append(int(np.argmin(np.abs(x - float(xr)))))
+
+        outs = []
+        for ix0 in fixed:
+            out = containers.TransientBandGroupMap(
+                group=np.array(names),
+                freq=band_map,
+                pol=opol,
+                x=x,
+                axes_from=hvis,
+                attrs_from=hvis,
+                distributed=hvis.distributed,
+                comm=hvis.comm,
+            )
+            if ix0 is None:
+                out.add_dataset("x_index")
+            out.redistribute("el")
+            out.datasets["band_used"][:] = used
+            out.datasets["ha"][:] = np.degrees(ha)
+            out.datasets["dec"][:] = np.degrees(dec)
+            out.attrs["duration"] = 1
+            out.attrs["reference_freq"] = self.reference_freq
+            out.attrs["spectral_index"] = self.group_spectral_index
+            out.attrs["x_reduce"] = "max" if ix0 is None else float(x[ix0])
+            out.attrs["sky_noise"] = True
+            out.snr[:].local_array[:] = 0.0
+            if ix0 is None:
+                out.datasets["x_index"][:].local_array[:] = 0
+            outs.append(out)
+
+        sb = (centre / self.reference_freq) ** self.group_spectral_index
+        ngp = numer.shape[0]
+        for ig, inc in enumerate(used):
+            idx = np.flatnonzero(inc)
+            lam, qvec = self._modes(rho_band[np.ix_(idx, idx)])
+            sg = np.zeros(centre.size)
+            sg[idx] = sb[idx]
+            for gg in range(ngp):
+                for ee in range(nel_local):
+                    nm, rs, vr, _ = self._combine(
+                        gg,
+                        ee,
+                        idx,
+                        sg,
+                        lam,
+                        qvec,
+                        numer,
+                        None,
+                        resp,
+                        vinc,
+                        vplus,
+                        vminus,
+                    )
+                    snr = np.where(
+                        (rs > 0) & (vr > 0), nm * tools.invert_no_zero(np.sqrt(vr)), 0.0
+                    )  # x, ra
+                    for out, ix0 in zip(outs, fixed):
+                        if ix0 is None:
+                            ix = np.argmax(snr, axis=0)
+                            out.snr[:].local_array[gg, ig, ee] = np.take_along_axis(
+                                snr, ix[np.newaxis], 0
+                            )[0]
+                            out.datasets["x_index"][:].local_array[gg, ig, ee] = ix
+                        else:
+                            out.snr[:].local_array[gg, ig, ee] = snr[ix0]
+        self.log.info(f"Made maps for {len(names)} groups of bands.")
+        return outs
+
+    def _sky_coefficients(self, sky, band_map, ew_used, ra):
+        """kappa_coh^2 and kappa_tot^2 [band, ew, ra], rho_pol [band], rho_band [band, band]."""
+        nband = len(band_map)
+        new = len(ew_used)
+        k2coh = np.zeros((nband, new, ra.size))
+        k2tot = np.zeros((nband, new, ra.size))
+        rho_pol = np.full(nband, self.rho_pol_default)
+
+        d = sky.datasets
+        sc = sky.index_map["freq"]["centre"][:]
+        sew = sky.index_map["ew"][:]
+        sband = np.array(
+            [
+                int(np.argmin(np.abs(sc - c))) if np.min(np.abs(sc - c)) < 1e-3 else -1
+                for c in band_map["centre"]
+            ]
+        )
+        sbase = np.array(
+            [
+                (
+                    int(np.argmin(np.abs(sew - b)))
+                    if np.min(np.abs(sew - b)) < 1e-3
+                    else -1
+                )
+                for b in ew_used
+            ]
+        )
+        if np.any(sbase < 0):
+            self.log.warning(
+                f"No sky-noise fit for baselines {ew_used[sbase < 0]} m: no sky term."
+            )
+        if np.any(sband < 0):
+            self.log.warning(
+                f"No sky-noise fit for {np.sum(sband < 0)} bands: no sky term."
+            )
+
+        # Block centres, using the blocks of EstimateSkyNoise on this RA axis
+        nblk = sky.index_map["block"].shape[0]
+        blk = (np.arange(ra.size) * nblk) // ra.size
+        centres = np.array([ra[blk == k].mean() for k in range(nblk)])
+        if not np.allclose(
+            ra[np.searchsorted(blk, np.arange(nblk))], sky.index_map["block"][:]
+        ):
+            self.log.warning("The RA blocks of the sky-noise fit differ from the data.")
+
+        for bb in range(nband):
+            jb = sband[bb]
+            if jb < 0:
+                continue
+            for ee in range(new):
+                je = sbase[ee]
+                if je < 0:
+                    continue
+                for name, arr in (("kappa2_coh", k2coh), ("kappa2_tot", k2tot)):
+                    day = d[name][jb, je] if d[f"{name}_weight"][jb, je] > 0 else 0.0
+                    val = _shrink_blocks(
+                        day,
+                        d[f"{name}_block"][jb, je],
+                        d[f"{name}_block_weight"][jb, je],
+                        self.shrink_blocks,
+                        self.kappa_floor,
+                    )
+                    arr[bb, ee] = np.clip(np.interp(ra, centres, val), 0.0, None)
+            w = d["rho_pol_weight"][jb][sbase[sbase >= 0]]
+            if np.sum(w) > 0:
+                rho_pol[bb] = np.sum(w * d["rho_pol"][jb][sbase[sbase >= 0]]) / np.sum(
+                    w
+                )
+        k2tot = np.maximum(k2tot, k2coh)
+        rho_pol = np.clip(rho_pol, -1.0, 1.0)
+
+        rho = np.full((nband, nband), np.nan)
+        if "rho_band" in d and np.all(sbase >= 0) and np.all(sband >= 0):
+            r = d["rho_band"][:][np.ix_(sband, sband, sbase)]
+            w = d["rho_band_weight"][:][np.ix_(sband, sband, sbase)]
+            ws = w.sum(axis=-1)
+            rho = np.where(
+                ws > 0, np.sum(w * r, axis=-1) * tools.invert_no_zero(ws), np.nan
+            )
+        else:
+            self.log.warning(
+                f"No correlation between bands in the sky-noise fit: using {self.rho_band_default}."
+            )
+        # Fill the pairs without a measurement with the median at the same separation
+        sep = np.abs(np.arange(nband)[:, np.newaxis] - np.arange(nband)[np.newaxis, :])
+        for dd in range(1, nband):
+            on = sep == dd
+            have = on & np.isfinite(rho)
+            fill = np.median(rho[have]) if have.any() else self.rho_band_default
+            rho[on & ~np.isfinite(rho)] = fill
+        np.fill_diagonal(rho, 1.0)
+        rho = _nearest_psd_correlation(np.clip(rho, -1.0, 1.0))
+
+        self.log.info(
+            f"Sky term: median kappa_coh {np.median(np.sqrt(k2coh[k2coh > 0])) if (k2coh > 0).any() else 0:.2e}, "
+            f"median rho_band between neighbours "
+            f"{np.median(np.diag(rho, 1)) if nband > 1 else 1:.2f}."
+        )
+        return k2coh, k2tot, rho_pol, rho
+
+
+def _check_same_grid(a, b):
+    """Check that two streams have the same RA, el and frequency axes."""
+    for name, ax_a, ax_b in (
+        ("RA", a.ra[:], b.ra[:]),
+        ("el", a.index_map["el"][:], b.index_map["el"][:]),
+        ("frequency", a.freq[:], b.freq[:]),
+    ):
+        if ax_a.shape != ax_b.shape or not np.allclose(ax_a, ax_b):
+            raise ValueError(f"The {name} axes of the streams differ.")
+
+
 def collapse_bands(numer, denom, scale):
     """Combine the numerator and denominator of each band for each spectral index.
 
@@ -3970,6 +4740,12 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
         if not names:
             raise ValueError("No groups of bands were given.")
         used = np.array(used)
+        if mf.attrs.get("sky_noise", False) and np.any(used.sum(axis=1) > 1):
+            self.log.warning(
+                "The bands include the noise that scales with the sky, which is "
+                "correlated between bands; summing bands here ignores that.  Use the "
+                "groups of TransientMatchedFilterSkyNoise instead."
+            )
 
         alphas = np.array(self.spectral_indices, dtype=np.float64)
         scale = (centre[np.newaxis, :] / self.reference_freq) ** alphas[:, np.newaxis]

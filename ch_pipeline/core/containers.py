@@ -1111,13 +1111,17 @@ class HybridVisSkyNoise(FreqContainer):
     units of the noise of the band sum), the number of samples and the mean
     measured and modelled power of the band sum in the same units.
 
+    ``rho_band`` is the correlation of ``e`` between two bands (the ``band`` axis
+    holds the centres of the bands of the ``freq`` axis), which is one on the
+    diagonal.
+
     Datasets ending in ``_weight`` are inverse variances; coefficients that could
     not be fitted (for example in bands without data) are zero with zero weight.
     ``alpha_single``, ``alpha_band`` and ``alpha_pol`` are valid where the weights
     of ``kappa2_tot``, ``kappa2_coh`` and ``rho_pol`` are non-zero.
     """
 
-    _axes = ("ew", "block", "source", "qbin")
+    _axes = ("ew", "block", "source", "qbin", "band")
 
     _dataset_spec: ClassVar = {
         **{
@@ -1176,6 +1180,15 @@ class HybridVisSkyNoise(FreqContainer):
                 "distributed": False,
             }
             for name in ("count", "excess", "model")
+        },
+        **{
+            name: {
+                "axes": ["freq", "band", "ew"],
+                "dtype": np.float64,
+                "initialise": False,
+                "distributed": False,
+            }
+            for name in ("rho_band", "rho_band_weight")
         },
         "kappa2_self": {
             "axes": ["freq"],
