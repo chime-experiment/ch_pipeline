@@ -1429,6 +1429,79 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
         return self.index_map["x"]
 
 
+class TransientBandGroupMap(FreqContainer, SiderealContainer):
+    """Single-sample matched filter summed over groups of bands.
+
+    For each group of bands, the S/N of the sum over the bands in the group, at the
+    best telescope-x and spectral index, at every elevation and start time.  The
+    ``freq`` axis holds the centre and width of the bands, and ``band_used`` which
+    of them are in each group.  ``x_index`` and ``spectral_index`` give the best
+    trial.  ``ha`` and ``dec`` give the hour angle and declination of each
+    ``(el, x)``.
+    """
+
+    _axes = ("pol", "group", "el", "x")
+
+    _dataset_spec: ClassVar = {
+        "snr": {
+            "axes": ["pol", "group", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "x_index": {
+            "axes": ["pol", "group", "el", "ra"],
+            "dtype": np.int16,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "spectral_index": {
+            "axes": ["pol", "group", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 32, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "band_used": {
+            "axes": ["group", "freq"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ha": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "dec": {
+            "axes": ["el", "x"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def snr(self):
+        return self.datasets["snr"]
+
+    @property
+    def group(self):
+        return self.index_map["group"]
+
+
 class TransientCandidateMap(SiderealContainer, DataWeightContainer):
     """Best transient trial at each elevation and start time."""
 

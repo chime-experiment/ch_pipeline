@@ -3882,6 +3882,139 @@ class CollapseMatchedFilterBands(tasklib.base.ContainerTask):
         return out
 
 
+class CollapseBandsToGroups(tasklib.base.ContainerTask):
+    """Sum the single-sample matched filter over groups of bands.
+
+    For each group, the bands are combined as in :class:`CollapseMatchedFilterBands`
+    at every telescope-x, and the best S/N over x and spectral index is kept.  This
+    gives maps that are much smaller than the per-band output, for example for
+    sub-bands, or for every band on its own.
+
+    Attributes
+    ----------
+    groups : dict
+        Groups of bands, as {name: [[lo, hi], ...]} in MHz.  A band is in a group if
+        its centre is in any of the ranges.
+    each_band : bool
+        Also make a group of every band on its own, named by its centre frequency.
+        Default is False.
+    spectral_indices : list of float
+        Spectral indices to search.  Default is [0].
+    reference_freq : float
+        Reference frequency for the spectral index in MHz.  Default is 600.
+    duration : int
+        Duration (in samples) of the trials to use.  Default is 1.
+    nel_chunk : int
+        Number of elevations to process at once.  Default is 16.
+    """
+
+    groups = config.Property(proptype=dict, default={})
+    each_band = config.Property(proptype=bool, default=False)
+    spectral_indices = config.list_type((int, float), default=[0.0])
+    reference_freq = config.Property(proptype=float, default=600.0)
+    duration = config.Property(proptype=int, default=1)
+    nel_chunk = config.Property(proptype=int, default=16)
+
+    def process(self, mf):
+        """Sum over the groups of bands.
+
+        Parameters
+        ----------
+        mf : ch_pipeline.core.containers.TransientMatchedFilter
+            Matched filter output for each band.
+
+        Returns
+        -------
+        out : ch_pipeline.core.containers.TransientBandGroupMap
+            Best S/N for each group of bands.
+        """
+        mf.redistribute("el")
+
+        centre = mf.index_map["freq"]["centre"][:]
+        durations = list(mf.index_map["duration"][:])
+        if self.duration not in durations:
+            raise ValueError(f"Duration {self.duration} is not in {durations}.")
+        idur = durations.index(self.duration)
+
+        names, used = [], []
+        for name, ranges in self.groups.items():
+            inc = np.zeros(centre.size, dtype=bool)
+            for lo, hi in ranges:
+                inc |= (centre >= lo) & (centre < hi)
+            if not inc.any():
+                raise ValueError(f"Group {name} contains no bands.")
+            names.append(str(name))
+            used.append(inc)
+        if self.each_band:
+            for bb, nu in enumerate(centre):
+                names.append(f"{nu:.1f}")
+                used.append(np.arange(centre.size) == bb)
+        if not names:
+            raise ValueError("No groups of bands were given.")
+        used = np.array(used)
+
+        alphas = np.array(self.spectral_indices, dtype=np.float64)
+        scale = (centre[np.newaxis, :] / self.reference_freq) ** alphas[:, np.newaxis]
+
+        out = containers.TransientBandGroupMap(
+            group=np.array(names),
+            axes_from=mf,
+            attrs_from=mf,
+            distributed=mf.distributed,
+            comm=mf.comm,
+        )
+        out.redistribute("el")
+        out.datasets["band_used"][:] = used
+        out.datasets["ha"][:] = mf.datasets["ha"][:]
+        out.datasets["dec"][:] = mf.datasets["dec"][:]
+        out.attrs["duration"] = self.duration
+        out.attrs["reference_freq"] = self.reference_freq
+
+        amp = mf.amplitude[:].local_array[:, idur]  # pol, band, el, ra, x
+        wgt = mf.weight[:].local_array[:, idur]
+
+        osnr = out.snr[:].local_array
+        oix = out.datasets["x_index"][:].local_array
+        oalpha = out.datasets["spectral_index"][:].local_array
+        osnr[:] = 0.0
+        oix[:] = 0
+        oalpha[:] = 0.0
+
+        npol, _, nel = amp.shape[:3]
+        for pp in range(npol):
+            for e0 in range(0, nel, self.nel_chunk):
+                esl = slice(e0, min(e0 + self.nel_chunk, nel))
+                for gg, inc in enumerate(used):
+                    best = None
+                    for aa, s in enumerate(scale):
+                        # Accumulate one band at a time to avoid large temporaries
+                        num = 0.0
+                        den = 0.0
+                        for bb in np.flatnonzero(inc):
+                            w = wgt[pp, bb, esl].astype(np.float64)  # el, ra, x
+                            num = num + s[bb] * w * amp[pp, bb, esl]
+                            den = den + s[bb] ** 2 * w
+                        snr = num * tools.invert_no_zero(np.sqrt(den))  # el, ra, x
+                        ix = np.argmax(snr, axis=-1)
+                        smax = np.take_along_axis(snr, ix[..., np.newaxis], -1)[..., 0]
+                        if best is None:
+                            best = (smax, ix, np.zeros_like(smax))
+                        else:
+                            better = smax > best[0]
+                            best = (
+                                np.where(better, smax, best[0]),
+                                np.where(better, ix, best[1]),
+                                np.where(better, alphas[aa], best[2]),
+                            )
+                    osnr[pp, gg, esl] = best[0]
+                    oix[pp, gg, esl] = best[1]
+                    oalpha[pp, gg, esl] = best[2] if len(alphas) > 1 else alphas[0]
+
+        self.log.info(f"Made maps for {len(names)} groups of bands.")
+
+        return out
+
+
 class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
     """Find the trial with the highest signal-to-noise ratio.
 
