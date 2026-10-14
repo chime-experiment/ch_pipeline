@@ -3894,7 +3894,7 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
     ----------
     groups : dict
         Groups of bands, as {name: [[lo, hi], ...]} in MHz.  A band is in a group if
-        its centre is in any of the ranges.
+        its centre is in any of the ranges.  Groups without bands are left out.
     each_band : bool
         Also make a group of every band on its own, named by its centre frequency.
         Default is False.
@@ -3942,7 +3942,8 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
             for lo, hi in ranges:
                 inc |= (centre >= lo) & (centre < hi)
             if not inc.any():
-                raise ValueError(f"Group {name} contains no bands.")
+                self.log.info(f"Skipping group {name}, which contains no bands.")
+                continue
             names.append(str(name))
             used.append(inc)
         if self.each_band:
