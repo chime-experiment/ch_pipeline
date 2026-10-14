@@ -3964,6 +3964,8 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
             distributed=mf.distributed,
             comm=mf.comm,
         )
+        if len(alphas) > 1:
+            out.add_dataset("spectral_index")
         out.redistribute("el")
         out.datasets["band_used"][:] = used
         out.datasets["ha"][:] = mf.datasets["ha"][:]
@@ -3976,10 +3978,13 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
 
         osnr = out.snr[:].local_array
         oix = out.datasets["x_index"][:].local_array
-        oalpha = out.datasets["spectral_index"][:].local_array
+        oalpha = (
+            out.datasets["spectral_index"][:].local_array if len(alphas) > 1 else None
+        )
         osnr[:] = 0.0
         oix[:] = 0
-        oalpha[:] = 0.0
+        if oalpha is not None:
+            oalpha[:] = 0.0
 
         npol, _, nel = amp.shape[:3]
         for pp in range(npol):
@@ -4009,7 +4014,8 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
                             )
                     osnr[pp, gg, esl] = best[0]
                     oix[pp, gg, esl] = best[1]
-                    oalpha[pp, gg, esl] = best[2] if len(alphas) > 1 else alphas[0]
+                    if oalpha is not None:
+                        oalpha[pp, gg, esl] = best[2]
 
         self.log.info(f"Made maps for {len(names)} groups of bands.")
 

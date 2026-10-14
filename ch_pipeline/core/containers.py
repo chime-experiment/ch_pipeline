@@ -1435,9 +1435,15 @@ class TransientBandGroupMap(FreqContainer, SiderealContainer):
     For each group of bands, the S/N of the sum over the bands in the group, at the
     best telescope-x and spectral index, at every elevation and start time.  The
     ``freq`` axis holds the centre and width of the bands, and ``band_used`` which
-    of them are in each group.  ``x_index`` and ``spectral_index`` give the best
-    trial.  ``ha`` and ``dec`` give the hour angle and declination of each
+    of them are in each group.  ``x_index`` gives the best telescope-x, and
+    ``spectral_index`` (only present if more than one was searched) the best
+    spectral index.  ``ha`` and ``dec`` give the hour angle and declination of each
     ``(el, x)``.
+
+    The maps are stored without chunking or compression.  Writing compressed
+    datasets in parallel needs collective writes of every chunk, which is very
+    slow for many small chunks shared between processes, and S/N values do not
+    compress much anyway.
     """
 
     _axes = ("pol", "group", "el", "x")
@@ -1449,9 +1455,6 @@ class TransientBandGroupMap(FreqContainer, SiderealContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "x_index": {
             "axes": ["pol", "group", "el", "ra"],
@@ -1459,19 +1462,13 @@ class TransientBandGroupMap(FreqContainer, SiderealContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "spectral_index": {
             "axes": ["pol", "group", "el", "ra"],
             "dtype": np.float32,
-            "initialise": True,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "band_used": {
             "axes": ["group", "freq"],
