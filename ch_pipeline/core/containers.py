@@ -1030,9 +1030,6 @@ class MFilteredHybridVisStream(HybridVisStream):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 32, 4, 2048),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "noise_scale": {
             "axes": ["pol", "freq", "ew", "el"],
@@ -1040,9 +1037,6 @@ class MFilteredHybridVisStream(HybridVisStream):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 32, 4, 512),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
     }
 
@@ -1076,9 +1070,6 @@ class HybridVisNoiseScale(FreqContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 32, 4, 512),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "nsample": {
             "axes": ["pol", "freq", "ew", "el"],
@@ -1086,9 +1077,6 @@ class HybridVisNoiseScale(FreqContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 32, 4, 512),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
     }
 
@@ -1511,9 +1499,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "amplitude": {
             "axes": ["pol", "el", "ra"],
@@ -1521,9 +1506,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "weight": {
             "axes": ["pol", "el", "ra"],
@@ -1531,9 +1513,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "duration": {
             "axes": ["pol", "el", "ra"],
@@ -1541,9 +1520,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "spectral_index": {
             "axes": ["pol", "el", "ra"],
@@ -1551,9 +1527,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "x_index": {
             "axes": ["pol", "el", "ra"],
@@ -1561,9 +1534,6 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "el",
-            "chunks": (1, 32, 1024),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "ha": {
             "axes": ["el", "x"],
