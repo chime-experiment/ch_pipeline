@@ -7,6 +7,7 @@ import time
 import numpy as np
 import scipy.constants
 import scipy.interpolate
+import scipy.ndimage
 from caput import config, mpiarray
 from caput.pipeline import tasklib
 from draco.analysis.beamform import BeamFormExternalMixin
@@ -4106,6 +4107,34 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         overestimates the noise of band sums if the bands decorrelate.
     rho_pol_default : float
         Correlation between polarisations where it was not measured.  Default is 1.
+    local_window : int
+        Half-width in samples of the window of the local rescaling of the sky term
+        (see below).  Zero turns it off.  Default is 30.
+    local_gap : int
+        Samples within this many of the sample being rescaled are left out of its
+        window, so that a transient shorter than this does not raise its own noise.
+        Default is 5.
+    local_prior : float
+        Weight of the prior r = 1, in units of a sample dominated by the sky.
+        Default is 2.
+    local_cap : float
+        Each sample contributes at most this multiple of its modelled power.
+        Default is 20.
+    local_min : float
+        Lower limit of the rescaling.  Default is 0.1.
+
+    The sky term changes faster than the block or cell fits can follow (on some
+    nights over a few minutes).  So it is rescaled at each sample by the ratio of
+    the measured to the modelled power of the sky term in the samples around it in
+    the same row, for each band:
+
+        r = (sum_j u_j (min(X_j / mu_j, cap) - th_j / mu_j) + prior) / (sum_j u_j^2 + prior)
+
+    over ``local_gap < |j| <= local_window``, summed over polarisations and
+    baselines, where X is the power of the sum of the filtered data over the
+    channels of the band (weighted by the thermal noise), mu its model, th its
+    thermal part, and u = (mu - th) / mu the fraction of the model from the sky.
+    Samples without sky signal have u = 0, so where there is none r = 1.
     """
 
     groups = config.Property(proptype=dict, default={})
@@ -4115,6 +4144,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     kappa_floor = config.Property(proptype=float, default=0.1)
     rho_band_default = config.Property(proptype=float, default=1.0)
     rho_pol_default = config.Property(proptype=float, default=1.0)
+    local_window = config.Property(proptype=int, default=30)
+    local_gap = config.Property(proptype=int, default=5)
+    local_prior = config.Property(proptype=float, default=2.0)
+    local_cap = config.Property(proptype=float, default=20.0)
+    local_min = config.Property(proptype=float, default=0.1)
 
     def process(self, hvis, unfiltered, sky):
         """Apply the matched filter.
@@ -4284,14 +4318,31 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
             omp = one_m_p[:, :, :, np.newaxis, :]
 
+            # Local rescaling of the sky term [el, ra]
+            rloc = self._local_scale(
+                vis,
+                uvis,
+                nscale,
+                inv_w,
+                fsel,
+                ipol,
+                ipu,
+                iew,
+                iewu,
+                k2coh[bb],
+                k2tot[bb],
+                yband_local,
+            )
+
             for e0 in range(0, nel_local, self.nel_chunk):
                 esl = slice(e0, min(e0 + self.nel_chunk, nel_local))
                 yel = el_local[esl]
                 # Coefficients for these elevations: [(pol), (freq), ew, el, ra]
                 yb = yband_local[esl]
-                kt = k2tot[bb][:, yb][np.newaxis, np.newaxis]
-                ki = k2inc[bb][:, yb][np.newaxis, np.newaxis]
-                kc = kcoh[bb][:, yb][np.newaxis]
+                rl = rloc[esl][np.newaxis]  # (ew), el, ra
+                kt = (k2tot[bb][:, yb] * rl)[np.newaxis, np.newaxis]
+                ki = (k2inc[bb][:, yb] * rl)[np.newaxis, np.newaxis]
+                kc = (kcoh[bb][:, yb] * np.sqrt(rl))[np.newaxis]
                 phase = (
                     2.0
                     * np.pi
@@ -4423,6 +4474,60 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             nel_local,
         )
         return (trials, bands, *group_maps)
+
+    def _local_scale(
+        self, vis, uvis, nscale, inv_w, fsel, ipol, ipu, iew, iewu, k2coh, k2tot, yband
+    ):
+        """Rescaling of the sky term of one band at each local elevation and sample.
+
+        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra].
+
+        Returns
+        -------
+        r : np.ndarray[el_local, ra]
+        """
+        nel, nra = vis.shape[3], vis.shape[4]
+        if self.local_window <= 0:
+            return np.ones((nel, nra), dtype=np.float32)
+
+        num = np.zeros((nel, nra))
+        den = np.zeros((nel, nra))
+        for e0 in range(0, nel, self.nel_chunk):
+            esl = slice(e0, min(e0 + self.nel_chunk, nel))
+            yb = yband[esl]
+            d = vis[:, :, :, esl][np.ix_(ipol, fsel, iew)]  # pol, freq, ew, el, ra
+            sv = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
+            var = nscale[:, fsel][..., esl, np.newaxis] * inv_w
+            ok = (var > 0) & np.isfinite(d) & np.isfinite(sv)
+            a = np.where(ok, tools.invert_no_zero(var), 0.0)
+            d = np.where(ok, d, 0.0)
+            sv = np.where(ok, sv, 0.0)
+            m = np.sum(a * d, axis=1)  # pol, ew, el, ra
+            rb = np.sum(a * sv, axis=1)
+            A = np.sum(a, axis=1)
+            B = np.sum(a**2 * np.abs(sv) ** 2, axis=1)
+            nch = ok.sum(axis=1)
+            kt = k2tot[:, yb][np.newaxis]  # (pol), ew, el, ra
+            kc = k2coh[:, yb][np.newaxis]
+            mu = A + kt * B + kc * (np.abs(rb) ** 2 - B)
+            use = (nch >= 2) & (A > 0) & (mu > 0)
+            inv_mu = tools.invert_no_zero(np.where(use, mu, 0.0))
+            u = np.where(use, (mu - A) * inv_mu, 0.0)
+            y = np.where(
+                use,
+                np.minimum(np.abs(m) ** 2 * inv_mu, self.local_cap) - A * inv_mu,
+                0.0,
+            )
+            num[esl] = np.sum(u * y, axis=(0, 1))
+            den[esl] = np.sum(u * u, axis=(0, 1))
+
+        kern = np.ones(2 * self.local_window + 1)
+        g = min(self.local_gap, self.local_window)
+        kern[self.local_window - g : self.local_window + g + 1] = 0.0
+        num = scipy.ndimage.convolve1d(num, kern, axis=-1, mode="constant")
+        den = scipy.ndimage.convolve1d(den, kern, axis=-1, mode="constant")
+        r = (num + self.local_prior) / (den + self.local_prior)
+        return np.maximum(r, self.local_min).astype(np.float32)
 
     @staticmethod
     def _amp_weight(numer, resp, var):
