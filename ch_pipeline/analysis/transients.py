@@ -1844,6 +1844,243 @@ class CorrectFilterGain(tasklib.base.ContainerTask):
         return stream
 
 
+class SubtractScintillation(tasklib.base.ContainerTask):
+    """Fit and subtract the scintillation of the foregrounds from filtered data.
+
+    Ionospheric scintillation modulates the brightness of compact sources from one
+    sample to the next by a small fraction ``g(t, freq)``, which is the same on every
+    baseline and smooth in frequency.  The m-mode filter cannot remove it, so the
+    filtered data contain ``g f``, where ``f`` is the foreground.  This task fits
+
+        d(freq) = f_hat(freq) * sum_j a_j phi_j(freq)
+
+    at each polarisation, east-west baseline, elevation and time, and subtracts it.
+    The spectral basis is ``phi_0 = (freq / nu0)**beta`` and, if ``nparam`` is 2,
+    ``phi_1 = phi_0 ln(freq / nu0)``, which follows changes of the spectral index.
+    The ``a_j`` are complex, since the filter turns part of the modulation into
+    quadrature, and have a Gaussian prior of width ``prior_sigma``, so that nothing
+    is subtracted where the scintillation of the foreground is below the noise.
+
+    The foreground estimate is the low-pass part of the data at sample ``t`` from a
+    fit that leaves out sample ``t`` itself,
+
+        f_hat = v - d / (1 - P[t, t]),
+
+    where ``v`` is the unfiltered and ``d`` the filtered visibility.  This is exact
+    for the least-squares m-mode filters, so a transient lasting one sample is not
+    in its own template, and is only removed to the extent that it resembles the
+    template.  Longer transients leak into the template of their other samples.
+
+    The fit is weighted by the inverse variance of the filtered data, plus the
+    self-noise of the foreground, ``self_noise |f_hat|^2 / (dnu tau)`` for channel
+    width ``dnu`` and sample spacing ``tau``.
+
+    Attributes
+    ----------
+    beta : float
+        Spectral index of the modulation.  Default is -1.8.
+    nu0 : float
+        Reference frequency in MHz.  Default is 600.
+    nparam : int
+        Number of spectral basis functions, 1 or 2.  Default is 2.
+    prior_sigma : list of float
+        Width of the prior on each amplitude (one value for all, or one per basis
+        function).  Default is 0.01.
+    self_noise : float
+        Coefficient of the self-noise term in the weights.  Zero ignores it.
+        Default is 1.
+    min_gain : float
+        Leave samples whose filter gain ``1 - P[t, t]`` is lower unchanged.
+        Default is 0.1.
+    combine_pol : bool
+        Fit the polarisations together with one set of amplitudes.  Default is
+        False.
+    subtract : bool
+        Subtract the fit.  If False, only fit, for diagnostics.  Default is True.
+    in_place : bool
+        Modify the filtered stream in place.  Default is True.
+    nrow_chunk : int
+        Number of elevations to process at once.  Default is 64.
+    """
+
+    beta = config.Property(proptype=float, default=-1.8)
+    nu0 = config.Property(proptype=float, default=600.0)
+    nparam = config.Property(proptype=int, default=2)
+    prior_sigma = config.list_type(float, default=[0.01])
+    self_noise = config.Property(proptype=float, default=1.0)
+    min_gain = config.Property(proptype=float, default=0.1)
+    combine_pol = config.Property(proptype=bool, default=False)
+    subtract = config.Property(proptype=bool, default=True)
+    in_place = config.Property(proptype=bool, default=True)
+    nrow_chunk = config.Property(proptype=int, default=64)
+
+    def process(self, stream, unfiltered):
+        """Fit and subtract the scintillation.
+
+        Parameters
+        ----------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            Output of :class:`LSQMFilterHybridVis`, with the filter response and
+            without the gain correction.
+        unfiltered : draco.core.containers.HybridVisStream
+            The input to the filter.
+
+        Returns
+        -------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The filtered visibilities with the fit subtracted.
+        fit : ch_pipeline.core.containers.HybridVisScintillationFit
+            The fitted amplitudes.
+        """
+        if "ra_response" not in stream.datasets:
+            raise ValueError("SubtractScintillation needs the filter response.")
+        if stream.attrs.get("filter_gain_corrected", False):
+            raise ValueError(
+                "SubtractScintillation needs the uncorrected filter output."
+            )
+        if self.nparam not in (1, 2):
+            raise ValueError("nparam must be 1 or 2.")
+        _check_same_grid(stream, unfiltered)
+
+        if not self.in_place:
+            stream = stream.copy()
+        stream.redistribute("freq")
+        unfiltered.redistribute("freq")
+
+        nparam = self.nparam
+        sigma = np.array(self.prior_sigma, dtype=np.float64)
+        if sigma.size == 1:
+            sigma = np.repeat(sigma, nparam)
+        if sigma.size != nparam or np.any(sigma <= 0.0):
+            raise ValueError(
+                "prior_sigma needs one positive value or one per parameter."
+            )
+        prior = np.diag(1.0 / sigma**2)
+
+        # Match the polarisations and baselines of the unfiltered stream
+        pol = [str(p) for p in stream.index_map["pol"]]
+        upol = [str(p) for p in unfiltered.index_map["pol"]]
+        ipol_u = [upol.index(p) for p in pol]
+        ew = stream.index_map["ew"][:]
+        uew = unfiltered.index_map["ew"][:]
+        iew_u = [int(np.argmin(np.abs(uew - b))) for b in ew]
+        if not np.allclose(uew[iew_u], ew):
+            raise ValueError("The east-west baselines of the streams differ.")
+
+        el = stream.index_map["el"][:]
+        nel = el.size
+        npol, new = len(pol), ew.size
+        nfit = 1 if self.combine_pol else npol
+
+        # Spectral basis and self-noise coefficient for the local frequencies
+        fslc = stream.vis[:].local_bounds
+        freq = stream.freq[fslc]
+        width = stream.index_map["freq"]["width"][fslc]
+        ra = stream.ra[:]
+        tau = np.median(np.diff(ra)) / 360.0 * 86164.0905
+        lnu = np.log(freq / self.nu0)
+        phi = np.array([np.exp(self.beta * lnu), np.exp(self.beta * lnu) * lnu])[
+            :nparam
+        ]
+        cself = self.self_noise / (width * 1e6 * tau)
+
+        lag = list(stream.index_map["lag"])
+        gain = 1.0 - stream.ra_response[:].local_array[..., lag.index(0)].real
+        weight = stream.weight[:].local_array  # pol, freq, ew, ra
+        uweight = unfiltered.weight[:].local_array
+        vis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        uvis = unfiltered.vis[:].local_array
+
+        valid = (
+            (weight > 0)
+            & (uweight[ipol_u][:, :, iew_u] > 0)
+            & (gain > max(self.min_gain, 0.0))
+        )  # pol, freq, ew, ra
+        inv_gain = np.where(valid, tools.invert_no_zero(gain), 0.0)
+
+        fit = containers.HybridVisScintillationFit(
+            axes_from=stream,
+            attrs_from=stream,
+            param=np.array(["amplitude", "slope"][:nparam]),
+            distributed=stream.distributed,
+            comm=stream.comm,
+        )
+        fit.redistribute("el")
+        fit.attrs["beta"] = self.beta
+        fit.attrs["nu0"] = self.nu0
+        fit.attrs["prior_sigma"] = sigma
+        fit.attrs["combine_pol"] = self.combine_pol
+        fit.attrs["subtracted"] = self.subtract
+        amp_out = fit.amplitude[:].local_array
+        pow_out = fit.template_power[:].local_array
+        e_lo = fit.amplitude[:].local_offset[2]
+        e_hi = e_lo + amp_out.shape[2]
+
+        def template(pp, ff, esl):
+            """Leave-one-out foreground and fit weights for one pol and frequency."""
+            ok = valid[pp, ff][:, np.newaxis, :]  # ew, 1, ra
+            d = vis[pp, ff, :, esl]
+            v = uvis[ipol_u[pp], ff, iew_u, esl]
+            fh = np.where(ok, v - d * inv_gain[pp, ff][:, np.newaxis, :], 0.0)
+            w = weight[pp, ff][:, np.newaxis, :].astype(np.float64)
+            wt = np.where(ok, w / (1.0 + w * cself[ff] * np.abs(fh) ** 2), 0.0)
+            return fh, d, wt
+
+        nfreq_local = vis.shape[1]
+        for e0 in range(0, nel, self.nrow_chunk):
+            esl = slice(e0, min(e0 + self.nrow_chunk, nel))
+            ne = esl.stop - esl.start
+
+            # Normal equations, summed over the local frequencies and then over ranks
+            G = np.zeros((nfit, new, ne, ra.size, nparam, nparam), dtype=np.float64)
+            B = np.zeros((nfit, new, ne, ra.size, nparam), dtype=np.complex128)
+            for ff in range(nfreq_local):
+                for pp in range(npol):
+                    fh, d, wt = template(pp, ff, esl)
+                    pw = wt * np.abs(fh) ** 2
+                    cross = wt * fh.conj() * d
+                    pf = 0 if self.combine_pol else pp
+                    for j in range(nparam):
+                        B[pf, ..., j] += phi[j, ff] * cross
+                        for k in range(nparam):
+                            G[pf, ..., j, k] += phi[j, ff] * phi[k, ff] * pw
+
+            if stream.distributed and stream.comm.size > 1:
+                from caput import mpiutil
+
+                stream.comm.Allreduce(mpiutil.MPI.IN_PLACE, G, op=mpiutil.MPI.SUM)
+                stream.comm.Allreduce(mpiutil.MPI.IN_PLACE, B, op=mpiutil.MPI.SUM)
+
+            has = G[..., 0, 0] > 0
+            A = np.linalg.solve(G + prior, B[..., np.newaxis])[..., 0]
+            A[~has] = 0.0
+
+            # Store the rows of this chunk that are local to the fit container
+            lo, hi = max(e0, e_lo), min(esl.stop, e_hi)
+            if hi > lo:
+                for pp in range(npol):
+                    pf = 0 if self.combine_pol else pp
+                    amp_out[pp, :, lo - e_lo : hi - e_lo] = A[pf, :, lo - e0 : hi - e0]
+                    pow_out[pp, :, lo - e_lo : hi - e_lo] = G[
+                        pf, :, lo - e0 : hi - e0, :, 0, 0
+                    ]
+
+            if not self.subtract:
+                continue
+
+            for ff in range(nfreq_local):
+                for pp in range(npol):
+                    fh, _, wt = template(pp, ff, esl)
+                    pf = 0 if self.combine_pol else pp
+                    g = np.tensordot(A[pf], phi[:, ff], axes=([-1], [0]))
+                    model = np.where(wt > 0, g * fh, 0.0)
+                    vis[pp, ff, :, esl] -= model.astype(vis.dtype)
+
+        stream.attrs["scintillation_subtracted"] = self.subtract
+
+        return stream, fit
+
+
 class SubtractElevationMedian(tasklib.base.ContainerTask):
     """Subtract the median over elevation from hybrid beamformed visibilities.
 

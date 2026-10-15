@@ -1053,6 +1053,46 @@ class MFilteredHybridVisStream(HybridVisStream):
         return self.datasets["noise_scale"]
 
 
+class HybridVisScintillationFit(SiderealContainer):
+    """Fit of the scintillation of the foregrounds in m-mode filtered visibilities.
+
+    At each polarisation, east-west baseline, elevation and time, the filtered
+    visibilities were fit with ``sum_j a_j phi_j(freq) f(freq)``, where ``f`` is the
+    leave-one-out estimate of the foreground and ``phi_j`` are spectral basis
+    functions (the ``param`` axis; see the attributes).  ``amplitude`` holds the
+    ``a_j`` and ``template_power`` the weighted power of the first template,
+    ``sum w |phi_0 f|^2``, so that ``prior_sigma**2 * template_power`` is the
+    scintillation power of the foreground relative to the noise.
+    """
+
+    _axes = ("pol", "ew", "el", "param")
+
+    _dataset_spec: ClassVar = {
+        "amplitude": {
+            "axes": ["pol", "ew", "el", "ra", "param"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "template_power": {
+            "axes": ["pol", "ew", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+    }
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def template_power(self):
+        return self.datasets["template_power"]
+
+
 class HybridVisNoiseScale(FreqContainer):
     """Ratio of the measured to the expected noise variance of hybrid visibilities.
 
