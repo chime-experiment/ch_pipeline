@@ -2676,6 +2676,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         Indices of the east-west baselines to fit.  Default is all except 0 m.
     nblock : int
         Number of blocks of right ascension.  Default is 12.
+    el_edges : list of float
+        Edges of bands of telescope-y.  If given, the coefficients are also fitted in
+        cells of RA block and telescope-y band (the ``_cell`` datasets).  Rows
+        outside the edges belong to the nearest band.  Default is none.
     clip : float
         Leave out samples with power above this multiple of the model.  Default 20.
     niter : int
@@ -2707,6 +2711,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     pol = config.list_type(str, default=["XX", "YY"])
     ew_index = config.list_type(int, default=None)
     nblock = config.Property(proptype=int, default=12)
+    el_edges = config.list_type(float, default=None)
     clip = config.Property(proptype=float, default=20.0)
     niter = config.Property(proptype=int, default=20)
     kappa_prior = config.Property(proptype=float, default=1e-3)
@@ -2831,6 +2836,18 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             [[0.0], np.logspace(np.log10(self.qmin), np.log10(self.qmax), self.nqbin)]
         )
 
+        # Bands of telescope-y for the cell fits
+        if self.el_edges:
+            yedges = np.asarray(self.el_edges, dtype=np.float64)
+            nyb = yedges.size - 1
+            ycell = np.clip(
+                np.searchsorted(yedges, el[iel], side="right") - 1, 0, nyb - 1
+            )
+        else:
+            yedges = np.array([-1.0, 1.0])
+            nyb = 1
+            ycell = None
+
         out = containers.HybridVisSkyNoise(
             freq=band_map,
             band=band_map["centre"],
@@ -2838,10 +2855,17 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             block=block_start,
             source=np.array(names, dtype=str),
             qbin=qedges[1:],
+            yband=yedges[:-1],
             attrs_from=stream,
         )
         out.add_dataset("rho_band")
         out.add_dataset("rho_band_weight")
+        if ycell is not None:
+            for name in ("kappa2_tot_cell", "kappa2_coh_cell"):
+                out.add_dataset(name)
+                out.add_dataset(f"{name}_weight")
+            out.attrs["yband_edges"] = yedges
+        self._ycell, self._nyb = ycell, nyb
         for name in out.datasets:
             out.datasets[name][:] = 0.0
         out.attrs["pol_used"] = list(self.pol)
@@ -2973,6 +2997,13 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 alpha2, kc2 = fit2["theta"]
                 if not np.all(np.isfinite(fit2["theta"])):
                     continue
+                # The block and cell fits use the kappa_tot^2 of their own block or
+                # cell in the fixed part, rather than the whole-day value
+                fit2["shift"] = (
+                    "kappa2_tot",
+                    kt2,
+                    s2["off"] / kt2 if kt2 != 0 else 0.0,
+                )
                 self._store(
                     out,
                     "kappa2_coh",
@@ -3179,7 +3210,47 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             "wt": wt,
             "cols": cols,
             "resid": X - offset,
+            "offset": offset,
         }
+
+    def _group_fits(self, fit, ip, group, ngroup, extra=0.0):
+        """Fit parameter ``ip`` separately in groups of samples.
+
+        The other parameters are held at their whole-day values, and ``extra`` is
+        added to the fixed part of the mean of each sample.  The fit is iterated
+        with the weights and clipping of the mean in each group, so that a group
+        whose coefficient is far from the whole-day value is not biased by the
+        clipping of the whole-day fit.
+
+        Returns
+        -------
+        val, info : np.ndarray[ngroup]
+            The value and its Fisher information (zero without samples).
+        """
+        theta = fit["theta"]
+        cols, offset = fit["cols"], fit["offset"]
+        X = fit["resid"] + offset
+        q = cols[:, ip]
+        rest = offset + extra + cols @ theta - q * theta[ip]
+        floor = 0.5 * np.abs(theta[0]) * cols[:, 0]
+        val = np.full(ngroup, theta[ip])
+        info = np.zeros(ngroup)
+        for _ in range(self.niter):
+            mu = np.maximum(rest + val[group] * q, floor)
+            good = (mu > 0) & (X < self.clip * mu)
+            wt = np.where(good, tools.invert_no_zero(mu) ** 2, 0.0)
+            num = self.comm.allreduce(
+                np.bincount(group, weights=wt * (X - rest) * q, minlength=ngroup)
+            )
+            info = self.comm.allreduce(
+                np.bincount(group, weights=wt * q * q, minlength=ngroup)
+            )
+            new = np.where(info > 0, num * tools.invert_no_zero(info), theta[ip])
+            done = np.allclose(new, val, rtol=1e-4, atol=1e-3 * abs(theta[ip]))
+            val = new
+            if done:
+                break
+        return val, info
 
     def _normal(self, fit, sel):
         """Normal equations restricted to a subset of the samples (summed over ranks)."""
@@ -3208,23 +3279,59 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         return np.sqrt((n - 1) / n * np.sum((jack - jack.mean()) ** 2))
 
     def _store(self, out, name, bb, oe, fit, ip, t, e, block, src_mask):
-        """Store a coefficient with its weight, and the block and source fits.
+        """Store a coefficient with its weight, and the block, cell and source fits.
 
         The weight is the inverse of the jackknife variance, or zero if that could
-        not be formed.  The block and source fits keep the other parameters at the
-        whole-day values, with inverse-variance weights from the Fisher matrix.
+        not be formed.  The block and cell fits are fitted again within each block or
+        cell (see :meth:`_group_fits`), keeping the other parameters at the
+        whole-day values; their weights are from the Fisher matrix.  The source fits
+        are a single step from the whole-day fit.
         """
         theta = fit["theta"]
         out.datasets[name][bb, oe] = theta[ip]
 
         blk = block[t]
-        for kk in range(self.nblock):
-            Gk, bk = self._normal(fit, blk == kk)
-            if Gk[ip, ip] > 0:
-                other = bk[ip] - np.dot(np.delete(Gk[ip], ip), np.delete(theta, ip))
-                out.datasets[f"{name}_block"][bb, oe, kk] = other / Gk[ip, ip]
-                out.datasets[f"{name}_block_weight"][bb, oe, kk] = Gk[ip, ip]
+
+        def shift(sub):
+            """Change of the fixed part when a held coefficient takes the values sub.
+
+            ``fit["shift"]`` is (name, whole-day value, regressor per sample) of a
+            coefficient held fixed in this fit; ``sub`` is its value in the block or
+            cell of each sample.
+            """
+            if "shift" not in fit:
+                return 0.0
+            _, day, reg = fit["shift"]
+            return (sub - day) * reg
+
+        def held(kind, group):
+            """The held coefficient in each block or cell, or the whole-day value."""
+            if "shift" not in fit:
+                return 0.0
+            tname, tday, _ = fit["shift"]
+            val = np.where(
+                out.datasets[f"{tname}_{kind}_weight"][bb, oe] > 0,
+                out.datasets[f"{tname}_{kind}"][bb, oe],
+                tday,
+            ).ravel()
+            return shift(val[group])
+
+        val, info = self._group_fits(fit, ip, blk, self.nblock, held("block", blk))
+        out.datasets[f"{name}_block"][bb, oe] = np.where(info > 0, val, 0.0)
+        out.datasets[f"{name}_block_weight"][bb, oe] = info
         out.datasets[f"{name}_weight"][bb, oe] = _inv_var(self._jackknife(fit, ip, blk))
+
+        # Cells of RA block and telescope-y band
+        if getattr(self, "_ycell", None) is not None and f"{name}_cell" in out.datasets:
+            nyb = self._nyb
+            cell = blk * nyb + self._ycell[e]
+            val, info = self._group_fits(
+                fit, ip, cell, self.nblock * nyb, held("cell", cell)
+            )
+            out.datasets[f"{name}_cell"][bb, oe] = np.where(info > 0, val, 0.0).reshape(
+                self.nblock, nyb
+            )
+            out.datasets[f"{name}_cell_weight"][bb, oe] = info.reshape(self.nblock, nyb)
 
         for ss in range(src_mask.shape[0]):
             Gs, bs = self._normal(fit, src_mask[ss][e, t])
@@ -3912,6 +4019,25 @@ def _shrink_blocks(day, val, wgt, shrink=True, floor=0.0):
     return np.maximum(out, floor * day)
 
 
+def _shrink_cells(parent, val, wgt, shrink=True):
+    """Cell values [block, yband] shrunk towards the value of their block.
+
+    As :func:`_shrink_blocks`, with the scatter of all the cells about their block
+    values.  Cells that could not be fitted get the value of their block.
+    """
+    ok = (wgt > 0) & np.isfinite(val)
+    out = np.broadcast_to(parent[:, np.newaxis], val.shape).astype(np.float64).copy()
+    if ok.any() and not shrink:
+        out[ok] = val[ok]
+    elif ok.any():
+        var = 1.0 / wgt[ok]
+        par = out[ok]
+        tau2 = np.mean((val[ok] - par) ** 2 - var)
+        if tau2 > 0:
+            out[ok] = (val[ok] / var + par / tau2) / (1.0 / var + 1.0 / tau2)
+    return out
+
+
 def _nearest_psd_correlation(rho):
     """Clip the negative eigenvalues of a correlation matrix and renormalise it."""
     lam, vec = np.linalg.eigh(0.5 * (rho + rho.T))
@@ -3953,9 +4079,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     output with :class:`CollapseBandsToGroups`.
 
     The coefficients are the fits within blocks of right ascension, shrunk towards
-    the whole-day value and kept above ``kappa_floor`` times it (see
-    :func:`_shrink_blocks`), and interpolated linearly between the block centres.
-    Bands or baselines without a fit have no sky term.
+    the whole-day value (see :func:`_shrink_blocks`), or, if the fit has them, the
+    fits within cells of RA block and telescope-y band, shrunk towards the value of
+    their block (see :func:`_shrink_cells`).  They are kept above ``kappa_floor``
+    times the whole-day value, interpolated linearly between the block centres, and
+    constant within each band of telescope-y.  Bands or baselines without a fit have
+    no sky term.
 
     Attributes
     ----------
@@ -4064,11 +4193,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         ha, dec = _ground_to_sph_clipped(xx, yy, self.latitude)
 
         # Coefficients of the sky term, interpolated onto the RA axis
-        k2coh, k2tot, rho_pol, rho_band = self._sky_coefficients(
-            sky, band_map, ew[iew], ra
+        k2coh, k2tot, yband, rho_pol, rho_band = self._sky_coefficients(
+            sky, band_map, ew[iew], ra, el
         )
         k2inc = np.clip(k2tot - k2coh, 0.0, None)
-        kcoh = np.sqrt(k2coh)  # band, ew, ra
+        kcoh = np.sqrt(k2coh)  # band, ew, yband, ra
         lam, qvec = self._modes(rho_band)
 
         # Thermal weights, gathered over frequency
@@ -4091,6 +4220,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             raise RuntimeError("The streams are not distributed in the same way.")
         el_local = el[el_slc]
         nel_local = el_local.size
+        yband_local = yband[el_slc]
 
         if "noise_scale" in hvis.datasets:
             ns = hvis.noise_scale[:]
@@ -4151,15 +4281,17 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 one_m_p = (1.0 - resp_t[..., lag_index[0]].real).astype(np.float32)
             else:
                 one_m_p = np.ones(wb.shape, dtype=np.float32)
-            kt = k2tot[bb][np.newaxis, np.newaxis, :, np.newaxis, :]  # ew, ra
-            ki = k2inc[bb][np.newaxis, np.newaxis, :, np.newaxis, :]
-            kc = kcoh[bb][np.newaxis, :, np.newaxis, :]  # (freq), ew, el, ra
             inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
             omp = one_m_p[:, :, :, np.newaxis, :]
 
             for e0 in range(0, nel_local, self.nel_chunk):
                 esl = slice(e0, min(e0 + self.nel_chunk, nel_local))
                 yel = el_local[esl]
+                # Coefficients for these elevations: [(pol), (freq), ew, el, ra]
+                yb = yband_local[esl]
+                kt = k2tot[bb][:, yb][np.newaxis, np.newaxis]
+                ki = k2inc[bb][:, yb][np.newaxis, np.newaxis]
+                kc = kcoh[bb][:, yb][np.newaxis]
                 phase = (
                     2.0
                     * np.pi
@@ -4438,15 +4570,28 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         self.log.info(f"Made maps for {len(names)} groups of bands.")
         return outs
 
-    def _sky_coefficients(self, sky, band_map, ew_used, ra):
-        """kappa_coh^2 and kappa_tot^2 [band, ew, ra], rho_pol [band], rho_band [band, band]."""
+    def _sky_coefficients(self, sky, band_map, ew_used, ra, el):
+        """Coefficients of the sky term on the data's axes.
+
+        Returns kappa_coh^2 and kappa_tot^2 [band, ew, yband, ra], the band of
+        telescope-y of each elevation [el], rho_pol [band] and rho_band [band, band].
+        """
         nband = len(band_map)
         new = len(ew_used)
-        k2coh = np.zeros((nband, new, ra.size))
-        k2tot = np.zeros((nband, new, ra.size))
+        d = sky.datasets
+        cells = "kappa2_coh_cell" in d and "kappa2_tot_cell" in d
+        if cells:
+            yedges = np.asarray(sky.attrs["yband_edges"], dtype=np.float64)
+            nyb = yedges.size - 1
+            yband = np.clip(np.searchsorted(yedges, el, side="right") - 1, 0, nyb - 1)
+            self.log.info(f"Using the sky-noise fits in {nyb} bands of telescope-y.")
+        else:
+            nyb = 1
+            yband = np.zeros(el.size, dtype=int)
+        k2coh = np.zeros((nband, new, nyb, ra.size))
+        k2tot = np.zeros((nband, new, nyb, ra.size))
         rho_pol = np.full(nband, self.rho_pol_default)
 
-        d = sky.datasets
         sc = sky.index_map["freq"]["centre"][:]
         sew = sky.index_map["ew"][:]
         sband = np.array(
@@ -4500,7 +4645,20 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                         self.shrink_blocks,
                         self.kappa_floor,
                     )
-                    arr[bb, ee] = np.clip(np.interp(ra, centres, val), 0.0, None)
+                    if cells:
+                        val = _shrink_cells(
+                            val,
+                            d[f"{name}_cell"][jb, je],
+                            d[f"{name}_cell_weight"][jb, je],
+                            self.shrink_blocks,
+                        )  # block, yband
+                    else:
+                        val = val[:, np.newaxis]
+                    val = np.maximum(val, self.kappa_floor * day)
+                    for yy in range(nyb):
+                        arr[bb, ee, yy] = np.clip(
+                            np.interp(ra, centres, val[:, yy]), 0.0, None
+                        )
             w = d["rho_pol_weight"][jb][sbase[sbase >= 0]]
             if np.sum(w) > 0:
                 rho_pol[bb] = np.sum(w * d["rho_pol"][jb][sbase[sbase >= 0]]) / np.sum(
@@ -4536,7 +4694,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             f"median rho_band between neighbours "
             f"{np.median(np.diag(rho, 1)) if nband > 1 else 1:.2f}."
         )
-        return k2coh, k2tot, rho_pol, rho
+        return k2coh, k2tot, yband, rho_pol, rho
 
 
 def _check_same_grid(a, b):

@@ -1111,6 +1111,10 @@ class HybridVisSkyNoise(FreqContainer):
     units of the noise of the band sum), the number of samples and the mean
     measured and modelled power of the band sum in the same units.
 
+    Datasets ending in ``_cell`` are fits within cells of RA block and telescope-y
+    band (the ``yband`` axis holds the lower edge of each band, and the attribute
+    ``yband_edges`` all the edges), present if the fit was asked for them.
+
     ``rho_band`` is the correlation of ``e`` between two bands (the ``band`` axis
     holds the centres of the bands of the ``freq`` axis), which is one on the
     diagonal.
@@ -1121,7 +1125,7 @@ class HybridVisSkyNoise(FreqContainer):
     of ``kappa2_tot``, ``kappa2_coh`` and ``rho_pol`` are non-zero.
     """
 
-    _axes = ("ew", "block", "source", "qbin", "band")
+    _axes = ("ew", "block", "source", "qbin", "band", "yband")
 
     _dataset_spec: ClassVar = {
         **{
@@ -1180,6 +1184,20 @@ class HybridVisSkyNoise(FreqContainer):
                 "distributed": False,
             }
             for name in ("count", "excess", "model")
+        },
+        **{
+            name: {
+                "axes": ["freq", "ew", "block", "yband"],
+                "dtype": np.float64,
+                "initialise": False,
+                "distributed": False,
+            }
+            for name in (
+                "kappa2_tot_cell",
+                "kappa2_tot_cell_weight",
+                "kappa2_coh_cell",
+                "kappa2_coh_cell_weight",
+            )
         },
         **{
             name: {
