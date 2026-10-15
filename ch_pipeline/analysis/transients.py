@@ -2050,10 +2050,10 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                             G[pf, ..., j, k] += phi[j, ff] * phi[k, ff] * pw
 
             if stream.distributed and stream.comm.size > 1:
-                from caput import mpiutil
+                from mpi4py import MPI
 
-                stream.comm.Allreduce(mpiutil.MPI.IN_PLACE, G, op=mpiutil.MPI.SUM)
-                stream.comm.Allreduce(mpiutil.MPI.IN_PLACE, B, op=mpiutil.MPI.SUM)
+                stream.comm.Allreduce(MPI.IN_PLACE, G, op=MPI.SUM)
+                stream.comm.Allreduce(MPI.IN_PLACE, B, op=MPI.SUM)
 
             has = G[..., 0, 0] > 0
             A = np.linalg.solve(G + prior, B[..., np.newaxis])[..., 0]
