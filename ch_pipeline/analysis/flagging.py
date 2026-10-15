@@ -1499,7 +1499,9 @@ class MaskDay(tasklib.base.ContainerTask):
     csd : list, optional
         Override `csd` or `lsd` attribute of input container, using this
         list of CSDs instead. Must be specified if input container does
-        not have one of these attributes. Default: None.
+        not have one of these attributes. Warning will be generated if
+        input container has attribute that disagrees with provided list.
+        Default: None.
     """
 
     zero_data = config.Property(proptype=bool, default=False)
@@ -1531,26 +1533,45 @@ class MaskDay(tasklib.base.ContainerTask):
             flag = self._flag(time)
 
         else:
-            # Check for CSD property. If absent, attempt to fetch either the LSD or
-            # CSD attribute of the input container. In the case of a SiderealStack,
-            # there will be multiple LSDs and the flag will be the logical OR of the
-            # flag from each individual LSD.
-            if self.csd is not None:
-                csd = self.csd
-            else:
-                try:
-                    csd = (
-                        dstream.attrs["lsd"]
-                        if "lsd" in dstream.attrs
-                        else dstream.attrs["csd"]
-                    )
-                    if not isinstance(csd, list | tuple):
-                        csd = [csd]
-                except KeyError:
+            # Attempt to fetch attribute from container. In the case of a
+            # SiderealStack, there will be multiple LSDs and the flag will
+            # be the logical OR of the flag from each individual LSD.
+            try:
+                csd = (
+                    dstream.attrs["lsd"]
+                    if "lsd" in dstream.attrs
+                    else dstream.attrs["csd"]
+                )
+            except KeyError:
+                csd = None
+
+            if self.csd is None:
+                # If task property isn't provided and input container
+                # lacks attribute, raise error. (If input container has
+                # attribute, silently accept it.)
+                if csd is None:
                     raise KeyError(
                         "Must specify csd in masking task if input container "
                         "has no csd or lsd attribute"
                     )
+            else:
+                # If task property is provided and input container has
+                # attribute, log a warning if they disagree.
+                # Regardless of warning, accept task property.
+                if csd is not None and not np.all(self.csd == csd):
+                    self.log.warning(
+                        f"Overriding csd/lsd attribute of input container ({csd}) "
+                        f"with config property ({self.csd})"
+                    )
+
+                csd = self.csd
+
+            # If single CSD is specified, convert to a list
+            if not isinstance(csd, list | tuple):
+                csd = [csd]
+
+            # Log the CSD(s) we'll use
+            self.log.info(f"Applying mask using CSD {csd}")
 
             ra = dstream.ra[:]
             ntaper = int(
