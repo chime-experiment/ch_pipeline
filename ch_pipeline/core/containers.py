@@ -1061,8 +1061,9 @@ class HybridVisScintillationFit(SiderealContainer):
     leave-one-out estimate of the foreground and ``phi_j`` are spectral basis
     functions (the ``param`` axis; see the attributes).  ``amplitude`` holds the
     ``a_j`` and ``template_power`` the weighted power of the first template,
-    ``sum w |phi_0 f|^2``, so that ``prior_sigma**2 * template_power`` is the
-    scintillation power of the foreground relative to the noise.
+    ``sum w |phi_0 f|^2``.  ``prior_sigma`` (if present) is the width of the prior on
+    the first amplitude at each sample, so that ``prior_sigma**2 * template_power``
+    is the scintillation power of the foreground relative to the noise.
     """
 
     _axes = ("pol", "ew", "el", "param")
@@ -1079,6 +1080,13 @@ class HybridVisScintillationFit(SiderealContainer):
             "axes": ["pol", "ew", "el", "ra"],
             "dtype": np.float32,
             "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "prior_sigma": {
+            "axes": ["pol", "ew", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": False,
             "distributed": True,
             "distributed_axis": "el",
         },

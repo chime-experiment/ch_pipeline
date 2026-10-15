@@ -1862,8 +1862,18 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     also follows the slow phase ramp across the band of a transient anywhere in the
     beam on a short baseline, so it removes much more of the transients.
     The ``a_j`` are complex, since the filter turns part of the modulation into
-    quadrature, and have a Gaussian prior of width ``prior_sigma``, so that nothing
-    is subtracted where the scintillation of the foreground is below the noise.
+    quadrature, and have a Gaussian prior, so that nothing is subtracted where the
+    scintillation of the foreground is below the noise.  A transient is removed in
+    proportion to ``rho^2 q / (1 + q)``, where ``rho`` is its overlap with the
+    template and ``q`` the prior variance times the weighted power of the template,
+    so the prior should only be large where the foreground really scintillates.
+    Diffuse emission does not scintillate, but is bright, so a fixed prior would
+    remove transients near the meridian of most rows.  With ``prior_mode`` "block"
+    the prior variance is instead measured from the data, separately for each
+    polarisation group, baseline, elevation and block of RA: it is the variance of
+    the unregularised amplitudes in excess of their noise (weighted for the
+    samples where the template is bright, and clipped at ``prior_clip`` times the
+    model), kept between ``prior_floor`` and ``prior_cap``.
 
     The foreground estimate is the low-pass part of the data at sample ``t`` from a
     fit that leaves out sample ``t`` itself,
@@ -1887,9 +1897,19 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         Reference frequency in MHz.  Default is 600.
     nparam : int
         Number of spectral basis functions, 1 or 2.  Default is 1.
+    prior_mode : str
+        "block" (default) to measure the prior in blocks of RA, or "fixed" to use
+        ``prior_sigma``.
     prior_sigma : list of float
         Width of the prior on each amplitude (one value for all, or one per basis
-        function).  Default is 0.01.
+        function), and the starting point of the block estimate.  Default is 0.01.
+    nblock : int
+        Number of blocks of RA for the block prior.  Default is 48.
+    prior_floor, prior_cap : float
+        Range of the block prior width.  Defaults are 1e-5 and 0.03.
+    prior_clip : float
+        Clip each squared amplitude at this many times its modelled variance in
+        the block estimate.  Default is 20.
     self_noise : float
         Coefficient of the self-noise term in the weights.  Zero ignores it.
         Default is 1.
@@ -1910,7 +1930,12 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     beta = config.Property(proptype=float, default=-1.8)
     nu0 = config.Property(proptype=float, default=600.0)
     nparam = config.Property(proptype=int, default=1)
+    prior_mode = config.enum(["block", "fixed"], default="block")
     prior_sigma = config.list_type(float, default=[0.01])
+    nblock = config.Property(proptype=int, default=48)
+    prior_floor = config.Property(proptype=float, default=1e-5)
+    prior_cap = config.Property(proptype=float, default=0.03)
+    prior_clip = config.Property(proptype=float, default=20.0)
     self_noise = config.Property(proptype=float, default=1.0)
     min_gain = config.Property(proptype=float, default=0.1)
     combine_pol = config.Property(proptype=bool, default=True)
@@ -1959,7 +1984,6 @@ class SubtractScintillation(tasklib.base.ContainerTask):
             raise ValueError(
                 "prior_sigma needs one positive value or one per parameter."
             )
-        prior = np.diag(1.0 / sigma**2)
 
         # Match the polarisations and baselines of the unfiltered stream
         pol = [str(p) for p in stream.index_map["pol"]]
@@ -2013,6 +2037,13 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         fit.attrs["beta"] = self.beta
         fit.attrs["nu0"] = self.nu0
         fit.attrs["prior_sigma"] = sigma
+        fit.attrs["prior_mode"] = self.prior_mode
+        fit.add_dataset("prior_sigma")
+        psig_out = fit.datasets["prior_sigma"][:].local_array
+        # Block of RA of each sample, for the block prior
+        nblock = max(min(self.nblock, ra.size), 1)
+        blk = (np.arange(ra.size) * nblock) // ra.size
+        blk_start = np.flatnonzero(np.r_[True, np.diff(blk) > 0])
         fit.attrs["combine_pol"] = self.combine_pol
         fit.attrs["subtracted"] = self.subtract
         amp_out = fit.amplitude[:].local_array
@@ -2056,6 +2087,13 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                 stream.comm.Allreduce(MPI.IN_PLACE, B, op=MPI.SUM)
 
             has = G[..., 0, 0] > 0
+            if self.prior_mode == "block":
+                var = self._block_prior(G, B, has, blk_start, blk, sigma**2)
+            else:
+                var = np.broadcast_to(sigma**2, (*G.shape[:-2], nparam))
+            prior = np.zeros_like(G)
+            for j in range(nparam):
+                prior[..., j, j] = 1.0 / var[..., j]
             A = np.linalg.solve(G + prior, B[..., np.newaxis])[..., 0]
             A[~has] = 0.0
 
@@ -2068,6 +2106,9 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                     pow_out[pp, :, lo - e_lo : hi - e_lo] = G[
                         pf, :, lo - e0 : hi - e0, :, 0, 0
                     ]
+                    psig_out[pp, :, lo - e_lo : hi - e_lo] = np.sqrt(
+                        var[pf, :, lo - e0 : hi - e0, :, 0]
+                    )
 
             if not self.subtract:
                 continue
@@ -2083,6 +2124,38 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         stream.attrs["scintillation_subtracted"] = self.subtract
 
         return stream, fit
+
+    def _block_prior(self, G, B, has, blk_start, blk, var0, niter=5):
+        """Prior variance of each amplitude, measured in blocks of RA.
+
+        Uses the diagonal of the normal equations: the unregularised amplitude
+        ``a = B_j / G_jj`` has noise variance ``1 / G_jj``, so ``|a|^2`` estimates the
+        prior variance plus that.
+
+        Returns
+        -------
+        var : np.ndarray[..., nra, nparam]
+            Prior variance of each amplitude at each sample.
+        """
+        nparam = G.shape[-1]
+        lo, hi = self.prior_floor**2, self.prior_cap**2
+        var = np.zeros((*G.shape[:-2], nparam), dtype=np.float64)
+        for j in range(nparam):
+            gjj = np.where(has, G[..., j, j], 1.0)
+            noise = np.where(has, 1.0 / gjj, 0.0)
+            x = np.where(has, np.abs(B[..., j] / gjj) ** 2, 0.0)
+            s = np.full((*G.shape[:-3], blk_start.size), np.clip(var0[j], lo, hi))
+            for _ in range(niter):
+                tot = s[..., blk] + noise
+                u = np.where(has, 1.0 / tot**2, 0.0)
+                xc = np.minimum(x, self.prior_clip * tot)
+                num = np.add.reduceat(u * (xc - noise), blk_start, axis=-1)
+                den = np.add.reduceat(u, blk_start, axis=-1)
+                s = np.clip(
+                    np.where(den > 0, num / np.where(den > 0, den, 1.0), lo), lo, hi
+                )
+            var[..., j] = s[..., blk]
+        return var
 
 
 class SubtractElevationMedian(tasklib.base.ContainerTask):
