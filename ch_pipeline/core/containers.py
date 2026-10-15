@@ -1224,7 +1224,9 @@ class HybridVisSourceCutouts(FreqContainer):
     its transit, and ``el_offset`` elevations centred on the elevation nearest its
     transit.  The ``ra_index`` and ``el_index`` datasets give the indices of the
     window into the original stream, with -1 where the window extends past the end of
-    a stream that does not cover a full day.  The weights there are zero.
+    a stream that does not cover a full day.  The weights there are zero.  Stored
+    without compression: the windows are small, and parallel writes of compressed
+    datasets with small chunks can stall.
     """
 
     _axes = ("source", "pol", "ew", "el_offset", "ra_offset")
@@ -1236,9 +1238,6 @@ class HybridVisSourceCutouts(FreqContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 1, 32, 4, 64, 128),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "vis_weight": {
             "axes": ["source", "pol", "freq", "ew", "ra_offset"],
@@ -1246,9 +1245,6 @@ class HybridVisSourceCutouts(FreqContainer):
             "initialise": True,
             "distributed": True,
             "distributed_axis": "freq",
-            "chunks": (1, 1, 32, 4, 128),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
         },
         "ra": {
             "axes": ["source", "ra_offset"],
