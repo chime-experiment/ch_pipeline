@@ -1857,6 +1857,10 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     at each polarisation, east-west baseline, elevation and time, and subtracts it.
     The spectral basis is ``phi_0 = (freq / nu0)**beta`` and, if ``nparam`` is 2,
     ``phi_1 = phi_0 ln(freq / nu0)``, which follows changes of the spectral index.
+    The second term removes a little more of the scintillation (99% of its variance
+    instead of 97% next to bright sources), but a complex ``a_0 + a_1 ln(freq)``
+    also follows the slow phase ramp across the band of a transient anywhere in the
+    beam on a short baseline, so it removes much more of the transients.
     The ``a_j`` are complex, since the filter turns part of the modulation into
     quadrature, and have a Gaussian prior of width ``prior_sigma``, so that nothing
     is subtracted where the scintillation of the foreground is below the noise.
@@ -1882,7 +1886,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     nu0 : float
         Reference frequency in MHz.  Default is 600.
     nparam : int
-        Number of spectral basis functions, 1 or 2.  Default is 2.
+        Number of spectral basis functions, 1 or 2.  Default is 1.
     prior_sigma : list of float
         Width of the prior on each amplitude (one value for all, or one per basis
         function).  Default is 0.01.
@@ -1893,8 +1897,8 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         Leave samples whose filter gain ``1 - P[t, t]`` is lower unchanged.
         Default is 0.1.
     combine_pol : bool
-        Fit the polarisations together with one set of amplitudes.  Default is
-        False.
+        Fit the polarisations together with one set of amplitudes, since the
+        scintillation is the same in both.  Default is True.
     subtract : bool
         Subtract the fit.  If False, only fit, for diagnostics.  Default is True.
     in_place : bool
@@ -1905,11 +1909,11 @@ class SubtractScintillation(tasklib.base.ContainerTask):
 
     beta = config.Property(proptype=float, default=-1.8)
     nu0 = config.Property(proptype=float, default=600.0)
-    nparam = config.Property(proptype=int, default=2)
+    nparam = config.Property(proptype=int, default=1)
     prior_sigma = config.list_type(float, default=[0.01])
     self_noise = config.Property(proptype=float, default=1.0)
     min_gain = config.Property(proptype=float, default=0.1)
-    combine_pol = config.Property(proptype=bool, default=False)
+    combine_pol = config.Property(proptype=bool, default=True)
     subtract = config.Property(proptype=bool, default=True)
     in_place = config.Property(proptype=bool, default=True)
     nrow_chunk = config.Property(proptype=int, default=64)
