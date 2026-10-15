@@ -4880,6 +4880,113 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         return out
 
 
+class FillRAGaps(tasklib.base.ContainerTask):
+    """Insert the samples missing from gaps in the RA axis, with zero weight.
+
+    The data of some days have gaps (dropped integrations, or hours without data)
+    in an otherwise uniform time axis, which the m-mode filters do not accept.
+    Every step that is close to a whole number of samples is filled with the
+    missing samples, which are zero in every dataset with an RA axis (so they have
+    zero weight), except ``effective_ra``, which is set to the RA of the sample.  A
+    step that is not close to a whole number of samples is an error.  Without gaps
+    the input is returned unchanged.
+
+    Attributes
+    ----------
+    tolerance : float
+        Largest difference from a whole number of samples, as a fraction of the
+        sample spacing.  Default is 0.01.
+    """
+
+    tolerance = config.Property(proptype=float, default=0.01)
+
+    def process(self, cont):
+        """Fill the gaps.
+
+        Parameters
+        ----------
+        cont : container with an ``ra`` axis, distributed over another axis
+            For example a draco.core.containers.HybridVisStream.
+
+        Returns
+        -------
+        out : container of the same type
+            With a uniform RA axis.
+        """
+        ra = cont.ra[:]
+        step = np.diff(ra)
+        dra = np.median(step)
+        nstep = np.rint(step / dra).astype(int)
+        if np.any(np.abs(step - nstep * dra) > self.tolerance * dra) or np.any(
+            nstep < 1
+        ):
+            bad = np.flatnonzero(np.abs(step - nstep * dra) > self.tolerance * dra)
+            raise ValueError(
+                f"{bad.size} steps of the RA axis are not a whole number of samples, "
+                f"for example {step[bad[:3]] / dra} samples."
+            )
+        if np.all(nstep == 1):
+            self.log.info("The RA axis has no gaps.")
+            return cont
+
+        # Index of each input sample on the filled axis
+        index = np.concatenate([[0], np.cumsum(nstep)])
+        nnew = index[-1] + 1
+        new_ra = ra[0] + dra * np.arange(nnew)
+        new_ra[index] = ra  # keep the original values exactly
+        gaps = np.flatnonzero(nstep > 1)
+        self.log.info(
+            f"Filling {gaps.size} gaps in the RA axis with {nnew - ra.size} samples: "
+            + ", ".join(f"{nstep[g] - 1} at RA {ra[g]:.2f}" for g in gaps[:10])
+        )
+
+        dist_axis = None
+        for dset in cont.datasets.values():
+            if getattr(dset, "distributed", False):
+                dist_axis = dset.attrs["axis"][dset.distributed_axis]
+                break
+        if dist_axis == "ra":
+            raise ValueError("The input must not be distributed over RA.")
+
+        out = cont.__class__(
+            ra=new_ra,
+            axes_from=cont,
+            attrs_from=cont,
+            distributed=cont.distributed,
+            comm=cont.comm,
+        )
+        for name in cont.datasets:
+            if name not in out.datasets:
+                out.add_dataset(name)
+
+        for name, dset in cont.datasets.items():
+            odset = out.datasets[name]
+            axes = list(dset.attrs["axis"])
+            src = dset[:]
+            src = src.local_array if hasattr(src, "local_array") else src
+            dst = odset[:]
+            dst_local = dst.local_array if hasattr(dst, "local_array") else dst
+            if "ra" not in axes:
+                dst_local[:] = src
+                continue
+            iax = axes.index("ra")
+            dst_local[:] = 0
+            sel = [slice(None)] * src.ndim
+            sel[iax] = index
+            dst_local[tuple(sel)] = src
+            if name == "effective_ra":
+                shape = [1] * src.ndim
+                shape[iax] = nnew
+                fill = np.ones(nnew, dtype=bool)
+                fill[index] = False
+                sel[iax] = fill
+                dst_local[tuple(sel)] = np.broadcast_to(
+                    new_ra.reshape(shape), dst_local.shape
+                )[tuple(sel)]
+
+        return out
+
+
 class SelectRARange(tasklib.base.ContainerTask):
     """Keep the samples of a container whose right ascension is within a range.
 
