@@ -1889,6 +1889,29 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     self-noise of the foreground, ``self_noise |f_hat|^2 / (dnu tau)`` for channel
     width ``dnu`` and sample spacing ``tau``.
 
+    The unfiltered data contain everything in the beam, including diffuse emission
+    and sources that do not scintillate, so ``f_hat`` is the wrong template unless one
+    compact source dominates.  With ``template`` "neighbours", the template of each
+    sample is instead learned from the filtered data of its neighbours, which only
+    contain what scintillates: since the modulation is white from one sample to the
+    next and the foreground changes slowly, the filtered data near ``t`` are copies
+    of one shape with random amplitudes.  Starting from ``phi_0 f_hat``, the
+    amplitudes ``a(t')`` are fit at every sample and the template is rebuilt as
+
+        e(t) = sum_t' conj(a(t')) R(t, t') d(t') / sum_t' |a(t')|^2,
+
+    channel by channel, over ``gap < |t' - t| <= window``, where ``R`` rotates the
+    fringe of the row's meridian from ``t'`` to ``t``; this is repeated ``niter``
+    times (power iteration towards the leading singular vector).  Leaving out the
+    samples within ``gap`` keeps a transient at ``t``, and its ringing in the
+    filtered data of its neighbours, out of its own template.  The amplitudes used
+    as weights are clipped at ``clip`` times their typical value in the row.  A
+    bright transient would still reach the templates of its neighbours through its
+    ringing in their filtered data, beyond ``gap``.  So samples that the starting
+    template cannot explain (weighted residual power more than ``flag_threshold``
+    robust standard deviations above the row's median) are flagged, and neither
+    they nor the samples within ``ring`` of them are used to build templates.
+
     Attributes
     ----------
     beta : float
@@ -1925,6 +1948,22 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         Modify the filtered stream in place.  Default is True.
     nrow_chunk : int
         Number of elevations to process at once.  Default is 64.
+    template : str
+        "foreground" (default) for ``phi f_hat``, or "neighbours" to learn the
+        template from the filtered data of the neighbouring samples (one term only).
+    window, gap : int
+        Neighbours used for the "neighbours" template.  Defaults are 20 and 5.
+    niter : int
+        Iterations of the "neighbours" template.  Default is 2.
+    clip : float
+        Clip the amplitudes used to build the "neighbours" template at this many
+        times the square root of their median power in the row.  Default is 5.
+    flag_threshold : float
+        Flag samples whose residual power after the starting fit is this many
+        robust standard deviations above the median of the row.  Default is 5.
+    ring : int
+        Samples within this of a flagged sample are not used to build templates.
+        Default is the half-length of the stored filter response.
     """
 
     beta = config.Property(proptype=float, default=-1.8)
@@ -1942,6 +1981,13 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     subtract = config.Property(proptype=bool, default=True)
     in_place = config.Property(proptype=bool, default=True)
     nrow_chunk = config.Property(proptype=int, default=64)
+    template = config.enum(["foreground", "neighbours"], default="foreground")
+    window = config.Property(proptype=int, default=20)
+    gap = config.Property(proptype=int, default=5)
+    niter = config.Property(proptype=int, default=2)
+    clip = config.Property(proptype=float, default=5.0)
+    flag_threshold = config.Property(proptype=float, default=5.0)
+    ring = config.Property(proptype=int, default=None)
 
     def process(self, stream, unfiltered):
         """Fit and subtract the scintillation.
@@ -1969,6 +2015,10 @@ class SubtractScintillation(tasklib.base.ContainerTask):
             )
         if self.nparam not in (1, 2):
             raise ValueError("nparam must be 1 or 2.")
+        if self.template == "neighbours" and self.nparam != 1:
+            raise ValueError("The neighbours template has a single term (nparam = 1).")
+        if self.template == "neighbours" and not 0 <= self.gap < self.window:
+            raise ValueError("Need 0 <= gap < window.")
         _check_same_grid(stream, unfiltered)
 
         if not self.in_place:
@@ -2013,6 +2063,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         cself = self.self_noise / (width * 1e6 * tau)
 
         lag = list(stream.index_map["lag"])
+        self._ring = max(lag) if self.ring is None else self.ring
         gain = 1.0 - stream.ra_response[:].local_array[..., lag.index(0)].real
         weight = stream.weight[:].local_array  # pol, freq, ew, ra
         uweight = unfiltered.weight[:].local_array
@@ -2045,6 +2096,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         blk = (np.arange(ra.size) * nblock) // ra.size
         blk_start = np.flatnonzero(np.r_[True, np.diff(blk) > 0])
         fit.attrs["combine_pol"] = self.combine_pol
+        fit.attrs["template"] = self.template
         fit.attrs["subtracted"] = self.subtract
         amp_out = fit.amplitude[:].local_array
         pow_out = fit.template_power[:].local_array
@@ -2061,30 +2113,152 @@ class SubtractScintillation(tasklib.base.ContainerTask):
             wt = np.where(ok, w / (1.0 + w * cself[ff] * np.abs(fh) ** 2), 0.0)
             return fh, d, wt
 
+        def allreduce(*arrays):
+            if stream.distributed and stream.comm.size > 1:
+                from mpi4py import MPI
+
+                for arr in arrays:
+                    stream.comm.Allreduce(MPI.IN_PLACE, arr, op=MPI.SUM)
+
         nfreq_local = vis.shape[1]
+        nra = ra.size
+        if self.template == "neighbours":
+            from ch_ephem.observers import chime
+
+            # Fringe rate of the meridian of each row: a source near the meridian at
+            # declination dec has x = -cos(dec) ha, so the visibility at t + lag is
+            # rotated to t by exp(2 pi i u cos(dec) lag dra)
+            cos_dec = np.cos(np.arcsin(np.clip(el, -1, 1)) + np.radians(chime.latitude))
+            dra = np.radians(np.median(np.diff(ra)))
+            u_bf = ew[:, np.newaxis] * freq[np.newaxis, :] * 1e6 / scipy.constants.c
+            lags = [
+                lag
+                for lag in range(-self.window, self.window + 1)
+                if abs(lag) > self.gap
+            ]
+
+        def neighbour_amplitudes(e_chunk, esl):
+            """Unregularised amplitudes of the current templates, clipped."""
+            ne = esl.stop - esl.start
+            G1 = np.zeros((nfit, new, ne, nra), dtype=np.float64)
+            B1 = np.zeros((nfit, new, ne, nra), dtype=np.complex128)
+            for ff in range(nfreq_local):
+                for pp in range(npol):
+                    _, d, wt = template(pp, ff, esl)
+                    ef = e_chunk[pp, ff]
+                    pf = 0 if self.combine_pol else pp
+                    G1[pf] += wt * np.abs(ef) ** 2
+                    B1[pf] += wt * ef.conj() * d
+            allreduce(G1, B1)
+            return G1, B1
+
+        def residual_power(e_chunk, a, esl):
+            """Weighted power of d - a e and the number of channels, over frequency."""
+            ne = esl.stop - esl.start
+            chi = np.zeros((nfit, new, ne, nra), dtype=np.float64)
+            nch = np.zeros((nfit, new, ne, nra), dtype=np.float64)
+            for ff in range(nfreq_local):
+                for pp in range(npol):
+                    _, d, wt = template(pp, ff, esl)
+                    pf = 0 if self.combine_pol else pp
+                    chi[pf] += wt * np.abs(d - a[pf] * e_chunk[pp, ff]) ** 2
+                    nch[pf] += wt > 0
+            allreduce(chi, nch)
+            return chi, nch
+
+        def rebuild(a, esl, use):
+            """Template of each sample from its neighbours, channel by channel.
+
+            Only the samples where ``use`` is True contribute.
+            """
+            ne = esl.stop - esl.start
+            e_chunk = np.zeros((npol, nfreq_local, new, ne, nra), dtype=np.complex64)
+            for ff in range(nfreq_local):
+                for pp in range(npol):
+                    d = vis[pp, ff, :, esl]
+                    ok = valid[pp, ff][:, np.newaxis, :]  # ew, 1, ra
+                    pf = 0 if self.combine_pol else pp
+                    ap = np.where(use[pf], a[pf], 0.0)  # ew, el, ra
+                    num = np.zeros(d.shape, dtype=np.complex128)
+                    den = np.zeros(d.shape, dtype=np.float64)
+                    for lag in lags:
+                        lo, hi = max(0, -lag), min(nra, nra - lag)
+                        src = slice(lo + lag, hi + lag)
+                        rot = np.exp(
+                            2j
+                            * np.pi
+                            * u_bf[:, ff, np.newaxis]
+                            * cos_dec[np.newaxis, esl]
+                            * lag
+                            * dra
+                        )[..., np.newaxis]
+                        num[..., lo:hi] += ap[..., src].conj() * rot * d[..., src]
+                        den[..., lo:hi] += np.abs(ap[..., src]) ** 2 * ok[..., src]
+                    e_chunk[pp, ff] = np.where(
+                        ok & (den > 0), num / np.where(den > 0, den, 1.0), 0.0
+                    )
+            return e_chunk
+
         for e0 in range(0, nel, self.nrow_chunk):
             esl = slice(e0, min(e0 + self.nrow_chunk, nel))
             ne = esl.stop - esl.start
 
-            # Normal equations, summed over the local frequencies and then over ranks
-            G = np.zeros((nfit, new, ne, ra.size, nparam, nparam), dtype=np.float64)
-            B = np.zeros((nfit, new, ne, ra.size, nparam), dtype=np.complex128)
-            for ff in range(nfreq_local):
-                for pp in range(npol):
-                    fh, d, wt = template(pp, ff, esl)
-                    pw = wt * np.abs(fh) ** 2
-                    cross = wt * fh.conj() * d
-                    pf = 0 if self.combine_pol else pp
-                    for j in range(nparam):
-                        B[pf, ..., j] += phi[j, ff] * cross
-                        for k in range(nparam):
-                            G[pf, ..., j, k] += phi[j, ff] * phi[k, ff] * pw
-
-            if stream.distributed and stream.comm.size > 1:
-                from mpi4py import MPI
-
-                stream.comm.Allreduce(MPI.IN_PLACE, G, op=MPI.SUM)
-                stream.comm.Allreduce(MPI.IN_PLACE, B, op=MPI.SUM)
+            if self.template == "neighbours":
+                e_chunk = np.zeros(
+                    (npol, nfreq_local, new, ne, nra), dtype=np.complex64
+                )
+                for ff in range(nfreq_local):
+                    for pp in range(npol):
+                        fh, _, _ = template(pp, ff, esl)
+                        e_chunk[pp, ff] = phi[0, ff] * fh
+                g_init = None
+                for it in range(self.niter + 1):
+                    G1, B1 = neighbour_amplitudes(e_chunk, esl)
+                    if g_init is None:
+                        g_init = G1.copy()
+                        use = self._unexplained(e_chunk, G1, B1, esl, residual_power)
+                    else:
+                        # Keep the weighted norm of the starting template at each
+                        # sample, so that the amplitudes stay fractions of the
+                        # foreground and the prior means the same as without
+                        good = (G1 > 0) & (g_init > 0)
+                        scale = np.where(
+                            good, np.sqrt(g_init / np.where(good, G1, 1.0)), 0.0
+                        )
+                        sp = scale[[0] * npol] if self.combine_pol else scale
+                        e_chunk *= sp[:, np.newaxis].astype(np.float32)
+                        B1 = B1 * scale
+                        G1 = np.where(good, g_init, 0.0)
+                    if it == self.niter:
+                        break
+                    a = np.where(G1 > 0, B1 / np.where(G1 > 0, G1, 1.0), 0.0)
+                    # Clip the weights at a few times their typical size in the row
+                    power = np.where(G1 > 0, np.abs(a) ** 2, np.nan)
+                    typical = np.nanmedian(power, axis=-1, keepdims=True)
+                    typical = np.where(np.isfinite(typical), typical, 0.0)
+                    inv_g = np.divide(1.0, G1, out=np.zeros_like(G1), where=G1 > 0)
+                    lim = np.sqrt(self.clip * (typical + inv_g))
+                    big = np.abs(a) > lim
+                    a = np.where(big, a / np.where(big, np.abs(a), 1.0) * lim, a)
+                    e_chunk = rebuild(a, esl, use)
+                G = G1[..., np.newaxis, np.newaxis]
+                B = B1[..., np.newaxis]
+            else:
+                # Normal equations, summed over the local frequencies and then over
+                # ranks
+                G = np.zeros((nfit, new, ne, nra, nparam, nparam), dtype=np.float64)
+                B = np.zeros((nfit, new, ne, nra, nparam), dtype=np.complex128)
+                for ff in range(nfreq_local):
+                    for pp in range(npol):
+                        fh, d, wt = template(pp, ff, esl)
+                        pw = wt * np.abs(fh) ** 2
+                        cross = wt * fh.conj() * d
+                        pf = 0 if self.combine_pol else pp
+                        for j in range(nparam):
+                            B[pf, ..., j] += phi[j, ff] * cross
+                            for k in range(nparam):
+                                G[pf, ..., j, k] += phi[j, ff] * phi[k, ff] * pw
+                allreduce(G, B)
 
             has = G[..., 0, 0] > 0
             if self.prior_mode == "block":
@@ -2117,13 +2291,39 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                 for pp in range(npol):
                     fh, _, wt = template(pp, ff, esl)
                     pf = 0 if self.combine_pol else pp
-                    g = np.tensordot(A[pf], phi[:, ff], axes=([-1], [0]))
-                    model = np.where(wt > 0, g * fh, 0.0)
+                    if self.template == "neighbours":
+                        model = A[pf, ..., 0] * e_chunk[pp, ff]
+                    else:
+                        g = np.tensordot(A[pf], phi[:, ff], axes=([-1], [0]))
+                        model = g * fh
+                    model = np.where(wt > 0, model, 0.0)
                     vis[pp, ff, :, esl] -= model.astype(vis.dtype)
 
         stream.attrs["scintillation_subtracted"] = self.subtract
 
         return stream, fit
+
+    def _unexplained(self, e_chunk, G, B, esl, residual_power):
+        """Samples to use for building templates: not unexplained, nor near one.
+
+        The residual power per channel after fitting the starting template is
+        compared with the median of the row; samples more than ``flag_threshold``
+        robust standard deviations above it are flagged, and the samples within
+        ``ring`` of them are left out as well.
+        """
+        a = np.where(G > 0, B / np.where(G > 0, G, 1.0), 0.0)
+        chi, nch = residual_power(e_chunk, a, esl)
+        ok = nch > 0
+        x = np.where(ok, chi / np.where(ok, nch, 1.0), np.nan)
+        med = np.nanmedian(x, axis=-1, keepdims=True)
+        mad = 1.4826 * np.nanmedian(np.abs(x - med), axis=-1, keepdims=True)
+        mad = np.where(np.isfinite(mad), mad, np.inf)
+        bad = ok & (x > med + self.flag_threshold * mad)
+        if self._ring > 0 and np.any(bad):
+            bad = scipy.ndimage.maximum_filter1d(
+                bad.astype(np.uint8), size=2 * self._ring + 1, axis=-1, mode="constant"
+            ).astype(bool)
+        return ok & ~bad
 
     def _block_prior(self, G, B, has, blk_start, blk, var0, niter=5):
         """Prior variance of each amplitude, measured in blocks of RA.
