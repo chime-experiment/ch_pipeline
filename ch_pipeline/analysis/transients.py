@@ -6428,8 +6428,8 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
 
         Returns
         -------
-        table : containers.TransientCandidateTable
-            The input, with the spectra added.
+        out : containers.TransientCandidateTable
+            A copy of the input, with the spectra added.
         """
         from mpi4py import MPI
 
@@ -6443,7 +6443,7 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
             raise ValueError(f"Duration {self.duration} is not in {durations}.")
         idur = durations.index(self.duration)
 
-        rec = table.candidate[:]
+        rec = table.candidate[:].copy()
         ncand = rec.size
         ra_b = bands.index_map["ra"][:]
         dra = np.median(np.diff(ra_b))
@@ -6466,10 +6466,12 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
         bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
 
-        table.add_dataset("spectrum")
-        table.add_dataset("spectrum_weight")
-        table.datasets["spectrum"][:] = amp
-        table.datasets["spectrum_weight"][:] = wgt
+        out = table.copy()
+        for name in ("spectrum", "spectrum_weight"):
+            if name not in out.datasets:
+                out.add_dataset(name)
+        out.datasets["spectrum"][:] = amp
+        out.datasets["spectrum_weight"][:] = wgt
 
         alphas = np.array(self.alphas, dtype=np.float64)
         for k in range(ncand):
@@ -6487,11 +6489,11 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
                 stats,
             ):
                 rec[name][k] = val
-        table.candidate[:] = rec
-        table.attrs["band_snr_min"] = self.snr_min
+        out.candidate[:] = rec
+        out.attrs["band_snr_min"] = self.snr_min
 
         self.log.info(f"Added the spectra of {ncand} candidates.")
-        return table
+        return out
 
 
 class SiftTransientCandidates(tasklib.base.ContainerTask):
