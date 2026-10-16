@@ -33,7 +33,7 @@ from typing import ClassVar
 
 import numpy as np
 from caput import memdata
-from caput.containers import Container, ContainerPrototype
+from caput.containers import Container, ContainerPrototype, TableSpec
 from caput.util import typeutils
 from ch_util import andata
 from draco.core.containers import (
@@ -1639,6 +1639,129 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
     @property
     def x(self):
         return self.index_map["x"]
+
+
+class TransientCandidateTable(TableSpec):
+    """Candidates found in the maps of the transient search, one row per candidate.
+
+    The ``candidate`` table holds the position of each candidate and the properties
+    measured by :class:`ch_pipeline.analysis.transients.GroupTransientCandidates`
+    (see there for their definitions).  ``group_snr`` is the S/N of each group of
+    bands at the candidate (at the best telescope-x for each group).  If the
+    per-band matched filter was available,
+    :class:`ch_pipeline.analysis.transients.AddCandidateSpectra` adds ``spectrum``
+    and ``spectrum_weight``, the amplitude (Jy) and its inverse variance in each band
+    at the candidate's telescope-x.  The ``sift`` table holds the result of
+    :class:`ch_pipeline.analysis.transients.SiftTransientCandidates`: whether each
+    candidate was kept, and a bit mask of the tests it failed (the bits are named in
+    the ``sift_flags`` attribute).
+    """
+
+    _axes = ("group", "freq")
+
+    _table_spec: ClassVar = {
+        "candidate": {
+            "columns": [
+                # Position on the map and the best trial
+                ["el_index", np.int32],
+                ["ra_index", np.int32],
+                ["x_index", np.int16],
+                ["y", np.float64],
+                ["x", np.float64],
+                ["ra", np.float64],
+                ["unix", np.float64],
+                ["snr", np.float32],
+                ["amplitude", np.float32],
+                ["duration", np.float32],
+                ["spectral_index", np.float32],
+                # Position on the sky (ICRS) and hour angle
+                ["ra_icrs", np.float64],
+                ["dec_icrs", np.float64],
+                ["ha", np.float32],
+                # Shape at half the peak S/N, and of the island above grow_snr
+                ["npix", np.int32],
+                ["fwhm_y", np.float32],
+                ["fwhm_t", np.float32],
+                ["x_spread", np.float32],
+                ["island_npix", np.int32],
+                ["island_dy", np.float32],
+                ["island_dt", np.float32],
+                ["island_slope", np.float32],
+                ["island_corr", np.float32],
+                # Other peaks along the row
+                ["row_npeak", np.int16],
+                ["row_max_ratio", np.float32],
+                ["row_spacing", np.float32],
+                ["row_spacing_cv", np.float32],
+                # Other rows at the same time
+                ["col_nrows", np.int16],
+                ["col_nrows_bg", np.int16],
+                ["col_ncand", np.int16],
+                # Spectrum across the groups of bands
+                ["group_nsig", np.int16],
+                ["group_frac_max", np.float32],
+                ["group_best", np.int16],
+                # Spectrum across the bands (AddCandidateSpectra)
+                ["band_nsig", np.int16],
+                ["band_frac_max", np.float32],
+                ["band_best_freq", np.float32],
+                ["band_alpha", np.float32],
+                ["band_chi2", np.float32],
+                # Noise
+                ["weight_ratio", np.float32],
+                # The Sun and bright sources
+                ["sun_ha", np.float32],
+                ["sun_alt", np.float32],
+                ["track_name", "S12"],
+                ["track_dy", np.float32],
+                ["track_ha", np.float32],
+                ["lobe_name", "S12"],
+                ["lobe_ha", np.float32],
+                ["lobe_freq", np.float32],
+                # Catalogue
+                ["cat_name", "S32"],
+                ["cat_flux", np.float32],
+                ["cat_dra", np.float32],
+                ["cat_ddec", np.float32],
+                ["cat_nmatch", np.int16],
+            ],
+            "axis": "candidate",
+        },
+        "sift": {
+            "columns": [["keep", bool], ["flags", np.uint32]],
+            "axis": "candidate",
+            "initialise": False,
+        },
+    }
+
+    _dataset_spec: ClassVar = {
+        "group_snr": {
+            "axes": ["candidate", "group"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "spectrum": {
+            "axes": ["candidate", "freq"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+        "spectrum_weight": {
+            "axes": ["candidate", "freq"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def candidate(self):
+        return self.datasets["candidate"]
+
+    @property
+    def group(self):
+        return self.index_map["group"]
 
 
 class RawContainer(TODContainer):

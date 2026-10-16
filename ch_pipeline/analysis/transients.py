@@ -3,6 +3,7 @@
 import inspect
 import json
 import time
+from typing import ClassVar
 
 import numpy as np
 import scipy.constants
@@ -5839,4 +5840,838 @@ class SelectRARange(tasklib.base.ContainerTask):
             f"Kept {keep.size} of {ra.size} samples "
             f"(RA {ra[sel][0]:.2f} to {ra[sel][-1]:.2f} deg)."
         )
+        return out
+
+
+# ----------------------------------------------------------------------------
+# Grouping candidates and sifting them
+# ----------------------------------------------------------------------------
+
+# Speed of light in m MHz, for the north-south grating lobes
+_C_M_MHZ = scipy.constants.c / 1e6
+
+
+def _local_peaks(img, nrow, ncol, threshold):
+    """Local maxima of a map at or above a threshold.
+
+    A pixel is a peak if it is the largest within +-``nrow`` rows and +-``ncol``
+    columns.  Of a plateau of equal maxima, only the first pixel is kept.
+
+    Returns
+    -------
+    rows, cols : np.ndarray[int]
+        Indices of the peaks, sorted by decreasing value.
+    """
+    mx = scipy.ndimage.maximum_filter(
+        img, size=(2 * nrow + 1, 2 * ncol + 1), mode="constant", cval=-np.inf
+    )
+    peak = (img == mx) & (img >= threshold)
+    lab, npeak = scipy.ndimage.label(peak, structure=np.ones((3, 3)))
+    if npeak == 0:
+        return np.zeros(0, dtype=int), np.zeros(0, dtype=int)
+    flat = lab.ravel()
+    idx = np.flatnonzero(flat)
+    _, first = np.unique(flat[idx], return_index=True)
+    rows, cols = np.unravel_index(idx[first], img.shape)
+    order = np.argsort(img[rows, cols], kind="stable")[::-1]
+    return rows[order], cols[order]
+
+
+def _run_length(mask, i):
+    """Length of the run of True values in a 1D mask that contains index i."""
+    if not mask[i]:
+        return 0
+    lo = i
+    while lo > 0 and mask[lo - 1]:
+        lo -= 1
+    hi = i
+    while hi < mask.size - 1 and mask[hi + 1]:
+        hi += 1
+    return hi - lo + 1
+
+
+def _wrap_deg(a):
+    """Wrap angles in degrees to [-180, 180)."""
+    return (np.asarray(a) + 180.0) % 360.0 - 180.0
+
+
+def _telescope_y_alt(ha, dec, lat):
+    """Telescope-y and altitude (deg) of a source at hour angle ``ha`` (deg).
+
+    ``dec`` is in degrees and ``lat`` in radians.  The small rotation of the
+    telescope is ignored.
+    """
+    h = np.radians(ha)
+    d = np.radians(dec)
+    y = np.cos(lat) * np.sin(d) - np.sin(lat) * np.cos(d) * np.cos(h)
+    salt = np.sin(lat) * np.sin(d) + np.cos(lat) * np.cos(d) * np.cos(h)
+    return y, np.degrees(np.arcsin(np.clip(salt, -1.0, 1.0)))
+
+
+def _spectrum_stats(freq, amp, weight, snr_min, ref_freq, alphas):
+    """Summary of a spectrum of band amplitudes.
+
+    Returns the number of bands with S/N above ``snr_min``, the fraction of the
+    positive S/N^2 in the brightest band, the centre of the brightest band, and the
+    spectral index and reduced chi-squared of the best-fitting power law (from the
+    grid ``alphas``).
+    """
+    ok = (weight > 0) & np.isfinite(amp)
+    if not np.any(ok):
+        return -1, np.nan, np.nan, np.nan, np.nan
+    s = np.where(ok, amp * np.sqrt(np.where(ok, weight, 0.0)), 0.0)
+    pos = np.clip(s, 0.0, None) ** 2
+    frac = pos.max() / pos.sum() if pos.sum() > 0 else np.nan
+    f, a, w = freq[ok], amp[ok], weight[ok]
+    m = (f[:, np.newaxis] / ref_freq) ** alphas[np.newaxis, :]
+    norm = np.sum(
+        w[:, np.newaxis] * m * a[:, np.newaxis], axis=0
+    ) * tools.invert_no_zero(np.sum(w[:, np.newaxis] * m**2, axis=0))
+    chi2 = np.sum(w[:, np.newaxis] * (a[:, np.newaxis] - norm * m) ** 2, axis=0)
+    k = int(np.argmin(chi2))
+    return (
+        int(np.sum(s > snr_min)),
+        frac,
+        freq[int(np.argmax(s))],
+        alphas[k],
+        chi2[k] / max(f.size - 2, 1),
+    )
+
+
+def _decode_names(names):
+    return [n.decode() if isinstance(n, bytes) else str(n) for n in names]
+
+
+class GroupTransientCandidates(tasklib.base.ContainerTask):
+    """Find the candidates in the maps of the transient search and describe them.
+
+    A candidate is a peak of the best-x S/N map (all bands) at or above ``seed_snr``
+    that is the largest within +-``peak_dy`` in telescope-y and +-``peak_dt``
+    samples in start time.  So a pulse and the sidelobes of the synthesized beam at
+    the same time are one candidate, while pulses at different times stay separate.
+    For each candidate the output table has (columns of the ``candidate`` table):
+
+    - Position and best trial: ``el_index``, ``ra_index``, ``x_index``, ``y``
+      (telescope-y), ``x`` (telescope-x), ``ra`` (start of the pulse, the RA of the
+      meridian in degrees), ``unix`` (time of the start), ``snr``, ``amplitude``
+      (Jy at the reference frequency), ``duration`` (s) and ``spectral_index``.
+    - Sky position: ``ra_icrs`` and ``dec_icrs`` (degrees) and the hour angle ``ha``
+      (degrees) of the best telescope-x.
+    - Shape: ``npix``, ``fwhm_y`` and ``fwhm_t`` (s) of the region above half the
+      peak, and ``x_spread``, the standard deviation of the best telescope-x index in
+      that region.  The "island" is the connected region above ``grow_snr`` around the
+      peak, within +-``box_dy`` and +-``box_dra``: its number of pixels, extent in
+      telescope-y and in time (s), and the slope (telescope-y per degree of RA) and
+      correlation of telescope-y with RA of its pixels, weighted by S/N.  Arcs from
+      moving objects have large extents in both and a high correlation.
+    - Along the row: ``row_npeak``, the number of other peaks (local maxima within 1
+      row and +-``row_peak_dra``) within +-``row_dy`` in telescope-y and
+      +-``row_dra`` degrees of RA with S/N at least ``row_snr`` and ``row_ratio``
+      times that of the candidate; ``row_max_ratio``, the S/N of the brightest
+      other peak there over the candidate's; and ``row_spacing`` (s) and
+      ``row_spacing_cv``, the median and the coefficient of variation of the
+      spacing between those peaks and the candidate, to tell periodic pulses from
+      scintillation.
+    - At the same time: ``col_nrows``, the number of rows with |S/N| above
+      ``col_snr`` at telescope-x = 0 (group "all" of ``groups_x0``) within one sample
+      of the candidate's start; ``col_nrows_bg``, the running median of that number
+      over +-``col_bg_dt`` samples, which is high during scintillation episodes and
+      low for a burst of broadband RFI; and ``col_ncand``, the number of candidates
+      within one sample.
+    - Spectrum: ``group_snr`` (a separate dataset) is the S/N of each group of bands
+      at the best telescope-x of that group; ``group_nsig`` is the number of groups
+      (other than "all") above ``group_snr_min``, ``group_frac_max`` the fraction of
+      the positive S/N^2 in the brightest group and ``group_best`` its index.  The
+      ``band_*`` columns are left empty here (see :class:`AddCandidateSpectra`).
+    - ``weight_ratio``: the weight at the candidate over the median of its row.
+    - The Sun and bright sources (``bright_sources``): ``sun_ha`` and ``sun_alt``
+      (degrees); the source above the horizon whose track is closest in
+      telescope-y (``track_name``, ``track_dy``, ``track_ha``); and the source
+      above the horizon, with the smallest hour angle, whose first north-south
+      grating lobe falls on the candidate's row at a frequency within
+      ``freq_range`` (``lobe_name``, ``lobe_ha``, ``lobe_freq``).  The lobe of a
+      source at telescope-y y_s is at y_s +- c / (nu d), with d the feed spacing
+      ``ns_spacing``.
+    - Catalogue (if ``catalogue`` is set): of the sources within +-``cat_ddec`` in
+      dec and +-``cat_dra`` in RA cos(dec) of the candidate's sky position, the
+      brightest (``cat_name``, ``cat_flux`` in Jy at 600 MHz, and its offsets
+      ``cat_dra`` and ``cat_ddec`` in degrees), and their number ``cat_nmatch``.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation of the maps to use.  Default is 0.
+    seed_snr : float
+        Smallest peak S/N for a candidate.  Default is 8.
+    peak_dy : float
+        Half-width in telescope-y within which a candidate is the largest peak.
+        Default is 0.02.
+    peak_dt : int
+        Half-width in samples within which a candidate is the largest peak.
+        Default is 3.
+    grow_snr : float
+        Threshold of the island around a candidate.  Default is 5.
+    box_dy, box_dra : float
+        Half-widths in telescope-y and in degrees of RA of the box in which the shape
+        is measured.  Defaults are 0.1 and 2.
+    row_snr, row_ratio : float
+        Smallest S/N of another peak along the row, absolute and relative to the
+        candidate.  Defaults are 8 and 1/3.
+    row_dy, row_dra : float
+        Half-widths in telescope-y and in degrees of RA of the search along the row.
+        Defaults are 0.01 and 5.
+    row_peak_dra : float
+        Half-width in degrees of RA of the local maxima along the row.  Default is
+        0.3.
+    col_snr : float
+        |S/N| threshold for counting the rows at the same time.  Default is 5.
+    col_bg_dt : int
+        Half-width in samples of the running median of the number of rows lit.
+        Default is 30 (5 minutes).
+    group_snr_min : float
+        S/N above which a group of bands counts as detected.  Default is 4 (the
+        maximum over telescope-x of noise alone is ~2).
+    bright_sources : list of str
+        The Sun and bright sources, as names in ``ch_ephem.sources.source_dictionary``
+        or "sun".  Default is ["sun", "CYG_A", "CAS_A", "TAU_A", "VIR_A"].
+    ns_spacing : float
+        North-south feed spacing in metres.  Default is 0.3048.
+    freq_range : list of float
+        Frequency range in MHz for the grating lobes.  Default is [400, 800].
+    catalogue : str
+        HDF5 file with datasets ``name``, ``ra``, ``dec`` (ICRS, degrees) and
+        ``flux_600`` (Jy), for example from scripts/catalog/reduce_specfind.py.  If
+        not set, the catalogue columns are left empty.
+    cat_ddec, cat_dra : float
+        Half-widths of the catalogue match in degrees.  Defaults are 0.5 and 2.
+    max_candidates : int
+        Keep at most this many candidates (the brightest).  Default is 50000.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    seed_snr = config.Property(proptype=float, default=8.0)
+    peak_dy = config.Property(proptype=float, default=0.02)
+    peak_dt = config.Property(proptype=int, default=3)
+    grow_snr = config.Property(proptype=float, default=5.0)
+    box_dy = config.Property(proptype=float, default=0.1)
+    box_dra = config.Property(proptype=float, default=2.0)
+    row_snr = config.Property(proptype=float, default=8.0)
+    row_ratio = config.Property(proptype=float, default=1.0 / 3.0)
+    row_dy = config.Property(proptype=float, default=0.01)
+    row_dra = config.Property(proptype=float, default=5.0)
+    row_peak_dra = config.Property(proptype=float, default=0.3)
+    col_snr = config.Property(proptype=float, default=5.0)
+    col_bg_dt = config.Property(proptype=int, default=30)
+    group_snr_min = config.Property(proptype=float, default=4.0)
+    bright_sources = config.list_type(
+        type_=str, default=["sun", "CYG_A", "CAS_A", "TAU_A", "VIR_A"]
+    )
+    ns_spacing = config.Property(proptype=float, default=0.3048)
+    freq_range = config.list_type(type_=float, length=2, default=[400.0, 800.0])
+    catalogue = config.Property(proptype=str, default=None)
+    cat_ddec = config.Property(proptype=float, default=0.5)
+    cat_dra = config.Property(proptype=float, default=2.0)
+    max_candidates = config.Property(proptype=int, default=50000)
+
+    def setup(self):
+        """Load the catalogue, if any."""
+        self._cat = None
+        if self.catalogue:
+            import h5py
+
+            with h5py.File(self.catalogue, "r") as f:
+                dec = f["dec"][:]
+                order = np.argsort(dec)
+                self._cat = {
+                    "name": f["name"][:][order],
+                    "ra": f["ra"][:][order],
+                    "dec": dec[order],
+                    "flux": f["flux_600"][:][order],
+                }
+            self.log.info(
+                f"Loaded {self._cat['dec'].size} catalogue sources from {self.catalogue}."
+            )
+
+    def process(self, cand, groups_maxx, groups_x0):
+        """Find and describe the candidates.
+
+        Parameters
+        ----------
+        cand : containers.TransientCandidateMap
+            Best trial at each elevation and start time (all bands).
+        groups_maxx : containers.TransientBandGroupMap
+            S/N of each group of bands at the best telescope-x.
+        groups_x0 : containers.TransientBandGroupMap
+            Signed S/N of each group of bands at telescope-x = 0, with a group "all".
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            One row per candidate.
+        """
+        import warnings
+
+        from caput.astro import skyfield as csf
+        from ch_ephem.observers import chime
+        from mpi4py import MPI
+        from skyfield.units import Angle
+
+        for cont in (cand, groups_maxx, groups_x0):
+            cont.redistribute("el")
+
+        el = cand.index_map["el"][:]
+        ra = cand.index_map["ra"][:]
+        xgrid = cand.index_map["x"][:]
+        for g in (groups_maxx, groups_x0):
+            if g.index_map["el"].size != el.size or not np.allclose(
+                g.index_map["ra"][:], ra
+            ):
+                raise ValueError(
+                    "The group maps must have the same elevations and start times "
+                    "as the candidate map."
+                )
+        lsd = _stream_lsd(cand)
+        pp = self.pol
+        dy = np.median(np.diff(el))
+        dra = np.median(np.diff(ra))
+        tsamp = float(cand.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
+        lat = np.radians(chime.latitude)
+
+        # The maps of the best trial and of telescope-x = 0, on every rank
+        snr = cand.snr[:].allgather()[pp].astype(np.float32)
+        wgt = cand.weight[:].allgather()[pp]
+        xidx = cand.datasets["x_index"][:].allgather()[pp]
+        valid = (wgt > 0) & np.isfinite(snr)
+        img = np.where(valid, snr, 0.0).astype(np.float32)
+
+        names0 = _decode_names(groups_x0.index_map["group"][:])
+        if "all" not in names0:
+            raise ValueError("groups_x0 must have a group named 'all'.")
+        x0 = mpiarray.MPIArray.wrap(
+            np.ascontiguousarray(groups_x0.snr[:].local_array[pp, names0.index("all")]),
+            axis=0,
+            comm=groups_x0.comm,
+        ).allgather()
+
+        # Candidates, and the finer peaks used along the rows
+        de = max(1, round(self.peak_dy / dy))
+        pe, pt = _local_peaks(img, de, self.peak_dt, self.seed_snr)
+        if pe.size > self.max_candidates:
+            self.log.warning(
+                f"Keeping the brightest {self.max_candidates} of {pe.size} candidates."
+            )
+            pe, pt = pe[: self.max_candidates], pt[: self.max_candidates]
+        ncand = pe.size
+        nfine = max(1, round(self.row_peak_dra / dra))
+        fe, ft = _local_peaks(img, 1, nfine, self.row_snr)
+        order = np.argsort(fe, kind="stable")
+        fe, ft = fe[order], ft[order]
+        fs = img[fe, ft]
+        fra = ra[ft]
+
+        # Rows lit at the same time, and candidates at the same time
+        hot = (np.abs(np.nan_to_num(x0)) > self.col_snr) & valid
+        hot3 = hot.copy()
+        hot3[:, 1:] |= hot[:, :-1]
+        hot3[:, :-1] |= hot[:, 1:]
+        col_count = hot3.sum(axis=0)
+        col_bg = scipy.ndimage.median_filter(
+            col_count, size=2 * self.col_bg_dt + 1, mode="nearest"
+        )
+        cand_count = np.bincount(pt, minlength=ra.size)
+        cand_count3 = cand_count.copy()
+        cand_count3[1:] += cand_count[:-1]
+        cand_count3[:-1] += cand_count[1:]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            wrow = np.nanmedian(np.where(wgt > 0, wgt, np.nan), axis=1)
+
+        names_g = _decode_names(groups_maxx.index_map["group"][:])
+        out = containers.TransientCandidateTable(
+            candidate=ncand,
+            group=np.array(names_g),
+            freq=groups_maxx.index_map["freq"][:],
+            attrs_from=cand,
+            comm=cand.comm,
+        )
+        rec = np.zeros(ncand, dtype=out.candidate[:].dtype)
+        for name in rec.dtype.names:
+            if rec.dtype[name].kind == "f":
+                rec[name] = np.nan
+        rec["band_nsig"] = -1
+        out.attrs["lsd"] = lsd
+        for key in (
+            "seed_snr", "peak_dy", "peak_dt", "grow_snr", "row_snr", "row_ratio",
+            "row_dy", "row_dra", "col_snr", "group_snr_min", "cat_ddec", "cat_dra",
+        ):  # fmt: skip
+            out.attrs[key] = getattr(self, key)
+        if self.catalogue:
+            out.attrs["catalogue"] = self.catalogue
+
+        if ncand == 0:
+            self.log.info("No candidates.")
+            return out
+
+        # Position and best trial
+        ix = xidx[pe, pt].astype(int)
+        rec["el_index"] = pe
+        rec["ra_index"] = pt
+        rec["x_index"] = ix
+        rec["y"] = el[pe]
+        rec["x"] = xgrid[ix]
+        rec["ra"] = ra[pt]
+        rec["unix"] = chime.lsd_to_unix(lsd + ra[pt] / 360.0)
+        rec["snr"] = img[pe, pt]
+        for name in ("amplitude", "duration", "spectral_index"):
+            vals = np.zeros(ncand, dtype=np.float64)
+            dset = cand.datasets[name][:]
+            off, nloc = dset.local_offset[1], dset.local_shape[1]
+            mine = (pe >= off) & (pe < off + nloc)
+            vals[mine] = dset.local_array[pp, pe[mine] - off, pt[mine]]
+            cand.comm.Allreduce(MPI.IN_PLACE, vals, op=MPI.SUM)
+            rec[name] = vals
+        rec["duration"] *= tsamp
+        rec["weight_ratio"] = wgt[pe, pt] * tools.invert_no_zero(
+            np.nan_to_num(wrow[pe])
+        )
+
+        # Sky position
+        ha_c = cand.datasets["ha"][:][pe, ix]
+        dec_c = cand.datasets["dec"][:][pe, ix]
+        ra_cirs = (ra[pt] - ha_c) % 360.0
+        epoch = csf.unix_to_skyfield_time(chime.lsd_to_unix(lsd + 0.5))
+        star = chime.star_cirs(Angle(degrees=ra_cirs), Angle(degrees=dec_c), epoch)
+        rec["ra_icrs"] = np.atleast_1d(star.ra._degrees) % 360.0
+        rec["dec_icrs"] = np.atleast_1d(star.dec.degrees)
+        rec["ha"] = ha_c
+
+        # Shape, and the other peaks along the row
+        nbox_e = max(1, round(self.box_dy / dy))
+        nbox_t = max(1, round(self.box_dra / dra))
+        nrow = max(0, round(self.row_dy / dy))
+        eight = np.ones((3, 3))
+        for k in range(ncand):
+            e, t = pe[k], pt[k]
+            peak = img[e, t]
+            e0, e1 = max(e - nbox_e, 0), min(e + nbox_e + 1, el.size)
+            t0, t1 = max(t - nbox_t, 0), min(t + nbox_t + 1, ra.size)
+            sub = img[e0:e1, t0:t1]
+            ce, ct = e - e0, t - t0
+
+            lab, _ = scipy.ndimage.label(sub >= max(0.5 * peak, self.grow_snr), eight)
+            comp = lab == lab[ce, ct]
+            rec["npix"][k] = comp.sum()
+            rec["fwhm_y"][k] = _run_length(comp[:, ct], ce) * dy
+            rec["fwhm_t"][k] = _run_length(comp[ce], ct) * tsamp
+            rec["x_spread"][k] = np.std(xidx[e0:e1, t0:t1][comp])
+
+            lab, _ = scipy.ndimage.label(sub >= self.grow_snr, eight)
+            isl = lab == lab[ce, ct]
+            ie, it = np.nonzero(isl)
+            rec["island_npix"][k] = ie.size
+            rec["island_dy"][k] = (np.ptp(ie) + 1) * dy
+            rec["island_dt"][k] = (np.ptp(it) + 1) * tsamp
+            if ie.size >= 3 and np.ptp(ie) > 0 and np.ptp(it) > 0:
+                w = sub[ie, it]
+                yy, rr = el[e0 + ie], ra[t0 + it]
+                ym, rm = np.average(yy, weights=w), np.average(rr, weights=w)
+                cyr = np.average((yy - ym) * (rr - rm), weights=w)
+                vr = np.average((rr - rm) ** 2, weights=w)
+                vy = np.average((yy - ym) ** 2, weights=w)
+                rec["island_slope"][k] = cyr / vr
+                rec["island_corr"][k] = cyr / np.sqrt(vr * vy)
+
+            lo, hi = np.searchsorted(fe, [e - nrow, e + nrow + 1])
+            near = np.abs(fra[lo:hi] - ra[t])
+            other = (near <= self.row_dra) & (np.abs(ft[lo:hi] - t) > self.peak_dt)
+            if np.any(other):
+                rec["row_max_ratio"][k] = fs[lo:hi][other].max() / peak
+            else:
+                rec["row_max_ratio"][k] = 0.0
+            strong = other & (fs[lo:hi] >= max(self.row_snr, self.row_ratio * peak))
+            rec["row_npeak"][k] = strong.sum()
+            if strong.any():
+                times = np.sort(np.concatenate([fra[lo:hi][strong], [ra[t]]]))
+                gaps = np.diff(times) * 240.0 * 0.99727
+                rec["row_spacing"][k] = np.median(gaps)
+                if gaps.size >= 2:
+                    rec["row_spacing_cv"][k] = np.std(gaps) / np.mean(gaps)
+
+        rec["col_nrows"] = col_count[pt]
+        rec["col_nrows_bg"] = col_bg[pt]
+        rec["col_ncand"] = cand_count3[pt]
+
+        # S/N of each group of bands at the candidate
+        gsnr = np.zeros((ncand, len(names_g)), dtype=np.float64)
+        loc = groups_maxx.snr[:]
+        off, nloc = loc.local_offset[2], loc.local_shape[2]
+        mine = (pe >= off) & (pe < off + nloc)
+        if np.any(mine):
+            gsnr[mine] = loc.local_array[pp][:, pe[mine] - off, pt[mine]].T
+        groups_maxx.comm.Allreduce(MPI.IN_PLACE, gsnr, op=MPI.SUM)
+        out.datasets["group_snr"][:] = gsnr
+        sub = np.array([n != "all" for n in names_g])
+        if np.any(sub):
+            gs = gsnr[:, sub]
+            pos = np.clip(gs, 0.0, None) ** 2
+            rec["group_nsig"] = np.sum(gs > self.group_snr_min, axis=1)
+            rec["group_frac_max"] = pos.max(axis=1) * tools.invert_no_zero(
+                pos.sum(axis=1)
+            )
+            rec["group_best"] = np.flatnonzero(sub)[np.argmax(gs, axis=1)]
+
+        # The Sun and bright sources
+        lst = ra[pt]
+        _, sra, sdec = _source_positions(["sun"], {}, lsd)
+        sun_ha = _wrap_deg(lst - sra[0])
+        _, sun_alt = _telescope_y_alt(sun_ha, sdec[0], lat)
+        rec["sun_ha"] = sun_ha
+        rec["sun_alt"] = sun_alt
+        if self.bright_sources:
+            bnames, bra, bdec = _source_positions(self.bright_sources, {}, lsd)
+            fmin, fmax = self.freq_range
+            best_track = np.full(ncand, np.inf)
+            best_lobe = np.full(ncand, np.inf)
+            for name, r_b, d_b in zip(bnames, bra, bdec):
+                ha_b = _wrap_deg(lst - r_b)
+                y_b, alt_b = _telescope_y_alt(ha_b, d_b, lat)
+                up = alt_b > 0
+                dyk = el[pe] - y_b
+                better = up & (np.abs(dyk) < best_track)
+                best_track[better] = np.abs(dyk[better])
+                rec["track_name"][better] = name
+                rec["track_dy"][better] = dyk[better]
+                rec["track_ha"][better] = ha_b[better]
+                flobe = _C_M_MHZ / (self.ns_spacing * np.maximum(np.abs(dyk), 1e-6))
+                hit = up & (flobe >= fmin) & (flobe <= fmax)
+                better = hit & (np.abs(ha_b) < best_lobe)
+                best_lobe[better] = np.abs(ha_b[better])
+                rec["lobe_name"][better] = name
+                rec["lobe_ha"][better] = ha_b[better]
+                rec["lobe_freq"][better] = flobe[better]
+
+        # Catalogue
+        if self._cat is not None:
+            cdec = self._cat["dec"]
+            lo = np.searchsorted(cdec, rec["dec_icrs"] - self.cat_ddec)
+            hi = np.searchsorted(cdec, rec["dec_icrs"] + self.cat_ddec)
+            for k in range(ncand):
+                if hi[k] == lo[k]:
+                    continue
+                d0 = rec["dec_icrs"][k]
+                dr = _wrap_deg(self._cat["ra"][lo[k] : hi[k]] - rec["ra_icrs"][k])
+                dr = dr * np.cos(np.radians(d0))
+                within = np.flatnonzero(np.abs(dr) <= self.cat_dra)
+                if within.size == 0:
+                    continue
+                j = within[np.argmax(self._cat["flux"][lo[k] : hi[k]][within])]
+                rec["cat_name"][k] = self._cat["name"][lo[k] + j]
+                rec["cat_flux"][k] = self._cat["flux"][lo[k] + j]
+                rec["cat_dra"][k] = dr[j]
+                rec["cat_ddec"][k] = self._cat["dec"][lo[k] + j] - d0
+                rec["cat_nmatch"][k] = within.size
+            nomatch = rec["cat_nmatch"] == 0
+            rec["cat_flux"][nomatch] = 0.0
+
+        out.candidate[:] = rec
+        self.log.info(
+            f"Found {ncand} candidates with S/N >= {self.seed_snr:g} "
+            f"(brightest {rec['snr'][0]:.1f})."
+        )
+        return out
+
+
+class AddCandidateSpectra(tasklib.base.ContainerTask):
+    """Add the amplitude in each band to a table of candidates.
+
+    For each candidate, the amplitude and weight of each band of the per-band
+    matched filter at its telescope-y, start time and telescope-x are stored in the
+    ``spectrum`` and ``spectrum_weight`` datasets, and summarised in the ``band_*``
+    columns: ``band_nsig``, the number of bands with S/N above ``snr_min``;
+    ``band_frac_max``, the fraction of the positive S/N^2 in the brightest band;
+    ``band_best_freq``, its centre (MHz); and ``band_alpha`` and ``band_chi2``, the
+    spectral index and reduced chi-squared of the best-fitting power law.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation.  Default is 0.
+    duration : int
+        Duration of the trial (in samples).  Default is 1.
+    snr_min : float
+        S/N above which a band counts as detected.  Default is 3.
+    reference_freq : float
+        Reference frequency (MHz) of the power-law fit.  Default is 600.
+    alphas : list of float
+        Spectral indices of the fit.  Default is -5 to 5 in steps of 0.1.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    duration = config.Property(proptype=int, default=1)
+    snr_min = config.Property(proptype=float, default=3.0)
+    reference_freq = config.Property(proptype=float, default=600.0)
+    alphas = config.list_type(
+        type_=float, default=list(np.round(np.arange(-5, 5.01, 0.1), 1))
+    )
+
+    def process(self, table, bands):
+        """Add the spectra.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates, from :class:`GroupTransientCandidates`.
+        bands : containers.TransientMatchedFilter
+            Matched filter output for each band, on the same elevations and with the
+            start times of the candidates (it may extend beyond them).
+
+        Returns
+        -------
+        table : containers.TransientCandidateTable
+            The input, with the spectra added.
+        """
+        from mpi4py import MPI
+
+        bands.redistribute("el")
+        centre = bands.index_map["freq"]["centre"][:]
+        tcentre = table.index_map["freq"]["centre"][:]
+        if centre.size != tcentre.size or not np.allclose(centre, tcentre):
+            raise ValueError("The bands differ from those of the candidate table.")
+        durations = list(bands.index_map["duration"][:])
+        if self.duration not in durations:
+            raise ValueError(f"Duration {self.duration} is not in {durations}.")
+        idur = durations.index(self.duration)
+
+        rec = table.candidate[:]
+        ncand = rec.size
+        ra_b = bands.index_map["ra"][:]
+        dra = np.median(np.diff(ra_b))
+        tb = np.clip(np.searchsorted(ra_b, rec["ra"] - 0.5 * dra), 0, ra_b.size - 1)
+        if ncand and np.any(np.abs(ra_b[tb] - rec["ra"]) > 0.01 * dra):
+            raise ValueError("The start times of the candidates are not in the bands.")
+        if bands.index_map["el"].size <= (rec["el_index"].max() if ncand else 0):
+            raise ValueError("The elevations of the candidates are not in the bands.")
+
+        amp = np.zeros((ncand, centre.size), dtype=np.float64)
+        wgt = np.zeros((ncand, centre.size), dtype=np.float64)
+        la, lw = bands.amplitude[:], bands.weight[:]
+        off, nloc = la.local_offset[3], la.local_shape[3]
+        e = rec["el_index"].astype(int)
+        mine = (e >= off) & (e < off + nloc)
+        if np.any(mine):
+            sel = (e[mine] - off, tb[mine], rec["x_index"][mine].astype(int))
+            amp[mine] = la.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
+            wgt[mine] = lw.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
+        bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
+        bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+
+        table.add_dataset("spectrum")
+        table.add_dataset("spectrum_weight")
+        table.datasets["spectrum"][:] = amp
+        table.datasets["spectrum_weight"][:] = wgt
+
+        alphas = np.array(self.alphas, dtype=np.float64)
+        for k in range(ncand):
+            stats = _spectrum_stats(
+                centre, amp[k], wgt[k], self.snr_min, self.reference_freq, alphas
+            )
+            for name, val in zip(
+                (
+                    "band_nsig",
+                    "band_frac_max",
+                    "band_best_freq",
+                    "band_alpha",
+                    "band_chi2",
+                ),
+                stats,
+            ):
+                rec[name][k] = val
+        table.candidate[:] = rec
+        table.attrs["band_snr_min"] = self.snr_min
+
+        self.log.info(f"Added the spectra of {ncand} candidates.")
+        return table
+
+
+class SiftTransientCandidates(tasklib.base.ContainerTask):
+    """Flag the candidates that are explained by something other than a transient.
+
+    Each test sets a bit in ``flags`` of the ``sift`` table, and a candidate is kept
+    if no test flags it.  The bits are (with the properties that set them):
+
+    - 0 ``snr``: S/N below ``snr_min``.
+    - 1 ``sun``: within ``sun_ha_max`` degrees of hour angle of the Sun.
+    - 2 ``track``: within ``track_dy_max`` in telescope-y of the track of the Sun or
+      a bright source.
+    - 3 ``lobe``: on a grating lobe of the Sun or a bright source within
+      ``lobe_ha_max`` degrees of hour angle.
+    - 4 ``broadband``: ``col_nrows_max`` or more rows lit at the same time, more
+      than the running median over the neighbouring samples.
+    - 5 ``row_repeat``: more than ``row_npeak_max`` other peaks along the row, unless
+      they are periodic.
+    - 6 ``catalogue``: a catalogue source brighter than ``cat_flux_ratio`` times the
+      candidate's amplitude within the match region, which could leave a residual
+      of that size.
+    - 7 ``narrowband``: more than ``band_frac_max`` of the S/N^2 in one band (if the
+      spectra were added), or else more than ``group_frac_max`` in one group of
+      bands.
+    - 8 ``arc``: an island extending at least ``arc_dy_min`` in telescope-y and
+      ``arc_dt_min`` seconds, with |correlation| of at least ``arc_corr_min``.
+    - 9 ``wide``: wider than ``fwhm_y_max`` in telescope-y at half the peak.
+    - 10 ``low_weight``: weight below ``weight_ratio_min`` times the median of the
+      row (mostly flagged data).
+    - 11 ``horizon``: |telescope-y| above ``horizon_y_max``, where the sensitivity is
+      low and RFI from the ground is strong.
+    - 16 ``periodic`` (information only): at least ``periodic_npeak_min`` other
+      peaks along the row, spaced by at least ``periodic_spacing_min`` seconds with
+      a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
+      keeps out the flicker of scintillation, whose local maxima are spaced by about
+      the width of the window that finds them.
+
+    Attributes
+    ----------
+    select : bool
+        Return only the candidates that are kept.  Default is False (all, with
+        their flags).
+    """
+
+    FLAGS: ClassVar = {
+        "snr": 0,
+        "sun": 1,
+        "track": 2,
+        "lobe": 3,
+        "broadband": 4,
+        "row_repeat": 5,
+        "catalogue": 6,
+        "narrowband": 7,
+        "arc": 8,
+        "wide": 9,
+        "low_weight": 10,
+        "horizon": 11,
+        "periodic": 16,
+    }
+    INFO: ClassVar = ("periodic",)
+
+    snr_min = config.Property(proptype=float, default=10.0)
+    sun_ha_max = config.Property(proptype=float, default=20.0)
+    track_dy_max = config.Property(proptype=float, default=0.02)
+    lobe_ha_max = config.Property(proptype=float, default=10.0)
+    col_nrows_max = config.Property(proptype=int, default=50)
+    row_npeak_max = config.Property(proptype=int, default=0)
+    periodic_npeak_min = config.Property(proptype=int, default=3)
+    periodic_cv_max = config.Property(proptype=float, default=0.15)
+    periodic_spacing_min = config.Property(proptype=float, default=240.0)
+    cat_flux_ratio = config.Property(proptype=float, default=10.0)
+    band_frac_max = config.Property(proptype=float, default=0.5)
+    group_frac_max = config.Property(proptype=float, default=0.7)
+    arc_dy_min = config.Property(proptype=float, default=0.02)
+    arc_dt_min = config.Property(proptype=float, default=20.0)
+    arc_corr_min = config.Property(proptype=float, default=0.7)
+    fwhm_y_max = config.Property(proptype=float, default=0.03)
+    weight_ratio_min = config.Property(proptype=float, default=0.05)
+    horizon_y_max = config.Property(proptype=float, default=0.95)
+    select = config.Property(proptype=bool, default=False)
+
+    def process(self, table):
+        """Sift the candidates.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates, from :class:`GroupTransientCandidates`.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy with the ``sift`` table, or only the candidates kept if ``select``.
+        """
+        rec = table.candidate[:]
+        flags = np.zeros(rec.size, dtype=np.uint32)
+
+        def flag(name, cond):
+            flags[np.asarray(cond, dtype=bool)] |= np.uint32(1 << self.FLAGS[name])
+
+        with np.errstate(invalid="ignore"):
+            flag("snr", rec["snr"] < self.snr_min)
+            flag("sun", np.abs(rec["sun_ha"]) < self.sun_ha_max)
+            flag("track", np.abs(rec["track_dy"]) < self.track_dy_max)
+            flag(
+                "lobe",
+                np.isfinite(rec["lobe_freq"])
+                & (np.abs(rec["lobe_ha"]) < self.lobe_ha_max),
+            )
+            flag(
+                "broadband",
+                rec["col_nrows"].astype(int) - rec["col_nrows_bg"]
+                >= self.col_nrows_max,
+            )
+            periodic = (
+                (rec["row_npeak"] >= self.periodic_npeak_min)
+                & (rec["row_spacing_cv"] < self.periodic_cv_max)
+                & (rec["row_spacing"] >= self.periodic_spacing_min)
+            )
+            flag("periodic", periodic)
+            flag("row_repeat", (rec["row_npeak"] > self.row_npeak_max) & ~periodic)
+            flag(
+                "catalogue",
+                rec["cat_flux"] >= self.cat_flux_ratio * np.abs(rec["amplitude"]),
+            )
+            has_bands = rec["band_nsig"] >= 0
+            flag(
+                "narrowband",
+                np.where(
+                    has_bands,
+                    rec["band_frac_max"] > self.band_frac_max,
+                    rec["group_frac_max"] > self.group_frac_max,
+                ),
+            )
+            flag(
+                "arc",
+                (rec["island_dy"] >= self.arc_dy_min)
+                & (rec["island_dt"] >= self.arc_dt_min)
+                & (np.abs(rec["island_corr"]) >= self.arc_corr_min),
+            )
+            flag("wide", rec["fwhm_y"] > self.fwhm_y_max)
+            flag("low_weight", rec["weight_ratio"] < self.weight_ratio_min)
+            flag("horizon", np.abs(rec["y"]) > self.horizon_y_max)
+
+        reject = np.uint32(
+            sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
+        )
+        keep = (flags & reject) == 0
+
+        counts = ", ".join(
+            f"{n} {np.sum((flags >> b) & 1)}" for n, b in self.FLAGS.items()
+        )
+        self.log.info(
+            f"Kept {keep.sum()} of {rec.size} candidates.  Flagged: {counts}."
+        )
+
+        rows = np.flatnonzero(keep) if self.select else np.arange(rec.size)
+        out = containers.TransientCandidateTable(
+            candidate=rows.size,
+            axes_from=table,
+            attrs_from=table,
+            comm=table.comm,
+        )
+        for name in table.datasets:
+            if name not in out.datasets:
+                out.add_dataset(name)
+            out.datasets[name][:] = table.datasets[name][:][rows]
+        if "sift" not in out.datasets:
+            out.add_dataset("sift")
+        sift = np.zeros(rows.size, dtype=out.datasets["sift"][:].dtype)
+        sift["keep"] = keep[rows]
+        sift["flags"] = flags[rows]
+        out.datasets["sift"][:] = sift
+        out.attrs["sift_flags"] = json.dumps(self.FLAGS)
+        for key in (
+            "snr_min", "sun_ha_max", "track_dy_max", "lobe_ha_max", "col_nrows_max",
+            "row_npeak_max", "periodic_npeak_min", "periodic_cv_max",
+            "periodic_spacing_min", "cat_flux_ratio",
+            "band_frac_max", "group_frac_max", "arc_dy_min", "arc_dt_min",
+            "arc_corr_min", "fwhm_y_max", "weight_ratio_min", "horizon_y_max",
+        ):  # fmt: skip
+            out.attrs[f"sift_{key}"] = getattr(self, key)
         return out
