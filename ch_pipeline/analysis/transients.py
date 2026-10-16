@@ -1907,10 +1907,15 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     filtered data of its neighbours, out of its own template.  The amplitudes used
     as weights are clipped at ``clip`` times their typical value in the row.  A
     bright transient would still reach the templates of its neighbours through its
-    ringing in their filtered data, beyond ``gap``.  So samples that the starting
-    template cannot explain (weighted residual power more than ``flag_threshold``
-    robust standard deviations above the row's median) are flagged, and neither
-    they nor the samples within ``ring`` of them are used to build templates.
+    ringing in their filtered data (which extends beyond ``gap``) and through its
+    neighbours' starting templates.  This only matters for transients much
+    brighter than the local scintillation.  Scintillation can only be a small
+    fraction of the foreground, while a transient can be any size, so samples
+    whose filtered data, in excess of the noise, have more than ``flag_fraction``
+    of the weighted amplitude of the starting template are flagged, and neither
+    they nor the samples within ``ring`` of them are used to build templates.  (A test of how well the starting
+    template explains the data would also flag the scintillation spikes in rows
+    where that template is wrong, which are what the template has to learn.)
 
     Attributes
     ----------
@@ -1958,9 +1963,12 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     clip : float
         Clip the amplitudes used to build the "neighbours" template at this many
         times the square root of their median power in the row.  Default is 5.
-    flag_threshold : float
-        Flag samples whose residual power after the starting fit is this many
-        robust standard deviations above the median of the row.  Default is 5.
+    flag_fraction : float
+        Flag samples whose filtered data, in excess of the noise (whose level is
+        the median of the row), are larger than this fraction of the starting
+        template, ``sum w |d|^2 - noise > flag_fraction^2 sum w |phi_0 f_hat|^2``, and
+        more than 5 sigma above the noise.  Default is 0.1, well above the largest
+        scintillation seen (1-2% rms).
     ring : int
         Samples within this of a flagged sample are not used to build templates.
         Default is the half-length of the stored filter response.
@@ -1986,7 +1994,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
     gap = config.Property(proptype=int, default=5)
     niter = config.Property(proptype=int, default=2)
     clip = config.Property(proptype=float, default=5.0)
-    flag_threshold = config.Property(proptype=float, default=5.0)
+    flag_fraction = config.Property(proptype=float, default=0.1)
     ring = config.Property(proptype=int, default=None)
 
     def process(self, stream, unfiltered):
@@ -2152,19 +2160,21 @@ class SubtractScintillation(tasklib.base.ContainerTask):
             allreduce(G1, B1)
             return G1, B1
 
-        def residual_power(e_chunk, a, esl):
-            """Weighted power of d - a e and the number of channels, over frequency."""
+        def data_power(esl):
+            """Weighted power of the filtered data, and its expectation for noise."""
             ne = esl.stop - esl.start
-            chi = np.zeros((nfit, new, ne, nra), dtype=np.float64)
-            nch = np.zeros((nfit, new, ne, nra), dtype=np.float64)
+            pw = np.zeros((nfit, new, ne, nra), dtype=np.float64)
+            npw = np.zeros((nfit, new, ne, nra), dtype=np.float64)
             for ff in range(nfreq_local):
                 for pp in range(npol):
                     _, d, wt = template(pp, ff, esl)
                     pf = 0 if self.combine_pol else pp
-                    chi[pf] += wt * np.abs(d - a[pf] * e_chunk[pp, ff]) ** 2
-                    nch[pf] += wt > 0
-            allreduce(chi, nch)
-            return chi, nch
+                    pw[pf] += wt * np.abs(d) ** 2
+                    # E|n|^2 = 1 / w, so the weighted noise power is wt / w
+                    w = weight[pp, ff][:, np.newaxis, :].astype(np.float64)
+                    npw[pf] += np.where(wt > 0, wt / np.where(w > 0, w, 1.0), 0.0)
+            allreduce(pw, npw)
+            return pw, npw
 
         def rebuild(a, esl, use):
             """Template of each sample from its neighbours, channel by channel.
@@ -2216,7 +2226,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                     G1, B1 = neighbour_amplitudes(e_chunk, esl)
                     if g_init is None:
                         g_init = G1.copy()
-                        use = self._unexplained(e_chunk, G1, B1, esl, residual_power)
+                        use = self._unexplained(G1, *data_power(esl))
                     else:
                         # Keep the weighted norm of the starting template at each
                         # sample, so that the amplitudes stay fractions of the
@@ -2303,22 +2313,27 @@ class SubtractScintillation(tasklib.base.ContainerTask):
 
         return stream, fit
 
-    def _unexplained(self, e_chunk, G, B, esl, residual_power):
-        """Samples to use for building templates: not unexplained, nor near one.
+    def _unexplained(self, g_init, pw, npw):
+        """Samples to use for building templates: not too bright, nor near one.
 
-        The residual power per channel after fitting the starting template is
-        compared with the median of the row; samples more than ``flag_threshold``
-        robust standard deviations above it are flagged, and the samples within
-        ``ring`` of them are left out as well.
+        Samples whose filtered data, in excess of the noise, have more than
+        ``flag_fraction`` of the weighted amplitude of the starting template cannot
+        be scintillation and are flagged, and the samples within ``ring`` of them
+        are left out as well.
         """
-        a = np.where(G > 0, B / np.where(G > 0, G, 1.0), 0.0)
-        chi, nch = residual_power(e_chunk, a, esl)
-        ok = nch > 0
-        x = np.where(ok, chi / np.where(ok, nch, 1.0), np.nan)
-        med = np.nanmedian(x, axis=-1, keepdims=True)
-        mad = 1.4826 * np.nanmedian(np.abs(x - med), axis=-1, keepdims=True)
-        mad = np.where(np.isfinite(mad), mad, np.inf)
-        bad = ok & (x > med + self.flag_threshold * mad)
+        ok = g_init > 0
+        # The noise level of each row, relative to the weights, is the median over
+        # RA of the measured to the expected power (the weights do not include the
+        # noise scale)
+        ratio = np.where(ok & (npw > 0), pw / np.where(npw > 0, npw, 1.0), np.nan)
+        scale = np.nanmedian(ratio, axis=-1, keepdims=True)
+        scale = np.where(np.isfinite(scale), scale, 1.0)
+        excess = pw - scale * npw
+        bad = (
+            ok
+            & (excess > self.flag_fraction**2 * g_init)
+            & (excess > 5.0 * scale * np.sqrt(2.0 * npw))
+        )
         if self._ring > 0 and np.any(bad):
             bad = scipy.ndimage.maximum_filter1d(
                 bad.astype(np.uint8), size=2 * self._ring + 1, axis=-1, mode="constant"
