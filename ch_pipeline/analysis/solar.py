@@ -1198,3 +1198,278 @@ def _swap_inputs(prod, conj):
     tmp["input_a"] = np.where(conj, prod["input_b"], prod["input_a"])
     tmp["input_b"] = np.where(conj, prod["input_a"], prod["input_b"])
     return tmp
+
+
+class SolarCleanVisGrid(tasklib.base.ContainerTask):
+    """Clean the Sun from gridded visibilities with a fit smooth in frequency and time.
+
+    For each baseline (east-west and north-south separation) and polarisation of a
+    :class:`draco.core.containers.VisGridStream`, the samples taken while the Sun is
+    up are fringestopped to the Sun and fitted with
+
+        V(nu, t) exp(-2 pi i b . s_sun(t) / lambda) = sum_kl c_kl S_k(nu) B_l(t),
+
+    and the fit, times the Sun's fringe, is subtracted.  ``S_k`` are discrete prolate
+    spheroidal sequences on the frequency channels with delays up to ``delay_max``
+    (the eigenvectors of ``sinc(2 delay_max (nu_i - nu_j))`` with eigenvalues above
+    ``eig_threshold`` times the largest), and ``B_l`` are cubic B-splines in time
+    with knots every ``knot_spacing`` minutes, separately for each period with the
+    Sun above ``alt_min``.
+
+    The fit absorbs the Sun's response on each baseline whatever its origin: the
+    primary beam of the feeds of that baseline (which differs between baselines by
+    ~10% near transit and more in the sidelobes), the resolved disk and its
+    projection, and slow changes in the solar flux.  It is a filter in delay and
+    fringe rate centred on those of the Sun, which follows the Sun across the sky.
+    A transient within the primary beam is within ``delay_max`` of the Sun's delay
+    on all but the longest baselines, so only its shortness protects it: a pulse of
+    duration T loses roughly T / ``knot_spacing`` of its amplitude while the Sun is
+    up (e.g. 17% for 30 s with 3 minute knots).  Finer knots follow the Sun more
+    closely and cost more.
+
+    Each sample touches four splines, so the normal equations are block-banded in
+    time.  They are built sample by sample (the frequency Gram matrix of each
+    sample, weighted by the visibility weights) and solved by a banded Cholesky
+    decomposition, with ``ridge`` times the mean of the diagonal added to it.
+
+    Attributes
+    ----------
+    delay_max : float
+        Largest delay of the fit in ns.  Default is 120.
+    knot_spacing : float
+        Spacing of the spline knots in minutes.  Default is 3.
+    alt_min : float
+        Fit and subtract while the Sun is above this altitude, in degrees.  Default
+        is 0.
+    freq_chunk : float
+        If set, fit separate pieces of the band of this width (MHz), which is
+        cheaper for wide bands.  Default is None (the whole band).
+    eig_threshold : float
+        Keep the frequency basis functions with eigenvalues above this fraction of
+        the largest.  Default is 1e-10 (1e-6 leaves ~1e-4 of a bright Sun).
+    ridge : float
+        Regularisation, as a fraction of the mean of the diagonal of the normal
+        equations.  Default is 1e-8.
+    in_place : bool
+        Subtract from the input instead of a copy.  Default is False.
+    """
+
+    delay_max = config.Property(proptype=float, default=120.0)
+    knot_spacing = config.Property(proptype=float, default=3.0)
+    alt_min = config.Property(proptype=float, default=0.0)
+    freq_chunk = config.Property(proptype=float, default=None)
+    eig_threshold = config.Property(proptype=float, default=1e-10)
+    ridge = config.Property(proptype=float, default=1e-8)
+    in_place = config.Property(proptype=bool, default=False)
+
+    def process(self, gstream):
+        """Clean the Sun.
+
+        Parameters
+        ----------
+        gstream : draco.core.containers.VisGridStream
+            Gridded visibilities, with an ``lsd`` (or ``csd``) attribute.
+
+        Returns
+        -------
+        out : draco.core.containers.VisGridStream
+            The visibilities with the Sun subtracted while it is up.
+        """
+        out = gstream if self.in_place else gstream.copy()
+        out.redistribute("ns")
+
+        lsd = out.attrs.get("lsd", out.attrs.get("csd"))
+        if lsd is None:
+            raise ValueError("The stream has no lsd attribute.")
+        lsd = float(np.atleast_1d(lsd)[0])
+        ra = out.ra[:]
+        times = chime.lsd_to_unix(lsd + ra / 360.0)
+
+        # The Sun in telescope coordinates
+        sun = sun_coord(times, deg=False)
+        ha, dec, alt = sun[:, 0], sun[:, 1], sun[:, 2]
+        lat = np.radians(chime.latitude)
+        rot = np.radians(getattr(chime, "rotation", 0.0))
+        xs = -np.cos(dec) * np.sin(ha)
+        ys = np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(ha)
+        ew_sun = np.cos(rot) * xs + np.sin(rot) * ys
+        ns_sun = -np.sin(rot) * xs + np.cos(rot) * ys
+
+        segments = _true_runs(alt > np.radians(self.alt_min))
+        if not segments:
+            self.log.info("The Sun is not up.")
+            return out
+
+        freq = out.freq[:]
+        chunks = self._freq_chunks(freq)
+        sbases = [
+            _dpss_basis(freq[c], self.delay_max * 1e-3, self.eig_threshold)
+            for c in chunks
+        ]
+        self.log.info(
+            f"Fitting {len(segments)} periods with the Sun up, "
+            f"{sum(s.stop - s.start for s in segments)} samples, with "
+            f"{sum(b.shape[1] for b in sbases)} frequency functions in "
+            f"{len(chunks)} pieces of the band."
+        )
+
+        tbases = [
+            _spline_basis(times[seg], self.knot_spacing * 60.0) for seg in segments
+        ]
+
+        ew = out.index_map["ew"][:]
+        ns_local = out.vis[:].local_bounds
+        ns = out.index_map["ns"][:][ns_local]
+        vis = out.vis[:].local_array  # pol, freq, ew, ns, ra
+        weight = out.weight[:].local_array
+
+        inv_lambda = freq * 1e6 / scipy.constants.c
+        npol, _, new, nns, _ = vis.shape
+        removed = np.zeros(2)
+        for seg, (ib, bv, nbasis) in zip(segments, tbases):
+            for ie in range(new):
+                for jn in range(nns):
+                    # Fringe of the Sun [freq, time]
+                    delay = ew[ie] * ew_sun[seg] + ns[jn] * ns_sun[seg]
+                    fringe = np.exp(2.0j * np.pi * inv_lambda[:, np.newaxis] * delay)
+                    for pp in range(npol):
+                        w = weight[pp, :, ie, jn, seg]
+                        if not np.any(w > 0):
+                            continue
+                        d = vis[pp, :, ie, jn, seg] * fringe.conj()
+                        model = np.zeros(d.shape, dtype=np.complex128)
+                        for chunk, sb in zip(chunks, sbases):
+                            model[chunk] = _fit_smooth(
+                                d[chunk], w[chunk], sb, ib, bv, nbasis, self.ridge
+                            )
+                        removed += [
+                            np.sum(w * np.abs(model) ** 2),
+                            np.sum(w * np.abs(d) ** 2),
+                        ]
+                        vis[pp, :, ie, jn, seg] -= (model * fringe).astype(vis.dtype)
+
+        total = np.zeros(2)
+        out.comm.Allreduce(removed, total)
+        self.log.info(
+            f"The Sun model holds {total[0] / max(total[1], 1e-30):.3f} of the weighted "
+            "power while the Sun is up."
+        )
+        out.attrs["solar_clean"] = (
+            f"delay_max {self.delay_max} ns, knot_spacing {self.knot_spacing} min, "
+            f"alt_min {self.alt_min} deg"
+        )
+        return out
+
+    def _freq_chunks(self, freq):
+        """Index arrays of the pieces of the band that are fitted separately."""
+        if not self.freq_chunk:
+            return [np.arange(freq.size)]
+        edges = np.arange(freq.min(), freq.max() + self.freq_chunk, self.freq_chunk)
+        piece = np.clip(np.digitize(freq, edges) - 1, 0, edges.size - 1)
+        return [np.flatnonzero(piece == p) for p in np.unique(piece)]
+
+
+def _true_runs(mask):
+    """Slices of the runs of True values of a 1D boolean array."""
+    padded = np.concatenate([[False], mask, [False]])
+    change = np.flatnonzero(np.diff(padded.astype(int)))
+    return [slice(a, b) for a, b in zip(change[::2], change[1::2])]
+
+
+def _dpss_basis(freq, delay_max, threshold):
+    """Discrete prolate spheroidal basis on frequencies (MHz) for delays up to delay_max (us).
+
+    Returns
+    -------
+    basis : np.ndarray[nfreq, nfunc]
+        Orthonormal columns, ordered by decreasing concentration.
+    """
+    dnu = freq[:, np.newaxis] - freq[np.newaxis, :]
+    kernel = np.sinc(2.0 * delay_max * dnu)
+    lam, vec = np.linalg.eigh(kernel)
+    keep = lam > threshold * lam.max()
+    return vec[:, keep][:, ::-1]
+
+
+def _spline_basis(t, spacing):
+    """Cubic B-splines in time with knots every ``spacing`` seconds.
+
+    Returns
+    -------
+    index : np.ndarray[ntime, 4]
+        Index of the four splines that are non-zero at each sample.
+    value : np.ndarray[ntime, 4]
+        Their values.
+    nbasis : int
+        Number of splines.
+    """
+    from scipy.interpolate import BSpline
+
+    span = max(t[-1] - t[0], 1e-6)
+    nint = max(int(np.ceil(span / spacing)), 1)
+    inner = np.linspace(t[0], t[-1], nint + 1)
+    knots = np.concatenate([[inner[0]] * 3, inner, [inner[-1]] * 3])
+    nbasis = knots.size - 4
+    dm = BSpline.design_matrix(np.clip(t, inner[0], inner[-1]), knots, 3).tocsr()
+    index = np.zeros((t.size, 4), dtype=np.int64)
+    value = np.zeros((t.size, 4))
+    first = np.clip(np.searchsorted(inner, t, side="right") - 1, 0, nint - 1)
+    for ii in range(4):
+        index[:, ii] = first + ii
+        value[:, ii] = np.asarray(dm[np.arange(t.size), first + ii]).ravel()
+    return index, value, nbasis
+
+
+def _fit_smooth(d, w, sbasis, tindex, tvalue, nbasis, ridge):
+    """Weighted least-squares fit of ``d[freq, time]`` by ``S(freq) x B(time)``.
+
+    The normal equations are block-banded in time and solved by a banded Cholesky
+    decomposition.  Returns the model on the same grid.
+    """
+    from scipy.linalg import solveh_banded
+
+    nk = sbasis.shape[1]
+    nt = d.shape[1]
+    w = np.where(np.isfinite(d), w, 0.0)
+    d = np.where(w > 0, d, 0.0)
+
+    # Gram matrix and projection of each sample on the frequency basis
+    gram = np.einsum("fk,fl,ft->tkl", sbasis, sbasis, w, optimize=True)  # t, k, k
+    proj = np.einsum("fk,ft->tk", sbasis, w * d, optimize=True)  # t, k
+
+    # Upper blocks (l, l + o) for o = 0..3 (the matrix is symmetric), and the
+    # right-hand side
+    blocks = np.zeros((nbasis, 4, nk, nk))
+    rhs = np.zeros((nbasis, nk), dtype=np.complex128)
+    for ii in range(4):
+        np.add.at(rhs, tindex[:, ii], tvalue[:, ii, np.newaxis] * proj)
+        for jj in range(ii, 4):
+            np.add.at(
+                blocks,
+                (tindex[:, ii], jj - ii),
+                (tvalue[:, ii] * tvalue[:, jj])[:, np.newaxis, np.newaxis] * gram,
+            )
+    # Upper banded storage: ab[u + i - j, j] = A[i, j] for i <= j
+    npar = nbasis * nk
+    u = 4 * nk - 1
+    ab = np.zeros((u + 1, npar))
+    for o in range(4):
+        for a in range(nk):
+            for b in range(nk):
+                i = np.arange(nbasis - o) * nk + a
+                j = (np.arange(nbasis - o) + o) * nk + b
+                ok = i <= j
+                ab[u + i[ok] - j[ok], j[ok]] = blocks[: nbasis - o, o, a, b][ok]
+    diag = ab[u]
+    ab[u] = diag + ridge * max(np.mean(diag), 1e-30)
+
+    rhs = rhs.reshape(npar)
+    sol = solveh_banded(ab, np.stack([rhs.real, rhs.imag], axis=-1), lower=False)
+    coeff = (sol[:, 0] + 1j * sol[:, 1]).reshape(nbasis, nk)
+
+    # Model: S @ coeff[l]^T, combined over the four splines of each sample
+    h = sbasis @ coeff.T  # freq, nbasis
+    model = np.zeros((sbasis.shape[0], nt), dtype=np.complex128)
+    for ii in range(4):
+        model += h[:, tindex[:, ii]] * tvalue[:, ii]
+    return model
