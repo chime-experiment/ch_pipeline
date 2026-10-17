@@ -2757,6 +2757,16 @@ def _nearest_ra_index(ra, ra0):
     return best[1]
 
 
+def _local_rfi_mask(stream, el_slc):
+    """Local part of the ``rfi_mask`` dataset [freq, el, ra], or None if absent."""
+    if "rfi_mask" not in stream.datasets:
+        return None
+    rm = stream.rfi_mask[:]
+    if rm.local_bounds != el_slc:
+        raise RuntimeError("rfi_mask is not distributed like the data.")
+    return rm.local_array
+
+
 def _self_conjugate(pol, ew):
     """Which [pol, ew] hybrid visibilities are formed with their own conjugate.
 
@@ -3159,6 +3169,351 @@ class _BandMixin:
         return band_index, band_map
 
 
+class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
+    """Flag narrowband RFI in m-mode filtered hybrid visibilities.
+
+    At each polarisation, east-west baseline, elevation and sample, the filtered
+    visibilities are averaged over the channels of each band, weighted by their
+    inverse noise variance, and the band averages are fit with a spectrally smooth
+    model: discrete prolate spheroidal sequences in frequency for delays up to
+    ``|ew| x_max / c + delay_pad``.  A signal from the sky within ``x_max`` of the
+    meridian, such as a broadband transient, has a fringe with a delay below
+    ``|ew| x_max / c``, and ``delay_pad`` allows for the structure of its spectrum
+    and of the beam, so the model takes it up, while a feature confined to a few
+    bands is left in the residual ``r_b``.  Its expected power is
+
+        v_b = s_b (1 / A_b -/+ q_b + epsilon^2 |m_b|^2)
+
+    where ``1 / A_b`` is the thermal variance of the band average (from the
+    weights and the noise scale), ``q_b`` the variance of the model at the band
+    (subtracted for a band in the fit, added for one left out), ``m_b`` the model,
+    and ``epsilon`` the fractional error of the model for a bright broadband
+    signal.  ``s_b`` is a local scale: the running median over ``local_window``
+    samples on either side of ``|r_b|^2 / (v_b / s_b)``, divided by ln 2 (its median
+    for noise), and at least one.  It follows the noise that scales with the sky
+    near bright sources, which is not spectrally smooth, but not features much
+    shorter than the window, so RFI that stays in one row for longer is missed.
+
+    The statistic of each band, elevation and sample is ``Z = sum |r_b|^2 / v_b``
+    over the polarisations and baselines, which for noise has a gamma distribution
+    with shape the number of terms.  Bands with ``Z`` above ``clip`` (as an
+    equivalent Gaussian significance) are left out of the fit, which is repeated
+    ``niter`` times.  At most a fraction ``max_clip`` of the bands (those with the
+    largest ``Z``) are left out at each sample, so that a sample that departs from
+    the model in many bands is still flagged.  Bands above ``threshold`` are
+    flagged, the flags are grown into the connected region of elevation and sample
+    above ``grow_threshold`` in the same band, and then dilated by ``dilate_el``
+    elevations and ``dilate_ra`` samples (without wrapping in right ascension).
+
+    The flags are stored in the ``rfi_mask`` dataset [freq, el, ra], set for all
+    the channels of a flagged band and shared by the polarisations and baselines.
+    :class:`EstimateSkyNoise` and :class:`TransientMatchedFilterSkyNoise` leave
+    those samples out.  The input is modified.
+
+    Attributes
+    ----------
+    pol : list of str
+        Polarisations to use.  Default is ["XX", "YY"].
+    ew_index : list of int
+        Indices of the east-west baselines to use.  Default is all except 0 m,
+        whose co-polar visibilities are real.
+    x_max : float
+        Largest telescope-x of a signal that the smooth model must take up.
+        Default is 0.1.
+    delay_pad : float
+        Delay in ns added to the geometric delay of each baseline.  Default is 10.
+    dpss_threshold : float
+        Keep the sequences with concentration above this fraction of the largest.
+        Default is 1e-4.
+    epsilon : float
+        Fractional error of the model.  Default is 0.2.
+    local_window : int
+        Half-width in samples of the running median.  Zero turns it off.  Default
+        is 30.
+    threshold : float
+        Significance for flagging.  Default is 5.
+    grow_threshold : float
+        Significance for growing the flags.  Default is 3.
+    clip : float
+        Significance for leaving bands out of the fit.  Default is 4.
+    niter : int
+        Number of refits.  Default is 2.
+    max_clip : float
+        Largest fraction of the bands left out of the fit.  Default is 0.25.
+    dilate_el, dilate_ra : int
+        Dilation of the flags in elevations and samples.  Default is 1 for both.
+    ridge : float
+        Regularisation of the fit, relative to the mean of the diagonal of the
+        normal matrix.  Default is 1e-6.
+    nsample_chunk : int
+        Approximate number of samples fit at once.  Default is 8192.
+    """
+
+    pol = config.list_type(str, default=["XX", "YY"])
+    ew_index = config.list_type(int, default=None)
+    x_max = config.Property(proptype=float, default=0.1)
+    delay_pad = config.Property(proptype=float, default=10.0)
+    dpss_threshold = config.Property(proptype=float, default=1e-4)
+    epsilon = config.Property(proptype=float, default=0.2)
+    local_window = config.Property(proptype=int, default=30)
+    threshold = config.Property(proptype=float, default=5.0)
+    grow_threshold = config.Property(proptype=float, default=3.0)
+    clip = config.Property(proptype=float, default=4.0)
+    niter = config.Property(proptype=int, default=2)
+    max_clip = config.Property(proptype=float, default=0.25)
+    dilate_el = config.Property(proptype=int, default=1)
+    dilate_ra = config.Property(proptype=int, default=1)
+    ridge = config.Property(proptype=float, default=1e-6)
+    nsample_chunk = config.Property(proptype=int, default=8192)
+
+    def process(self, stream):
+        """Flag the narrowband RFI.
+
+        Parameters
+        ----------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            m-mode filtered visibilities, with the ``noise_scale`` dataset if the
+            noise is to be measured relative to it.
+
+        Returns
+        -------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The input with the ``rfi_mask`` dataset.
+        """
+        from scipy.special import gammainccinv
+        from scipy.stats import norm
+
+        from .solar import _dpss_basis
+
+        if "elevation_vis_weight" in stream.datasets:
+            raise ValueError("Elevation-dependent weights are not supported.")
+
+        pol = list(stream.index_map["pol"])
+        ipol = [pol.index(p) for p in self.pol]
+        ew = stream.index_map["ew"][:]
+        iew = (
+            [ii for ii in range(ew.size) if ew[ii] != 0.0]
+            if self.ew_index is None
+            else list(self.ew_index)
+        )
+        self_conj = _self_conjugate(self.pol, ew[iew])
+        terms = [
+            (pp, ee)
+            for ii, pp in enumerate(ipol)
+            for jj, ee in enumerate(iew)
+            if not self_conj[ii, jj]
+        ]
+        if len(terms) < self_conj.size:
+            self.log.warning("Leaving out the real co-polar 0 m visibilities.")
+        if not terms:
+            raise ValueError("No polarisations and baselines to use.")
+        nterm = len(terms)
+
+        freq = stream.freq[:]
+        band_index, band_map = self._assign_bands(freq)
+        nband = band_map.size
+        chans = [np.flatnonzero(band_index == bb) for bb in range(nband)]
+
+        nel = stream.index_map["el"].size
+        ra = stream.ra[:]
+        nra = ra.size
+        periodic = _is_full_day(ra) and bool(stream.attrs.get("ra_periodic", True))
+
+        # Weights of the filtered data have no el axis: gather them
+        stream.redistribute("freq")
+        weight = stream.weight[:].allgather()  # pol, freq, ew, ra
+
+        # Smooth basis of each term, at the weighted mean frequency of each band
+        basis = []
+        for pp, ee in terms:
+            wsum = weight[pp, :, ee].sum(axis=-1).astype(np.float64)
+            fb = band_map["centre"].copy()
+            for bb, cc in enumerate(chans):
+                if wsum[cc].sum() > 0:
+                    fb[bb] = np.sum(wsum[cc] * freq[cc]) / wsum[cc].sum()
+            tau = abs(ew[ee]) * self.x_max / scipy.constants.c + 1e-9 * self.delay_pad
+            basis.append(_dpss_basis(fb, 1e6 * tau, self.dpss_threshold))
+        self.log.info(
+            "Smooth model with "
+            + ", ".join(
+                f"{basis[ii].shape[1]} sequences for ew = {ew[ee]:0.1f} m"
+                for ii, (pp, ee) in enumerate(terms)
+                if pp == terms[0][0]
+            )
+            + f" over {nband} bands."
+        )
+
+        # Thresholds on Z for each number of terms
+        def zthr(sigma):
+            p = norm.sf(sigma)
+            return np.array(
+                [np.inf] + [gammainccinv(n, p) for n in range(1, nterm + 1)]
+            )
+
+        thr_flag = zthr(self.threshold)
+        thr_grow = zthr(self.grow_threshold)
+        thr_clip = zthr(self.clip)
+
+        if "rfi_mask" not in stream.datasets:
+            stream.add_dataset("rfi_mask")
+        stream.redistribute(["el", "freq"])
+        vis = stream.vis[:].local_array
+        el_slc = stream.vis[:].local_bounds
+        nel_local = vis.shape[3]
+        if stream.rfi_mask[:].local_bounds != el_slc:
+            raise RuntimeError("rfi_mask is not distributed like the data.")
+        if "noise_scale" in stream.datasets:
+            ns = stream.noise_scale[:]
+            if ns.local_bounds != el_slc:
+                raise RuntimeError("noise_scale is not distributed like the data.")
+            nscale = ns.local_array  # pol, freq, ew, el
+        else:
+            self.log.info("No noise_scale dataset: using the weights alone.")
+            nscale = None
+
+        stat = np.zeros((nband, nel_local, nra), dtype=np.float32)
+        nstat = np.zeros((nband, nel_local, nra), dtype=np.int16)
+        nrow = max(1, self.nsample_chunk // nra)
+        t0 = time.time()
+        for e0 in range(0, nel_local, nrow):
+            esl = slice(e0, min(e0 + nrow, nel_local))
+            ne = esl.stop - esl.start
+
+            # Band averages and their inverse variance [term, band, el, ra]
+            Y = np.zeros((nterm, nband, ne, nra), dtype=np.complex128)
+            A = np.zeros((nterm, nband, ne, nra), dtype=np.float64)
+            for it, (pp, ee) in enumerate(terms):
+                for bb, cc in enumerate(chans):
+                    d = vis[pp, cc, ee, esl]  # chan, el, ra
+                    a = np.broadcast_to(weight[pp, cc, ee][:, np.newaxis], d.shape)
+                    if nscale is not None:
+                        isc = tools.invert_no_zero(nscale[pp, cc, ee, esl])
+                        a = a * isc[..., np.newaxis]
+                    ok = np.isfinite(d) & (a > 0)
+                    a = np.where(ok, a, 0.0)
+                    A[it, bb] = a.sum(axis=0)
+                    Y[it, bb] = np.sum(a * np.where(ok, d, 0.0), axis=0)
+            Y *= tools.invert_no_zero(A)
+            Y = Y.reshape(nterm, nband, -1)
+            A = A.reshape(nterm, nband, -1)
+
+            valid = A > 0
+            nvalid = valid.sum(axis=0)
+            clipped = np.zeros((nband, Y.shape[-1]), dtype=bool)
+            for ii in range(self.niter + 1):
+                power = self._residual_power(Y, A, ~clipped, basis)
+                if ii == 0:
+                    scale = self._local_scale(power, valid, ne, nra, periodic)
+                Z = np.sum(np.where(valid, power / scale, 0.0), axis=0)
+                if ii < self.niter:
+                    clipped = self._clip(Z, clipped | (Z > thr_clip[nvalid]))
+
+            stat[:, esl] = Z.reshape(nband, ne, nra)
+            nstat[:, esl] = nvalid.reshape(nband, ne, nra)
+        self.log.debug(f"Fit the band averages in {time.time() - t0:0.1f} seconds.")
+
+        # Grow and dilate the flags in each band, over all elevations
+        seed = mpiarray.MPIArray.wrap(stat > thr_flag[nstat], axis=1, comm=self.comm)
+        grow = mpiarray.MPIArray.wrap(stat > thr_grow[nstat], axis=1, comm=self.comm)
+        seed = seed.redistribute(0).local_array
+        grow = grow.redistribute(0).local_array
+        struct = np.ones((2 * self.dilate_el + 1, 2 * self.dilate_ra + 1), dtype=bool)
+        flag = np.zeros_like(seed)
+        for bb in range(seed.shape[0]):
+            if seed[bb].any():
+                flag[bb] = scipy.ndimage.binary_propagation(
+                    seed[bb], mask=grow[bb] | seed[bb]
+                )
+                flag[bb] = scipy.ndimage.binary_dilation(flag[bb], structure=struct)
+        flag = mpiarray.MPIArray.wrap(flag, axis=0, comm=self.comm).redistribute(1)
+        if flag.local_shape[1] != nel_local:
+            raise RuntimeError("The flags are not distributed like the data.")
+        flag = flag.local_array
+
+        mask = stream.rfi_mask[:].local_array  # freq, el, ra
+        mask[:] = False
+        for bb, cc in enumerate(chans):
+            mask[cc] = flag[bb]
+
+        nflag = self.comm.allreduce(flag.sum(axis=(1, 2)))
+        frac = nflag / float(nel * nra)
+        top = np.argsort(frac)[::-1][:5]
+        self.log.info(
+            f"Flagged {frac.mean():0.2%} of the band samples; most in "
+            + ", ".join(
+                f"{band_map['centre'][bb]:0.1f} MHz ({frac[bb]:0.2%})" for bb in top
+            )
+            + "."
+        )
+
+        return stream
+
+    def _clip(self, Z, clipped):
+        """Limit the bands left out at each sample to the ``max_clip`` largest."""
+        nbad = clipped.sum(axis=0)
+        nmax = int(self.max_clip * Z.shape[0])
+        over = nbad > nmax
+        if over.any():
+            rank = np.argsort(np.argsort(-Z[:, over], axis=0), axis=0)
+            clipped[:, over] &= rank < nmax
+        return clipped
+
+    def _residual_power(self, Y, A, use, basis):
+        """Power of the residual from the smooth fit relative to its expectation.
+
+        Parameters
+        ----------
+        Y, A : np.ndarray[term, band, sample]
+            Band averages and their inverse variance.
+        use : np.ndarray[band, sample]
+            Bands to use in the fit.
+        basis : list of np.ndarray[band, nfunc]
+            Smooth basis of each term.
+
+        Returns
+        -------
+        power : np.ndarray[term, band, sample]
+            ``|r_b|^2 (1 / A_b -/+ q_b + epsilon^2 |m_b|^2)^-1``.
+        """
+        power = np.zeros(Y.shape, dtype=np.float64)
+        for it, phi in enumerate(basis):
+            nfunc = phi.shape[1]
+            outer = (phi[:, :, np.newaxis] * phi[:, np.newaxis, :]).reshape(
+                phi.shape[0], -1
+            )  # band, func * func
+            a = np.where(use, A[it], 0.0)  # band, sample
+            G = (a.T @ outer).reshape(-1, nfunc, nfunc)
+            diag = np.trace(G, axis1=1, axis2=2) / nfunc
+            empty = diag <= 0.0
+            reg = np.where(empty, 1.0, self.ridge * diag)
+            G += reg[:, np.newaxis, np.newaxis] * np.eye(nfunc)
+            Ginv = np.linalg.inv(G)  # sample, func, func
+            rhs = (a * Y[it]).T @ phi  # sample, func
+            coeff = np.matmul(Ginv, rhs[:, :, np.newaxis])[..., 0]
+            model = phi @ coeff.T  # band, sample
+            q = outer @ Ginv.reshape(Ginv.shape[0], -1).T  # band, sample
+
+            inv_a = tools.invert_no_zero(A[it])
+            var = np.where(use, inv_a - q, inv_a + q)
+            var = np.maximum(var, 1e-3 * inv_a) + self.epsilon**2 * np.abs(model) ** 2
+            var[:, empty] = np.inf
+            power[it] = np.abs(Y[it] - model) ** 2 * tools.invert_no_zero(var)
+        return power
+
+    def _local_scale(self, power, valid, nel, nra, periodic):
+        """Running median of the residual power along RA, in units of the noise."""
+        if self.local_window <= 0:
+            return np.ones_like(power)
+        p = np.where(valid, power, 0.0).astype(np.float32)
+        p = p.reshape(*power.shape[:2], nel, nra)
+        med = scipy.ndimage.median_filter(
+            p,
+            size=(1, 1, 1, 2 * self.local_window + 1),
+            mode="wrap" if periodic else "nearest",
+        )
+        return np.maximum(med / np.log(2.0), 1.0).reshape(power.shape)
+
+
 class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     """Fit the noise of m-mode filtered visibilities that scales with the sky.
 
@@ -3197,7 +3552,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
 
     The 0 m baseline is excluded by default: its co-polar visibilities are real and
     its unfiltered visibilities are dominated by the receiver noise rather than the
-    sky.
+    sky.  Samples flagged in the ``rfi_mask`` dataset (see :class:`FlagNarrowbandRFI`)
+    are left out.
 
     Attributes
     ----------
@@ -3353,6 +3709,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         else:
             self.log.info("No noise_scale dataset: using the weights alone.")
             scale = None
+        rfi = _local_rfi_mask(stream, el_slc)
 
         src_mask = np.zeros((nsrc, nel_local, nra), dtype=bool)
         ra_off = ((ra[np.newaxis, :] - src_ra[:, np.newaxis] + 180.0) % 360.0) - 180.0
@@ -3446,6 +3803,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                         & np.isfinite(F)
                         & np.isfinite(R)
                     )
+                    if rfi is not None:
+                        valid &= ~rfi[chans]
                     X = np.abs(F) ** 2
                     R2 = np.abs(R) ** 2
 
@@ -4065,6 +4424,10 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         wname = "noise_weight" if has_response else hvis._weight_dset_name
         if "elevation_vis_weight" in hvis.datasets:
             raise ValueError("Elevation-dependent weights are not supported.")
+        if "rfi_mask" in hvis.datasets:
+            raise ValueError(
+                "The RFI mask is not supported: use TransientMatchedFilterSkyNoise."
+            )
         weight_all = hvis[wname][:].allgather()[ipol][:, :, iew].astype(np.float32)
 
         # On the 0 m baseline, the co-polar hybrid visibilities are formed from each
@@ -4631,6 +4994,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     constant within each band of telescope-y.  Bands or baselines without a fit have
     no sky term.
 
+    Samples flagged in the ``rfi_mask`` dataset (see :class:`FlagNarrowbandRFI`)
+    are given zero weight, here and in the local rescaling below.
+
     Attributes
     ----------
     groups : dict
@@ -4822,6 +5188,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             nscale = ns.local_array[np.ix_(ipol, np.arange(freq.size), iew)]
         else:
             nscale = np.ones((len(ipol), freq.size, len(iew), nel_local), np.float32)
+        rfi = _local_rfi_mask(hvis, el_slc)
 
         common = {
             "pol": opol,
@@ -4893,6 +5260,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 vis,
                 uvis,
                 nscale,
+                rfi,
                 inv_w,
                 fsel,
                 ipol,
@@ -4940,6 +5308,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     & np.isfinite(data)
                     & np.isfinite(sky_v)
                 )
+                if rfi is not None:
+                    ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
                 wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
                 data = np.where(ok, data, 0.0)
                 sky_v = np.where(ok, sky_v, 0.0)
@@ -5150,11 +5520,25 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return resp_cross, var_cross
 
     def _local_scale(
-        self, vis, uvis, nscale, inv_w, fsel, ipol, ipu, iew, iewu, k2coh, k2tot, yband
+        self,
+        vis,
+        uvis,
+        nscale,
+        rfi,
+        inv_w,
+        fsel,
+        ipol,
+        ipu,
+        iew,
+        iewu,
+        k2coh,
+        k2tot,
+        yband,
     ):
         """Rescaling of the sky term of one band at each local elevation and sample.
 
-        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra].
+        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra], and
+        ``rfi`` is the local RFI mask [freq, el, ra] or None.
 
         Returns
         -------
@@ -5173,6 +5557,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             sv = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
             var = nscale[:, fsel][..., esl, np.newaxis] * inv_w
             ok = (var > 0) & np.isfinite(d) & np.isfinite(sv)
+            if rfi is not None:
+                ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
             a = np.where(ok, tools.invert_no_zero(var), 0.0)
             d = np.where(ok, d, 0.0)
             sv = np.where(ok, sv, 0.0)
