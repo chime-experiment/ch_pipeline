@@ -4578,7 +4578,7 @@ def _nearest_psd_correlation(rho):
 
 
 class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
-    """Single-sample matched filter including the noise that scales with the sky.
+    """Matched filter including the noise that scales with the sky.
 
     The filtered data are modelled as thermal noise plus the residual fitted by
     :class:`EstimateSkyNoise`: for visibility ``k`` (polarisation, channel and
@@ -4601,7 +4601,21 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     unfiltered data, combined over the polarisations with ``rho_pol``.  For each
     spectral index the bands are weighted by ``s_b = (nu_b / nu_ref)^alpha`` as in
     :class:`TransientMatchedFilter`.  With ``kappa = 0`` the result is that of
-    :class:`TransientMatchedFilter` for single-sample trials.
+    :class:`TransientMatchedFilter`.
+
+    For a duration of W samples the template follows the source along its track as
+    in :class:`TransientMatchedFilter`.  The numerator, the diagonal of the response
+    and the variance above are summed along the track, and the filter couples the
+    samples of the track: the response gets
+    ``sum_k sum_{j != j'} g_kj^* g_kj' W_k(t_j) (-P_k[t_j, t_j'])`` and the variance
+    the thermal ``sum_k sum_{j != j'} g_kj^* g_kj' W_k(t_j) (-P_k[t_j, t_j'])
+    sigma_k^2(t_j') W_k(t_j')``, since the thermal noise after the filter has
+    covariance ``(delta - P[t, t']) sigma^2(t')``.  The sky term is taken as
+    independent between samples (it is white at 10 s after the filter).  These need
+    the filter response out to lag W - 1.  The per-band output and the group maps
+    are single-sample only (``band_durations`` must be [1]), and with the local
+    rescaling ``local_gap`` must be at least W - 1, so that a pulse does not raise
+    its own noise.
 
     The sub-band maps of :class:`CollapseBandsToGroups` are made here too, since
     the correlation between bands is needed for their noise.  Each entry of
@@ -4701,11 +4715,21 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         groups : ch_pipeline.core.containers.TransientBandGroupMap
             One for each entry of ``group_x_reduce``, if ``groups`` is set.
         """
-        if sorted(set(self.durations)) != [1] or sorted(set(self.band_durations)) != [
-            1
-        ]:
+        durations = sorted(set(self.durations))
+        if min(durations) < 1:
+            raise ValueError("Durations must be at least one sample.")
+        if sorted(set(self.band_durations)) != [1] or durations[0] != 1:
             raise ValueError(
-                "Only single-sample trials are supported with the sky noise."
+                "With the sky noise, durations must include 1 and band_durations must "
+                "be [1]."
+            )
+        wmax = max(durations)
+        if self.local_window > 0 and (
+            self.local_gap < wmax - 1 or self.local_window <= self.local_gap
+        ):
+            raise ValueError(
+                f"Durations up to {wmax} samples need local_gap >= {wmax - 1} (and "
+                "local_window > local_gap), or local_window = 0."
             )
         alphas = np.array(self.spectral_indices, dtype=np.float64)
 
@@ -4714,6 +4738,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         has_response = "ra_response" in hvis.datasets
         if has_response:
             lag_index = {d: ii for ii, d in enumerate(hvis.index_map["lag"])}
+        if wmax > 1 and (not has_response or max(hvis.index_map["lag"]) < wmax - 1):
+            raise ValueError(
+                f"Durations up to {wmax} samples require the filter response out to "
+                f"lag {wmax - 1}."
+            )
 
         pol = list(hvis.index_map["pol"])
         ipol = [pol.index(p) for p in self.pol]
@@ -4803,7 +4832,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             "comm": hvis.comm,
         }
         trials = containers.TransientMatchedFilterTrials(
-            duration=np.array([1]), spectral_index=alphas, **common
+            duration=np.array(durations), spectral_index=alphas, **common
         )
         bands = containers.TransientMatchedFilter(
             freq=band_map, duration=np.array([1]), **common
@@ -4836,6 +4865,17 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         pbeam *= visible[el_slc][np.newaxis, np.newaxis]
         lmbda = scipy.constants.c / (freq * 1e6)
         u = ew[iew][np.newaxis, :] / lmbda[:, np.newaxis]  # freq, ew
+
+        # For durations longer than one sample: the tracks, and the coupling of the
+        # samples of a track by the filter, summed over the bands for each spectral
+        # index [spectral index, duration, pol group, el, x, ra]
+        long_w = [W for W in durations if W > 1]
+        periodic = _is_full_day(ra) and bool(hvis.attrs.get("ra_periodic", True))
+        if long_w:
+            track = self._tracks(ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax)
+            cshp = (alphas.size, len(long_w), ngp, nel_local, nx, nra)
+            cross_r = np.zeros(cshp, dtype=np.float32)
+            cross_v = np.zeros(cshp, dtype=np.float32)
 
         for bb in range(nband):
             fsel = np.flatnonzero(band_index == bb)
@@ -4926,6 +4966,22 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     resp[gg, bb, esl] = np.matmul(g2, kmat(wr))
                     vinc[gg, bb, esl] = np.matmul(g2, kmat(wv))
 
+                    if long_w:
+                        cr, cv = self._track_cross(
+                            tc,
+                            kmat(wt),
+                            kmat(var_th),
+                            resp_t[grp].reshape(-1, *resp_t.shape[3:]),
+                            lag_index,
+                            track[:, esl],
+                            long_w,
+                        )
+                        for iw in range(len(long_w)):
+                            for ia in range(alphas.size):
+                                sb2 = scale[bb, ia] ** 2
+                                cross_r[ia, iw, gg, esl] += sb2 * cr[iw]
+                                cross_v[ia, iw, gg, esl] += sb2 * cv[iw]
+
                     vp = []
                     for pp in grp:
                         tp = template[pp].reshape(-1, *template.shape[3:])
@@ -4987,6 +5043,32 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     if timag is not None:
                         im, _ = self._amp_weight(ni, rs, vr)
                         timag[gg, 0, ia, ee] = im.T
+                    if not long_w:
+                        continue
+
+                    # Longer durations: sums along the tracks, plus the coupling
+                    tr = track[:, ee : ee + 1]
+                    parts = [nm, rs, vr] + ([ni] if ni is not None else [])
+                    sums = [
+                        self._track_numerator(a[np.newaxis], tr, durations)
+                        for a in parts
+                    ]
+                    for iw, W in enumerate(long_w):
+                        iwd = durations.index(W)
+                        valid = (
+                            np.ones(nra, dtype=bool)
+                            if periodic
+                            else np.arange(nra) <= nra - W
+                        )
+                        rs_w = sums[1][iwd][0].real + cross_r[ia, iw, gg, ee]
+                        vr_w = sums[2][iwd][0].real + 0.5 * cross_v[ia, iw, gg, ee]
+                        rs_w = np.where(valid, rs_w, 0.0)
+                        amp, wgt = self._amp_weight(sums[0][iwd][0].real, rs_w, vr_w)
+                        tamp[gg, iwd, ia, ee] = amp.T
+                        twgt[gg, iwd, ia, ee] = wgt.T
+                        if timag is not None:
+                            im, _ = self._amp_weight(sums[3][iwd][0].real, rs_w, vr_w)
+                            timag[gg, iwd, ia, ee] = im.T
 
         group_maps = self._group_maps(
             hvis,
@@ -5004,6 +5086,68 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             nel_local,
         )
         return (trials, bands, *group_maps)
+
+    @staticmethod
+    def _track_cross(tc, wt, var_th, presp, lag_index, track, long_w):
+        """Coupling by the filter of the different samples along the tracks.
+
+        For each duration W in ``long_w``, the terms ``j != j'`` (both < W) of the
+        response and of the thermal variance of the numerator (see the class
+        docstring), for a transient starting at each sample.
+
+        Parameters
+        ----------
+        tc : np.ndarray[k, el, x]
+            Template at each grid x.
+        wt, var_th : np.ndarray[el, k, ra]
+            Total weight and thermal variance of each visibility.
+        presp : np.ndarray[k, ra, lag]
+            Filter response ``P[t, t + d]``.
+        lag_index : dict
+            Index of each lag ``d`` in ``presp``.
+        track : np.ndarray[wmax, el, x]
+            From :meth:`TransientMatchedFilter._tracks`.
+        long_w : list of int
+            Durations, all longer than one sample, in increasing order.
+
+        Returns
+        -------
+        resp_cross, var_cross : list of np.ndarray[el, x, ra]
+            For each duration in ``long_w``.
+        """
+        wmax = max(long_w)
+        _, nel, nx = tc.shape
+        nra = wt.shape[-1]
+
+        # Template along the track at each step [j][el, x, k]
+        g = []
+        for jj in range(wmax):
+            idx = track[jj]
+            gj = np.take_along_axis(tc, np.maximum(idx, 0)[np.newaxis], axis=2)
+            g.append(np.where(idx[np.newaxis] >= 0, gj, 0.0).transpose(1, 2, 0))
+        wv = wt * var_th
+
+        acc_r = np.zeros((nel, nx, nra), dtype=np.complex128)
+        acc_v = np.zeros((nel, nx, nra), dtype=np.complex128)
+        resp_cross, var_cross = [], []
+        for W in range(2, wmax + 1):
+            jn = W - 1
+            pairs = [(jn, jp) for jp in range(jn)] + [(jj, jn) for jj in range(jn)]
+            for jj, jp in pairs:
+                coeff = g[jj].conj() * g[jp]  # el, x, k
+                # -W(t) P[t, t + d] at t = tau + j, and the thermal variance and weight
+                # at t' = tau + j'
+                a_r = np.roll(
+                    -wt * presp[np.newaxis, :, :, lag_index[jp - jj]], -jj, axis=-1
+                )
+                a_v = a_r * np.roll(wv, -jp, axis=-1)
+                acc_r += np.matmul(coeff, a_r.astype(np.complex64))
+                acc_v += np.matmul(coeff, a_v.astype(np.complex64))
+            if W in long_w:
+                resp_cross.append(acc_r.real.astype(np.float32))
+                var_cross.append(acc_v.real.astype(np.float32))
+
+        return resp_cross, var_cross
 
     def _local_scale(
         self, vis, uvis, nscale, inv_w, fsel, ipol, ipu, iew, iewu, k2coh, k2tot, yband
