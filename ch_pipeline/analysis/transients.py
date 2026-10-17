@@ -3222,7 +3222,11 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     the running median (centred, over the samples with data) within
     ``local_window`` samples on either side in the same band and row of ``Z`` over
     its median for noise, and at least one.  A track crosses a row in a few
-    samples, so it barely changes the median.
+    samples, so it barely changes the median.  Where the sky dominates (``s`` above
+    ``sky_scale_max``, near the transits of the Sun and the brightest sources), its
+    fluctuations are common to all rows at once and look like vertical tracks, so
+    no pixel is lit there; those samples have little weight in the matched filter
+    anyway.
 
     In each band, a pixel is lit if ``Z / s`` is above the value that noise exceeds
     with the probability of a Gaussian S/N above ``snr_lit`` in magnitude, and its
@@ -3268,6 +3272,9 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         rows) and 1.
     local_window : int
         Half-width in samples of the running median.  Default is 30 (5 minutes).
+    sky_scale_max : float
+        Largest local scale (total over thermal variance) at which pixels can be
+        lit.  Zero turns the limit off.  Default is 3.
     nsample_chunk : int
         Approximate number of samples averaged at once.  Default is 65536.
     """
@@ -3282,6 +3289,7 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     grow_dy = config.Property(proptype=float, default=0.0033)
     grow_dt = config.Property(proptype=int, default=1)
     local_window = config.Property(proptype=int, default=30)
+    sky_scale_max = config.Property(proptype=float, default=3.0)
     nsample_chunk = config.Property(proptype=int, default=65536)
 
     def process(self, stream):
@@ -3422,6 +3430,8 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
                 excess, size=(2 * L + 1, 5), mode="constant"
             )
             lit = valid & (zs > z_lit[nz[bb]]) & (excess > self.rel**2 * near)
+            if self.sky_scale_max > 0:
+                lit &= s <= self.sky_scale_max
             flag[bb] = _line_mask(lit, valid, lines, self.lit_frac)
             if flag[bb].any():
                 flag[bb] = scipy.ndimage.binary_dilation(flag[bb], structure=grow)
