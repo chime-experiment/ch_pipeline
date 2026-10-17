@@ -6536,9 +6536,9 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     - At the same time: ``col_nrows``, the number of rows with |S/N| above
       ``col_snr`` at telescope-x = 0 (group "all" of ``groups_x0``) within one sample
       of the candidate's start; ``col_nrows_bg``, the running median of that number
-      over +-``col_bg_dt`` samples, which is high during scintillation episodes and
-      low for a burst of broadband RFI; and ``col_ncand``, the number of candidates
-      within one sample.
+      over the samples with data within +-``col_bg_dt``, which is high during
+      scintillation episodes and low for a burst of broadband RFI; and
+      ``col_ncand``, the number of candidates within one sample.
     - Spectrum: ``group_snr`` (a separate dataset) is the S/N of each group of bands
       at the best telescope-x of that group; ``group_nsig`` is the number of groups
       (other than "all") above ``group_snr_min``, ``group_frac_max`` the fraction of
@@ -6741,8 +6741,10 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         hot3[:, 1:] |= hot[:, :-1]
         hot3[:, :-1] |= hot[:, 1:]
         col_count = hot3.sum(axis=0)
-        col_bg = scipy.ndimage.median_filter(
-            col_count, size=2 * self.col_bg_dt + 1, mode="nearest"
+        col_bg = median.moving_weighted_median(
+            col_count.astype(np.float64),
+            valid.any(axis=0).astype(np.float64),
+            2 * self.col_bg_dt + 1,
         )
         cand_count = np.bincount(pt, minlength=ra.size)
         cand_count3 = cand_count.copy()

@@ -10,9 +10,9 @@ import caput.astro.time as ctime
 import numpy as np
 import pytz
 import scipy.constants
-import scipy.ndimage
 import skyfield
 from caput import config
+from caput.algorithms import median
 from caput.astro.skyfield import skyfield_wrapper
 from caput.containers import tod
 from caput.pipeline import tasklib
@@ -1570,9 +1570,10 @@ def _fit_shared(d, w, drift, nshared, niter, ridge, clip, clip_window=15):
         power = np.sum(w * np.abs(x) ** 2, axis=0) * _inv(nused)
         if not np.any(valid):
             return np.zeros(power.shape, dtype=bool)
-        filled = np.where(valid, power, np.median(power[valid]))
-        local = scipy.ndimage.median_filter(
-            filled, size=2 * clip_window + 1, mode="nearest"
+        local = median.moving_weighted_median(
+            np.ascontiguousarray(power, dtype=np.float64),
+            valid.astype(np.float64),
+            2 * clip_window + 1,
         )
         return power > clip * local
 
