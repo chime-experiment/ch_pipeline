@@ -10,6 +10,7 @@ import scipy.constants
 import scipy.interpolate
 import scipy.ndimage
 from caput import config, mpiarray
+from caput.algorithms import median
 from caput.pipeline import tasklib
 from draco.analysis.beamform import BeamFormExternalMixin
 from draco.analysis.ringmapmaker import find_grid_indices
@@ -3218,9 +3219,10 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     and baselines: ``Z``, which for noise has a gamma distribution with shape the
     number of terms ``n``.  The variance from the sky (the residual of bright
     sources, scintillation) is allowed for by dividing ``Z`` by a local scale ``s``,
-    the running median over ``local_window`` samples on either side in the same
-    band and row of ``Z`` over its median for noise, and at least one.  A track
-    crosses a row in a few samples, so it barely changes the median.
+    the running median (centred, over the samples with data) within
+    ``local_window`` samples on either side in the same band and row of ``Z`` over
+    its median for noise, and at least one.  A track crosses a row in a few
+    samples, so it barely changes the median.
 
     In each band, a pixel is lit if ``Z / s`` is above the value that noise exceeds
     with the probability of a Gaussian S/N above ``snr_lit`` in magnitude, and its
@@ -3398,17 +3400,22 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             valid = nz[bb] > 0
             if not valid.any():
                 continue
-            # Local scale from the running median along RA
-            r = np.where(valid, Z[bb] / z_med[nz[bb]], 0.0).astype(np.float32)
+            # Local scale from the running median along RA of the samples with data
             if self.local_window > 0:
-                s = scipy.ndimage.median_filter(
-                    r,
+                r = np.where(valid, Z[bb] / z_med[nz[bb]], 0.0).astype(np.float64)
+                w = valid.astype(np.float64)
+                pad = self.local_window if periodic else 0
+                if pad:
+                    r = np.concatenate([r[:, -pad:], r, r[:, :pad]], axis=1)
+                    w = np.concatenate([w[:, -pad:], w, w[:, :pad]], axis=1)
+                s = median.moving_weighted_median(
+                    np.ascontiguousarray(r),
+                    np.ascontiguousarray(w),
                     size=(1, 2 * self.local_window + 1),
-                    mode="wrap" if periodic else "nearest",
                 )
-                s = np.maximum(s, 1.0)
+                s = np.maximum(s[:, pad : pad + nra], 1.0)
             else:
-                s = np.ones_like(r)
+                s = np.ones(Z[bb].shape)
             zs = np.where(valid, Z[bb] / s, 0.0)
             excess = np.where(valid, zs - nz[bb], 0.0)
             near = scipy.ndimage.maximum_filter(
