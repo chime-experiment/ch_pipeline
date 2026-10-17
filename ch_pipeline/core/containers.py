@@ -1707,6 +1707,7 @@ class TransientCandidateTable(TableSpec):
                 ["band_best_freq", np.float32],
                 ["band_alpha", np.float32],
                 ["band_chi2", np.float32],
+                ["band_fit_frac", np.float32],
                 # Noise
                 ["weight_ratio", np.float32],
                 # The Sun and bright sources

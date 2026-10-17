@@ -5912,13 +5912,14 @@ def _spectrum_stats(freq, amp, weight, snr_min, ref_freq, alphas):
     """Summary of a spectrum of band amplitudes.
 
     Returns the number of bands with S/N above ``snr_min``, the fraction of the
-    positive S/N^2 in the brightest band, the centre of the brightest band, and the
+    positive S/N^2 in the brightest band, the centre of the brightest band, the
     spectral index and reduced chi-squared of the best-fitting power law (from the
-    grid ``alphas``).
+    grid ``alphas``), and the fraction of the spectrum's power that the power law
+    explains, 1 - chi^2 / chi^2_0, with chi^2_0 that of a zero spectrum.
     """
     ok = (weight > 0) & np.isfinite(amp)
     if not np.any(ok):
-        return -1, np.nan, np.nan, np.nan, np.nan
+        return -1, np.nan, np.nan, np.nan, np.nan, np.nan
     s = np.where(ok, amp * np.sqrt(np.where(ok, weight, 0.0)), 0.0)
     pos = np.clip(s, 0.0, None) ** 2
     frac = pos.max() / pos.sum() if pos.sum() > 0 else np.nan
@@ -5929,12 +5930,14 @@ def _spectrum_stats(freq, amp, weight, snr_min, ref_freq, alphas):
     ) * tools.invert_no_zero(np.sum(w[:, np.newaxis] * m**2, axis=0))
     chi2 = np.sum(w[:, np.newaxis] * (a[:, np.newaxis] - norm * m) ** 2, axis=0)
     k = int(np.argmin(chi2))
+    chi2_zero = np.sum(w * a**2)
     return (
         int(np.sum(s > snr_min)),
         frac,
         freq[int(np.argmax(s))],
         alphas[k],
         chi2[k] / max(f.size - 2, 1),
+        1.0 - chi2[k] / chi2_zero if chi2_zero > 0 else np.nan,
     )
 
 
@@ -6390,8 +6393,11 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     ``spectrum`` and ``spectrum_weight`` datasets, and summarised in the ``band_*``
     columns: ``band_nsig``, the number of bands with S/N above ``snr_min``;
     ``band_frac_max``, the fraction of the positive S/N^2 in the brightest band;
-    ``band_best_freq``, its centre (MHz); and ``band_alpha`` and ``band_chi2``, the
-    spectral index and reduced chi-squared of the best-fitting power law.
+    ``band_best_freq``, its centre (MHz); ``band_alpha`` and ``band_chi2``, the
+    spectral index and reduced chi-squared of the best-fitting power law; and
+    ``band_fit_frac``, the fraction of the spectrum's power that it explains
+    (1 - chi^2 / chi^2 of a zero spectrum).  RFI puts its power in a few bands and
+    is poorly fitted; an astrophysical pulse is smooth.
 
     Attributes
     ----------
@@ -6485,6 +6491,7 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
                     "band_best_freq",
                     "band_alpha",
                     "band_chi2",
+                    "band_fit_frac",
                 ),
                 stats,
             ):
@@ -6525,6 +6532,11 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       row (mostly flagged data).
     - 11 ``horizon``: |telescope-y| above ``horizon_y_max``, where the sensitivity is
       low and RFI from the ground is strong.
+    - 12 ``unsmooth`` (only with the spectra): the spectrum is not a power law,
+      with reduced chi-squared above ``smooth_chi2_max`` and less than
+      ``smooth_frac_min`` of its power explained by the fit.  Both are needed:
+      bright pulses have a large chi-squared from small deviations but are well
+      explained, and faint ones are poorly explained only because of the noise.
     - 16 ``periodic`` (information only): at least ``periodic_npeak_min`` other
       peaks along the row, spaced by at least ``periodic_spacing_min`` seconds with
       a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
@@ -6551,6 +6563,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "wide": 9,
         "low_weight": 10,
         "horizon": 11,
+        "unsmooth": 12,
         "periodic": 16,
     }
     INFO: ClassVar = ("periodic",)
@@ -6573,6 +6586,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     fwhm_y_max = config.Property(proptype=float, default=0.03)
     weight_ratio_min = config.Property(proptype=float, default=0.05)
     horizon_y_max = config.Property(proptype=float, default=0.95)
+    smooth_chi2_max = config.Property(proptype=float, default=5.0)
+    smooth_frac_min = config.Property(proptype=float, default=0.7)
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -6637,6 +6652,12 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             flag("wide", rec["fwhm_y"] > self.fwhm_y_max)
             flag("low_weight", rec["weight_ratio"] < self.weight_ratio_min)
             flag("horizon", np.abs(rec["y"]) > self.horizon_y_max)
+            flag(
+                "unsmooth",
+                has_bands
+                & (rec["band_chi2"] > self.smooth_chi2_max)
+                & (rec["band_fit_frac"] < self.smooth_frac_min),
+            )
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -6674,6 +6695,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "periodic_spacing_min", "cat_flux_ratio",
             "band_frac_max", "group_frac_max", "arc_dy_min", "arc_dt_min",
             "arc_corr_min", "fwhm_y_max", "weight_ratio_min", "horizon_y_max",
+            "smooth_chi2_max", "smooth_frac_min",
         ):  # fmt: skip
             out.attrs[f"sift_{key}"] = getattr(self, key)
         return out
