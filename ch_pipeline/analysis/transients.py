@@ -2757,14 +2757,46 @@ def _nearest_ra_index(ra, ra0):
     return best[1]
 
 
-def _local_rfi_mask(stream, el_slc):
-    """Local part of the ``rfi_mask`` dataset [freq, el, ra], or None if absent."""
-    if "rfi_mask" not in stream.datasets:
+def _channel_rfi_mask(mask, stream, el_slc):
+    """Expand a mask of bands to the channels of a stream, at its local elevations.
+
+    Parameters
+    ----------
+    mask : draco.core.containers.LocalizedSiderealRFIMask or None
+        Mask with a frequency axis of bands (centre and width), for example the
+        output of :class:`FlagNarrowbandRFI`.
+    stream : draco.core.containers.HybridVisStream
+        Stream distributed over elevation.
+    el_slc : slice
+        Local elevations of the stream.
+
+    Returns
+    -------
+    rfi : np.ndarray[freq, el_local, ra] or None
+        True where a channel lies in a flagged band.
+    """
+    if mask is None:
         return None
-    rm = stream.rfi_mask[:]
-    if rm.local_bounds != el_slc:
-        raise RuntimeError("rfi_mask is not distributed like the data.")
-    return rm.local_array
+    for ax in ("ra", "el"):
+        a, b = stream.index_map[ax][:], mask.index_map[ax][:]
+        if a.shape != b.shape or not np.allclose(a, b):
+            raise ValueError(f"The {ax} axes of the stream and the RFI mask differ.")
+
+    mask.redistribute("el")
+    m = mask.mask[:]
+    if m.local_bounds != el_slc:
+        raise RuntimeError("The RFI mask is not distributed like the data.")
+    m = m.local_array  # band, ra, el
+
+    fmap = mask.index_map["freq"][:]
+    lo = fmap["centre"] - 0.5 * fmap["width"]
+    hi = fmap["centre"] + 0.5 * fmap["width"]
+    freq = stream.freq[:]
+    rfi = np.zeros((freq.size, m.shape[2], m.shape[1]), dtype=bool)
+    for bb in range(fmap.size):
+        sel = (freq >= lo[bb]) & (freq < hi[bb])
+        rfi[sel] |= m[bb].T[np.newaxis]
+    return rfi
 
 
 def _self_conjugate(pol, ew):
@@ -3205,10 +3237,10 @@ class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
     above ``grow_threshold`` in the same band, and then dilated by ``dilate_el``
     elevations and ``dilate_ra`` samples (without wrapping in right ascension).
 
-    The flags are stored in the ``rfi_mask`` dataset [freq, el, ra], set for all
-    the channels of a flagged band and shared by the polarisations and baselines.
-    :class:`EstimateSkyNoise` and :class:`TransientMatchedFilterSkyNoise` leave
-    those samples out.  The input is modified.
+    The output is a mask with one entry per band (its frequency axis holds the
+    centre and width of each band), shared by the polarisations and baselines.
+    :class:`EstimateSkyNoise` and :class:`TransientMatchedFilterSkyNoise` take it
+    as an optional requirement and leave out the channels of flagged bands.
 
     Attributes
     ----------
@@ -3277,8 +3309,8 @@ class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
 
         Returns
         -------
-        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
-            The input with the ``rfi_mask`` dataset.
+        mask : draco.core.containers.LocalizedSiderealRFIMask
+            True for the flagged bands, elevations and samples.
         """
         from scipy.special import gammainccinv
         from scipy.stats import norm
@@ -3354,14 +3386,10 @@ class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
         thr_grow = zthr(self.grow_threshold)
         thr_clip = zthr(self.clip)
 
-        if "rfi_mask" not in stream.datasets:
-            stream.add_dataset("rfi_mask")
         stream.redistribute(["el", "freq"])
         vis = stream.vis[:].local_array
         el_slc = stream.vis[:].local_bounds
         nel_local = vis.shape[3]
-        if stream.rfi_mask[:].local_bounds != el_slc:
-            raise RuntimeError("rfi_mask is not distributed like the data.")
         if "noise_scale" in stream.datasets:
             ns = stream.noise_scale[:]
             if ns.local_bounds != el_slc:
@@ -3430,10 +3458,16 @@ class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
             raise RuntimeError("The flags are not distributed like the data.")
         flag = flag.local_array
 
-        mask = stream.rfi_mask[:].local_array  # freq, el, ra
-        mask[:] = False
-        for bb, cc in enumerate(chans):
-            mask[cc] = flag[bb]
+        out = draco_containers.LocalizedSiderealRFIMask(
+            freq=band_map,
+            ra=ra,
+            el=stream.index_map["el"][:],
+            attrs_from=stream,
+            distributed=stream.distributed,
+            comm=stream.comm,
+        )
+        out.redistribute("el")
+        out.mask[:].local_array[:] = flag.transpose(0, 2, 1)
 
         nflag = self.comm.allreduce(flag.sum(axis=(1, 2)))
         frac = nflag / float(nel * nra)
@@ -3446,7 +3480,7 @@ class FlagNarrowbandRFI(_BandMixin, tasklib.base.ContainerTask):
             + "."
         )
 
-        return stream
+        return out
 
     def _clip(self, Z, clipped):
         """Limit the bands left out at each sample to the ``max_clip`` largest."""
@@ -3552,8 +3586,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
 
     The 0 m baseline is excluded by default: its co-polar visibilities are real and
     its unfiltered visibilities are dominated by the receiver noise rather than the
-    sky.  Samples flagged in the ``rfi_mask`` dataset (see :class:`FlagNarrowbandRFI`)
-    are left out.
+    sky.  If an RFI mask is given (see :class:`FlagNarrowbandRFI`), the flagged
+    samples are left out.
 
     Attributes
     ----------
@@ -3611,6 +3645,19 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     qmax = config.Property(proptype=float, default=1e8)
     nqbin = config.Property(proptype=int, default=40)
     seed = config.Property(proptype=int, default=0)
+
+    rfi_mask = None
+
+    def setup(self, mask=None):
+        """Set the RFI mask.
+
+        Parameters
+        ----------
+        mask : draco.core.containers.LocalizedSiderealRFIMask, optional
+            Mask of bands, elevations and samples to leave out, for example the
+            output of :class:`FlagNarrowbandRFI`.
+        """
+        self.rfi_mask = mask
 
     def process(self, stream, unfiltered):
         """Fit the coefficients.
@@ -3709,7 +3756,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
         else:
             self.log.info("No noise_scale dataset: using the weights alone.")
             scale = None
-        rfi = _local_rfi_mask(stream, el_slc)
+        rfi = _channel_rfi_mask(self.rfi_mask, stream, el_slc)
 
         src_mask = np.zeros((nsrc, nel_local, nra), dtype=bool)
         ra_off = ((ra[np.newaxis, :] - src_ra[:, np.newaxis] + 180.0) % 360.0) - 180.0
@@ -4424,10 +4471,6 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         wname = "noise_weight" if has_response else hvis._weight_dset_name
         if "elevation_vis_weight" in hvis.datasets:
             raise ValueError("Elevation-dependent weights are not supported.")
-        if "rfi_mask" in hvis.datasets:
-            raise ValueError(
-                "The RFI mask is not supported: use TransientMatchedFilterSkyNoise."
-            )
         weight_all = hvis[wname][:].allgather()[ipol][:, :, iew].astype(np.float32)
 
         # On the 0 m baseline, the co-polar hybrid visibilities are formed from each
@@ -4994,7 +5037,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     constant within each band of telescope-y.  Bands or baselines without a fit have
     no sky term.
 
-    Samples flagged in the ``rfi_mask`` dataset (see :class:`FlagNarrowbandRFI`)
+    If an RFI mask is given (see :class:`FlagNarrowbandRFI`), the flagged samples
     are given zero weight, here and in the local rescaling below.
 
     Attributes
@@ -5059,6 +5102,24 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     local_prior = config.Property(proptype=float, default=2.0)
     local_cap = config.Property(proptype=float, default=20.0)
     local_min = config.Property(proptype=float, default=0.1)
+
+    rfi_mask = None
+
+    def setup(self, manager, beam, mask=None):
+        """Set the telescope, the primary beam model and the RFI mask.
+
+        Parameters
+        ----------
+        manager : ProductManager, BeamTransfer, or TransitTelescope
+            Object from which a telescope instance is extracted.
+        beam : draco.core.containers.GridBeam
+            Primary beam model in telescope coordinates.
+        mask : draco.core.containers.LocalizedSiderealRFIMask, optional
+            Mask of bands, elevations and samples to leave out, for example the
+            output of :class:`FlagNarrowbandRFI`.
+        """
+        super().setup(manager, beam)
+        self.rfi_mask = mask
 
     def process(self, hvis, unfiltered, sky):
         """Apply the matched filter.
@@ -5188,7 +5249,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             nscale = ns.local_array[np.ix_(ipol, np.arange(freq.size), iew)]
         else:
             nscale = np.ones((len(ipol), freq.size, len(iew), nel_local), np.float32)
-        rfi = _local_rfi_mask(hvis, el_slc)
+        rfi = _channel_rfi_mask(self.rfi_mask, hvis, el_slc)
 
         common = {
             "pol": opol,

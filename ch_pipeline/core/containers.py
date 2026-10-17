@@ -1008,8 +1008,7 @@ class MFilteredHybridVisStream(HybridVisStream):
 
     For a filter ``y -> (I - P) y`` along right ascension, this also holds the
     elements of the filter near the diagonal, ``P[t, t + lag]``, and the inverse
-    variance of the visibilities before filtering.  ``rfi_mask`` (if present) flags
-    samples with RFI, shared by the polarisations and baselines.
+    variance of the visibilities before filtering.
     """
 
     _axes = ("lag",)
@@ -1039,16 +1038,6 @@ class MFilteredHybridVisStream(HybridVisStream):
             "distributed": True,
             "distributed_axis": "freq",
         },
-        "rfi_mask": {
-            "axes": ["freq", "el", "ra"],
-            "dtype": bool,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
-            "chunks": (32, 64, 2048),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
-        },
     }
 
     @property
@@ -1062,10 +1051,6 @@ class MFilteredHybridVisStream(HybridVisStream):
     @property
     def noise_scale(self):
         return self.datasets["noise_scale"]
-
-    @property
-    def rfi_mask(self):
-        return self.datasets["rfi_mask"]
 
 
 class HybridVisScintillationFit(SiderealContainer):
