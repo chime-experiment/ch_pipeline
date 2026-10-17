@@ -36,7 +36,7 @@ docs = [
     "sphinx_rtd_theme"
 ]
 hfb = [
-    "beam-model @ git+ssh://git@github.com/CHIMEFRB/beam-model.git"
+    "cfbm"
 ]
 test = [
     "pytest >= 7.0"
