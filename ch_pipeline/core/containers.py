@@ -1688,6 +1688,9 @@ class TransientCandidateTable(TableSpec):
                 ["island_dt", np.float32],
                 ["island_slope", np.float32],
                 ["island_corr", np.float32],
+                ["ext_npix", np.int32],
+                ["ext_dy", np.float32],
+                ["ext_dt", np.float32],
                 # Other peaks along the row
                 ["row_npeak", np.int16],
                 ["row_max_ratio", np.float32],

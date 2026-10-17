@@ -6557,7 +6557,12 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
       peak, within +-``box_dy`` and +-``box_dra``: its number of pixels, extent in
       telescope-y and in time (s), and the slope (telescope-y per degree of RA) and
       correlation of telescope-y with RA of its pixels, weighted by S/N.  Arcs from
-      moving objects have large extents in both and a high correlation.
+      moving objects have large extents in both and a high correlation.  The
+      "extent" is the same but with pixels above ``grow_snr`` joined across gaps of
+      up to ``join_dy`` in telescope-y and ``join_dt`` samples, so that a chain of
+      blobs (an arc broken up by the fringes) counts as one: ``ext_npix`` (its
+      pixels above ``grow_snr``), ``ext_dy`` and ``ext_dt`` (s).  A pulse from a
+      point source extends ~0.01 in telescope-y.
     - Along the row: ``row_npeak``, the number of other peaks (local maxima within 1
       row and +-``row_peak_dra``) within +-``row_dy`` in telescope-y and
       +-``row_dra`` degrees of RA with S/N at least ``row_snr`` and ``row_ratio``
@@ -6608,6 +6613,9 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     box_dy, box_dra : float
         Half-widths in telescope-y and in degrees of RA of the box in which the shape
         is measured.  Defaults are 0.1 and 2.
+    join_dy, join_dt : float, int
+        Largest gaps in telescope-y and in samples bridged in the extent.  Defaults
+        are 0.005 (3 rows) and 1.
     row_snr, row_ratio : float
         Smallest S/N of another peak along the row, absolute and relative to the
         candidate.  Defaults are 8 and 1/3.
@@ -6649,6 +6657,8 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     grow_snr = config.Property(proptype=float, default=5.0)
     box_dy = config.Property(proptype=float, default=0.1)
     box_dra = config.Property(proptype=float, default=2.0)
+    join_dy = config.Property(proptype=float, default=0.005)
+    join_dt = config.Property(proptype=int, default=1)
     row_snr = config.Property(proptype=float, default=8.0)
     row_ratio = config.Property(proptype=float, default=1.0 / 3.0)
     row_dy = config.Property(proptype=float, default=0.01)
@@ -6796,8 +6806,9 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         rec["band_nsig"] = -1
         out.attrs["lsd"] = lsd
         for key in (
-            "seed_snr", "peak_dy", "peak_dt", "grow_snr", "row_snr", "row_ratio",
-            "row_dy", "row_dra", "col_snr", "group_snr_min", "cat_ddec", "cat_dra",
+            "seed_snr", "peak_dy", "peak_dt", "grow_snr", "join_dy", "join_dt",
+            "row_snr", "row_ratio", "row_dy", "row_dra", "col_snr", "group_snr_min",
+            "cat_ddec", "cat_dra",
         ):  # fmt: skip
             out.attrs[key] = getattr(self, key)
         if self.catalogue:
@@ -6845,6 +6856,9 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         nbox_t = max(1, round(self.box_dra / dra))
         nrow = max(0, round(self.row_dy / dy))
         eight = np.ones((3, 3))
+        join = np.ones(
+            (2 * max(0, round(self.join_dy / dy)) + 1, 2 * max(0, self.join_dt) + 1)
+        )
         for k in range(ncand):
             e, t = pe[k], pt[k]
             peak = img[e, t]
@@ -6875,6 +6889,15 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
                 vy = np.average((yy - ym) ** 2, weights=w)
                 rec["island_slope"][k] = cyr / vr
                 rec["island_corr"][k] = cyr / np.sqrt(vr * vy)
+
+            lit = sub >= self.grow_snr
+            lab, _ = scipy.ndimage.label(
+                scipy.ndimage.binary_dilation(lit, structure=join), eight
+            )
+            ie, it = np.nonzero(lit & (lab == lab[ce, ct]))
+            rec["ext_npix"][k] = ie.size
+            rec["ext_dy"][k] = (np.ptp(ie) + 1) * dy
+            rec["ext_dt"][k] = (np.ptp(it) + 1) * tsamp
 
             lo, hi = np.searchsorted(fe, [e - nrow, e + nrow + 1])
             near = np.abs(fra[lo:hi] - ra[t])
@@ -7128,6 +7151,10 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       ``smooth_frac_min`` of its power explained by the fit.  Both are needed:
       bright pulses have a large chi-squared from small deviations but are well
       explained, and faint ones are poorly explained only because of the noise.
+    - 13 ``extended``: the extent (pixels joined across small gaps) reaches at least
+      ``ext_dy_min`` in telescope-y, far more than a point source.  This catches
+      arcs broken into blobs and short vertical streaks, which the ``arc`` test
+      misses.
     - 16 ``periodic`` (information only): at least ``periodic_npeak_min`` other
       peaks along the row, spaced by at least ``periodic_spacing_min`` seconds with
       a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
@@ -7155,6 +7182,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "low_weight": 10,
         "horizon": 11,
         "unsmooth": 12,
+        "extended": 13,
         "periodic": 16,
     }
     INFO: ClassVar = ("periodic",)
@@ -7175,6 +7203,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     arc_dt_min = config.Property(proptype=float, default=20.0)
     arc_corr_min = config.Property(proptype=float, default=0.7)
     fwhm_y_max = config.Property(proptype=float, default=0.03)
+    ext_dy_min = config.Property(proptype=float, default=0.05)
     weight_ratio_min = config.Property(proptype=float, default=0.05)
     horizon_y_max = config.Property(proptype=float, default=0.95)
     smooth_chi2_max = config.Property(proptype=float, default=5.0)
@@ -7241,6 +7270,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 & (np.abs(rec["island_corr"]) >= self.arc_corr_min),
             )
             flag("wide", rec["fwhm_y"] > self.fwhm_y_max)
+            flag("extended", rec["ext_dy"] >= self.ext_dy_min)
             flag("low_weight", rec["weight_ratio"] < self.weight_ratio_min)
             flag("horizon", np.abs(rec["y"]) > self.horizon_y_max)
             flag(
@@ -7285,7 +7315,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "row_npeak_max", "periodic_npeak_min", "periodic_cv_max",
             "periodic_spacing_min", "cat_flux_ratio",
             "band_frac_max", "group_frac_max", "arc_dy_min", "arc_dt_min",
-            "arc_corr_min", "fwhm_y_max", "weight_ratio_min", "horizon_y_max",
+            "arc_corr_min", "fwhm_y_max", "ext_dy_min", "weight_ratio_min",
+            "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min",
         ):  # fmt: skip
             out.attrs[f"sift_{key}"] = getattr(self, key)
