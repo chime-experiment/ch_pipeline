@@ -10,6 +10,7 @@ import caput.astro.time as ctime
 import numpy as np
 import pytz
 import scipy.constants
+import scipy.ndimage
 import skyfield
 from caput import config
 from caput.astro.skyfield import skyfield_wrapper
@@ -1200,8 +1201,11 @@ def _swap_inputs(prod, conj):
     return tmp
 
 
-class SolarCleanVisGrid(tasklib.base.ContainerTask):
-    """Clean the Sun from gridded visibilities with a fit smooth in frequency and time.
+class SolarCleanVisGridSmooth(tasklib.base.ContainerTask):
+    """Clean the Sun from gridded visibilities with a smooth fit on each baseline.
+
+    See :class:`SolarCleanVisGrid` for a model shared by the baselines, which
+    follows the Sun more closely at less cost to transients.
 
     For each baseline (east-west and north-south separation) and polarisation of a
     :class:`draco.core.containers.VisGridStream`, the samples taken while the Sun is
@@ -1278,23 +1282,7 @@ class SolarCleanVisGrid(tasklib.base.ContainerTask):
         out = gstream if self.in_place else gstream.copy()
         out.redistribute("ns")
 
-        lsd = out.attrs.get("lsd", out.attrs.get("csd"))
-        if lsd is None:
-            raise ValueError("The stream has no lsd attribute.")
-        lsd = float(np.atleast_1d(lsd)[0])
-        ra = out.ra[:]
-        times = chime.lsd_to_unix(lsd + ra / 360.0)
-
-        # The Sun in telescope coordinates
-        sun = sun_coord(times, deg=False)
-        ha, dec, alt = sun[:, 0], sun[:, 1], sun[:, 2]
-        lat = np.radians(chime.latitude)
-        rot = np.radians(getattr(chime, "rotation", 0.0))
-        xs = -np.cos(dec) * np.sin(ha)
-        ys = np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(ha)
-        ew_sun = np.cos(rot) * xs + np.sin(rot) * ys
-        ns_sun = -np.sin(rot) * xs + np.cos(rot) * ys
-
+        times, ew_sun, ns_sun, alt = _sun_track(out)
         segments = _true_runs(alt > np.radians(self.alt_min))
         if not segments:
             self.log.info("The Sun is not up.")
@@ -1367,6 +1355,323 @@ class SolarCleanVisGrid(tasklib.base.ContainerTask):
         edges = np.arange(freq.min(), freq.max() + self.freq_chunk, self.freq_chunk)
         piece = np.clip(np.digitize(freq, edges) - 1, 0, edges.size - 1)
         return [np.flatnonzero(piece == p) for p in np.unique(piece)]
+
+
+class SolarCleanVisGrid(tasklib.base.ContainerTask):
+    """Clean the Sun from gridded visibilities with profiles shared by the baselines.
+
+    While the Sun is up, the visibilities of each polarisation and frequency of a
+    :class:`draco.core.containers.VisGridStream` are fringestopped to the Sun and
+    fitted with
+
+        V_b(t) exp(-2 pi i b . s_sun(t) / lambda) = sum_r a_br(t) h_r(t),
+
+    and the fit, times the Sun's fringe, is subtracted.  The ``nshared`` curves
+    ``h_r(t)`` are common to all baselines ``b`` and free at every sample.  The
+    factors ``a_br(t)`` of each baseline change slowly: cubic B-splines in time with
+    knots every ``drift_spacing`` minutes, or constant if it is 0.
+
+    After fringestopping, the Sun on every baseline is the solar flux times the
+    primary beam towards the Sun, which is nearly the same for all baselines and
+    changes quickly as the Sun moves through the beam (the first curve).  The
+    baselines differ by how much they resolve the disk and by the differences
+    between the beams of their feeds (the factors); the largest of these, the
+    wander of the beam centroid between feeds, adds a second curve (to first
+    order, the derivative of the first).  The factors change only slowly.
+
+    The model can change at any sample, but only in the patterns of the factors
+    across the baselines.  A transient elsewhere, whose phase relative to the Sun
+    winds differently on each baseline, is removed only to the extent that it
+    looks like those patterns: roughly the response to it of beams formed on them.
+    So that a transient (or a bright source passing through the beam) cannot shape
+    the patterns themselves, the factors are fitted only from samples whose power
+    in the data and in the residual, summed over the baselines, are both within
+    ``clip`` times their running medians over +-15 samples: a pulse stands out on
+    every baseline at once, in the data where the Sun is faint and in the residual
+    where it is bright.  The curves at every sample are then fitted with the
+    patterns fixed.
+
+    The model is fitted by alternating least squares, starting from the leading
+    directions in time of the weighted data (found by block power iteration; the
+    alternating fit can stall from a poorer start).  Given the factors, the curves
+    at each sample are a weighted fit across the baselines; given the curves (made
+    orthonormal, which keeps the fit well conditioned), the factors of each
+    baseline are a weighted fit over time.  Each frequency is fitted on its own,
+    so the stream stays distributed over frequency.  The 0 m baseline, whose
+    gridded visibilities are complex conjugates of each other at opposite
+    north-south separations, is left unchanged.
+
+    Attributes
+    ----------
+    nshared : int
+        Number of curves shared by the baselines.  Default is 2.
+    drift_spacing : float
+        Spacing in minutes of the knots of the factors of each baseline, or 0 for
+        constant factors.  Default is 60.
+    clip : float
+        Samples whose power in the data or in the residual (summed over the
+        baselines) is above this multiple of its running median over +-15 samples
+        are left out of the fit of the factors.  Default is 5.
+    alt_min : float
+        Fit and subtract while the Sun is above this altitude, in degrees.  Default
+        is 0.
+    niter : int
+        Number of iterations of the alternating fit.  Default is 10.
+    ridge : float
+        Regularisation of each fit, as a fraction of the mean of the diagonal of its
+        normal equations.  Default is 1e-10 (larger values bias the fit of a
+        bright Sun: 1e-6 leaves a few 1e-5 of it).
+    in_place : bool
+        Subtract from the input instead of a copy.  Default is False.
+    """
+
+    nshared = config.Property(proptype=int, default=2)
+    drift_spacing = config.Property(proptype=float, default=60.0)
+    clip = config.Property(proptype=float, default=5.0)
+    alt_min = config.Property(proptype=float, default=0.0)
+    niter = config.Property(proptype=int, default=10)
+    ridge = config.Property(proptype=float, default=1e-10)
+    in_place = config.Property(proptype=bool, default=False)
+
+    def process(self, gstream):
+        """Clean the Sun.
+
+        Parameters
+        ----------
+        gstream : draco.core.containers.VisGridStream
+            Gridded visibilities, with an ``lsd`` (or ``csd``) attribute.
+
+        Returns
+        -------
+        out : draco.core.containers.VisGridStream
+            The visibilities with the Sun subtracted while it is up.
+        """
+        out = gstream if self.in_place else gstream.copy()
+        out.redistribute("freq")
+
+        times, ew_sun, ns_sun, alt = _sun_track(out)
+        segments = _true_runs(alt > np.radians(self.alt_min))
+        if not segments:
+            self.log.info("The Sun is not up.")
+            return out
+
+        # Baselines other than 0 m
+        ew = out.index_map["ew"][:]
+        ns = out.index_map["ns"][:]
+        if np.any(ew == 0.0):
+            self.log.info("Leaving the 0 m baseline unchanged.")
+        ie, jn = np.meshgrid(
+            np.flatnonzero(ew != 0.0), np.arange(ns.size), indexing="ij"
+        )
+        ie, jn = ie.ravel(), jn.ravel()
+        b_ew, b_ns = ew[ie], ns[jn]
+
+        vis = out.vis[:].local_array  # pol, freq, ew, ns, ra
+        weight = out.weight[:].local_array
+        fsl = out.vis[:].local_bounds
+        inv_lambda = out.freq[fsl] * 1e6 / scipy.constants.c
+
+        self.log.info(
+            f"Fitting {len(segments)} periods with the Sun up "
+            f"({sum(s.stop - s.start for s in segments)} samples), {ie.size} "
+            f"baselines, {self.nshared} shared curves."
+        )
+        power = np.zeros(3)
+        for seg in segments:
+            tsel = np.arange(seg.start, seg.stop)
+            drift = _spline_design(times[seg], self.drift_spacing * 60.0)
+            delay = (
+                b_ew[:, np.newaxis] * ew_sun[np.newaxis, seg]
+                + b_ns[:, np.newaxis] * ns_sun[np.newaxis, seg]
+            )  # baseline, time
+            sel = (ie[:, np.newaxis], jn[:, np.newaxis], tsel[np.newaxis, :])
+            for ff in range(vis.shape[1]):
+                fringe = np.exp(2.0j * np.pi * inv_lambda[ff] * delay)
+                for pp in range(vis.shape[0]):
+                    w = weight[pp, ff][sel].astype(np.float64)
+                    if not np.any(w > 0):
+                        continue
+                    d = vis[pp, ff][sel] * fringe.conj()
+                    model, nclip = _fit_shared(
+                        d, w, drift, self.nshared, self.niter, self.ridge, self.clip
+                    )
+                    power += [
+                        np.sum(w * np.abs(model) ** 2),
+                        np.sum(w * np.abs(np.where(w > 0, d, 0.0)) ** 2),
+                        nclip,
+                    ]
+                    vis[pp, ff][sel] -= (model * fringe).astype(vis.dtype)
+
+        total = np.zeros(3)
+        out.comm.Allreduce(power, total)
+        self.log.info(
+            f"The Sun model holds {total[0] / max(total[1], 1e-30):.4f} of the weighted "
+            f"power while the Sun is up; {int(total[2])} samples (summed over "
+            "frequencies and polarisations) were left out of the fit of the factors."
+        )
+        out.attrs["solar_clean"] = (
+            f"shared profiles: nshared {self.nshared}, drift_spacing "
+            f"{self.drift_spacing} min, clip {self.clip}, alt_min {self.alt_min} deg"
+        )
+        return out
+
+
+def _sun_track(stream):
+    """Unix times, and the Sun's telescope coordinates and altitude (rad), on the RA axis."""
+    lsd = stream.attrs.get("lsd", stream.attrs.get("csd"))
+    if lsd is None:
+        raise ValueError("The stream has no lsd attribute.")
+    lsd = float(np.atleast_1d(lsd)[0])
+    times = chime.lsd_to_unix(lsd + stream.ra[:] / 360.0)
+
+    sun = sun_coord(times, deg=False)
+    ha, dec, alt = sun[:, 0], sun[:, 1], sun[:, 2]
+    lat = np.radians(chime.latitude)
+    rot = np.radians(getattr(chime, "rotation", 0.0))
+    xs = -np.cos(dec) * np.sin(ha)
+    ys = np.cos(lat) * np.sin(dec) - np.sin(lat) * np.cos(dec) * np.cos(ha)
+    ew_sun = np.cos(rot) * xs + np.sin(rot) * ys
+    ns_sun = -np.sin(rot) * xs + np.cos(rot) * ys
+    return times, ew_sun, ns_sun, alt
+
+
+def _spline_design(t, spacing):
+    """Dense design matrix [time, spline] of cubic B-splines with knots every spacing (s).
+
+    A spacing of 0 (or longer than the span) gives a single constant column.
+    """
+    if spacing <= 0 or t[-1] - t[0] <= spacing:
+        return np.ones((t.size, 1))
+    index, value, nbasis = _spline_basis(t, spacing)
+    design = np.zeros((t.size, nbasis))
+    for ii in range(4):
+        design[np.arange(t.size), index[:, ii]] += value[:, ii]
+    return design
+
+
+def _fit_shared(d, w, drift, nshared, niter, ridge, clip, clip_window=15):
+    """Fit ``d[baseline, time]`` with ``sum_r a_r(baseline, time) h_r(time)``.
+
+    The curves ``h_r`` are free at every sample; the factors are
+    ``a_r(b, t) = sum_m alpha[b, r, m] drift[t, m]``, fitted from the samples whose
+    residual is within ``clip`` times its running median over +-``clip_window``
+    samples (see :class:`SolarCleanVisGrid`).
+    Returns the model and the number of samples left out of the factors.
+    """
+    w = np.where(np.isfinite(d), w, 0.0)
+    d = np.where(w > 0, d, 0.0)
+    nused = np.sum(w > 0, axis=0)
+
+    valid = nused > 0
+
+    def outliers(x):
+        # Power per sample, normalised by the number of baselines, above clip
+        # times its running median
+        power = np.sum(w * np.abs(x) ** 2, axis=0) * _inv(nused)
+        if not np.any(valid):
+            return np.zeros(power.shape, dtype=bool)
+        filled = np.where(valid, power, np.median(power[valid]))
+        local = scipy.ndimage.median_filter(
+            filled, size=2 * clip_window + 1, mode="nearest"
+        )
+        return power > clip * local
+
+    # A pulse stands out in the data where the Sun is faint; where it is bright, it
+    # stands out in the residual
+    data_out = outliers(d)
+
+    def sample_keep(model):
+        return valid & ~data_out & ~outliers(d - model)
+
+    # Start from the leading directions in time of the weighted data (block power
+    # iteration), from the samples that do not stand out in the data, and fit the
+    # factors to them
+    keep = valid & ~data_out
+    curves = _leading_curves(d, w * keep, nshared)
+    alpha = _fit_factors(d, w * keep, curves, drift, ridge)
+    keep = sample_keep(_shared_model(alpha, curves, drift))
+    alpha = _fit_factors(d, w * keep, curves, drift, ridge)
+
+    for _ in range(niter):
+        curves = _fit_curves(d, w, alpha, drift, ridge)
+        # Orthonormal curves (the same model, with the factors transformed), which
+        # keeps the alternating fit well conditioned
+        q, r = np.linalg.qr(curves)
+        if np.all(np.abs(np.diag(r)) > 0):
+            curves = q
+            alpha = np.einsum("rs,bsm->brm", r, alpha)
+        keep = sample_keep(_shared_model(alpha, curves, drift))
+        alpha = _fit_factors(d, w * keep, curves, drift, ridge)
+    curves = _fit_curves(d, w, alpha, drift, ridge)
+
+    return _shared_model(alpha, curves, drift), int(np.sum(~keep & (nused > 0)))
+
+
+def _fit_curves(d, w, alpha, drift, ridge):
+    """The curves at each sample, given the factors: a weighted fit across baselines."""
+    factors = np.matmul(alpha, drift.T)  # baseline, curve, time
+    nr = factors.shape[1]
+    wfc = w[:, np.newaxis] * factors.conj()
+    gram = np.empty((d.shape[1], nr, nr), dtype=np.complex128)
+    for rr in range(nr):
+        for ss in range(nr):
+            gram[:, rr, ss] = np.sum(wfc[:, rr] * factors[:, ss], axis=0)
+    rhs = np.stack([np.sum(wfc[:, rr] * d, axis=0) for rr in range(nr)], axis=-1)
+    return _solve_ridge(gram, rhs, ridge)
+
+
+def _leading_curves(d, w, ncurve, niter=20):
+    """The leading directions in time of the weighted data, by block power iteration.
+
+    Returns orthonormal columns [time, curve].
+    """
+    dw = np.sqrt(w) * d
+    v = np.zeros((d.shape[1], ncurve), dtype=np.complex128)
+    v[:, 0] = 1.0
+    for rr in range(1, ncurve):
+        v[:, rr] = np.cos(np.pi * rr * np.arange(d.shape[1]) / max(d.shape[1], 1))
+    v, _ = np.linalg.qr(v)
+    for _ in range(niter):
+        v, _ = np.linalg.qr(dw.conj().T @ (dw @ v))
+    return v
+
+
+def _inv(x):
+    return np.where(x > 0, 1.0 / np.where(x > 0, x, 1.0), 0.0)
+
+
+def _shared_model(alpha, curves, drift):
+    """``sum_r (sum_m alpha[b, r, m] drift[t, m]) curves[t, r]`` as [baseline, time]."""
+    factors = np.matmul(alpha, drift.T)  # baseline, curve, time
+    return np.sum(factors * curves.T[np.newaxis], axis=1)
+
+
+def _solve_ridge(gram, rhs, ridge):
+    """Solve batches of ``(gram + ridge * mean(diag)) x = rhs``."""
+    n = gram.shape[-1]
+    diag = np.real(np.einsum("...ii->...i", gram))
+    scale = ridge * np.maximum(np.mean(diag, axis=-1), 1e-30)
+    reg = gram + scale[..., np.newaxis, np.newaxis] * np.eye(n)
+    return np.linalg.solve(reg, rhs[..., np.newaxis])[..., 0]
+
+
+def _fit_factors(d, w, curves, drift, ridge):
+    """The factors of each baseline, given the curves: a weighted fit over time.
+
+    All baselines share the design ``curves x drift``, so their normal matrices are
+    one product of the (real) weights with the outer products of the design at
+    each sample.
+    """
+    nb = d.shape[0]
+    nr, nm = curves.shape[1], drift.shape[1]
+    nk = nr * nm
+    design = (curves[:, :, np.newaxis] * drift[:, np.newaxis, :]).reshape(-1, nk)
+    outer = (design.conj()[:, :, np.newaxis] * design[:, np.newaxis, :]).reshape(
+        -1, nk * nk
+    )
+    gram = (w @ outer.real + 1.0j * (w @ outer.imag)).reshape(nb, nk, nk)
+    rhs = (w * d) @ design.conj()
+    return _solve_ridge(gram, rhs, ridge).reshape(nb, nr, nm)
 
 
 def _true_runs(mask):
