@@ -3312,25 +3312,7 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         if "elevation_vis_weight" in stream.datasets:
             raise ValueError("Elevation-dependent weights are not supported.")
 
-        pol = list(stream.index_map["pol"])
-        ipol = [pol.index(p) for p in self.pol]
-        ew = stream.index_map["ew"][:]
-        iew = (
-            [ii for ii in range(ew.size) if ew[ii] != 0.0]
-            if self.ew_index is None
-            else list(self.ew_index)
-        )
-        self_conj = _self_conjugate(self.pol, ew[iew])
-        terms = [
-            (pp, ee)
-            for ii, pp in enumerate(ipol)
-            for jj, ee in enumerate(iew)
-            if not self_conj[ii, jj]
-        ]
-        if len(terms) < self_conj.size:
-            self.log.warning("Leaving out the real co-polar 0 m visibilities.")
-        if not terms:
-            raise ValueError("No polarisations and baselines to use.")
+        terms = _power_terms(stream, self.pol, self.ew_index, self.log)
         nterm = len(terms)
 
         freq = stream.freq[:]
@@ -3352,44 +3334,9 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             [[np.inf], gammainccinv(nn, 2.0 * norm.sf(self.snr_lit))]
         )
 
-        # Weights of the filtered data have no el axis: gather them
-        stream.redistribute("freq")
-        weight = stream.weight[:].allgather()  # pol, freq, ew, ra
-
-        stream.redistribute(["el", "freq"])
-        vis = stream.vis[:].local_array
-        el_slc = stream.vis[:].local_bounds
-        nel_local = vis.shape[3]
-        if "noise_scale" in stream.datasets:
-            ns = stream.noise_scale[:]
-            if ns.local_bounds != el_slc:
-                raise RuntimeError("noise_scale is not distributed like the data.")
-            nscale = ns.local_array  # pol, freq, ew, el
-        else:
-            self.log.info("No noise_scale dataset: using the weights alone.")
-            nscale = None
-
-        # Power of the band averages relative to the thermal noise, summed over the
-        # terms [band, el, ra], and the number of terms
         t0 = time.time()
-        Z = np.zeros((nband, nel_local, nra), dtype=np.float32)
-        nz = np.zeros((nband, nel_local, nra), dtype=np.int16)
-        nrow = max(1, self.nsample_chunk // nra)
-        for e0 in range(0, nel_local, nrow):
-            esl = slice(e0, min(e0 + nrow, nel_local))
-            for pp, ee in terms:
-                for bb, cc in enumerate(chans):
-                    d = vis[pp, cc, ee, esl]  # chan, el, ra
-                    a = np.broadcast_to(weight[pp, cc, ee][:, np.newaxis], d.shape)
-                    if nscale is not None:
-                        isc = tools.invert_no_zero(nscale[pp, cc, ee, esl])
-                        a = a * isc[..., np.newaxis]
-                    ok = np.isfinite(d) & (a > 0)
-                    a = np.where(ok, a, 0.0)
-                    A = a.sum(axis=0)
-                    y = np.sum(a * np.where(ok, d, 0.0), axis=0)
-                    Z[bb, esl] += np.abs(y) ** 2 * tools.invert_no_zero(A)
-                    nz[bb, esl] += A > 0
+        Z, nz, _ = _band_power(stream, terms, chans, self.nsample_chunk, self.log)
+        nel_local = Z.shape[1]
         self.log.debug(f"Formed the band powers in {time.time() - t0:0.1f} seconds.")
 
         # Each band over all elevations
@@ -3408,22 +3355,7 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             valid = nz[bb] > 0
             if not valid.any():
                 continue
-            # Local scale from the running median along RA of the samples with data
-            if self.local_window > 0:
-                r = np.where(valid, Z[bb] / z_med[nz[bb]], 0.0).astype(np.float64)
-                w = valid.astype(np.float64)
-                pad = self.local_window if periodic else 0
-                if pad:
-                    r = np.concatenate([r[:, -pad:], r, r[:, :pad]], axis=1)
-                    w = np.concatenate([w[:, -pad:], w, w[:, :pad]], axis=1)
-                s = median.moving_weighted_median(
-                    np.ascontiguousarray(r),
-                    np.ascontiguousarray(w),
-                    size=(1, 2 * self.local_window + 1),
-                )
-                s = np.maximum(s[:, pad : pad + nra], 1.0)
-            else:
-                s = np.ones(Z[bb].shape)
+            s = _power_scale(Z[bb], nz[bb], z_med, self.local_window, periodic)
             zs = np.where(valid, Z[bb] / s, 0.0)
             excess = np.where(valid, zs - nz[bb], 0.0)
             near = scipy.ndimage.maximum_filter(
@@ -3465,6 +3397,107 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         )
 
         return out
+
+
+def _power_terms(stream, pols, ew_index, log):
+    """(pol, ew) index pairs of the terms of the band power, without real 0 m."""
+    pol = list(stream.index_map["pol"])
+    ipol = [pol.index(p) for p in pols]
+    ew = stream.index_map["ew"][:]
+    iew = (
+        [ii for ii in range(ew.size) if ew[ii] != 0.0]
+        if ew_index is None
+        else list(ew_index)
+    )
+    self_conj = _self_conjugate(pols, ew[iew])
+    terms = [
+        (pp, ee)
+        for ii, pp in enumerate(ipol)
+        for jj, ee in enumerate(iew)
+        if not self_conj[ii, jj]
+    ]
+    if len(terms) < self_conj.size:
+        log.warning("Leaving out the real co-polar 0 m visibilities.")
+    if not terms:
+        raise ValueError("No polarisations and baselines to use.")
+    return terms
+
+
+def _band_power(stream, terms, chans, nsample_chunk, log):
+    """Power of the band averages of filtered visibilities, in units of the noise.
+
+    The visibilities of each term (polarisation and baseline) are averaged over the
+    channels of each band, weighted by their inverse noise variance (the weights
+    and, if present, the noise scale), and ``|average|^2`` over its variance is
+    summed over the terms.  The stream is left distributed over elevation.
+
+    Returns
+    -------
+    Z : np.ndarray[band, el_local, ra]
+        The summed power; for noise, gamma distributed with shape ``n``.
+    n : np.ndarray[band, el_local, ra]
+        The number of terms with data.
+    el_slc : slice
+        The local elevations.
+    """
+    # Weights of the filtered data have no el axis: gather them
+    stream.redistribute("freq")
+    weight = stream.weight[:].allgather()  # pol, freq, ew, ra
+
+    stream.redistribute(["el", "freq"])
+    vis = stream.vis[:].local_array
+    el_slc = stream.vis[:].local_bounds
+    nel_local, nra = vis.shape[3:]
+    if "noise_scale" in stream.datasets:
+        ns = stream.noise_scale[:]
+        if ns.local_bounds != el_slc:
+            raise RuntimeError("noise_scale is not distributed like the data.")
+        nscale = ns.local_array  # pol, freq, ew, el
+    else:
+        log.info("No noise_scale dataset: using the weights alone.")
+        nscale = None
+
+    Z = np.zeros((len(chans), nel_local, nra), dtype=np.float32)
+    nz = np.zeros((len(chans), nel_local, nra), dtype=np.int16)
+    nrow = max(1, nsample_chunk // nra)
+    for e0 in range(0, nel_local, nrow):
+        esl = slice(e0, min(e0 + nrow, nel_local))
+        for pp, ee in terms:
+            for bb, cc in enumerate(chans):
+                d = vis[pp, cc, ee, esl]  # chan, el, ra
+                a = np.broadcast_to(weight[pp, cc, ee][:, np.newaxis], d.shape)
+                if nscale is not None:
+                    isc = tools.invert_no_zero(nscale[pp, cc, ee, esl])
+                    a = a * isc[..., np.newaxis]
+                ok = np.isfinite(d) & (a > 0)
+                a = np.where(ok, a, 0.0)
+                A = a.sum(axis=0)
+                y = np.sum(a * np.where(ok, d, 0.0), axis=0)
+                Z[bb, esl] += np.abs(y) ** 2 * tools.invert_no_zero(A)
+                nz[bb, esl] += A > 0
+    return Z, nz, el_slc
+
+
+def _power_scale(Z, nz, z_med, window, periodic):
+    """Local scale of the band power ``Z`` [el, ra] with ``nz`` terms.
+
+    The running median along RA of ``Z`` over its median for noise (``z_med[n]``),
+    over the samples with data within ``window`` on either side, and at least one.
+    """
+    if window <= 0:
+        return np.ones(Z.shape)
+    valid = nz > 0
+    nra = Z.shape[-1]
+    r = np.where(valid, Z / z_med[nz], 0.0).astype(np.float64)
+    w = valid.astype(np.float64)
+    pad = window if periodic else 0
+    if pad:
+        r = np.concatenate([r[:, -pad:], r, r[:, :pad]], axis=1)
+        w = np.concatenate([w[:, -pad:], w, w[:, :pad]], axis=1)
+    s = median.moving_weighted_median(
+        np.ascontiguousarray(r), np.ascontiguousarray(w), size=(1, 2 * window + 1)
+    )
+    return np.maximum(s[:, pad : pad + nra], 1.0)
 
 
 def _line_offsets(L, slopes):
