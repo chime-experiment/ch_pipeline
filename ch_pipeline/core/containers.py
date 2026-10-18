@@ -1137,6 +1137,45 @@ class HybridVisNoiseScale(FreqContainer):
         return self.datasets["nsample"]
 
 
+class HybridVisInbandNoise(FreqContainer, SiderealContainer):
+    """Local scale of the noise of hybrid visibilities, from the scatter in frequency.
+
+    ``scale`` multiplies the noise variance implied by the weights and the static
+    noise scale, for each polarisation, band of channels (the ``freq`` axis holds
+    the centre and width of each band), east-west baseline, elevation and sample.
+    ``dof`` is the number of degrees of freedom of the estimate in each band before
+    smoothing (the same at every elevation).
+
+    The scale is stored without chunking or compression, like the group maps.
+    """
+
+    _axes = ("pol", "ew", "el")
+
+    _dataset_spec: ClassVar = {
+        "scale": {
+            "axes": ["pol", "freq", "ew", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
+        "dof": {
+            "axes": ["pol", "freq", "ew", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def scale(self):
+        return self.datasets["scale"]
+
+    @property
+    def dof(self):
+        return self.datasets["dof"]
+
+
 class HybridVisSkyNoise(FreqContainer):
     """Fit of the noise of m-mode filtered visibilities that scales with the sky.
 

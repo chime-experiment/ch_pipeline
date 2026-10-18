@@ -3800,6 +3800,355 @@ def _line_mask(lit, valid, lines, frac):
     return hit & lit
 
 
+class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
+    """Measure the local noise of filtered visibilities from their scatter in frequency.
+
+    The noise expected from the weights and the static noise scale (a whole-day
+    estimate for each polarisation, channel, baseline and elevation) misses noise
+    that changes across the sky: the sky in the formed beams (the Galaxy, the Sun)
+    raises the system temperature of the rows that point at it, and bright sources
+    add self-noise.  Both are independent between channels, unlike the signals we
+    look for (sources, scintillation, transients), which are smooth in frequency.
+
+    At each polarisation, baseline, elevation and sample, the filtered visibilities
+    are fitted across the channels (with data) by discrete prolate spheroidal
+    sequences up to the delay ``delay_pad + |b| x_max / c`` (the fringe of a source
+    within ``x_max`` of the meridian on baseline ``b``, plus the structure of the
+    spectra and the beam), weighted by the inverse of their expected noise variance
+    ``w / s`` (weights and static scale; the static scale is averaged over blocks of
+    ``el_block`` elevations for the weights of the fit).  In each band, the residual
+    power in units of the expected noise, and its expectation for unit-variance
+    noise (the sum of one minus the leverage of each channel), are summed over
+    ``el_window`` elevations and ``ra_window`` samples on either side, and their
+    ratio is the scale.
+    Because the fit removes anything smooth in frequency, a pulse does not raise its
+    own noise, and the estimate can include the sample itself.  Samples flagged in
+    an RFI mask (given to setup) are left out of the sums.
+
+    The noise of neighbouring channels is slightly correlated (+0.03 for adjacent
+    channels on 2418), which raises the noise of a band sum above that implied by
+    independent channels; the scale of each band is multiplied by
+    ``1 + 2 channel_correlation n_pairs / n``, with ``n`` its channels with data and
+    ``n_pairs`` the adjacent pairs among them, so that it describes band sums.
+
+    The part of the sky noise that is common to the channels of a band
+    (scintillation and jitter of bright sources) is not measured here; that is the
+    coherent term of :class:`EstimateSkyNoise`.  :class:`EstimateSkyNoise` and
+    :class:`TransientMatchedFilterSkyNoise` take the output as an optional
+    requirement and multiply the thermal variance by it.
+
+    Attributes
+    ----------
+    pol : list of str
+        Polarisations.  Default is all of the stream's.
+    ew_index : list of int
+        Indices of the east-west baselines.  Default is all.
+    delay_pad : float
+        Delay in ns added to the fringe delay of the fit.  Default is 50.
+    x_max : float
+        Largest telescope-x for the fringe delay.  Default is 0.3.
+    ridge : float
+        Regularisation of the fit, relative to the mean of the diagonal of its
+        normal equations.  Default is 1e-6.
+    el_window : int
+        Half-width of the sums in elevations.  Default is 3.
+    ra_window : int
+        Half-width of the sums in samples.  Default is 5.
+    channel_correlation : float
+        Correlation of the noise of adjacent channels.  Default is 0.03.
+    min_dof : float
+        Smallest number of degrees of freedom of the sums; below it the scale is
+        one.  Default is 20.
+    el_block : int
+        Number of elevations that share the weights of the fit (the mean of their
+        static scale).  Default is 8.
+    extra_modes : int
+        Sequences beyond ``2 N W`` (the time-bandwidth product).  The first ``2 N W``
+        leave ~3e-3 of the power of a smooth spectrum; ten more leave ~1e-10.
+        Default is 10.
+    """
+
+    pol = config.list_type(str, default=None)
+    ew_index = config.list_type(int, default=None)
+    delay_pad = config.Property(proptype=float, default=50.0)
+    x_max = config.Property(proptype=float, default=0.3)
+    ridge = config.Property(proptype=float, default=1e-6)
+    el_window = config.Property(proptype=int, default=3)
+    ra_window = config.Property(proptype=int, default=5)
+    channel_correlation = config.Property(proptype=float, default=0.03)
+    min_dof = config.Property(proptype=float, default=20.0)
+    el_block = config.Property(proptype=int, default=8)
+    extra_modes = config.Property(proptype=int, default=10)
+
+    rfi_mask = None
+
+    def setup(self, mask=None):
+        """Set the RFI mask.
+
+        Parameters
+        ----------
+        mask : draco.core.containers.LocalizedSiderealRFIMask, optional
+            Bands, elevations and samples to leave out.
+        """
+        self.rfi_mask = mask
+
+    def process(self, stream):
+        """Estimate the scale.
+
+        Parameters
+        ----------
+        stream : ch_pipeline.core.containers.MFilteredHybridVisStream
+            Filtered visibilities, with the ``noise_scale`` dataset if the static
+            scale is to be included.
+
+        Returns
+        -------
+        out : ch_pipeline.core.containers.HybridVisInbandNoise
+            The scale of each band at every elevation and sample.
+        """
+        from scipy.signal.windows import dpss
+
+        if "elevation_vis_weight" in stream.datasets:
+            raise ValueError("Elevation-dependent weights are not supported.")
+
+        freq = stream.freq[:]
+        band_index, band_map = self._assign_bands(freq)
+        nband = band_map.size
+        pol = [str(p) for p in stream.index_map["pol"]]
+        ipol = list(range(len(pol))) if self.pol is None else [pol.index(p) for p in self.pol]
+        ew = stream.index_map["ew"][:]
+        iew = list(range(ew.size)) if self.ew_index is None else list(self.ew_index)
+        ra = stream.ra[:]
+        nra = ra.size
+        periodic = _is_full_day(ra) and bool(stream.attrs.get("ra_periodic", True))
+
+        # Weights of the filtered data have no el axis: gather them
+        stream.redistribute("freq")
+        weight = stream.weight[:].allgather()  # pol, freq, ew, ra
+
+        stream.redistribute(["el", "freq"])
+        vis = stream.vis[:].local_array
+        el_slc = stream.vis[:].local_bounds
+        nel_local = vis.shape[3]
+        nel = stream.index_map["el"].size
+        if "noise_scale" in stream.datasets:
+            ns = stream.noise_scale[:]
+            if ns.local_bounds != el_slc:
+                raise RuntimeError("noise_scale is not distributed like the data.")
+            nscale = ns.local_array  # pol, freq, ew, el
+            # All elevations, for the weights of the fit of each block of elevations
+            nscale_all = stream.noise_scale[:].allgather()
+        else:
+            self.log.info("No noise_scale dataset: using the weights alone.")
+            nscale = None
+            nscale_all = None
+        # Blocks of elevations on the global grid, so that the result does not depend
+        # on the distribution
+        gel = np.arange(nel)[el_slc]
+        blocks = [
+            (np.flatnonzero(gel // self.el_block == bk), bk)
+            for bk in np.unique(gel // self.el_block)
+        ]
+        rfi = _channel_rfi_mask(self.rfi_mask, stream, el_slc)  # freq, el, ra
+        flagged = None
+        if rfi is not None:
+            flagged = np.zeros((nband, nel_local, nra), dtype=bool)
+            for bb in range(nband):
+                flagged[bb] = rfi[band_index == bb].any(axis=0)
+
+        # Channels on a uniform grid, for the sequences
+        dnu = np.min(np.abs(np.diff(freq))) if freq.size > 1 else 1.0
+        grid = np.rint((freq - freq.min()) / dnu).astype(int)
+        ngrid = grid.max() + 1
+        # Sums over the channels of each band, and pairs of adjacent channels in a band
+        bsum = (band_index[np.newaxis, :] == np.arange(nband)[:, np.newaxis]).astype(
+            np.float64
+        )
+        same = np.zeros(freq.size, dtype=bool)
+        same[:-1] = (band_index[:-1] == band_index[1:]) & (band_index[:-1] >= 0)
+
+        shp = (len(ipol), nband, len(iew), nel_local, nra)
+        num = np.zeros(shp, dtype=np.float32)
+        den = np.zeros(shp, dtype=np.float32)
+        dof = np.zeros((len(ipol), nband, len(iew), nra), dtype=np.float32)
+        corr = np.ones((len(ipol), nband, len(iew), nra), dtype=np.float32)
+
+        t0 = time.time()
+        for oe, ie in enumerate(iew):
+            tau = 1e-9 * self.delay_pad + abs(ew[ie]) * self.x_max / scipy.constants.c
+            nw = tau * dnu * 1e6 * ngrid
+            nmode = int(np.clip(np.floor(2 * nw) + self.extra_modes, 1, ngrid // 2))
+            A = dpss(ngrid, max(nw, 0.5), Kmax=nmode).T[grid]  # freq, mode
+            for op, ip in enumerate(ipol):
+                w = weight[ip, :, ie]  # freq, ra
+                sc = (
+                    nscale[ip, :, ie]
+                    if nscale is not None
+                    else np.ones((freq.size, nel_local), dtype=np.float32)
+                )
+                isc = tools.invert_no_zero(sc)
+                for bi_, (rows, bk) in enumerate(blocks):
+                    esl = slice(rows[0], rows[-1] + 1)
+                    # The fit is weighted by the mean inverse static scale of the
+                    # block, which changes slowly with elevation
+                    gsl = slice(bk * self.el_block, min((bk + 1) * self.el_block, nel))
+                    isc_b = (
+                        np.mean(tools.invert_no_zero(nscale_all[ip, :, ie, gsl]), axis=1)
+                        if nscale_all is not None
+                        else np.ones(freq.size)
+                    )
+                    for tt in range(nra):
+                        W = w[:, tt] * isc_b  # inverse variance of each channel
+                        m = W > 0
+                        if m.sum() <= nmode + 2:
+                            continue
+                        Am = A[m]
+                        G = Am.T @ (W[m, np.newaxis] * Am)
+                        G += self.ridge * np.trace(G) / nmode * np.eye(nmode)
+                        Gi = np.linalg.inv(G)
+                        h1 = np.zeros(freq.size)
+                        h1[m] = 1.0 - W[m] * np.einsum("fk,kl,fl->f", Am, Gi, Am)
+                        d = vis[ip, :, ie, esl, tt]  # freq, el
+                        ok = m[:, np.newaxis] & (sc[:, esl] > 0) & np.isfinite(d)
+                        d = np.where(ok, d, 0.0)
+                        res = d - A @ (Gi @ (Am.T @ (W[m, np.newaxis] * d[m])))
+                        p2 = np.where(
+                            ok, w[:, tt, np.newaxis] * isc[:, esl] * np.abs(res) ** 2, 0.0
+                        )
+                        num[op, :, oe, esl, tt] = bsum @ p2
+                        den[op, :, oe, esl, tt] = (bsum @ h1)[:, np.newaxis]
+                        if bi_ == 0:
+                            nb = bsum @ m
+                            dof[op, :, oe, tt] = bsum @ h1
+                            pairs = bsum @ (same & m & np.roll(m, -1))
+                            corr[op, :, oe, tt] = 1.0 + (
+                                2.0 * self.channel_correlation * pairs
+                            ) * tools.invert_no_zero(nb)
+        if flagged is not None:
+            num *= ~flagged[np.newaxis, :, np.newaxis]
+            den *= ~flagged[np.newaxis, :, np.newaxis]
+        self.log.debug(f"Fitted across frequency in {time.time() - t0:0.1f} seconds.")
+
+        # Sums over elevations and samples, with every elevation of a band local
+        def smooth(a):
+            a = mpiarray.MPIArray.wrap(a, axis=3, comm=self.comm).redistribute(1)
+            loc = a.local_array
+            loc = scipy.ndimage.uniform_filter1d(
+                loc, 2 * self.el_window + 1, axis=3, mode="constant"
+            )
+            loc = scipy.ndimage.uniform_filter1d(
+                loc, 2 * self.ra_window + 1, axis=4, mode="wrap" if periodic else "constant"
+            )
+            return mpiarray.MPIArray.wrap(loc, axis=1, comm=self.comm).redistribute(3)
+
+        nwin = (2 * self.el_window + 1) * (2 * self.ra_window + 1)
+        snum = smooth(num).local_array
+        sden = smooth(den).local_array
+        enough = sden * nwin >= self.min_dof
+        scale = np.where(enough, snum * tools.invert_no_zero(sden), 1.0)
+        scale *= corr[:, :, :, np.newaxis, :]
+
+        out = containers.HybridVisInbandNoise(
+            freq=band_map,
+            pol=np.array([pol[ip] for ip in ipol]),
+            ew=ew[iew],
+            axes_from=stream,
+            attrs_from=stream,
+            distributed=stream.distributed,
+            comm=stream.comm,
+        )
+        out.redistribute("el")
+        if out.scale[:].local_shape != scale.shape:
+            raise RuntimeError("The scale is not distributed like the data.")
+        out.scale[:].local_array[:] = scale
+        out.dof[:] = dof
+        out.attrs["delay_pad"] = self.delay_pad
+        out.attrs["x_max"] = self.x_max
+        out.attrs["el_window"] = self.el_window
+        out.attrs["ra_window"] = self.ra_window
+        out.attrs["channel_correlation"] = self.channel_correlation
+
+        good = scale[enough]
+        if good.size:
+            q = np.percentile(good, [16, 50, 84])
+            self.log.info(
+                "Scale on this rank (16/50/84th percentiles): "
+                + ", ".join(f"{v:0.3f}" for v in q)
+                + f"; {np.mean(enough):0.3f} of its samples have enough degrees of "
+                "freedom."
+            )
+        return out
+
+
+def _inband_factor(noise, stream, el_slc, pols, ews):
+    """The scale of :class:`EstimateInbandNoise` for the channels of a stream.
+
+    Parameters
+    ----------
+    noise : ch_pipeline.core.containers.HybridVisInbandNoise or None
+        The scale for each band.
+    stream : draco.core.containers.HybridVisStream
+        Stream distributed over elevation.
+    el_slc : slice
+        Local elevations of the stream.
+    pols : list of str
+        Polarisations wanted.
+    ews : np.ndarray
+        East-west baselines wanted.
+
+    Returns
+    -------
+    factor : np.ndarray[pol, nband + 1, ew, el_local, ra] or None
+        The scale of each band, with a last entry of ones.
+    chan_band : np.ndarray[freq]
+        Index into the second axis for each channel of the stream (the last entry
+        for channels in no band).
+    """
+    if noise is None:
+        return None, None
+    for ax in ("ra", "el"):
+        a, b = stream.index_map[ax][:], noise.index_map[ax][:]
+        if a.shape != b.shape or not np.allclose(a, b):
+            raise ValueError(f"The {ax} axes of the stream and the noise scale differ.")
+    noise.redistribute("el")
+    sc = noise.scale[:]
+    if sc.local_bounds != el_slc:
+        raise RuntimeError("The noise scale is not distributed like the data.")
+    npol = [str(p) for p in noise.index_map["pol"]]
+    new = noise.index_map["ew"][:]
+    ip = [npol.index(str(p)) for p in pols]
+    ie = [int(np.argmin(np.abs(new - e))) for e in ews]
+    if np.any(np.abs(new[ie] - np.asarray(ews)) > 1e-6):
+        raise ValueError("The noise scale does not have all of the baselines.")
+    s = sc.local_array[ip][:, :, ie]  # pol, band, ew, el, ra
+    ones = np.ones(s[:, :1].shape, dtype=s.dtype)
+    factor = np.concatenate([s, ones], axis=1)
+
+    fmap = noise.index_map["freq"][:]
+    lo = fmap["centre"] - 0.5 * fmap["width"]
+    hi = fmap["centre"] + 0.5 * fmap["width"]
+    freq = stream.freq[:]
+    chan_band = np.full(freq.size, fmap.size, dtype=int)
+    for bb in range(fmap.size):
+        chan_band[(freq >= lo[bb]) & (freq < hi[bb])] = bb
+    return factor, chan_band
+
+
+def _optional_inputs(*args):
+    """Sort optional requirements into an RFI mask and an in-band noise scale."""
+    mask, noise = None, None
+    for a in args:
+        if a is None:
+            continue
+        if isinstance(a, containers.HybridVisInbandNoise):
+            noise = a
+        elif isinstance(a, draco_containers.LocalizedSiderealRFIMask):
+            mask = a
+        else:
+            raise TypeError(f"Unexpected requirement {type(a).__name__}.")
+    return mask, noise
+
+
 class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     """Fit the noise of m-mode filtered visibilities that scales with the sky.
 
@@ -3899,17 +4248,21 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     seed = config.Property(proptype=int, default=0)
 
     rfi_mask = None
+    inband_noise = None
 
-    def setup(self, mask=None):
-        """Set the RFI mask.
+    def setup(self, mask=None, noise=None):
+        """Set the RFI mask and the in-band noise scale, in either order.
 
         Parameters
         ----------
         mask : draco.core.containers.LocalizedSiderealRFIMask, optional
             Mask of bands, elevations and samples to leave out, for example the
             output of :class:`FlagMovingRFI`.
+        noise : ch_pipeline.core.containers.HybridVisInbandNoise, optional
+            Local scale of the noise (:class:`EstimateInbandNoise`), which
+            multiplies the noise expected from the weights and the noise scale.
         """
-        self.rfi_mask = mask
+        self.rfi_mask, self.inband_noise = _optional_inputs(mask, noise)
 
     def process(self, stream, unfiltered):
         """Fit the coefficients.
@@ -4009,6 +4362,9 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             self.log.info("No noise_scale dataset: using the weights alone.")
             scale = None
         rfi = _channel_rfi_mask(self.rfi_mask, stream, el_slc)
+        gfac, gband = _inband_factor(
+            self.inband_noise, stream, el_slc, self.pol, ew[iew]
+        )
 
         src_mask = np.zeros((nsrc, nel_local, nra), dtype=bool)
         ra_off = ((ra[np.newaxis, :] - src_ra[:, np.newaxis] + 180.0) % 360.0) - 180.0
@@ -4086,7 +4442,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 # sums for each polarisation
                 s1 = {k: [] for k in ("X", "N", "R2", "t", "e")}
                 sums = []
-                for pf, pu in zip(ipf, ipu):
+                for jp, (pf, pu) in enumerate(zip(ipf, ipu)):
                     F = vf[pf, chans, xf]  # chan, el, ra
                     R = vr[pu, chans, xu]
                     w = weight[pf, chans, xf]  # chan, ra
@@ -4096,6 +4452,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                         else np.ones((chans.size, nel_local), dtype=np.float32)
                     )
                     N = sc[:, :, np.newaxis] * tools.invert_no_zero(w)[:, np.newaxis, :]
+                    if gfac is not None:
+                        N = N * gfac[jp, gband[chans], oe]
                     valid = (
                         (w > 0)[:, np.newaxis, :]
                         & (sc > 0)[:, :, np.newaxis]
@@ -5314,7 +5672,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     no sky term.
 
     If an RFI mask is given (see :class:`FlagMovingRFI`), the flagged samples
-    are given zero weight, here and in the local rescaling below.
+    are given zero weight, here and in the local rescaling below.  If a local
+    noise scale is given (see :class:`EstimateInbandNoise`), it multiplies the
+    thermal variance ``sigma_k^2``, here and in the local rescaling.
 
     Attributes
     ----------
@@ -5381,8 +5741,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
     rfi_mask = None
 
-    def setup(self, manager, beam, mask=None):
-        """Set the telescope, the primary beam model and the RFI mask.
+    def setup(self, manager, beam, mask=None, noise=None):
+        """Set the telescope, the primary beam model, the RFI mask and noise scale.
 
         Parameters
         ----------
@@ -5393,9 +5753,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         mask : draco.core.containers.LocalizedSiderealRFIMask, optional
             Mask of bands, elevations and samples to leave out, for example the
             output of :class:`FlagMovingRFI`.
+        noise : ch_pipeline.core.containers.HybridVisInbandNoise, optional
+            Local scale of the thermal noise (:class:`EstimateInbandNoise`).  The
+            mask and the noise scale may be given in either order.
         """
         super().setup(manager, beam)
-        self.rfi_mask = mask
+        self.rfi_mask, self.inband_noise = _optional_inputs(mask, noise)
 
     def process(self, hvis, unfiltered, sky):
         """Apply the matched filter.
@@ -5526,6 +5889,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         else:
             nscale = np.ones((len(ipol), freq.size, len(iew), nel_local), np.float32)
         rfi = _channel_rfi_mask(self.rfi_mask, hvis, el_slc)
+        gfac, gband = _inband_factor(
+            getattr(self, "inband_noise", None),
+            hvis,
+            el_slc,
+            [pol[ii] for ii in ipol],
+            ew[iew],
+        )
 
         common = {
             "pol": opol,
@@ -5591,6 +5961,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 one_m_p = np.ones(wb.shape, dtype=np.float32)
             inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
             omp = one_m_p[:, :, :, np.newaxis, :]
+            # In-band scale of the thermal noise [pol, freq, ew, el, ra]
+            gb = gfac[:, gband[fsel]] if gfac is not None else None
 
             # Local rescaling of the sky term [el, ra]
             rloc = self._local_scale(
@@ -5607,6 +5979,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 k2coh[bb],
                 k2tot[bb],
                 yband_local,
+                gb,
             )
 
             for e0 in range(0, nel_local, self.nel_chunk):
@@ -5638,6 +6011,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 ]  # pol, freq, ew, el, ra
                 sky_v = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
                 var_th = nscale[:, fsel][..., esl, np.newaxis] * inv_w
+                if gb is not None:
+                    var_th = var_th * gb[..., esl, :]
                 s2 = np.abs(sky_v) ** 2
                 ok = (
                     (inv_w > 0)
@@ -5871,11 +6246,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         k2coh,
         k2tot,
         yband,
+        gb=None,
     ):
         """Rescaling of the sky term of one band at each local elevation and sample.
 
-        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra], and
-        ``rfi`` is the local RFI mask [freq, el, ra] or None.
+        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra],
+        ``rfi`` is the local RFI mask [freq, el, ra] or None, and ``gb`` the
+        in-band scale of the thermal noise [pol, freq, ew, el, ra] or None.
 
         Returns
         -------
@@ -5893,6 +6270,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             d = vis[:, :, :, esl][np.ix_(ipol, fsel, iew)]  # pol, freq, ew, el, ra
             sv = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
             var = nscale[:, fsel][..., esl, np.newaxis] * inv_w
+            if gb is not None:
+                var = var * gb[..., esl, :]
             ok = (var > 0) & np.isfinite(d) & np.isfinite(sv)
             if rfi is not None:
                 ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
