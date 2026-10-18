@@ -3242,6 +3242,27 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     in telescope-y to fill a segment, and the track of a source across the day
     (in the far sidelobes) moves far slower than the smallest slope.
 
+    The line test leaves the "heads" of the tracks: compact bright spots at the top
+    of an arc (where an aircraft passes closest), at its turnarounds, and on the arc
+    in other bands than its arms.  A head is a local maximum (within ``line_dy`` and
+    two samples) of the largest excess ``Z / s - n`` over the bands not yet flagged,
+    above ``head_snr**2``, that is
+
+    - spiky in frequency: the ``head_nband`` largest excesses over all bands hold at
+      least ``head_spiky`` of their sum (a broadband pulse spreads its power over
+      many bands), and
+    - attached to a piece of the flags of all bands combined at least half of
+      ``line_dy`` tall: within one sample and ``head_tol_dy`` plus
+      ``head_tol_slope`` times its slope (rows per sample) of its flags, or in the
+      cone beyond one of its ends, up to ``head_max_dt`` samples along the slope
+      of the end (centroid rows of its last five samples), within ``head_tol_dy``
+      plus ``head_tol_slope`` times the slope times the samples.
+
+    In each band where a pixel within ``grow_dy`` and ``grow_dt`` of the head is
+    above the value for an |S/N| of ``head_snr_band``, the lit pixels connected to
+    the lit pixels there, within ``line_dy`` and ``head_dt`` samples of the head,
+    are flagged too, and grown like the tracks.
+
     The output is a mask with one entry per band (its frequency axis holds the
     centre and width of each band), shared by the polarisations and baselines.
     :class:`EstimateSkyNoise` and :class:`TransientMatchedFilterSkyNoise` take it
@@ -3270,6 +3291,26 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     grow_dy, grow_dt : float, int
         Growth of the flags in telescope-y and in samples.  Defaults are 0.0033 (2
         rows) and 1.
+    head_snr : float
+        Smallest equivalent |S/N| (square root of the excess) of a head.  Zero turns
+        the heads off.  Default is 8.
+    head_spiky : float
+        Smallest fraction of the excess over all bands in the ``head_nband``
+        largest.  Default is 0.75 (aircraft heads 0.83-1.00, J1634+44 0.23).
+    head_nband : int
+        Number of bands for ``head_spiky``.  Default is 3.
+    head_snr_band : float
+        Equivalent |S/N| above which a band is flagged at a head.  Default is 4.
+    head_tol_dy : float
+        Distance in telescope-y from a piece of the flags.  Default is 0.0164 (10
+        rows).
+    head_max_dt : int
+        Largest number of samples beyond the end of a piece.  Default is 6.
+    head_tol_slope : float
+        Allowance for the change of the slope beyond the end of a piece.  Default is
+        1.5.
+    head_dt : int
+        Half-width in samples of the region flagged around a head.  Default is 3.
     local_window : int
         Half-width in samples of the running median.  Default is 30 (5 minutes).
     sky_scale_max : float
@@ -3288,6 +3329,14 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     lit_frac = config.Property(proptype=float, default=0.5)
     grow_dy = config.Property(proptype=float, default=0.0033)
     grow_dt = config.Property(proptype=int, default=1)
+    head_snr = config.Property(proptype=float, default=8.0)
+    head_spiky = config.Property(proptype=float, default=0.75)
+    head_nband = config.Property(proptype=int, default=3)
+    head_snr_band = config.Property(proptype=float, default=4.0)
+    head_tol_dy = config.Property(proptype=float, default=0.0164)
+    head_max_dt = config.Property(proptype=int, default=6)
+    head_tol_slope = config.Property(proptype=float, default=1.5)
+    head_dt = config.Property(proptype=int, default=3)
     local_window = config.Property(proptype=int, default=30)
     sky_scale_max = config.Property(proptype=float, default=3.0)
     nsample_chunk = config.Property(proptype=int, default=65536)
@@ -3364,10 +3413,21 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             lit = valid & (zs > z_lit[nz[bb]]) & (excess > self.rel**2 * near)
             if self.sky_scale_max > 0:
                 lit &= s <= self.sky_scale_max
+                # nothing stands out where the sky dominates, for the heads either
+                zs = np.where(s <= self.sky_scale_max, zs, nz[bb])
             flag[bb] = _line_mask(lit, valid, lines, self.lit_frac)
             if flag[bb].any():
                 flag[bb] = scipy.ndimage.binary_dilation(flag[bb], structure=grow)
+            Z[bb] = zs
         self.log.debug(f"Searched for tracks in {time.time() - t0:0.1f} seconds.")
+
+        if self.head_snr > 0:
+            t0 = time.time()
+            z_band = np.concatenate(
+                [[np.inf], gammainccinv(nn, 2.0 * norm.sf(self.head_snr_band))]
+            )
+            flag |= self._flag_heads(Z, nz, flag, L, grow, z_lit, z_band, dy)
+            self.log.debug(f"Flagged the heads in {time.time() - t0:0.1f} seconds.")
 
         flag = mpiarray.MPIArray.wrap(flag, axis=0, comm=self.comm).redistribute(1)
         if flag.local_shape[1] != nel_local:
@@ -3397,6 +3457,183 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         )
 
         return out
+
+    def _flag_heads(self, zs, nz, flag, L, grow, z_lit, z_band, dy):
+        """Flags for the heads attached to the tracks.
+
+        Parameters
+        ----------
+        zs : np.ndarray[band_local, el, ra]
+            Band power over its local scale.
+        nz : np.ndarray[band_local, el, ra]
+            Number of terms.
+        flag : np.ndarray[band_local, el, ra]
+            Flags of the tracks.
+        L : int
+            Length of the line segments in rows.
+        grow : np.ndarray[2 * gy + 1, 2 * gt + 1]
+            Growth of the flags.
+        z_lit, z_band : np.ndarray
+            Lit and significant values of ``zs`` for each number of terms.
+        dy : float
+            Spacing of the rows in telescope-y.
+
+        Returns
+        -------
+        heads : np.ndarray[band_local, el, ra]
+            The flags of the heads.
+        """
+        from mpi4py import MPI
+
+        nb_local, nel, nra = zs.shape
+        comm = self.comm
+        b_off = comm.exscan(nb_local) or 0
+        nband = comm.allreduce(nb_local)
+
+        # Largest excess over the bands not flagged, and the number of bands flagged
+        peak = np.zeros((nel, nra), dtype=np.float32)
+        nflag = np.zeros((nel, nra), dtype=np.int32)
+        for bb in range(nb_local):
+            ok = (nz[bb] > 0) & ~flag[bb]
+            np.maximum(peak, np.where(ok, zs[bb] - nz[bb], 0.0), out=peak)
+            nflag += flag[bb]
+        comm.Allreduce(MPI.IN_PLACE, peak, op=MPI.MAX)
+        comm.Allreduce(MPI.IN_PLACE, nflag, op=MPI.SUM)
+
+        cand = (peak >= self.head_snr**2) & (
+            peak == scipy.ndimage.maximum_filter(peak, size=(L, 5), mode="constant")
+        )
+        ce, ct = np.nonzero(cand)
+        ncand = ce.size
+        out = np.zeros(zs.shape, dtype=bool)
+        if ncand == 0:
+            return out
+
+        # The excess in every band at the candidates, and whether each band is
+        # significant next to them
+        gy, gt = grow.shape[0] // 2, grow.shape[1] // 2
+        spec = np.zeros((nband, ncand), dtype=np.float64)
+        sig = np.zeros((nband, ncand), dtype=np.float64)
+        for bb in range(nb_local):
+            ok = nz[bb] > 0
+            spec[b_off + bb] = np.where(ok, zs[bb] - nz[bb], 0.0)[ce, ct].clip(0.0)
+            big = ok & (zs[bb] > z_band[nz[bb]])
+            big = scipy.ndimage.maximum_filter(big, size=(2 * gy + 1, 2 * gt + 1))
+            sig[b_off + bb] = big[ce, ct]
+        comm.Allreduce(MPI.IN_PLACE, spec, op=MPI.SUM)
+        comm.Allreduce(MPI.IN_PLACE, sig, op=MPI.SUM)
+
+        top = -np.sort(-spec, axis=0)[: self.head_nband].sum(axis=0)
+        spiky = top >= self.head_spiky * np.maximum(spec.sum(axis=0), 1e-30)
+
+        cols, ends = _flag_pieces(nflag > 0, max(1, L // 2))
+        tol = self.head_tol_dy / dy
+        head = np.array(
+            [
+                spiky[ii]
+                and _attached(
+                    ct[ii],
+                    ce[ii],
+                    cols,
+                    ends,
+                    tol,
+                    self.head_max_dt,
+                    self.head_tol_slope,
+                )
+                for ii in range(ncand)
+            ],
+            dtype=bool,
+        )
+        self.log.info(
+            f"{ncand} bright spots outside the tracks, {spiky.sum()} spiky in "
+            f"frequency, {head.sum()} attached to tracks."
+        )
+
+        # In the significant bands, the lit pixels connected to each head
+        h = L // 2
+        dt = self.head_dt
+        for ii in np.flatnonzero(head):
+            e0, e1 = max(ce[ii] - h, 0), min(ce[ii] + h + 1, nel)
+            t0, t1 = max(ct[ii] - dt, 0), min(ct[ii] + dt + 1, nra)
+            for bb in range(nb_local):
+                if not sig[b_off + bb, ii]:
+                    continue
+                n_ = nz[bb, e0:e1, t0:t1]
+                lit = (n_ > 0) & (zs[bb, e0:e1, t0:t1] > z_lit[n_])
+                blob, _ = scipy.ndimage.label(lit)
+                ee, tt = ce[ii] - e0, ct[ii] - t0
+                seed = blob[max(ee - gy, 0) : ee + gy + 1, max(tt - gt, 0) : tt + gt + 1]
+                seed = np.unique(seed[seed > 0])
+                if seed.size:
+                    out[bb, e0:e1, t0:t1] |= np.isin(blob, seed)
+        for bb in range(nb_local):
+            if out[bb].any():
+                out[bb] = scipy.ndimage.binary_dilation(out[bb], structure=grow)
+        return out
+
+
+def _flag_pieces(mask, min_rows, nend=5):
+    """Pieces of a mask [el, ra] at least ``min_rows`` tall: their columns and ends.
+
+    Pixels within one row or sample of each other are joined.
+
+    Returns
+    -------
+    cols : np.ndarray[ncol, 4]
+        For each sample of each piece: the sample, the lowest and highest row, and
+        the slope in rows per sample of the centroid rows there.
+    ends : np.ndarray[nend, 4]
+        For each end of each piece: the side (-1 for the first sample, +1 for the
+        last), the sample, the centroid row, and the slope of the centroid rows of
+        the ``nend`` samples at that end.
+    """
+    lab, _ = scipy.ndimage.label(
+        scipy.ndimage.binary_dilation(mask, structure=np.ones((3, 3), dtype=bool))
+    )
+    lab = np.where(mask, lab, 0)
+    cols, ends = [], []
+    for ii, sl in enumerate(scipy.ndimage.find_objects(lab)):
+        if sl is None or sl[0].stop - sl[0].start < min_rows:
+            continue
+        sub = lab[sl] == ii + 1
+        cc = np.flatnonzero(sub.any(axis=0))
+        rows = np.arange(sl[0].start, sl[0].stop, dtype=np.float64)
+        t = sl[1].start + cc
+        sub = sub[:, cc]
+        e = (sub * rows[:, np.newaxis]).sum(axis=0) / sub.sum(axis=0)
+        lo = np.where(sub, rows[:, np.newaxis], np.inf).min(axis=0)
+        hi = np.where(sub, rows[:, np.newaxis], -np.inf).max(axis=0)
+        slope = np.gradient(e, t) if t.size > 1 else np.zeros(1)
+        cols.append(np.stack([t, lo, hi, slope], axis=1))
+        for side, kk in ((-1, slice(0, nend)), (1, slice(-nend, None))):
+            sl_end = np.polyfit(t[kk], e[kk], 1)[0] if t[kk].size >= 2 else 0.0
+            jj = 0 if side < 0 else -1
+            ends.append((side, t[jj], e[jj], sl_end))
+    cols = np.concatenate(cols) if cols else np.zeros((0, 4))
+    return cols, np.array(ends, dtype=np.float64).reshape(-1, 4)
+
+
+def _attached(t, e, cols, ends, tol, max_dt, tol_slope):
+    """Whether the pixel (row e, sample t) is attached to a piece of the flags.
+
+    It is if, within one sample, a piece comes within ``tol + tol_slope |slope|``
+    rows (the slope of the piece there), or if the pixel is up to ``max_dt``
+    samples beyond an end of a piece, within ``tol + tol_slope |slope| dt`` rows of
+    the line along the slope of the end.
+    """
+    near = np.abs(cols[:, 0] - t) <= 1
+    if near.any():
+        c = cols[near]
+        off = np.maximum(c[:, 1] - e, e - c[:, 2]).clip(0.0)
+        if np.any(off <= tol + tol_slope * np.abs(c[:, 3])):
+            return True
+    if ends.size == 0:
+        return False
+    side, te, ee, slope = ends.T
+    dt = (t - te) * side
+    off = np.abs(e - (ee + slope * (t - te)))
+    ok = (dt >= 1) & (dt <= max_dt) & (off <= tol + tol_slope * np.abs(slope) * dt)
+    return bool(ok.any())
 
 
 def _power_terms(stream, pols, ew_index, log):
