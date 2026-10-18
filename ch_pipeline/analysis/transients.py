@@ -2800,6 +2800,16 @@ def _channel_rfi_mask(mask, stream, el_slc):
     return rfi
 
 
+def _combine_beams(beams):
+    """Geometric mean of power beams [nbeam, ...], zero where any is not positive."""
+    beams = np.asarray(beams)
+    if beams.shape[0] == 1:
+        return beams[0]
+    pos = np.all(beams > 0.0, axis=0)
+    logb = np.log(np.where(pos, beams, 1.0))
+    return np.where(pos, np.exp(logb.mean(axis=0)), 0.0)
+
+
 def _self_conjugate(pol, ew):
     """Which [pol, ew] hybrid visibilities are formed with their own conjugate.
 
@@ -4571,7 +4581,13 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     x_oversample : float
         See ``x_spacing``.  Default is 8.
     save_imag : bool
-        Also save the imaginary part as a null test.  Default is False.
+        Also save the imaginary part, as a null test or for signals of unknown
+        phase (the cross-polar products).  Default is False.
+    cross_beam : str
+        Primary beam of the cross-polar products XY and YX: "copol" for the
+        geometric mean of the XX and YY beams, the response to a polarised source
+        on axis, or "file" for the cross-polar beams of the beam model.  Default is
+        "copol".
     ignore_rot : bool
         Ignore the telescope rotation.  Default is False.
     nel_chunk : int
@@ -4592,6 +4608,7 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     x_spacing = config.Property(proptype=float, default=None)
     x_oversample = config.Property(proptype=float, default=8.0)
     save_imag = config.Property(proptype=bool, default=False)
+    cross_beam = config.enum(["copol", "file"], default="copol")
     ignore_rot = config.Property(proptype=bool, default=False)
     nel_chunk = config.Property(proptype=int, default=8)
 
@@ -5043,6 +5060,22 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
 
         return coeff
 
+    def _beam_pol_index(self, beam, pol):
+        """Indices into the beam's polarisations for each polarisation.
+
+        A list per polarisation; with ``cross_beam`` "copol", the cross-polar
+        products use the XX and YY beams, combined by :func:`_combine_beams`.
+        """
+        bpol = [str(p) for p in beam.pol]
+        out = []
+        for p in pol:
+            p = str(p)
+            if p[0] != p[1] and self.cross_beam == "copol":
+                out.append([bpol.index("XX"), bpol.index("YY")])
+            else:
+                out.append([bpol.index(p)])
+        return out
+
     def _beam_profile_hwhm(self, freq, pol):
         """Half width at half maximum of the beam in x at zenith, per frequency."""
         beam = self.beam
@@ -5053,8 +5086,7 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         nloc = beam.beam.local_shape[0]
         bfreq = bfreq_all[lo : lo + nloc]
 
-        bpol = list(beam.pol)
-        ipol = [bpol.index(p) for p in pol]
+        ipol = self._beam_pol_index(beam, pol)
 
         phi = np.asarray(beam.phi)
         isort = np.argsort(phi)
@@ -5065,11 +5097,11 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         for ff, nu in enumerate(bfreq):
             if np.min(np.abs(freq - nu)) > 1e-3:
                 continue
-            b = beam.beam[:].local_array[ff, ipol, 0, itheta].real
-            w = beam.weight[:].local_array[ff, ipol, 0, itheta]
-            if not np.all(np.any(w > 0, axis=-1)):
+            b = beam.beam[:].local_array[ff, :, 0, itheta].real
+            w = beam.weight[:].local_array[ff, :, 0, itheta]
+            if not all(np.any(w[ip] > 0, axis=-1).all() for ip in ipol):
                 continue
-            prof = np.mean(b, axis=0)[isort]
+            prof = np.mean([_combine_beams(b[ip]) for ip in ipol], axis=0)[isort]
             pk = prof.max()
             if pk <= 0:
                 continue
@@ -5127,8 +5159,7 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
 
         local = np.flatnonzero((bindex >= lo) & (bindex < lo + nloc))
 
-        bpol = list(beam.pol)
-        ipol = [bpol.index(p) for p in pol]
+        ipol = self._beam_pol_index(beam, pol)
 
         theta = np.asarray(beam.theta)
         phi = np.asarray(beam.phi)
@@ -5150,25 +5181,28 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         pb = np.zeros((local.size, len(pol), y.size, x.size), dtype=np.float32)
         for ii, ff in enumerate(local):
             lf = bindex[ff] - lo
-            for pp, ip in enumerate(ipol):
-                b = bdset[lf, ip, 0][:, xsel]
-                w = wdset[lf, ip, 0][:, xsel]
+            for pp, ips in enumerate(ipol):
+                vals = []
+                for ip in ips:
+                    b = bdset[lf, ip, 0][:, xsel]
+                    w = wdset[lf, ip, 0][:, xsel]
 
-                # A zero-weight point is invalid only if its beam is non-zero
-                flag = (w > 0.0) | (np.abs(b) == 0.0)
-                if not np.any(w > 0.0):
-                    continue
+                    # A zero-weight point is invalid only if its beam is non-zero
+                    flag = (w > 0.0) | (np.abs(b) == 0.0)
+                    if not np.any(w > 0.0):
+                        break
 
-                bval = np.where(flag, b.real, 0.0)
-                val = scipy.interpolate.RectBivariateSpline(theta, phi, bval)(y, x)
+                    bval = np.where(flag, b.real, 0.0)
+                    val = scipy.interpolate.RectBivariateSpline(theta, phi, bval)(y, x)
 
-                if not np.all(flag):
-                    fval = scipy.interpolate.RectBivariateSpline(
-                        theta, phi, flag.astype(np.float32)
-                    )(y, x)
-                    val = np.where(np.abs(fval - 1.0) < 0.01, val, 0.0)
-
-                pb[ii, pp] = val
+                    if not np.all(flag):
+                        fval = scipy.interpolate.RectBivariateSpline(
+                            theta, phi, flag.astype(np.float32)
+                        )(y, x)
+                        val = np.where(np.abs(fval - 1.0) < 0.01, val, 0.0)
+                    vals.append(val)
+                else:
+                    pb[ii, pp] = _combine_beams(np.array(vals))
 
         # Redistribute from frequency to elevation
         pb = mpiarray.MPIArray.wrap(pb, axis=0, comm=self.comm).redistribute(axis=2)
@@ -6445,6 +6479,182 @@ class CollapseBandsToGroups(tasklib.base.ContainerTask):
         self.log.info(f"Made maps for {len(names)} groups of bands, at the {where}.")
 
         return out
+
+
+class CollapseBandsIncoherent(tasklib.base.ContainerTask):
+    """Sum the power of the single-sample matched filter over groups of bands.
+
+    For signals whose phase is unknown and changes from band to band, such as the
+    cross-polar products: XY holds ``(U + iV)`` times the instrumental phase
+    between the X and Y arrays, a delay of a few ns that turns through several
+    cycles over the band but little within one band.  At each telescope-x, each band
+    (and polarisation) contributes ``w (a_re^2 + a_im^2)``, with ``a_re`` and
+    ``a_im`` the real and imaginary amplitudes and ``w`` their inverse variance, and
+    the sum ``q`` over the bands of a group (and over the polarisations if
+    ``combine_pol``) is chi-squared with ``K`` = 2 x (number of terms with data)
+    degrees of freedom for noise.  It is converted to the equivalent Gaussian S/N
+    by the Wilson-Hilferty approximation,
+
+        z = ((q / K)^(1/3) - (1 - 2 / (9 K))) / sqrt(2 / (9 K)),
+
+    and either the best z over telescope-x is kept, or z at a single telescope-x.
+
+    The matched filter must save the imaginary part (``save_imag``).  The real and
+    imaginary parts are taken to have the same variance, and the terms to be
+    independent: the correlation of the noise that scales with the sky between
+    bands and between polarisations is ignored.
+
+    Attributes
+    ----------
+    groups : dict
+        Groups of bands, as {name: [[lo, hi], ...]} in MHz.  A band is in a group if
+        its centre is in any of the ranges.  Groups without bands are left out.
+    each_band : bool
+        Also make a group of every band on its own.  Default is False.
+    duration : int
+        Duration (in samples) of the trials to use.  Default is 1.
+    x_reduce : str or float
+        "max" to keep the best telescope-x (stored in ``x_index``), or a value of
+        telescope-x.  Default is "max".
+    combine_pol : bool
+        Sum over the polarisations too, into one named by joining their names with
+        "+".  Default is True.
+    nel_chunk : int
+        Number of elevations to process at once.  Default is 16.
+    """
+
+    groups = config.Property(proptype=dict, default={})
+    each_band = config.Property(proptype=bool, default=False)
+    duration = config.Property(proptype=int, default=1)
+    x_reduce = config.Property(default="max")
+    combine_pol = config.Property(proptype=bool, default=True)
+    nel_chunk = config.Property(proptype=int, default=16)
+
+    def process(self, mf):
+        """Sum the power over the groups of bands.
+
+        Parameters
+        ----------
+        mf : ch_pipeline.core.containers.TransientMatchedFilter
+            Matched filter output for each band, with ``amplitude_imag``.
+
+        Returns
+        -------
+        out : ch_pipeline.core.containers.TransientBandGroupMap
+            Equivalent Gaussian S/N for each group of bands.
+        """
+        if "amplitude_imag" not in mf.datasets:
+            raise ValueError("The matched filter output has no imaginary part.")
+        mf.redistribute("el")
+
+        x = mf.index_map["x"][:]
+        if isinstance(self.x_reduce, str) and self.x_reduce.strip().lower() == "max":
+            xsel = slice(None)
+            fixed_x = None
+        else:
+            ix0 = int(np.argmin(np.abs(x - float(self.x_reduce))))
+            xsel = slice(ix0, ix0 + 1)
+            fixed_x = x[ix0]
+
+        centre = mf.index_map["freq"]["centre"][:]
+        durations = list(mf.index_map["duration"][:])
+        if self.duration not in durations:
+            raise ValueError(f"Duration {self.duration} is not in {durations}.")
+        idur = durations.index(self.duration)
+
+        names, used = [], []
+        for name, ranges in self.groups.items():
+            inc = np.zeros(centre.size, dtype=bool)
+            for lo, hi in ranges:
+                inc |= (centre >= lo) & (centre < hi)
+            if not inc.any():
+                self.log.info(f"Skipping group {name}, which contains no bands.")
+                continue
+            names.append(str(name))
+            used.append(inc)
+        if self.each_band:
+            for bb, nu in enumerate(centre):
+                names.append(f"{nu:.1f}")
+                used.append(np.arange(centre.size) == bb)
+        if not names:
+            raise ValueError("No groups of bands were given.")
+        used = np.array(used)
+
+        pol = [str(p) for p in mf.index_map["pol"]]
+        pol_groups = [list(range(len(pol)))] if self.combine_pol else [[pp] for pp in range(len(pol))]
+        opol = np.array(["+".join(pol[pp] for pp in grp) for grp in pol_groups])
+
+        out = containers.TransientBandGroupMap(
+            group=np.array(names),
+            pol=opol,
+            axes_from=mf,
+            attrs_from=mf,
+            distributed=mf.distributed,
+            comm=mf.comm,
+        )
+        if fixed_x is None:
+            out.add_dataset("x_index")
+        out.redistribute("el")
+        out.datasets["band_used"][:] = used
+        out.datasets["ha"][:] = mf.datasets["ha"][:]
+        out.datasets["dec"][:] = mf.datasets["dec"][:]
+        out.attrs["duration"] = self.duration
+        out.attrs["x_reduce"] = "max" if fixed_x is None else float(fixed_x)
+        out.attrs["statistic"] = "incoherent"
+
+        are = mf.amplitude[:].local_array[:, idur, ..., xsel]  # pol, band, el, ra, x
+        aim = mf.datasets["amplitude_imag"][:].local_array[:, idur, ..., xsel]
+        wgt = mf.weight[:].local_array[:, idur, ..., xsel]
+
+        osnr = out.snr[:].local_array
+        oix = out.datasets["x_index"][:].local_array if fixed_x is None else None
+        osnr[:] = 0.0
+        if oix is not None:
+            oix[:] = 0
+
+        nel = are.shape[2]
+        for op, grp in enumerate(pol_groups):
+            for e0 in range(0, nel, self.nel_chunk):
+                esl = slice(e0, min(e0 + self.nel_chunk, nel))
+                for gg, inc in enumerate(used):
+                    q = 0.0
+                    k = 0
+                    for pp in grp:
+                        for bb in np.flatnonzero(inc):
+                            w = wgt[pp, bb, esl].astype(np.float64)  # el, ra, x
+                            q = q + w * (
+                                are[pp, bb, esl].astype(np.float64) ** 2
+                                + aim[pp, bb, esl].astype(np.float64) ** 2
+                            )
+                            k = k + 2 * (w > 0)
+                    z = _chi2_to_gaussian(q, k)
+                    ix = np.argmax(z, axis=-1)
+                    osnr[op, gg, esl] = np.take_along_axis(z, ix[..., np.newaxis], -1)[
+                        ..., 0
+                    ]
+                    if oix is not None:
+                        oix[op, gg, esl] = ix
+
+        where = "best telescope-x" if fixed_x is None else f"telescope-x {fixed_x:+.4f}"
+        self.log.info(
+            f"Made incoherent maps for {len(names)} groups of bands and polarisations "
+            f"{list(opol)}, at the {where}."
+        )
+
+        return out
+
+
+def _chi2_to_gaussian(q, k):
+    """Equivalent Gaussian S/N of a chi-squared value ``q`` with ``k`` dof.
+
+    The Wilson-Hilferty approximation; zero where ``k`` is zero.
+    """
+    k = np.asarray(k, dtype=np.float64)
+    ok = k > 0
+    kk = np.where(ok, k, 1.0)
+    c = 2.0 / (9.0 * kk)
+    z = (np.cbrt(np.where(ok, q, 0.0) / kk) - (1.0 - c)) / np.sqrt(c)
+    return np.where(ok, z, 0.0)
 
 
 class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
