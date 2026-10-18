@@ -52,7 +52,7 @@ def parse_tle_text(text):
     """Parse element sets in two-line or three-line format.
 
     Lines may be separated by newlines, carriage returns or apostrophes (as in some
-    Space-Track downloads).  A line starting with "0 " gives the name of the next
+    Space-Track downloads; an apostrophe within a name is kept).  A line starting with "0 " gives the name of the next
     element set.  Element sets of the same satellite with the same epoch are kept
     once (the first).
 
@@ -64,7 +64,15 @@ def parse_tle_text(text):
     """
     from sgp4.api import Satrec
 
-    lines = [ln.strip() for ln in re.split(r"\r\n|\r|\n|'", text) if ln.strip()]
+    # An apostrophe is also a separator, but can appear in a name: rejoin fragments
+    # that do not start a line of an element set
+    lines = []
+    for ln in re.split(r"\r\n|\r|\n|'", text):
+        if ln.startswith(("0 ", "1 ", "2 ")) or not lines:
+            lines.append(ln)
+        elif ln.strip():
+            lines[-1] = f"{lines[-1]}'{ln}"
+    lines = [ln.strip() for ln in lines if ln.strip()]
     rows, seen, name = [], set(), ""
     ii = 0
     while ii < len(lines):
