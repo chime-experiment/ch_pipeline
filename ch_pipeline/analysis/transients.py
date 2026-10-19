@@ -5711,6 +5711,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         Default is 20.
     local_min : float
         Lower limit of the rescaling.  Default is 0.1.
+    inband_drop_inc : bool
+        With a local noise scale from :class:`EstimateInbandNoise`, which measures
+        the noise that is independent between channels (including the self-noise
+        of bright sources), leave out the incoherent sky term ``kappa_inc`` (use
+        ``kappa_tot = kappa_coh``) so that it is not counted twice.  Default is
+        True.
 
     The sky term changes faster than the block or cell fits can follow (on some
     nights over a few minutes).  So it is rescaled at each sample by the ratio of
@@ -5731,6 +5737,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     group_spectral_index = config.Property(proptype=float, default=0.0)
     shrink_blocks = config.Property(proptype=bool, default=True)
     kappa_floor = config.Property(proptype=float, default=0.1)
+    inband_drop_inc = config.Property(proptype=bool, default=True)
     rho_band_default = config.Property(proptype=float, default=1.0)
     rho_pol_default = config.Property(proptype=float, default=1.0)
     local_window = config.Property(proptype=int, default=30)
@@ -5855,6 +5862,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         k2coh, k2tot, yband, rho_pol, rho_band = self._sky_coefficients(
             sky, band_map, ew[iew], ra, el
         )
+        if getattr(self, "inband_noise", None) is not None and self.inband_drop_inc:
+            self.log.info(
+                "Leaving out the incoherent sky term: the local noise scale measures it."
+            )
+            k2tot = k2coh.copy()
         k2inc = np.clip(k2tot - k2coh, 0.0, None)
         kcoh = np.sqrt(k2coh)  # band, ew, yband, ra
         lam, qvec = self._modes(rho_band)
