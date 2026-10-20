@@ -1144,7 +1144,9 @@ class HybridVisInbandNoise(FreqContainer, SiderealContainer):
     noise scale, for each polarisation, band of channels (the ``freq`` axis holds
     the centre and width of each band), east-west baseline, elevation and sample.
     ``dof`` is the number of degrees of freedom of the estimate in each band before
-    smoothing (the same at every elevation).
+    smoothing (the same at every elevation).  ``common`` is the factor of the scale
+    shared by all elevations at each sample, and ``flag`` marks the samples of a
+    band where it was too large to use.
 
     The scale is stored without chunking or compression, like the group maps.
     """
@@ -1162,6 +1164,18 @@ class HybridVisInbandNoise(FreqContainer, SiderealContainer):
         "dof": {
             "axes": ["pol", "freq", "ew", "ra"],
             "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "common": {
+            "axes": ["pol", "freq", "ew", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "flag": {
+            "axes": ["freq", "ra"],
+            "dtype": bool,
             "initialise": True,
             "distributed": False,
         },

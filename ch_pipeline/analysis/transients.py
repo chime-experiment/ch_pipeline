@@ -3821,6 +3821,19 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
     noise (the sum of one minus the leverage of each channel), are summed over
     ``el_window`` elevations and ``ra_window`` samples on either side, and their
     ratio is the scale.
+
+    The scale is the product of two factors.  One is common to all elevations
+    and is measured at every sample without averaging in time: the residual
+    power of each elevation in units of its own smooth level, summed over all
+    elevations.  It follows jumps of the system temperature that last a sample
+    or two and raise the noise of every formed beam at once (bursts from the Sun
+    near the beam on 2418), which the smoothed weights and a window in time
+    would dilute.  The other is the smooth factor of each elevation, summed over
+    the windows after dividing out the common factor (starting from the power
+    summed over all elevations at each sample over its running median in time,
+    then two passes).  Where the
+    common factor exceeds ``flag_common`` in a band, those samples are flagged
+    (``flag``), and consumers leave them out.
     Because the fit removes anything smooth in frequency, a pulse does not raise its
     own noise, and the estimate can include the sample itself.  Samples flagged in
     an RFI mask (given to setup) are left out of the sums.
@@ -3866,6 +3879,9 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
         Sequences beyond ``2 N W`` (the time-bandwidth product).  The first ``2 N W``
         leave ~3e-3 of the power of a smooth spectrum; ten more leave ~1e-10.
         Default is 10.
+    flag_common : float
+        Flag the samples of a band where the factor common to all elevations
+        exceeds this.  Zero turns the flags off.  Default is 4.
     """
 
     pol = config.list_type(str, default=None)
@@ -3879,6 +3895,7 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
     min_dof = config.Property(proptype=float, default=20.0)
     el_block = config.Property(proptype=int, default=8)
     extra_modes = config.Property(proptype=int, default=10)
+    flag_common = config.Property(proptype=float, default=4.0)
 
     rfi_mask = None
 
@@ -4041,12 +4058,64 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
             )
             return mpiarray.MPIArray.wrap(loc, axis=1, comm=self.comm).redistribute(3)
 
+        # The scale is the product of a factor for each sample, common to all
+        # elevations (no smoothing in time: it follows jumps of the system
+        # temperature such as solar bursts), and a smooth factor for each elevation
+        # (summed over the windows after dividing out the common factor, so that
+        # jumps do not leak into the neighbouring samples).  Two passes.
         nwin = (2 * self.el_window + 1) * (2 * self.ra_window + 1)
-        snum = smooth(num).local_array
         sden = smooth(den).local_array
         enough = sden * nwin >= self.min_dof
-        scale = np.where(enough, snum * tools.invert_no_zero(sden), 1.0)
-        scale *= corr[:, :, :, np.newaxis, :]
+        # Start from the residual power summed over all elevations at each sample,
+        # over its running median in time: the jumps, without the slow changes
+        # (which the factor of each elevation follows)
+        cnum = self.comm.allreduce(
+            np.sum(np.where(enough, num, 0.0), axis=3, dtype=np.float64)
+        )
+        cden = self.comm.allreduce(
+            np.sum(np.where(enough, den, 0.0), axis=3, dtype=np.float64)
+        )
+        valid = cden > 0
+        c0 = np.where(valid, cnum * tools.invert_no_zero(cden), 1.0)
+        slow = median.moving_weighted_median(
+            np.ascontiguousarray(c0.reshape(-1, nra)),
+            np.ascontiguousarray(valid.reshape(-1, nra).astype(np.float64)),
+            size=(1, 2 * self.ra_window + 1),
+        ).reshape(c0.shape)
+        common = np.where(valid & (slow > 0), c0 * tools.invert_no_zero(slow), 1.0)
+        for _ in range(2):
+            snum = smooth(
+                (num * tools.invert_no_zero(common)[:, :, :, np.newaxis]).astype(
+                    np.float32
+                )
+            ).local_array
+            h = np.where(enough, snum * tools.invert_no_zero(sden), 1.0)
+            # Residual power of each elevation in units of its own smooth level,
+            # summed over all elevations (each weighted by its degrees of freedom)
+            cnum = np.sum(
+                np.where(enough, num * tools.invert_no_zero(h), 0.0),
+                axis=3,
+                dtype=np.float64,
+            )
+            cnum = self.comm.allreduce(cnum)
+            common = np.where(valid, cnum * tools.invert_no_zero(cden), 1.0)
+
+        scale = h * common[:, :, :, np.newaxis] * corr[:, :, :, np.newaxis, :]
+
+        # Samples of a band where the noise of every elevation jumped by more than
+        # flag_common (in any polarisation or baseline)
+        flag = (
+            np.any(common > self.flag_common, axis=(0, 2))
+            if self.flag_common > 0
+            else np.zeros((nband, nra), dtype=bool)
+        )
+        if flag.any():
+            self.log.info(
+                f"Flagged {flag.sum()} samples of bands ({flag.any(axis=0).sum()} "
+                f"samples in at least one band, {flag.any(axis=1).sum()} bands) where "
+                f"the noise of all elevations is more than {self.flag_common} times "
+                "its expectation."
+            )
 
         out = containers.HybridVisInbandNoise(
             freq=band_map,
@@ -4062,11 +4131,14 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
             raise RuntimeError("The scale is not distributed like the data.")
         out.scale[:].local_array[:] = scale
         out.dof[:] = dof
+        out.datasets["common"][:] = common
+        out.datasets["flag"][:] = flag
         out.attrs["delay_pad"] = self.delay_pad
         out.attrs["x_max"] = self.x_max
         out.attrs["el_window"] = self.el_window
         out.attrs["ra_window"] = self.ra_window
         out.attrs["channel_correlation"] = self.channel_correlation
+        out.attrs["flag_common"] = self.flag_common
 
         good = scale[enough]
         if good.size:
@@ -4103,9 +4175,11 @@ def _inband_factor(noise, stream, el_slc, pols, ews):
     chan_band : np.ndarray[freq]
         Index into the second axis for each channel of the stream (the last entry
         for channels in no band).
+    flag : np.ndarray[freq, ra] or None
+        True for the samples of each channel flagged by the noise estimate.
     """
     if noise is None:
-        return None, None
+        return None, None, None
     for ax in ("ra", "el"):
         a, b = stream.index_map[ax][:], noise.index_map[ax][:]
         if a.shape != b.shape or not np.allclose(a, b):
@@ -4131,7 +4205,21 @@ def _inband_factor(noise, stream, el_slc, pols, ews):
     chan_band = np.full(freq.size, fmap.size, dtype=int)
     for bb in range(fmap.size):
         chan_band[(freq >= lo[bb]) & (freq < hi[bb])] = bb
-    return factor, chan_band
+    flag = None
+    if "flag" in noise.datasets:
+        fb = noise.datasets["flag"][:]
+        if np.any(fb):
+            fb = np.concatenate([fb, np.zeros((1, fb.shape[1]), dtype=bool)], axis=0)
+            flag = fb[chan_band]
+    return factor, chan_band, flag
+
+
+def _merge_flags(rfi, flag, nel_local):
+    """Add flags of channels and samples [freq, ra] to a local RFI mask [freq, el, ra]."""
+    if flag is None:
+        return rfi
+    full = np.broadcast_to(flag[:, np.newaxis, :], (flag.shape[0], nel_local, flag.shape[1]))
+    return full.copy() if rfi is None else rfi | full
 
 
 def _optional_inputs(*args):
@@ -4362,9 +4450,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             self.log.info("No noise_scale dataset: using the weights alone.")
             scale = None
         rfi = _channel_rfi_mask(self.rfi_mask, stream, el_slc)
-        gfac, gband = _inband_factor(
+        gfac, gband, gflag = _inband_factor(
             self.inband_noise, stream, el_slc, self.pol, ew[iew]
         )
+        rfi = _merge_flags(rfi, gflag, nel_local)
 
         src_mask = np.zeros((nsrc, nel_local, nra), dtype=bool)
         ra_off = ((ra[np.newaxis, :] - src_ra[:, np.newaxis] + 180.0) % 360.0) - 180.0
@@ -5901,13 +5990,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         else:
             nscale = np.ones((len(ipol), freq.size, len(iew), nel_local), np.float32)
         rfi = _channel_rfi_mask(self.rfi_mask, hvis, el_slc)
-        gfac, gband = _inband_factor(
+        gfac, gband, gflag = _inband_factor(
             getattr(self, "inband_noise", None),
             hvis,
             el_slc,
             [pol[ii] for ii in ipol],
             ew[iew],
         )
+        rfi = _merge_flags(rfi, gflag, nel_local)
 
         common = {
             "pol": opol,
