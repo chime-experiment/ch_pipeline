@@ -6410,22 +6410,28 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             g.append(np.where(idx[np.newaxis] >= 0, gj, 0.0).transpose(1, 2, 0))
         wv = wt * var_th
 
+        def terms(jj, jp):
+            # -W(t) P[t, t + d] at t = tau + j, and the thermal variance and weight
+            # at t' = tau + j'
+            a_r = np.roll(
+                -wt * presp[np.newaxis, :, :, lag_index[jp - jj]], -jj, axis=-1
+            )
+            return a_r, a_r * np.roll(wv, -jp, axis=-1)
+
+        # Only the real part is kept, and the coefficient of (j', j) is the
+        # conjugate of that of (j, j'), so each pair takes one product:
+        # Re[c a + c^* b] = Re[c (a + b^*)]
         acc_r = np.zeros((nel, nx, nra), dtype=np.complex128)
         acc_v = np.zeros((nel, nx, nra), dtype=np.complex128)
         resp_cross, var_cross = [], []
         for W in range(2, wmax + 1):
             jn = W - 1
-            pairs = [(jn, jp) for jp in range(jn)] + [(jj, jn) for jj in range(jn)]
-            for jj, jp in pairs:
-                coeff = g[jj].conj() * g[jp]  # el, x, k
-                # -W(t) P[t, t + d] at t = tau + j, and the thermal variance and weight
-                # at t' = tau + j'
-                a_r = np.roll(
-                    -wt * presp[np.newaxis, :, :, lag_index[jp - jj]], -jj, axis=-1
-                )
-                a_v = a_r * np.roll(wv, -jp, axis=-1)
-                acc_r += np.matmul(coeff, a_r.astype(np.complex64))
-                acc_v += np.matmul(coeff, a_v.astype(np.complex64))
+            for jj in range(jn):
+                coeff = g[jj].conj() * g[jn]  # el, x, k
+                a_r, a_v = terms(jj, jn)
+                b_r, b_v = terms(jn, jj)
+                acc_r += np.matmul(coeff, (a_r + b_r.conj()).astype(np.complex64))
+                acc_v += np.matmul(coeff, (a_v + b_v.conj()).astype(np.complex64))
             if W in long_w:
                 resp_cross.append(acc_r.real.astype(np.float32))
                 var_cross.append(acc_v.real.astype(np.float32))
@@ -7500,6 +7506,46 @@ def _local_peaks(img, nrow, ncol, threshold):
     return rows[order], cols[order]
 
 
+def _merge_overlapping(rows, cols, dur, nrow, slack):
+    """Drop the peaks whose trial overlaps that of a brighter peak.
+
+    The maps are indexed by the start of the trial, so a pulse lasting W samples
+    lights trials starting anywhere from ~W samples before it to its end.  A peak
+    is dropped if, within +-``nrow`` rows, a brighter peak that is kept has a trial
+    [t, t + W) that overlaps its own, widened by ``slack`` samples each side.
+
+    Parameters
+    ----------
+    rows, cols : np.ndarray[int]
+        Peaks, sorted by decreasing value (as from ``_local_peaks``).
+    dur : np.ndarray[int]
+        Duration in samples of the best trial at each pixel of the map.
+    nrow, slack : int
+        Half-width in rows, and the extra samples either side.
+
+    Returns
+    -------
+    rows, cols : np.ndarray[int]
+        The peaks kept, in the same order.
+    """
+    if rows.size == 0:
+        return rows, cols
+    nr, nc = dur.shape
+    w = np.maximum(dur[rows, cols].astype(int), 1)
+    claimed = np.zeros((nr, nc + 1), dtype=bool)
+    keep = np.zeros(rows.size, dtype=bool)
+    for k in range(rows.size):
+        e, t = rows[k], cols[k]
+        if claimed[e, t : t + w[k]].any():
+            continue
+        keep[k] = True
+        claimed[
+            max(e - nrow, 0) : e + nrow + 1,
+            max(t - slack, 0) : min(t + w[k] + slack, nc),
+        ] = True
+    return rows[keep], cols[keep]
+
+
 def _run_length(mask, i):
     """Length of the run of True values in a 1D mask that contains index i."""
     if not mask[i]:
@@ -7573,8 +7619,11 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
 
     A candidate is a peak of the best-x S/N map (all bands) at or above ``seed_snr``
     that is the largest within +-``peak_dy`` in telescope-y and +-``peak_dt``
-    samples in start time.  So a pulse and the sidelobes of the synthesized beam at
-    the same time are one candidate, while pulses at different times stay separate.
+    samples in start time, and whose best trial [start, start + duration), widened
+    by ``peak_dt`` either side, does not overlap that of a brighter candidate within
+    +-``peak_dy`` (a long pulse lights trials over a range of start times).  So a
+    pulse and the sidelobes of the synthesized beam at the same time are one
+    candidate, while pulses at different times stay separate.
     For each candidate the output table has (columns of the ``candidate`` table):
 
     - Position and best trial: ``el_index``, ``ra_index``, ``x_index``, ``y``
@@ -7596,7 +7645,8 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
       pixels above ``grow_snr``), ``ext_dy`` and ``ext_dt`` (s).  A pulse from a
       point source extends ~0.01 in telescope-y.
     - Along the row: ``row_npeak``, the number of other peaks (local maxima within 1
-      row and +-``row_peak_dra``) within +-``row_dy`` in telescope-y and
+      row and +-``row_peak_dra``, merged as for the candidates, whose trials do not
+      overlap the candidate's) within +-``row_dy`` in telescope-y and
       +-``row_dra`` degrees of RA with S/N at least ``row_snr`` and ``row_ratio``
       times that of the candidate; ``row_max_ratio``, the S/N of the brightest
       other peak there over the candidate's; and ``row_spacing`` (s) and
@@ -7790,8 +7840,11 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         ).allgather()
 
         # Candidates, and the finer peaks used along the rows
+        dur = cand.datasets["duration"][:].allgather()[pp]
+        dur = np.where(valid, np.nan_to_num(dur), 1).astype(int)
         de = max(1, round(self.peak_dy / dy))
         pe, pt = _local_peaks(img, de, self.peak_dt, self.seed_snr)
+        pe, pt = _merge_overlapping(pe, pt, dur, de, self.peak_dt)
         if pe.size > self.max_candidates:
             self.log.warning(
                 f"Keeping the brightest {self.max_candidates} of {pe.size} candidates."
@@ -7800,10 +7853,12 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         ncand = pe.size
         nfine = max(1, round(self.row_peak_dra / dra))
         fe, ft = _local_peaks(img, 1, nfine, self.row_snr)
+        fe, ft = _merge_overlapping(fe, ft, dur, 1, nfine)
         order = np.argsort(fe, kind="stable")
         fe, ft = fe[order], ft[order]
         fs = img[fe, ft]
         fra = ra[ft]
+        fend = ft + dur[fe, ft]
 
         # Rows lit at the same time, and candidates at the same time
         hot = (np.abs(np.nan_to_num(x0)) > self.col_snr) & valid
@@ -7935,7 +7990,11 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
 
             lo, hi = np.searchsorted(fe, [e - nrow, e + nrow + 1])
             near = np.abs(fra[lo:hi] - ra[t])
-            other = (near <= self.row_dra) & (np.abs(ft[lo:hi] - t) > self.peak_dt)
+            # other pulses: trials that do not overlap the candidate's
+            other = (near <= self.row_dra) & (
+                (fend[lo:hi] + self.peak_dt <= t)
+                | (ft[lo:hi] >= t + dur[e, t] + self.peak_dt)
+            )
             if np.any(other):
                 rec["row_max_ratio"][k] = fs[lo:hi][other].max() / peak
             else:
@@ -8047,12 +8106,22 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     (1 - chi^2 / chi^2 of a zero spectrum).  RFI puts its power in a few bands and
     is poorly fitted; an astrophysical pulse is smooth.
 
+    With ``match_duration`` (the default), each candidate's spectrum is for its own
+    best duration W: from the band output for W if it has it, or else the
+    inverse-variance weighted mean of the single-sample band amplitudes along the
+    track of the source (the telescope-x of the candidate's sky position at each of
+    the W samples).  The latter leaves out the coupling of the samples by the
+    filter, so its weights are approximate, but the shape of the spectrum, which the
+    tests use, is barely affected.  Without it, every spectrum is for ``duration``.
+
     Attributes
     ----------
     pol : int
         Index of the polarisation.  Default is 0.
     duration : int
-        Duration of the trial (in samples).  Default is 1.
+        Duration of the trial (in samples) without ``match_duration``.  Default is 1.
+    match_duration : bool
+        Use each candidate's best duration.  Default is True.
     snr_min : float
         S/N above which a band counts as detected.  Default is 3.
     reference_freq : float
@@ -8063,6 +8132,7 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
 
     pol = config.Property(proptype=int, default=0)
     duration = config.Property(proptype=int, default=1)
+    match_duration = config.Property(proptype=bool, default=True)
     snr_min = config.Property(proptype=float, default=3.0)
     reference_freq = config.Property(proptype=float, default=600.0)
     alphas = config.list_type(
@@ -8092,10 +8162,9 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         tcentre = table.index_map["freq"]["centre"][:]
         if centre.size != tcentre.size or not np.allclose(centre, tcentre):
             raise ValueError("The bands differ from those of the candidate table.")
-        durations = list(bands.index_map["duration"][:])
-        if self.duration not in durations:
+        durations = [int(d) for d in bands.index_map["duration"][:]]
+        if not self.match_duration and self.duration not in durations:
             raise ValueError(f"Duration {self.duration} is not in {durations}.")
-        idur = durations.index(self.duration)
 
         rec = table.candidate[:].copy()
         ncand = rec.size
@@ -8107,16 +8176,68 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         if bands.index_map["el"].size <= (rec["el_index"].max() if ncand else 0):
             raise ValueError("The elevations of the candidates are not in the bands.")
 
+        # Duration of each candidate's spectrum, in samples
+        if self.match_duration:
+            tsamp = float(
+                table.attrs.get(
+                    "duration_unit_seconds",
+                    bands.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727),
+                )
+            )
+            wc = np.maximum(np.rint(np.nan_to_num(rec["duration"]) / tsamp), 1)
+            wc = wc.astype(int)
+        else:
+            wc = np.full(ncand, self.duration, dtype=int)
+
         amp = np.zeros((ncand, centre.size), dtype=np.float64)
         wgt = np.zeros((ncand, centre.size), dtype=np.float64)
         la, lw = bands.amplitude[:], bands.weight[:]
         off, nloc = la.local_offset[3], la.local_shape[3]
         e = rec["el_index"].astype(int)
+        xi = rec["x_index"].astype(int)
         mine = (e >= off) & (e < off + nloc)
-        if np.any(mine):
-            sel = (e[mine] - off, tb[mine], rec["x_index"][mine].astype(int))
-            amp[mine] = la.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
-            wgt[mine] = lw.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
+        direct = mine & np.isin(wc, durations)
+        for W in np.unique(wc[direct]):
+            m = direct & (wc == W)
+            idur = durations.index(int(W))
+            sel = (e[m] - off, tb[m], xi[m])
+            amp[m] = la.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
+            wgt[m] = lw.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
+        track = mine & ~direct
+        if np.any(track):
+            # Along the track, from the single-sample output
+            if 1 not in durations:
+                raise ValueError(
+                    "The bands have neither the candidates' durations nor duration 1."
+                )
+            i1 = durations.index(1)
+            xg = bands.index_map["x"][:]
+            dx = xg[1] - xg[0] if xg.size > 1 else 1.0
+            ha = np.radians(bands.datasets["ha"][:])
+            dec = np.radians(bands.datasets["dec"][:])
+            nra_b = ra_b.size
+            periodic = _is_full_day(ra_b)
+            for k in np.flatnonzero(track):
+                el_k = e[k] - off
+                a_sum = np.zeros(centre.size)
+                w_sum = np.zeros(centre.size)
+                for j in range(wc[k]):
+                    t = tb[k] + j
+                    if t >= nra_b:
+                        if not periodic:
+                            break
+                        t -= nra_b
+                    xj = -np.cos(dec[e[k], xi[k]]) * np.sin(
+                        ha[e[k], xi[k]] + j * np.radians(dra)
+                    )
+                    ij = int(np.rint((xj - xg[0]) / dx))
+                    if ij < 0 or ij >= xg.size:
+                        break
+                    wj = lw.local_array[self.pol, i1][:, el_k, t, ij]
+                    a_sum += wj * la.local_array[self.pol, i1][:, el_k, t, ij]
+                    w_sum += wj
+                amp[k] = a_sum * tools.invert_no_zero(w_sum)
+                wgt[k] = w_sum
         bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
         bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
 
@@ -8146,6 +8267,7 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
                 rec[name][k] = val
         out.candidate[:] = rec
         out.attrs["band_snr_min"] = self.snr_min
+        out.attrs["band_match_duration"] = self.match_duration
 
         self.log.info(f"Added the spectra of {ncand} candidates.")
         return out
