@@ -1694,6 +1694,81 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
         return self.index_map["x"]
 
 
+class TransientCandidateCutouts(FreqContainer):
+    """The per-band matched filter in windows around candidates.
+
+    For each candidate (``candidate_index`` is its row in the candidate table), the
+    amplitude (Jy) and weight of each band in a window of ``el_offset`` elevations
+    and ``ra_offset`` start times centred on the candidate, at its telescope-x
+    (``x_index``) and for single samples.  ``el_index`` and ``ra_index`` give the
+    indices into the maps, -1 outside them (weight zero there).  Distributed over
+    candidates.
+    """
+
+    _axes = ("candidate", "el_offset", "ra_offset")
+
+    _dataset_spec: ClassVar = {
+        "amplitude": {
+            "axes": ["candidate", "freq", "el_offset", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "weight": {
+            "axes": ["candidate", "freq", "el_offset", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "candidate_index": {
+            "axes": ["candidate"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "x_index": {
+            "axes": ["candidate"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el_index": {
+            "axes": ["candidate", "el_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ra_index": {
+            "axes": ["candidate", "ra_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el": {
+            "axes": ["candidate", "el_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ra": {
+            "axes": ["candidate", "ra_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
+
+
 class TransientCandidateTable(TableSpec):
     """Candidates found in the maps of the transient search, one row per candidate.
 
@@ -1704,7 +1779,10 @@ class TransientCandidateTable(TableSpec):
     per-band matched filter was available,
     :class:`ch_pipeline.analysis.transients.AddCandidateSpectra` adds ``spectrum``
     and ``spectrum_weight``, the amplitude (Jy) and its inverse variance in each band
-    at the candidate's telescope-x.  The ``sift`` table holds the result of
+    at the candidate's telescope-x, and
+    :class:`ch_pipeline.analysis.transients.AddNSProfile` the ``ns_*`` columns, a fit
+    of the north-south synthesized beam to the profile across telescope-y.  The
+    ``sift`` table holds the result of
     :class:`ch_pipeline.analysis.transients.SiftTransientCandidates`: whether each
     candidate was kept, and a bit mask of the tests it failed (the bits are named in
     the ``sift_flags`` attribute).
@@ -1764,6 +1842,16 @@ class TransientCandidateTable(TableSpec):
                 ["band_alpha", np.float32],
                 ["band_chi2", np.float32],
                 ["band_fit_frac", np.float32],
+                # North-south profile across telescope-y (AddNSProfile)
+                ["ns_nband", np.int16],
+                ["ns_dof", np.int32],
+                ["ns_snr", np.float32],
+                ["ns_dy", np.float32],
+                ["ns_chi2", np.float32],
+                ["ns_scale", np.float32],
+                ["ns_scale_lo", np.float32],
+                ["ns_scale_hi", np.float32],
+                ["ns_dchi2", np.float32],
                 # Noise
                 ["weight_ratio", np.float32],
                 # The Sun and bright sources

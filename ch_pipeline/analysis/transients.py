@@ -8092,6 +8092,204 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         return out
 
 
+def _candidate_positions(table, bands, match_duration=True, duration=1):
+    """Map indices of the candidates in the band output, and their durations.
+
+    Returns el index, start-time index, x index and duration (samples) of each.
+    """
+    rec = table.candidate[:]
+    ncand = rec.size
+    ra_b = bands.index_map["ra"][:]
+    dra = np.median(np.diff(ra_b))
+    tb = np.clip(np.searchsorted(ra_b, rec["ra"] - 0.5 * dra), 0, ra_b.size - 1)
+    if ncand and np.any(np.abs(ra_b[tb] - rec["ra"]) > 0.01 * dra):
+        raise ValueError("The start times of the candidates are not in the bands.")
+    if bands.index_map["el"].size <= (rec["el_index"].max() if ncand else 0):
+        raise ValueError("The elevations of the candidates are not in the bands.")
+    if match_duration:
+        tsamp = float(
+            table.attrs.get(
+                "duration_unit_seconds",
+                bands.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727),
+            )
+        )
+        wc = np.maximum(np.rint(np.nan_to_num(rec["duration"]) / tsamp), 1).astype(int)
+    else:
+        wc = np.full(ncand, duration, dtype=int)
+    return rec["el_index"].astype(int), tb, rec["x_index"].astype(int), wc
+
+
+def _band_cutouts(bands, pol, e, tb, xi, wc, row_off, time_off):
+    """Amplitude and weight of each band around candidates, from this rank's rows.
+
+    For candidate k, row ``e[k] + row_off[i]`` and start ``tb[k] + time_off[j]``, at
+    telescope-x index ``xi[k]`` and duration ``wc[k]``: from the band output for that
+    duration if it has it, or else the inverse-variance weighted mean of the
+    single-sample output along the track of the sky position of that row's template
+    (see :class:`AddCandidateSpectra`).  Entries outside the maps, or on rows held by
+    other ranks, are zero (sum over ranks to complete them).
+
+    Returns
+    -------
+    amp, wgt : np.ndarray[ncand, freq, len(row_off), len(time_off)]
+    """
+    durations = [int(d) for d in bands.index_map["duration"][:]]
+    la, lw = bands.amplitude[:], bands.weight[:]
+    off, nloc = la.local_offset[3], la.local_shape[3]
+    ra_b = bands.index_map["ra"][:]
+    nra = ra_b.size
+    dra = np.radians(np.median(np.diff(ra_b)))
+    periodic = _is_full_day(ra_b)
+    xg = bands.index_map["x"][:]
+    dx = xg[1] - xg[0] if xg.size > 1 else 1.0
+    ha = np.radians(bands.datasets["ha"][:])
+    dec = np.radians(bands.datasets["dec"][:])
+
+    row_off = np.asarray(row_off, dtype=int)
+    toff = np.asarray(time_off, dtype=int)
+    ncand, nf = len(e), la.local_shape[2]
+    amp = np.zeros((ncand, nf, row_off.size, toff.size), dtype=np.float64)
+    wgt = np.zeros_like(amp)
+    for k in range(ncand):
+        W = int(wc[k])
+        direct = W in durations
+        if not direct and 1 not in durations:
+            raise ValueError(
+                "The bands have neither the candidates' durations nor duration 1."
+            )
+        idur = durations.index(W) if direct else durations.index(1)
+        ts = tb[k] + toff
+        if periodic:
+            okt = np.ones(ts.size, dtype=bool)
+            ts = ts % nra
+        else:
+            okt = (ts >= 0) & (ts < nra)
+            ts = np.clip(ts, 0, nra - 1)
+        for ir, dr in enumerate(row_off):
+            er = e[k] + dr
+            if er < off or er >= off + nloc:
+                continue
+            A = la.local_array[pol, idur, :, er - off]  # freq, ra, x
+            Wt = lw.local_array[pol, idur, :, er - off]
+            if direct:
+                amp[k, :, ir] = np.where(okt, A[:, ts, xi[k]], 0.0)
+                wgt[k, :, ir] = np.where(okt, Wt[:, ts, xi[k]], 0.0)
+                continue
+            j = np.arange(W)
+            xj = -np.cos(dec[er, xi[k]]) * np.sin(ha[er, xi[k]] + j * dra)
+            ij = np.rint((xj - xg[0]) / dx).astype(int)
+            okj = np.cumprod((ij >= 0) & (ij < xg.size)).astype(bool)
+            ij = np.clip(ij, 0, xg.size - 1)
+            tt = ts[:, np.newaxis] + j[np.newaxis]  # time, j
+            if periodic:
+                tt = tt % nra
+                ok = okj[np.newaxis] & okt[:, np.newaxis]
+            else:
+                ok = np.cumprod(tt < nra, axis=1).astype(bool) & okj & okt[:, np.newaxis]
+                tt = np.clip(tt, 0, nra - 1)
+            a = A[:, tt, ij[np.newaxis]]  # freq, time, j
+            w = Wt[:, tt, ij[np.newaxis]] * ok[np.newaxis]
+            ws = w.sum(axis=-1)
+            amp[k, :, ir] = (w * a).sum(axis=-1) * tools.invert_no_zero(ws)
+            wgt[k, :, ir] = ws
+    return amp, wgt
+
+
+# Number of feeds on a cylinder (for the redundancy of the north-south baselines)
+_NS_NFEED = 256
+
+
+class _NSBeam:
+    """The north-south synthesized beam of BeamformNS, and its noise correlation.
+
+    BeamformNS (``weight: triangular``, ``scaled: False``) sums the north-south
+    baselines n d up to the longest present, ``n_max d``, with the triangular
+    window ``g_n = 1 - |n| / n_max``.  A point source at telescope-y ``y0`` gives
+    ``B(y - y0)`` at row y, ``B(dy) = sum_n g_n cos(2 pi n d nu dy / c) / sum_n g_n``,
+    a function of ``u = nu dy / c`` only.  The noise of baseline n has variance
+    ``~ 1 / (N_feed - |n|)`` (its redundancy, for a pair of cylinders), so the noise
+    of rows y and y' has correlation ``G(u) = sum_n g_n^2 / R_n cos(2 pi n d u) /
+    sum_n g_n^2 / R_n``.  Both are tabulated in u.
+    """
+
+    def __init__(self, ns_spacing=0.3048, ns_max=73.0, umax=0.5, du=2e-6):
+        nmax = int(np.floor(ns_max / ns_spacing + 1e-6))
+        n = np.arange(-nmax, nmax + 1)
+        g = 1.0 - np.abs(n) / nmax
+        r = _NS_NFEED - np.abs(n)
+        self.u = np.arange(0.0, umax + du, du)
+        self.F = np.zeros(self.u.size)
+        self.G = np.zeros(self.u.size)
+        for i0 in range(0, self.u.size, 4096):
+            ph = 2 * np.pi * ns_spacing * np.outer(self.u[i0 : i0 + 4096], n)
+            c = np.cos(ph)
+            self.F[i0 : i0 + 4096] = c @ g / g.sum()
+            self.G[i0 : i0 + 4096] = c @ (g**2 / r) / np.sum(g**2 / r)
+
+    def beam(self, u):
+        return np.interp(np.abs(u), self.u, self.F, right=0.0)
+
+    def corr(self, u):
+        return np.interp(np.abs(u), self.u, self.G, right=0.0)
+
+
+def _ns_profile_fit(nsb, yr, amp, wgt, freq, shifts, scales, min_rows, eig_tol=1e-9):
+    """Fit the north-south beam to a candidate's profile in each band.
+
+    The model in band b is ``a_b B_b((y - y0) / s)`` with a free amplitude ``a_b``
+    per band and a common shift ``y0`` and width scale ``s`` (1 for a point source).
+    The noise of the rows has the covariance of :class:`_NSBeam`, scaled by the
+    weights; the rows oversample the beam, so the covariance is near-singular and
+    the fit uses the eigenvectors above ``eig_tol`` of the largest eigenvalue.
+
+    Parameters
+    ----------
+    yr : np.ndarray[nrow]
+        Telescope-y of the rows relative to the candidate's.
+    amp, wgt : np.ndarray[nband, nrow]
+    freq : np.ndarray[nband]
+        Band centres (MHz).
+    shifts, scales : np.ndarray
+        Grids of y0 and s.
+
+    Returns
+    -------
+    chi2 : np.ndarray[nshift, nscale]
+        Summed over the bands, with the amplitudes at their best values.
+    snr2 : np.ndarray[nshift, nscale]
+        The S/N^2 of the fitted model, summed over the bands.
+    dof : int
+        Number of independent rows minus the amplitudes and the two parameters.
+    nband : int
+        Number of bands used.
+    """
+    chi2 = np.zeros((shifts.size, scales.size))
+    snr2 = np.zeros_like(chi2)
+    dof, nb = 0, 0
+    for b in range(amp.shape[0]):
+        v = (wgt[b] > 0) & np.isfinite(amp[b])
+        if v.sum() < min_rows:
+            continue
+        y = yr[v]
+        f = freq[b] * 1e6 / scipy.constants.c
+        sig = 1.0 / np.sqrt(wgt[b, v])
+        cov = sig[:, np.newaxis] * sig[np.newaxis] * nsb.corr(f * (y[:, None] - y[None]))
+        lam, vec = np.linalg.eigh(cov)
+        keep = lam > eig_tol * lam.max()
+        wm = vec[:, keep] / np.sqrt(lam[keep])
+        dw = wm.T @ amp[b, v]
+        arg = f * (y[None, None] - shifts[:, None, None]) / scales[None, :, None]
+        mw = nsb.beam(arg) @ wm  # shift, scale, mode
+        num = mw @ dw
+        den = np.sum(mw**2, axis=-1)
+        fit = num**2 * tools.invert_no_zero(den)
+        chi2 += dw @ dw - fit
+        snr2 += fit
+        dof += int(keep.sum()) - 1
+        nb += 1
+    return chi2, snr2, (dof - 2 if nb else 0), nb
+
+
 class AddCandidateSpectra(tasklib.base.ContainerTask):
     """Add the amplitude in each band to a table of candidates.
 
@@ -8168,76 +8366,11 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
 
         rec = table.candidate[:].copy()
         ncand = rec.size
-        ra_b = bands.index_map["ra"][:]
-        dra = np.median(np.diff(ra_b))
-        tb = np.clip(np.searchsorted(ra_b, rec["ra"] - 0.5 * dra), 0, ra_b.size - 1)
-        if ncand and np.any(np.abs(ra_b[tb] - rec["ra"]) > 0.01 * dra):
-            raise ValueError("The start times of the candidates are not in the bands.")
-        if bands.index_map["el"].size <= (rec["el_index"].max() if ncand else 0):
-            raise ValueError("The elevations of the candidates are not in the bands.")
-
-        # Duration of each candidate's spectrum, in samples
-        if self.match_duration:
-            tsamp = float(
-                table.attrs.get(
-                    "duration_unit_seconds",
-                    bands.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727),
-                )
-            )
-            wc = np.maximum(np.rint(np.nan_to_num(rec["duration"]) / tsamp), 1)
-            wc = wc.astype(int)
-        else:
-            wc = np.full(ncand, self.duration, dtype=int)
-
-        amp = np.zeros((ncand, centre.size), dtype=np.float64)
-        wgt = np.zeros((ncand, centre.size), dtype=np.float64)
-        la, lw = bands.amplitude[:], bands.weight[:]
-        off, nloc = la.local_offset[3], la.local_shape[3]
-        e = rec["el_index"].astype(int)
-        xi = rec["x_index"].astype(int)
-        mine = (e >= off) & (e < off + nloc)
-        direct = mine & np.isin(wc, durations)
-        for W in np.unique(wc[direct]):
-            m = direct & (wc == W)
-            idur = durations.index(int(W))
-            sel = (e[m] - off, tb[m], xi[m])
-            amp[m] = la.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
-            wgt[m] = lw.local_array[self.pol, idur][:, sel[0], sel[1], sel[2]].T
-        track = mine & ~direct
-        if np.any(track):
-            # Along the track, from the single-sample output
-            if 1 not in durations:
-                raise ValueError(
-                    "The bands have neither the candidates' durations nor duration 1."
-                )
-            i1 = durations.index(1)
-            xg = bands.index_map["x"][:]
-            dx = xg[1] - xg[0] if xg.size > 1 else 1.0
-            ha = np.radians(bands.datasets["ha"][:])
-            dec = np.radians(bands.datasets["dec"][:])
-            nra_b = ra_b.size
-            periodic = _is_full_day(ra_b)
-            for k in np.flatnonzero(track):
-                el_k = e[k] - off
-                a_sum = np.zeros(centre.size)
-                w_sum = np.zeros(centre.size)
-                for j in range(wc[k]):
-                    t = tb[k] + j
-                    if t >= nra_b:
-                        if not periodic:
-                            break
-                        t -= nra_b
-                    xj = -np.cos(dec[e[k], xi[k]]) * np.sin(
-                        ha[e[k], xi[k]] + j * np.radians(dra)
-                    )
-                    ij = int(np.rint((xj - xg[0]) / dx))
-                    if ij < 0 or ij >= xg.size:
-                        break
-                    wj = lw.local_array[self.pol, i1][:, el_k, t, ij]
-                    a_sum += wj * la.local_array[self.pol, i1][:, el_k, t, ij]
-                    w_sum += wj
-                amp[k] = a_sum * tools.invert_no_zero(w_sum)
-                wgt[k] = w_sum
+        e, tb, xi, wc = _candidate_positions(
+            table, bands, self.match_duration, self.duration
+        )
+        amp, wgt = _band_cutouts(bands, self.pol, e, tb, xi, wc, [0], [0])
+        amp, wgt = amp[:, :, 0, 0], wgt[:, :, 0, 0]
         bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
         bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
 
@@ -8270,6 +8403,266 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         out.attrs["band_match_duration"] = self.match_duration
 
         self.log.info(f"Added the spectra of {ncand} candidates.")
+        return out
+
+
+class AddNSProfile(tasklib.base.ContainerTask):
+    """Fit the north-south synthesized beam to each candidate's profile in telescope-y.
+
+    The north-south shape of a point source is known exactly: BeamformNS forms the
+    rows from the north-south baselines up to ~73 m with a triangular window, so a
+    source at telescope-y ``y0`` appears at row y as ``B_nu(y - y0)``, a beam whose
+    width scales as 1 / nu (FWHM 0.0087 at 420 MHz, 0.0061 at 600 MHz; see
+    :class:`_NSBeam`).  RFI in the near field (aircraft) or reaching the telescope
+    over a range of directions is wider.
+
+    For each candidate, the per-band matched filter is taken over +-``nrow`` rows at
+    the candidate's start time, telescope-x and duration (as for the spectra, see
+    :class:`AddCandidateSpectra`).  In each band with at least ``min_rows`` rows of
+    data, the model is ``a_b B_b((y - y_c - dy) / s)``: the amplitude ``a_b`` of each
+    band is free (scintillation and calibration errors change it), while the shift
+    ``dy`` and the width scale ``s`` are common to all bands.  The rows oversample
+    the beam and their noise is correlated (0.84 between neighbours at 600 MHz); the
+    fit uses the covariance from the beamforming, scaled by the weights.
+
+    Columns added: ``ns_nband``, the bands used; ``ns_dof``; ``ns_snr``, the S/N of
+    the fitted point-source model; ``ns_dy``, its shift; ``ns_chi2``, its reduced
+    chi-squared (s = 1); ``ns_scale``, the best width scale, with ``ns_scale_lo`` and
+    ``ns_scale_hi`` where the chi-squared (minimised over the shift) is 1 above its
+    minimum (the edges of the grid if it does not get there); and ``ns_dchi2``, the
+    chi-squared of the point source minus that at the best scale.  A point source
+    has ``ns_scale`` ~ 1 and small ``ns_dchi2``.  The primary beam is taken as
+    constant over the rows of the fit.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation.  Default is 0.
+    match_duration : bool
+        Use each candidate's best duration (else single samples).  Default is True.
+    nrow : int
+        Half-width of the profile in rows.  Default is 12 (+-0.02 in telescope-y).
+    min_rows : int
+        Smallest number of rows with data for a band to be used.  Default is 5.
+    max_shift : float
+        Largest shift, in rows.  Default is 1.5.
+    scale_range : list of float
+        Range of the width scale.  Default is [0.5, 8].
+    ns_spacing : float
+        North-south feed spacing in metres.  Default is 0.3048.
+    ns_max : float
+        Longest north-south baseline (m), as for MaskBaselines (mask_long_ns).
+        Default is 73.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    match_duration = config.Property(proptype=bool, default=True)
+    nrow = config.Property(proptype=int, default=12)
+    min_rows = config.Property(proptype=int, default=5)
+    max_shift = config.Property(proptype=float, default=1.5)
+    scale_range = config.list_type(type_=float, length=2, default=[0.5, 8.0])
+    ns_spacing = config.Property(proptype=float, default=0.3048)
+    ns_max = config.Property(proptype=float, default=73.0)
+
+    def process(self, table, bands):
+        """Fit the profiles.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates.
+        bands : containers.TransientMatchedFilter
+            Matched filter output for each band (as for AddCandidateSpectra).
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy of the input with the ``ns_*`` columns filled.
+        """
+        from caput.util import mpitools
+        from mpi4py import MPI
+
+        bands.redistribute("el")
+        comm = bands.comm
+        centre = bands.index_map["freq"]["centre"][:]
+        el = bands.index_map["el"][:]
+        e, tb, xi, wc = _candidate_positions(table, bands, self.match_duration, 1)
+        rec = table.candidate[:].copy()
+        ncand = rec.size
+
+        offs = np.arange(-self.nrow, self.nrow + 1)
+        amp, wgt = _band_cutouts(bands, self.pol, e, tb, xi, wc, offs, [0])
+        amp, wgt = amp[..., 0], wgt[..., 0]  # cand, band, row
+        comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
+        comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+
+        dy = np.median(np.diff(el))
+        shifts = dy * np.linspace(
+            -self.max_shift, self.max_shift, 2 * int(round(10 * self.max_shift)) + 1
+        )
+        lo, hi = np.log2(self.scale_range)
+        scales = 2.0 ** (np.arange(np.floor(8 * lo), np.ceil(8 * hi) + 1) / 8.0)
+        i1 = int(np.argmin(np.abs(scales - 1.0)))
+        umax = 1.1 * centre.max() * 1e6 / scipy.constants.c * (
+            (self.nrow + self.max_shift + 1) * dy / scales.min()
+        )
+        nsb = _NSBeam(self.ns_spacing, self.ns_max, umax=umax)
+
+        names = ("ns_nband", "ns_dof", "ns_snr", "ns_dy", "ns_chi2", "ns_scale",
+                 "ns_scale_lo", "ns_scale_hi", "ns_dchi2")  # fmt: skip
+        res = np.full((ncand, len(names)), np.nan)
+        _, s0, s1 = mpitools.split_local(ncand, comm=comm)
+        for k in range(s0, s1):
+            rows = e[k] + offs
+            inside = (rows >= 0) & (rows < el.size)
+            yr = np.where(inside, el[np.clip(rows, 0, el.size - 1)] - el[e[k]], 0.0)
+            w = np.where(inside[np.newaxis], wgt[k], 0.0)
+            chi2, snr2, dof, nb = _ns_profile_fit(
+                nsb, yr, amp[k], w, centre, shifts, scales, self.min_rows
+            )
+            res[k, 0], res[k, 1] = nb, dof
+            if nb == 0 or dof <= 0:
+                continue
+            c1 = chi2[:, i1]
+            j = int(np.argmin(c1))
+            prof = chi2.min(axis=0)
+            ok = np.flatnonzero(prof <= prof.min() + 1.0)
+            res[k, 2] = np.sqrt(max(snr2[j, i1], 0.0))
+            res[k, 3] = shifts[j]
+            res[k, 4] = c1[j] / dof
+            res[k, 5] = scales[int(np.argmin(prof))]
+            res[k, 6], res[k, 7] = scales[ok.min()], scales[ok.max()]
+            res[k, 8] = c1[j] - prof.min()
+        # Each candidate was fitted on one rank: take the finite entries
+        have = np.isfinite(res)
+        tot = np.where(have, res, 0.0)
+        comm.Allreduce(MPI.IN_PLACE, tot, op=MPI.SUM)
+        cnt = have.astype(np.int64)
+        comm.Allreduce(MPI.IN_PLACE, cnt, op=MPI.SUM)
+        res = np.where(cnt > 0, tot, np.nan)
+        for i, name in enumerate(names):
+            vals = res[:, i]
+            if rec.dtype[name].kind in "iu":
+                rec[name] = np.nan_to_num(vals).astype(rec.dtype[name])
+            else:
+                rec[name] = vals
+
+        out = table.copy()
+        out.candidate[:] = rec
+        out.attrs["ns_nrow"] = self.nrow
+        out.attrs["ns_max"] = self.ns_max
+        nfit = int(np.sum(rec["ns_dof"] > 0))
+        self.log.info(f"Fitted the north-south profiles of {nfit} of {ncand} candidates.")
+        return out
+
+
+class ExtractCandidateCutouts(tasklib.base.ContainerTask):
+    """Windows of the per-band matched filter around candidates.
+
+    For the candidates with S/N of at least ``snr_min`` (and only those kept by the
+    sifter if ``keep_only`` and the table has been sifted), the brightest
+    ``max_cutouts`` of them: the amplitude and weight of every band over
+    +-``nrow`` rows and +-``nra`` start times, at the candidate's telescope-x, for
+    single samples.  The result is distributed over candidates.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation.  Default is 0.
+    snr_min : float
+        Smallest S/N.  Default is 10.
+    keep_only : bool
+        Only the candidates kept by the sifter.  Default is False.
+    max_cutouts : int
+        Largest number of cutouts (the brightest).  Default is 1000.
+    nrow, nra : int
+        Half-widths of the window in rows and samples.  Defaults are 16 and 30.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    snr_min = config.Property(proptype=float, default=10.0)
+    keep_only = config.Property(proptype=bool, default=False)
+    max_cutouts = config.Property(proptype=int, default=1000)
+    nrow = config.Property(proptype=int, default=16)
+    nra = config.Property(proptype=int, default=30)
+
+    def process(self, table, bands):
+        """Extract the cutouts.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates (sifted or not).
+        bands : containers.TransientMatchedFilter
+            Matched filter output for each band, with duration 1.
+
+        Returns
+        -------
+        out : containers.TransientCandidateCutouts
+        """
+        from mpi4py import MPI
+
+        bands.redistribute("el")
+        comm = bands.comm
+        if 1 not in [int(d) for d in bands.index_map["duration"][:]]:
+            raise ValueError("The bands need duration 1 for the cutouts.")
+        rec = table.candidate[:]
+        sel = rec["snr"] >= self.snr_min
+        if self.keep_only and "sift" in table.datasets:
+            sel &= table.datasets["sift"][:]["keep"]
+        idx = np.flatnonzero(sel)
+        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        ncut = idx.size
+
+        e, tb, xi, _ = _candidate_positions(table, bands, False, 1)
+        e, tb, xi = e[idx], tb[idx], xi[idx]
+        roff = np.arange(-self.nrow, self.nrow + 1)
+        toff = np.arange(-self.nra, self.nra + 1)
+        el = bands.index_map["el"][:]
+        ra_b = bands.index_map["ra"][:]
+        periodic = _is_full_day(ra_b)
+
+        out = containers.TransientCandidateCutouts(
+            candidate=ncut,
+            freq=bands.index_map["freq"],
+            el_offset=roff,
+            ra_offset=toff,
+            attrs_from=table,
+            distributed=True,
+            comm=comm,
+        )
+        out.datasets["candidate_index"][:] = idx
+        out.datasets["x_index"][:] = xi
+        rows = e[:, np.newaxis] + roff[np.newaxis]
+        rin = (rows >= 0) & (rows < el.size)
+        out.datasets["el_index"][:] = np.where(rin, rows, -1)
+        out.datasets["el"][:] = np.where(rin, el[np.clip(rows, 0, el.size - 1)], np.nan)
+        ts = tb[:, np.newaxis] + toff[np.newaxis]
+        if periodic:
+            tin = np.ones(ts.shape, dtype=bool)
+            ts = ts % ra_b.size
+        else:
+            tin = (ts >= 0) & (ts < ra_b.size)
+        out.datasets["ra_index"][:] = np.where(tin, ts, -1)
+        out.datasets["ra"][:] = np.where(tin, ra_b[np.clip(ts, 0, ra_b.size - 1)], np.nan)
+
+        # Each rank's block of candidates, summed from the rows on every rank
+        la = out.amplitude[:]
+        offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
+        for r, (o, nl) in enumerate(offs):
+            k = slice(o, o + nl)
+            a, w = _band_cutouts(
+                bands, self.pol, e[k], tb[k], xi[k], np.ones(nl, int), roff, toff
+            )
+            a, w = a.astype(np.float32), w.astype(np.float32)
+            ra_ = np.zeros_like(a) if comm.rank == r else None
+            rw_ = np.zeros_like(w) if comm.rank == r else None
+            comm.Reduce(a, ra_, op=MPI.SUM, root=r)
+            comm.Reduce(w, rw_, op=MPI.SUM, root=r)
+            if comm.rank == r:
+                out.amplitude[:].local_array[:] = ra_
+                out.weight[:].local_array[:] = rw_
+        self.log.info(f"Extracted the cutouts of {ncut} candidates.")
         return out
 
 
@@ -8311,6 +8704,10 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       ``ext_dy_min`` in telescope-y, far more than a point source.  This catches
       arcs broken into blobs and short vertical streaks, which the ``arc`` test
       misses.
+    - 14 ``ns_shape`` (only with the north-south fit, see :class:`AddNSProfile`):
+      the profile across telescope-y is not the synthesized beam: the best width
+      scale is above ``ns_scale_max`` or below ``ns_scale_min`` and improves the
+      chi-squared by at least ``ns_dchi2_min`` over the point source.
     - 16 ``periodic`` (information only): at least ``periodic_npeak_min`` other
       peaks along the row, spaced by at least ``periodic_spacing_min`` seconds with
       a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
@@ -8339,6 +8736,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "horizon": 11,
         "unsmooth": 12,
         "extended": 13,
+        "ns_shape": 14,
         "periodic": 16,
     }
     INFO: ClassVar = ("periodic",)
@@ -8364,6 +8762,9 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     horizon_y_max = config.Property(proptype=float, default=0.95)
     smooth_chi2_max = config.Property(proptype=float, default=5.0)
     smooth_frac_min = config.Property(proptype=float, default=0.7)
+    ns_dchi2_min = config.Property(proptype=float, default=25.0)
+    ns_scale_max = config.Property(proptype=float, default=1.5)
+    ns_scale_min = config.Property(proptype=float, default=0.67)
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -8435,6 +8836,15 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 & (rec["band_chi2"] > self.smooth_chi2_max)
                 & (rec["band_fit_frac"] < self.smooth_frac_min),
             )
+            flag(
+                "ns_shape",
+                (rec["ns_dof"] > 0)
+                & (rec["ns_dchi2"] >= self.ns_dchi2_min)
+                & (
+                    (rec["ns_scale"] > self.ns_scale_max)
+                    | (rec["ns_scale"] < self.ns_scale_min)
+                ),
+            )
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -8473,7 +8883,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "band_frac_max", "group_frac_max", "arc_dy_min", "arc_dt_min",
             "arc_corr_min", "fwhm_y_max", "ext_dy_min", "weight_ratio_min",
             "horizon_y_max",
-            "smooth_chi2_max", "smooth_frac_min",
+            "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
+            "ns_scale_min",
         ):  # fmt: skip
             out.attrs[f"sift_{key}"] = getattr(self, key)
         return out
