@@ -3882,6 +3882,14 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
     flag_common : float
         Flag the samples of a band where the factor common to all elevations
         exceeds this.  Zero turns the flags off.  Default is 4.
+    max_leverage : float
+        Channels whose leverage in the fit exceeds this (isolated between masked
+        channels, so that the fit nearly reproduces them) are left out of the
+        estimate.  Default is 0.5.
+    min_common_dof : float
+        Smallest number of degrees of freedom, summed over the elevations, of the
+        factor common to all elevations at a sample; below it the factor is one.
+        Default is 100.
     """
 
     pol = config.list_type(str, default=None)
@@ -3896,6 +3904,8 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
     el_block = config.Property(proptype=int, default=8)
     extra_modes = config.Property(proptype=int, default=10)
     flag_common = config.Property(proptype=float, default=4.0)
+    max_leverage = config.Property(proptype=float, default=0.5)
+    min_common_dof = config.Property(proptype=float, default=100.0)
 
     rfi_mask = None
 
@@ -4023,14 +4033,21 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                         G = Am.T @ (W[m, np.newaxis] * Am)
                         G += self.ridge * np.trace(G) / nmode * np.eye(nmode)
                         Gi = np.linalg.inv(G)
-                        h1 = np.zeros(freq.size)
-                        h1[m] = 1.0 - W[m] * np.einsum("fk,kl,fl->f", Am, Gi, Am)
+                        lev = np.zeros(freq.size)
+                        lev[m] = W[m] * np.einsum("fk,kl,fl->f", Am, Gi, Am)
+                        # Channels the fit nearly reproduces on their own (isolated
+                        # between masked stretches) say little about the noise and
+                        # make the ratio unstable: leave them out
+                        use = m & (lev < self.max_leverage)
+                        h1 = np.where(use, 1.0 - lev, 0.0)
                         d = vis[ip, :, ie, esl, tt]  # freq, el
                         ok = m[:, np.newaxis] & (sc[:, esl] > 0) & np.isfinite(d)
                         d = np.where(ok, d, 0.0)
                         res = d - A @ (Gi @ (Am.T @ (W[m, np.newaxis] * d[m])))
                         p2 = np.where(
-                            ok, w[:, tt, np.newaxis] * isc[:, esl] * np.abs(res) ** 2, 0.0
+                            ok & use[:, np.newaxis],
+                            w[:, tt, np.newaxis] * isc[:, esl] * np.abs(res) ** 2,
+                            0.0,
                         )
                         num[op, :, oe, esl, tt] = bsum @ p2
                         den[op, :, oe, esl, tt] = (bsum @ h1)[:, np.newaxis]
@@ -4075,7 +4092,7 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
         cden = self.comm.allreduce(
             np.sum(np.where(enough, den, 0.0), axis=3, dtype=np.float64)
         )
-        valid = cden > 0
+        valid = cden >= self.min_common_dof
         c0 = np.where(valid, cnum * tools.invert_no_zero(cden), 1.0)
         slow = median.moving_weighted_median(
             np.ascontiguousarray(c0.reshape(-1, nra)),
