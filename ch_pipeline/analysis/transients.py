@@ -2529,21 +2529,36 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
     elevation.  Entries without a valid scale are given a scale of one.  The input is
     modified.
 
-    Entries whose scale exceeds ``max_scale`` are set to zero, which every later step
-    treats as no data.  Such a channel and elevation carries little information (at
-    most ``1 / max_scale`` of a clean one) and its excess noise, from RFI, is
-    unlikely to be Gaussian.  On 2418 with only the transient and chisq masks, 3
-    removes 19% of the (polarisation, channel, elevation) entries with data but
-    0.85% of the information: the channels of the local TV transmitters and the
-    rows near the horizon and its alias in others.
+    Entries whose scale exceeds ``max_scale`` are left out (set to zero, which every
+    later step treats as no data): such a channel and elevation carries little
+    information and its excess noise, from RFI, is unlikely to be Gaussian.  The
+    flags of each polarisation and baseline are then closed over ``close_chan``
+    channels and ``close_el`` elevations on either side, which fills holes in
+    flagged regions (where the ripple of the scale with frequency and elevation dips
+    below the limit) without growing them, and channels with at least
+    ``chan_frac`` of their elevations flagged are left out entirely.  The ripple
+    reaches a scale of ~3-4 at 400-450 MHz on 2418, so the limit should be above
+    that: with 5 (and the defaults below), 20% of the entries with data are left
+    out but 1.6% of the information (the channels of the local TV transmitters, and
+    rows near the horizon and its alias in others).
 
     Attributes
     ----------
     max_scale : float
         Largest usable scale.  Zero (default) keeps every entry.
+    close_chan : int
+        Half-width of the closing in channels.  Default is 2.
+    close_el : int
+        Half-width of the closing in elevations.  Default is 40.
+    chan_frac : float
+        Leave out a channel with at least this fraction of its elevations flagged.
+        Default is 0.8.
     """
 
     max_scale = config.Property(proptype=float, default=0.0)
+    close_chan = config.Property(proptype=int, default=2)
+    close_el = config.Property(proptype=int, default=40)
+    chan_frac = config.Property(proptype=float, default=0.8)
 
     def process(self, stream, scale):
         """Attach the scale.
@@ -2584,13 +2599,29 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
         good = np.isfinite(s) & (s > 0.0)
         out = np.where(good, s, 1.0)
         if self.max_scale > 0:
-            high = good & (s > self.max_scale)
-            out = np.where(high, 0.0, out)
-            nhigh = self.comm.allreduce(int(high.sum()))
-            ngood = self.comm.allreduce(int(good.sum()))
+            # The flags need every channel and elevation of a polarisation
+            sall = scale.scale[:].allgather()  # pol, freq, ew, el
+            gall = np.isfinite(sall) & (sall > 0.0)
+            flag = np.zeros(sall.shape, dtype=bool)
+            for pp in range(sall.shape[0]):
+                for ee in range(sall.shape[2]):
+                    flag[pp, :, ee] = _scale_flags(
+                        sall[pp, :, ee],
+                        gall[pp, :, ee],
+                        self.max_scale,
+                        self.close_chan,
+                        self.close_el,
+                        self.chan_frac,
+                    )
+            lo = scale.scale[:].local_offset[1]
+            flag = flag[:, lo : lo + s.shape[1]]
+            out = np.where(flag, 0.0, out)
             self.log.info(
-                f"{nhigh} of {ngood} entries ({nhigh / max(ngood, 1):.3f}) have a noise "
-                f"scale above {self.max_scale} and are left out."
+                f"{int(flag.sum()) if self.comm.size == 1 else self.comm.allreduce(int(flag.sum()))}"
+                f" entries left out ({np.sum(flag & good) / max(good.sum(), 1):.3f} of the "
+                f"local entries with a scale): scale above {self.max_scale}, closed over "
+                f"{self.close_chan} channels and {self.close_el} elevations, and channels "
+                f"with {self.chan_frac} of their elevations flagged."
             )
         stream.noise_scale[:].local_array[:] = out
 
@@ -2599,6 +2630,29 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
             self.log.info(f"{nbad} entries without a valid noise scale set to one.")
 
         return stream
+
+
+def _scale_flags(scale, have, max_scale, close_chan, close_el, chan_frac):
+    """Flags [freq, el] of a noise scale: threshold, closing, whole channels.
+
+    The closing pads the array by repeating its edges, so that regions reaching the
+    horizon are not eroded there.
+    """
+    flag = have & (scale > max_scale)
+    if (close_chan > 0 or close_el > 0) and flag.any():
+        pad = ((close_chan, close_chan), (close_el, close_el))
+        f = np.pad(flag, pad, mode="edge")
+        st = np.ones((2 * close_chan + 1, 2 * close_el + 1), dtype=bool)
+        f = scipy.ndimage.binary_erosion(
+            scipy.ndimage.binary_dilation(f, structure=st), structure=st
+        )
+        flag |= f[
+            close_chan : close_chan + scale.shape[0], close_el : close_el + scale.shape[1]
+        ]
+    nh = have.sum(axis=1)
+    frac = (flag & have).sum(axis=1) / np.maximum(nh, 1)
+    flag |= ((nh > 0) & (frac >= chan_frac))[:, np.newaxis]
+    return flag & have
 
 
 class ExtractSourceCutouts(tasklib.base.ContainerTask):
