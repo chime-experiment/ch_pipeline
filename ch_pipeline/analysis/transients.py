@@ -2528,7 +2528,22 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
     :class:`TransientMatchedFilter` uses to divide the noise weights at each
     elevation.  Entries without a valid scale are given a scale of one.  The input is
     modified.
+
+    Entries whose scale exceeds ``max_scale`` are set to zero, which every later step
+    treats as no data.  Such a channel and elevation carries little information (at
+    most ``1 / max_scale`` of a clean one) and its excess noise, from RFI, is
+    unlikely to be Gaussian.  On 2418 with only the transient and chisq masks, 3
+    removes 19% of the (polarisation, channel, elevation) entries with data but
+    0.85% of the information: the channels of the local TV transmitters and the
+    rows near the horizon and its alias in others.
+
+    Attributes
+    ----------
+    max_scale : float
+        Largest usable scale.  Zero (default) keeps every entry.
     """
+
+    max_scale = config.Property(proptype=float, default=0.0)
 
     def process(self, stream, scale):
         """Attach the scale.
@@ -2567,7 +2582,17 @@ class ApplyElevationNoiseScale(tasklib.base.ContainerTask):
 
         s = scale.scale[:].local_array
         good = np.isfinite(s) & (s > 0.0)
-        stream.noise_scale[:].local_array[:] = np.where(good, s, 1.0)
+        out = np.where(good, s, 1.0)
+        if self.max_scale > 0:
+            high = good & (s > self.max_scale)
+            out = np.where(high, 0.0, out)
+            nhigh = self.comm.allreduce(int(high.sum()))
+            ngood = self.comm.allreduce(int(good.sum()))
+            self.log.info(
+                f"{nhigh} of {ngood} entries ({nhigh / max(ngood, 1):.3f}) have a noise "
+                f"scale above {self.max_scale} and are left out."
+            )
+        stream.noise_scale[:].local_array[:] = out
 
         nbad = self.comm.allreduce(int((~good).sum()))
         if nbad:
@@ -4024,8 +4049,11 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                         if nscale_all is not None
                         else np.ones(freq.size)
                     )
+                    # Channels left out at some elevation of the block (noise scale
+                    # zero) are left out of the block's fit
+                    blk_ok = np.all(sc[:, esl] > 0, axis=1)
                     for tt in range(nra):
-                        W = w[:, tt] * isc_b  # inverse variance of each channel
+                        W = w[:, tt] * isc_b * blk_ok  # inverse variance of each channel
                         m = W > 0
                         if m.sum() <= nmode + 2:
                             continue
