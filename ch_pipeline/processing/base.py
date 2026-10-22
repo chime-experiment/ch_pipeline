@@ -388,9 +388,15 @@ class ProcessingType:
             user=user, priority_only=priority_only, check_failed=check_failed
         )[:max]
 
+        # Optional scheduler email notifications, set in the revision config
+        email = self._revparams.get("email")
+        mailtype = self._revparams.get("mailtype", "END")
+
         for tag in to_run:
             try:
-                queue_job(self.job_script(tag), submit=submit)
+                queue_job(
+                    self.job_script(tag), submit=submit, email=email, mailtype=mailtype
+                )
             except Exception:  # noqa: BLE001
                 import traceback
 
@@ -585,8 +591,12 @@ def find_venv():
     return os.environ.get("VIRTUAL_ENV", None)
 
 
-def queue_job(script, submit=True):
-    """Queue a pipeline script given as a string."""
+def queue_job(script, submit=True, email=None, mailtype=None):
+    """Queue a pipeline script given as a string.
+
+    If `email` is given, the scheduler will email that address on the
+    job events given by `mailtype` (e.g. "END" for slurm).
+    """
     import os
 
     with tempfile.NamedTemporaryFile("w+") as fh:
@@ -595,10 +605,14 @@ def queue_job(script, submit=True):
 
         # TODO: do this in a better way
         if submit:
-            cmd = "caput-pipeline queue --overwrite failed %s"
+            cmd = "caput-pipeline queue --overwrite failed"
         else:
-            cmd = "caput-pipeline queue --nosubmit %s"
-        os.system(cmd % fh.name)
+            cmd = "caput-pipeline queue --nosubmit"
+
+        if email:
+            cmd += f" --email {email} --mailtype {mailtype}"
+
+        os.system(f"{cmd} {fh.name}")
 
 
 def classify_failed(

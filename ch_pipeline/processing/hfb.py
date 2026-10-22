@@ -376,6 +376,10 @@ class HFBDailyProcessing(base.ProcessingType):
         "nodes": 8,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
+        # Email notifications. Set `email` to enable; `mailtype` is the
+        # slurm --mail-type event to notify on (END covers success and failure)
+        "email": None,
+        "mailtype": "END",
     }
     default_script = DEFAULT_SCRIPT
     # Make sure not to remove hfb files corresponding to CSDs below
