@@ -7302,6 +7302,113 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         return out
 
 
+class MaskFracLost(tasklib.base.ContainerTask):
+    """Mask the samples of which a large fraction was lost in the real-time pipeline.
+
+    Uses the ``frac_lost`` dataset of the daily system-sensitivity product
+    (``sensitivity_lsd_*.h5``, a :class:`draco.core.containers.SystemSensitivity`),
+    since the daily timestream does not carry it.  As
+    :class:`ch_pipeline.analysis.flagging.MaskHighFracLost`, whose default of 2% is
+    set by the spectral requirements of the 21 cm analysis.  Samples that are lost
+    entirely already have zero weight; partly lost ones remain, and are mostly in
+    the channels of RFI that the real-time excision does not fully remove.  Their
+    weights, smoothed in time, do not show the loss.
+
+    Attributes
+    ----------
+    threshold : float
+        Mask a frequency and time if more than this fraction was lost.
+        Default is 0.2.
+    """
+
+    threshold = config.Property(proptype=float, default=0.2)
+
+    def process(self, sens):
+        """Make the mask.
+
+        Parameters
+        ----------
+        sens : draco.core.containers.SystemSensitivity
+            Daily system sensitivity, with ``frac_lost`` [freq, time].
+
+        Returns
+        -------
+        mask : draco.core.containers.RFIMask
+        """
+        sens.redistribute("freq")
+        fl = sens.frac_lost[:].allgather()
+        out = draco_containers.RFIMask(axes_from=sens, attrs_from=sens)
+        mask = np.isfinite(fl) & (fl > self.threshold)
+        out.mask[:] = mask
+        self.log.info(
+            f"{100.0 * mask.mean():.2f}% of the samples lost more than "
+            f"{self.threshold:g} of their data."
+        )
+        return out
+
+
+class FlagHighNoise(tasklib.base.ContainerTask):
+    """Flag hybrid visibilities whose noise is far above that of the day.
+
+    Sets the weight to zero where the noise from the weights, ``1 / sqrt(weight)``,
+    is more than ``max_ratio`` times its median over the frequencies and times with
+    data, separately for each polarisation and east-west baseline.  The system
+    temperature ripples with frequency by up to a factor ~3 between the clean
+    channels, so the default of 4 only removes RFI and the steep edge of the band
+    (and some of the transit of the Sun).
+
+    Attributes
+    ----------
+    max_ratio : float
+        Largest noise relative to the median.  Default is 4.
+    """
+
+    max_ratio = config.Property(proptype=float, default=4.0)
+
+    def process(self, stream):
+        """Flag the stream in place.
+
+        Parameters
+        ----------
+        stream : draco.core.containers.HybridVisStream
+            Hybrid beamformed visibilities.
+
+        Returns
+        -------
+        stream : draco.core.containers.HybridVisStream
+            The same container, with weights set to zero where flagged.
+        """
+        from mpi4py import MPI
+
+        stream.redistribute("freq")
+        w = stream.weight[:].local_array  # pol, freq, ew, ra
+        comm = stream.comm
+        npol, _, new, _ = w.shape
+        nflag, ntot = 0, 0
+        for pp in range(npol):
+            for ee in range(new):
+                wl = w[pp, :, ee]
+                have = wl > 0
+                # median over all ranks (the weights of one pol and baseline, ~40 MB)
+                vals = wl[have]
+                allv = np.concatenate(comm.allgather(vals)) if comm.size > 1 else vals
+                if allv.size == 0:
+                    continue
+                wmed = np.median(allv)
+                # noise > max_ratio x median  <=>  weight < median weight / max_ratio^2
+                bad = have & (wl < wmed / self.max_ratio**2)
+                wl[bad] = 0.0
+                nflag += int(bad.sum())
+                ntot += int(have.sum())
+        nflag = comm.allreduce(nflag, op=MPI.SUM)
+        ntot = comm.allreduce(ntot, op=MPI.SUM)
+        self.log.info(
+            f"Flagged {100.0 * nflag / max(ntot, 1):.3f}% of the samples with noise "
+            f"above {self.max_ratio:g} x the median."
+        )
+        return stream
+
+
 class FillRAGaps(tasklib.base.ContainerTask):
     """Insert the samples missing from gaps in the RA axis, with zero weight.
 
