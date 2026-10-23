@@ -2,27 +2,28 @@
 
 import os
 
+import fluxcat
 import numpy as np
 import scipy.interpolate
 import scipy.stats
 from caput import config
+from caput.astro import constants
 from caput.containers import empty_like
-from ch_util import fluxcat
-from cora.util import units
+from caput.pipeline import tasklib
 from draco.analysis.beamform import icrs_to_cirs
-from draco.core import io, task
+from draco.core import io
 from draco.util import interferometry, tools
 
 from ..core import containers
 
 # Constants
-NU21 = units.nu21
-C = units.c
+NU21 = constants.nu21
+C = constants.c
 
 SIGMA = {"XX": 14.87857614, "YY": 9.95746878, "XY": 12.17180995, "YX": 12.17180995}
 
 
-class BaseInject(task.SingleTask):
+class BaseInject(tasklib.base.ContainerTask):
     """Base class for injecting point source catalogs into visibility data.
 
     Attributes
