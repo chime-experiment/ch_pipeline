@@ -41,6 +41,9 @@ class BaseInject(tasklib.base.ContainerTask):
         in the input container.  If False, then create a new container where the
         visibilities consist of the signal from the source catalog alone.  Default
         is False.
+    anti_podal : bool
+        Inject sources at antipodal transits in addition to main transits.
+        Default: False.
     nsigma : float
         Track sources for nsigma times the standard deviation of the theoretical
         beam response on each side of transit.  Default is 0.0, which results in
