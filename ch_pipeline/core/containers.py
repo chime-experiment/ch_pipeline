@@ -44,6 +44,7 @@ from draco.core.containers import (
     FreqContainer,
     HybridVisStream,
     SiderealContainer,
+    SourceCatalog,
     SpectroscopicCatalog,
     StaticGainData,
     TimeStream,
@@ -1692,6 +1693,97 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
     @property
     def x(self):
         return self.index_map["x"]
+
+
+class LPTCatalog(SourceCatalog):
+    """A catalogue of simulated long-period transients to inject into the data.
+
+    ``position`` holds the ICRS ``ra`` and ``dec`` (degrees).  The ``lpt`` table
+    holds the pulse of each source on one sidereal day (see
+    :class:`ch_pipeline.synthesis.inject_lpt.GenerateLPTCatalog` for the
+    definitions): its peak ``flux`` (Jy at the ``reference_freq`` attribute),
+    ``spectral_index`` and ``spectral_curvature``, ``duration`` (s) and ``t_offset``
+    (s, pulse centre minus transit), the fractions of linear and circular
+    polarisation, the rotation measure (rad / m^2) and the polarisation angle at
+    transit (degrees, from the X feed), and the scintillation (modulation index,
+    bandwidth in MHz and random seed).  The rest are the truth on that day: the CIRS
+    position, telescope-y at transit, telescope-x and the RA of the meridian
+    (degrees) at the start of the pulse, and the time of its centre.
+    """
+
+    _table_spec: ClassVar = {
+        "lpt": {
+            "columns": [
+                ["flux", np.float64],
+                ["spectral_index", np.float64],
+                ["spectral_curvature", np.float64],
+                ["duration", np.float64],
+                ["t_offset", np.float64],
+                ["frac_lin", np.float64],
+                ["frac_circ", np.float64],
+                ["rm", np.float64],
+                ["pol_angle", np.float64],
+                ["scint_index", np.float64],
+                ["scint_bw", np.float64],
+                ["scint_seed", np.int64],
+                ["ra_cirs", np.float64],
+                ["dec_cirs", np.float64],
+                ["y", np.float64],
+                ["x_start", np.float64],
+                ["ra_start", np.float64],
+                ["unix_center", np.float64],
+            ],
+            "axis": "object_id",
+        }
+    }
+
+
+class LPTInjectionResults(TableSpec):
+    """The injected long-period transients and the candidates that found them.
+
+    One row per injection (``object_id``): its parameters and truth (copied from
+    the :class:`LPTCatalog`), whether a candidate was found within the match window
+    (``found``, ``candidate`` its row in the candidate table or -1, ``n_match`` the
+    number of candidates in the window), and the measured properties and sifting
+    result of that candidate.
+    """
+
+    _table_spec: ClassVar = {
+        "injection": {
+            "columns": [
+                ["ra", np.float64],
+                ["dec", np.float64],
+                ["flux", np.float32],
+                ["spectral_index", np.float32],
+                ["duration", np.float32],
+                ["t_offset", np.float32],
+                ["frac_lin", np.float32],
+                ["frac_circ", np.float32],
+                ["y", np.float64],
+                ["x_start", np.float64],
+                ["ra_start", np.float64],
+                ["found", bool],
+                ["candidate", np.int32],
+                ["n_match", np.int16],
+                ["snr", np.float32],
+                ["amplitude", np.float32],
+                ["cand_duration", np.float32],
+                ["cand_spectral_index", np.float32],
+                ["cand_y", np.float64],
+                ["cand_x", np.float64],
+                ["cand_ra", np.float64],
+                ["keep", bool],
+                ["flags", np.uint32],
+                ["ns_scale", np.float32],
+                ["ns_dchi2", np.float32],
+            ],
+            "axis": "object_id",
+        }
+    }
+
+    @property
+    def injection(self):
+        return self.datasets["injection"]
 
 
 class TransientCandidateCutouts(FreqContainer):
