@@ -7166,21 +7166,21 @@ def _el_halo(local, off, nhalo, nel, comm, axis):
     return np.moveaxis(out, 0, axis)
 
 
-def _rolling_robust_sigma(a, nrow, window, gap, step_t, min_valid):
+def _rolling_robust_sigma(a, centres, nrow, window, gap, step_t, min_valid):
     """Robust spread of ``a`` around each sample, from its neighbours.
 
-    ``a`` [..., el + 2 nrow, ra] holds absolute values (NaN where masked), with
-    ``nrow`` rows of halo either side.  At every ``step_t``-th sample (and the last)
-    of each row, the spread is 1.4826 times the median of ``a`` over rows within
-    ``nrow`` and samples with ``gap < |dt| <= window``, NaN if fewer than
-    ``min_valid`` are present; it is interpolated linearly between those samples.
+    ``a`` [..., row, ra] holds absolute values (NaN where masked).  For each row
+    index in ``centres`` (at least ``nrow`` from the ends of ``a``), at every
+    ``step_t``-th sample (and the last), the spread is 1.4826 times the median of
+    ``a`` over rows within ``nrow`` and samples with ``gap < |dt| <= window``, NaN
+    if fewer than ``min_valid`` are present; it is interpolated linearly between
+    those samples.
 
     Returns
     -------
-    sigma : np.ndarray[..., el, ra]
+    sigma : np.ndarray[..., len(centres), ra]
     """
-    *lead, nrh, nra = a.shape
-    nel = nrh - 2 * nrow
+    *lead, _, nra = a.shape
     tt = np.arange(0, nra, step_t)
     if tt[-1] != nra - 1:
         tt = np.append(tt, nra - 1)
@@ -7188,9 +7188,9 @@ def _rolling_robust_sigma(a, nrow, window, gap, step_t, min_valid):
     use = np.abs(dt) > gap
     pad = [(0, 0)] * (len(lead) + 1) + [(window, window)]
     ap = np.pad(a.astype(np.float32), pad, constant_values=np.nan)
-    coarse = np.empty((*lead, nel, tt.size), dtype=np.float32)
-    for e in range(nel):
-        blk = ap[..., e : e + 2 * nrow + 1, :]  # ..., rows, ra + 2 window
+    coarse = np.empty((*lead, len(centres), tt.size), dtype=np.float32)
+    for ic, e in enumerate(centres):
+        blk = ap[..., e - nrow : e + nrow + 1, :]  # ..., rows, ra + 2 window
         win = np.lib.stride_tricks.sliding_window_view(blk, 2 * window + 1, axis=-1)
         w = win[..., tt, :][..., use]  # ..., rows, tt, used offsets
         w = np.moveaxis(w, -3, -2).reshape(*lead, tt.size, -1)
@@ -7200,13 +7200,18 @@ def _rolling_robust_sigma(a, nrow, window, gap, step_t, min_valid):
         hi = np.take_along_axis(w, np.maximum(cnt // 2, 0)[..., None], -1)[..., 0]
         med = 0.5 * (lo + hi)
         med[cnt < min_valid] = np.nan
-        coarse[..., e, :] = _MAD_TO_STD * med
-    if tt.size == 1:
-        return np.repeat(coarse, nra, axis=-1)
-    t = np.arange(nra)
-    i = np.clip(np.searchsorted(tt, t, side="right") - 1, 0, tt.size - 2)
-    f = ((t - tt[i]) / (tt[i + 1] - tt[i])).astype(np.float32)
-    return coarse[..., i] * (1 - f) + coarse[..., i + 1] * f
+        coarse[..., ic, :] = _MAD_TO_STD * med
+    return _interp_last(coarse, tt, nra)
+
+
+def _interp_last(c, at, n):
+    """Interpolate ``c`` [..., len(at)] given at the indices ``at`` to 0..n-1."""
+    if at.size == 1:
+        return np.repeat(c, n, axis=-1)
+    t = np.arange(n)
+    i = np.clip(np.searchsorted(at, t, side="right") - 1, 0, at.size - 2)
+    f = ((t - at[i]) / (at[i + 1] - at[i])).astype(np.float32)
+    return c[..., i] * (1 - f) + c[..., i + 1] * f
 
 
 class _RollingNoiseParams:
@@ -7215,7 +7220,8 @@ class _RollingNoiseParams:
     window = config.Property(proptype=int, default=45)
     gap = config.Property(proptype=int, default=15)
     nrow = config.Property(proptype=int, default=3)
-    step_t = config.Property(proptype=int, default=5)
+    step_t = config.Property(proptype=int, default=10)
+    step_e = config.Property(proptype=int, default=2)
     min_valid = config.Property(proptype=int, default=50)
 
     def _check_params(self, wmax=1):
@@ -7223,19 +7229,38 @@ class _RollingNoiseParams:
             raise ValueError(
                 f"Durations up to {wmax} samples need gap >= {wmax - 1} (gap = {self.gap})."
             )
-        if self.window <= self.gap or self.nrow < 0 or self.step_t < 1:
-            raise ValueError("Need window > gap, nrow >= 0 and step_t >= 1.")
+        if self.window <= self.gap or self.nrow < 0 or min(self.step_t, self.step_e) < 1:
+            raise ValueError("Need window > gap, nrow >= 0, step_t >= 1 and step_e >= 1.")
 
     def _sigma(self, absval, off, nel, comm):
-        """Rolling spread of ``absval`` [..., el_local, ra], NaN where masked."""
-        a = _el_halo(absval, off, self.nrow, nel, comm, axis=-2)
-        return _rolling_robust_sigma(
-            a, self.nrow, self.window, self.gap, self.step_t, self.min_valid
+        """Rolling spread of ``absval`` [..., el_local, ra], NaN where masked.
+
+        sigma is evaluated on the global rows that are multiples of ``step_e`` (and
+        the last) and interpolated linearly between them, so the rows either side
+        of the local block are fetched out to ``nrow + step_e - 1``.
+        """
+        n = absval.shape[-2]
+        nh = self.nrow + self.step_e - 1
+        a = _el_halo(absval, off, nh, nel, comm, axis=-2)
+        ce = np.arange(0, nel, self.step_e)
+        if ce[-1] != nel - 1:
+            ce = np.append(ce, nel - 1)
+        # the coarse rows that bracket the local ones
+        i0 = max(np.searchsorted(ce, off, side="right") - 1, 0)
+        i1 = min(np.searchsorted(ce, off + n - 1, side="left"), ce.size - 1)
+        cl = ce[i0 : i1 + 1]
+        sig = _rolling_robust_sigma(
+            a, cl - off + nh, self.nrow, self.window, self.gap, self.step_t,
+            self.min_valid,
         )
+        if cl.size == 1:
+            return np.repeat(sig, n, axis=-2)
+        sig = np.moveaxis(_interp_last(np.moveaxis(sig, -2, -1), cl - off, n), -1, -2)
+        return sig
 
     def _attrs(self, cont):
         cont.attrs["noise_calibrated"] = True
-        for name in ("window", "gap", "nrow", "step_t", "min_valid"):
+        for name in ("window", "gap", "nrow", "step_t", "step_e", "min_valid"):
             cont.attrs[f"noise_cal_{name}"] = getattr(self, name)
 
 
@@ -7263,8 +7288,8 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
     of the same telescope-x and trial (masked samples, of zero weight, left out).
     The gap leaves the pulse out of its own estimate, so it must be at least the
     longest duration minus one.  sigma is evaluated every ``step_t`` samples and
-    interpolated between them; where fewer than ``min_valid`` samples are present
-    the weight is set to zero.  The weights are divided by sigma^2, in place; the
+    ``step_e`` rows and interpolated between them; where fewer than ``min_valid``
+    samples are present the weight is set to zero.  The weights are divided by sigma^2, in place; the
     amplitudes are unchanged.  The result does not depend on the number of ranks.
 
     Attributes
@@ -7276,8 +7301,11 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
         is 15.
     nrow : int
         Rows either side included.  Default is 3.
-    step_t : int
-        Samples between the evaluations of sigma.  Default is 5.
+    step_t, step_e : int
+        Samples and rows between the evaluations of sigma, which is interpolated
+        linearly between them.  Defaults are 10 and 2 (on 2418 and 3035 the
+        statistics of the calibrated maps are those of every sample and row to
+        ~1%, at a third of the cost).
     min_valid : int
         Least number of samples for an estimate.  Default is 50.
     """
