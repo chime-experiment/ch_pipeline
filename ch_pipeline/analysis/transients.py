@@ -6321,6 +6321,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         response and of the thermal variance of the numerator (see the class
         docstring), for a transient starting at each sample.
 
+        The pair ``(j, j + d)`` and its mirror contribute ``Re[c X_d(t + j)]`` with
+        ``c = g_j^* g_{j+d}`` and ``X_d`` depending only on the lag ``d``, so ``X_d``
+        is formed once per lag, the shift by ``j`` is applied to the product (it
+        commutes with the sum over visibilities), and only the real part of the
+        product is computed (one real matrix product over ``(Re, Im)`` stacked
+        along the visibilities, half the work of a complex one).
+
         Parameters
         ----------
         tc : np.ndarray[k, el, x]
@@ -6353,31 +6360,44 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             g.append(np.where(idx[np.newaxis] >= 0, gj, 0.0).transpose(1, 2, 0))
         wv = wt * var_th
 
-        def terms(jj, jp):
-            # -W(t) P[t, t + d] at t = tau + j, and the thermal variance and weight
-            # at t' = tau + j'
-            a_r = np.roll(
-                -wt * presp[np.newaxis, :, :, lag_index[jp - jj]], -jj, axis=-1
-            )
-            return a_r, a_r * np.roll(wv, -jp, axis=-1)
+        def stack(x):
+            # [el, k, ra] complex -> [el, 2k, ra] real (Re over Im)
+            return np.concatenate([x.real, x.imag], axis=1).astype(np.float32)
 
-        # Only the real part is kept, and the coefficient of (j', j) is the
-        # conjugate of that of (j, j'), so each pair takes one product:
-        # Re[c a + c^* b] = Re[c (a + b^*)]
-        acc_r = np.zeros((nel, nx, nra), dtype=np.complex128)
-        acc_v = np.zeros((nel, nx, nra), dtype=np.complex128)
+        def shift_add(acc, m, j):
+            # acc += roll(m, -j) along RA
+            if j == 0:
+                acc += m
+            else:
+                acc[..., : nra - j] += m[..., j:]
+                acc[..., nra - j :] += m[..., :j]
+
+        # New pairs at each level jn = j + d (the pairs of duration jn + 1 that
+        # duration jn does not have)
+        new_r = np.zeros((wmax, nel, nx, nra), dtype=np.float32)
+        new_v = np.zeros((wmax, nel, nx, nra), dtype=np.float32)
+        for d in range(1, wmax):
+            # -W(t) P[t, t + d] and its mirror -W(t + d) P[t + d, t], with the
+            # thermal variance at the other end; Re[c a + c^* b] = Re[c (a + b^*)]
+            a_d = -wt * presp[np.newaxis, :, :, lag_index[d]]
+            b_d = np.roll(-wt * presp[np.newaxis, :, :, lag_index[-d]], -d, axis=-1)
+            x_r = stack(a_d + b_d.conj())
+            x_v = stack(a_d * np.roll(wv, -d, axis=-1) + b_d.conj() * wv)
+            for j in range(wmax - d):
+                c = g[j].conj() * g[j + d]  # el, x, k
+                cs = np.concatenate([c.real, -c.imag], axis=-1).astype(np.float32)
+                shift_add(new_r[j + d], np.matmul(cs, x_r), j)
+                shift_add(new_v[j + d], np.matmul(cs, x_v), j)
+
         resp_cross, var_cross = [], []
+        acc_r = np.zeros((nel, nx, nra), dtype=np.float64)
+        acc_v = np.zeros((nel, nx, nra), dtype=np.float64)
         for W in range(2, wmax + 1):
-            jn = W - 1
-            for jj in range(jn):
-                coeff = g[jj].conj() * g[jn]  # el, x, k
-                a_r, a_v = terms(jj, jn)
-                b_r, b_v = terms(jn, jj)
-                acc_r += np.matmul(coeff, (a_r + b_r.conj()).astype(np.complex64))
-                acc_v += np.matmul(coeff, (a_v + b_v.conj()).astype(np.complex64))
+            acc_r += new_r[W - 1]
+            acc_v += new_v[W - 1]
             if W in long_w:
-                resp_cross.append(acc_r.real.astype(np.float32))
-                var_cross.append(acc_v.real.astype(np.float32))
+                resp_cross.append(acc_r.astype(np.float32))
+                var_cross.append(acc_v.astype(np.float32))
 
         return resp_cross, var_cross
 
