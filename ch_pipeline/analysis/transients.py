@@ -5858,7 +5858,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     no sky term.
 
     If an RFI mask is given (see :class:`FlagMovingRFI`), the flagged samples
-    are given zero weight.  If a local noise scale is given (see
+    are given zero weight.  If an in-band noise scale is given (see
     :class:`EstimateInbandNoise`), it multiplies the thermal variance
     ``sigma_k^2``.
 
@@ -5887,7 +5887,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     rho_pol_default : float
         Correlation between polarisations where it was not measured.  Default is 1.
     inband_drop_inc : bool
-        With a local noise scale from :class:`EstimateInbandNoise`, which measures
+        With an in-band noise scale from :class:`EstimateInbandNoise`, which measures
         the noise that is independent between channels (including the self-noise
         of bright sources), leave out the incoherent sky term ``kappa_inc`` (use
         ``kappa_tot = kappa_coh``) so that it is not counted twice.  Default is
@@ -6014,7 +6014,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         )
         if getattr(self, "inband_noise", None) is not None and self.inband_drop_inc:
             self.log.info(
-                "Leaving out the incoherent sky term: the local noise scale measures it."
+                "Leaving out the incoherent sky term: the in-band noise scale measures it."
             )
             k2tot = k2coh.copy()
         k2inc = np.clip(k2tot - k2coh, 0.0, None)
