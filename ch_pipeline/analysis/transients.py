@@ -5841,9 +5841,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     covariance ``(delta - P[t, t']) sigma^2(t')``.  The sky term is taken as
     independent between samples (it is white at 10 s after the filter).  These need
     the filter response out to lag W - 1.  The per-band output and the group maps
-    are single-sample only (``band_durations`` must be [1]), and with the local
-    rescaling ``local_gap`` must be at least W - 1, so that a pulse does not raise
-    its own noise.
+    are single-sample only (``band_durations`` must be [1]).
 
     The sub-band maps of :class:`CollapseBandsToGroups` are made here too, since
     the correlation between bands is needed for their noise.  Each entry of
@@ -5860,9 +5858,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     no sky term.
 
     If an RFI mask is given (see :class:`FlagMovingRFI`), the flagged samples
-    are given zero weight, here and in the local rescaling below.  If a local
-    noise scale is given (see :class:`EstimateInbandNoise`), it multiplies the
-    thermal variance ``sigma_k^2``, here and in the local rescaling.
+    are given zero weight.  If a local noise scale is given (see
+    :class:`EstimateInbandNoise`), it multiplies the thermal variance
+    ``sigma_k^2``.
+
+    The sky term changes faster than the block or cell fits can follow (on some
+    nights over a few minutes).  That is left to :class:`CalibrateTrialNoise`,
+    which rescales the output by its measured spread around each sample.
 
     Attributes
     ----------
@@ -5884,40 +5886,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         overestimates the noise of band sums if the bands decorrelate.
     rho_pol_default : float
         Correlation between polarisations where it was not measured.  Default is 1.
-    local_window : int
-        Half-width in samples of the window of the local rescaling of the sky term
-        (see below).  Zero turns it off.  Default is 30.
-    local_gap : int
-        Samples within this many of the sample being rescaled are left out of its
-        window, so that a transient shorter than this does not raise its own noise.
-        Default is 5.
-    local_prior : float
-        Weight of the prior r = 1, in units of a sample dominated by the sky.
-        Default is 2.
-    local_cap : float
-        Each sample contributes at most this multiple of its modelled power.
-        Default is 20.
-    local_min : float
-        Lower limit of the rescaling.  Default is 0.1.
     inband_drop_inc : bool
         With a local noise scale from :class:`EstimateInbandNoise`, which measures
         the noise that is independent between channels (including the self-noise
         of bright sources), leave out the incoherent sky term ``kappa_inc`` (use
         ``kappa_tot = kappa_coh``) so that it is not counted twice.  Default is
         True.
-
-    The sky term changes faster than the block or cell fits can follow (on some
-    nights over a few minutes).  So it is rescaled at each sample by the ratio of
-    the measured to the modelled power of the sky term in the samples around it in
-    the same row, for each band:
-
-        r = (sum_j u_j (min(X_j / mu_j, cap) - th_j / mu_j) + prior) / (sum_j u_j^2 + prior)
-
-    over ``local_gap < |j| <= local_window``, summed over polarisations and
-    baselines, where X is the power of the sum of the filtered data over the
-    channels of the band (weighted by the thermal noise), mu its model, th its
-    thermal part, and u = (mu - th) / mu the fraction of the model from the sky.
-    Samples without sky signal have u = 0, so where there is none r = 1.
     """
 
     groups = config.Property(proptype=dict, default={})
@@ -5928,11 +5902,6 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     inband_drop_inc = config.Property(proptype=bool, default=True)
     rho_band_default = config.Property(proptype=float, default=1.0)
     rho_pol_default = config.Property(proptype=float, default=1.0)
-    local_window = config.Property(proptype=int, default=30)
-    local_gap = config.Property(proptype=int, default=5)
-    local_prior = config.Property(proptype=float, default=2.0)
-    local_cap = config.Property(proptype=float, default=20.0)
-    local_min = config.Property(proptype=float, default=0.1)
 
     rfi_mask = None
 
@@ -5985,13 +5954,6 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 "be [1]."
             )
         wmax = max(durations)
-        if self.local_window > 0 and (
-            self.local_gap < wmax - 1 or self.local_window <= self.local_gap
-        ):
-            raise ValueError(
-                f"Durations up to {wmax} samples need local_gap >= {wmax - 1} (and "
-                "local_window > local_gap), or local_window = 0."
-            )
         alphas = np.array(self.spectral_indices, dtype=np.float64)
 
         _check_same_grid(hvis, unfiltered)
@@ -6165,33 +6127,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             # In-band scale of the thermal noise [pol, freq, ew, el, ra]
             gb = gfac[:, gband[fsel]] if gfac is not None else None
 
-            # Local rescaling of the sky term [el, ra]
-            rloc = self._local_scale(
-                vis,
-                uvis,
-                nscale,
-                rfi,
-                inv_w,
-                fsel,
-                ipol,
-                ipu,
-                iew,
-                iewu,
-                k2coh[bb],
-                k2tot[bb],
-                yband_local,
-                gb,
-            )
-
             for e0 in range(0, nel_local, self.nel_chunk):
                 esl = slice(e0, min(e0 + self.nel_chunk, nel_local))
                 yel = el_local[esl]
                 # Coefficients for these elevations: [(pol), (freq), ew, el, ra]
                 yb = yband_local[esl]
-                rl = rloc[esl][np.newaxis]  # (ew), el, ra
-                kt = (k2tot[bb][:, yb] * rl)[np.newaxis, np.newaxis]
-                ki = (k2inc[bb][:, yb] * rl)[np.newaxis, np.newaxis]
-                kc = (kcoh[bb][:, yb] * np.sqrt(rl))[np.newaxis]
+                kt = k2tot[bb][:, yb][np.newaxis, np.newaxis]
+                ki = k2inc[bb][:, yb][np.newaxis, np.newaxis]
+                kc = kcoh[bb][:, yb][np.newaxis]
                 phase = (
                     2.0
                     * np.pi
@@ -6437,80 +6380,6 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 var_cross.append(acc_v.real.astype(np.float32))
 
         return resp_cross, var_cross
-
-    def _local_scale(
-        self,
-        vis,
-        uvis,
-        nscale,
-        rfi,
-        inv_w,
-        fsel,
-        ipol,
-        ipu,
-        iew,
-        iewu,
-        k2coh,
-        k2tot,
-        yband,
-        gb=None,
-    ):
-        """Rescaling of the sky term of one band at each local elevation and sample.
-
-        See the class docstring.  ``k2coh`` and ``k2tot`` are [ew, yband, ra],
-        ``rfi`` is the local RFI mask [freq, el, ra] or None, and ``gb`` the
-        in-band scale of the thermal noise [pol, freq, ew, el, ra] or None.
-
-        Returns
-        -------
-        r : np.ndarray[el_local, ra]
-        """
-        nel, nra = vis.shape[3], vis.shape[4]
-        if self.local_window <= 0:
-            return np.ones((nel, nra), dtype=np.float32)
-
-        num = np.zeros((nel, nra))
-        den = np.zeros((nel, nra))
-        for e0 in range(0, nel, self.nel_chunk):
-            esl = slice(e0, min(e0 + self.nel_chunk, nel))
-            yb = yband[esl]
-            d = vis[:, :, :, esl][np.ix_(ipol, fsel, iew)]  # pol, freq, ew, el, ra
-            sv = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
-            var = nscale[:, fsel][..., esl, np.newaxis] * inv_w
-            if gb is not None:
-                var = var * gb[..., esl, :]
-            ok = (var > 0) & np.isfinite(d) & np.isfinite(sv)
-            if rfi is not None:
-                ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
-            a = np.where(ok, tools.invert_no_zero(var), 0.0)
-            d = np.where(ok, d, 0.0)
-            sv = np.where(ok, sv, 0.0)
-            m = np.sum(a * d, axis=1)  # pol, ew, el, ra
-            rb = np.sum(a * sv, axis=1)
-            A = np.sum(a, axis=1)
-            B = np.sum(a**2 * np.abs(sv) ** 2, axis=1)
-            nch = ok.sum(axis=1)
-            kt = k2tot[:, yb][np.newaxis]  # (pol), ew, el, ra
-            kc = k2coh[:, yb][np.newaxis]
-            mu = A + kt * B + kc * (np.abs(rb) ** 2 - B)
-            use = (nch >= 2) & (A > 0) & (mu > 0)
-            inv_mu = tools.invert_no_zero(np.where(use, mu, 0.0))
-            u = np.where(use, (mu - A) * inv_mu, 0.0)
-            y = np.where(
-                use,
-                np.minimum(np.abs(m) ** 2 * inv_mu, self.local_cap) - A * inv_mu,
-                0.0,
-            )
-            num[esl] = np.sum(u * y, axis=(0, 1))
-            den[esl] = np.sum(u * u, axis=(0, 1))
-
-        kern = np.ones(2 * self.local_window + 1)
-        g = min(self.local_gap, self.local_window)
-        kern[self.local_window - g : self.local_window + g + 1] = 0.0
-        num = scipy.ndimage.convolve1d(num, kern, axis=-1, mode="constant")
-        den = scipy.ndimage.convolve1d(den, kern, axis=-1, mode="constant")
-        r = (num + self.local_prior) / (den + self.local_prior)
-        return np.maximum(r, self.local_min).astype(np.float32)
 
     @staticmethod
     def _amp_weight(numer, resp, var):
@@ -7243,6 +7112,255 @@ def _chi2_to_gaussian(q, k):
     return np.where(ok, z, 0.0)
 
 
+_MAD_TO_STD = 1.482602218505602
+
+
+def _el_halo(local, off, nhalo, nel, comm, axis):
+    """Extend a block of rows distributed over ranks by ``nhalo`` rows either side.
+
+    ``local`` holds the global rows ``off`` to ``off + n`` along ``axis``.  The rows
+    either side are fetched from the ranks that hold them; beyond the first and last
+    global row they are NaN.
+
+    Returns
+    -------
+    out : np.ndarray
+        ``local`` with ``n + 2 nhalo`` rows along ``axis``.
+    """
+    local = np.moveaxis(local, axis, 0)
+    n = local.shape[0]
+    out = np.full((n + 2 * nhalo,) + local.shape[1:], np.nan, dtype=local.dtype)
+    out[nhalo : nhalo + n] = local
+    if nhalo > 0:
+        single = comm is None or comm.size == 1
+        blocks = [(off, n)] if single else comm.allgather((off, n))
+        sends = []
+        for o, m in blocks:
+            want = np.r_[np.arange(o - nhalo, o), np.arange(o + m, o + m + nhalo)]
+            mine = want[(want >= off) & (want < off + n) & (want >= 0) & (want < nel)]
+            sends.append((mine, local[mine - off]))
+        recv = sends if single else comm.alltoall(sends)
+        for rows, vals in recv:
+            if rows.size:
+                out[rows - off + nhalo] = vals
+    return np.moveaxis(out, 0, axis)
+
+
+def _rolling_robust_sigma(a, nrow, window, gap, step_t, min_valid):
+    """Robust spread of ``a`` around each sample, from its neighbours.
+
+    ``a`` [..., el + 2 nrow, ra] holds absolute values (NaN where masked), with
+    ``nrow`` rows of halo either side.  At every ``step_t``-th sample (and the last)
+    of each row, the spread is 1.4826 times the median of ``a`` over rows within
+    ``nrow`` and samples with ``gap < |dt| <= window``, NaN if fewer than
+    ``min_valid`` are present; it is interpolated linearly between those samples.
+
+    Returns
+    -------
+    sigma : np.ndarray[..., el, ra]
+    """
+    *lead, nrh, nra = a.shape
+    nel = nrh - 2 * nrow
+    tt = np.arange(0, nra, step_t)
+    if tt[-1] != nra - 1:
+        tt = np.append(tt, nra - 1)
+    dt = np.arange(-window, window + 1)
+    use = np.abs(dt) > gap
+    pad = [(0, 0)] * (len(lead) + 1) + [(window, window)]
+    ap = np.pad(a.astype(np.float32), pad, constant_values=np.nan)
+    coarse = np.empty((*lead, nel, tt.size), dtype=np.float32)
+    for e in range(nel):
+        blk = ap[..., e : e + 2 * nrow + 1, :]  # ..., rows, ra + 2 window
+        win = np.lib.stride_tricks.sliding_window_view(blk, 2 * window + 1, axis=-1)
+        w = win[..., tt, :][..., use]  # ..., rows, tt, used offsets
+        w = np.moveaxis(w, -3, -2).reshape(*lead, tt.size, -1)
+        w = np.sort(w, axis=-1)  # NaN last
+        cnt = np.sum(np.isfinite(w), axis=-1)
+        lo = np.take_along_axis(w, np.maximum((cnt - 1) // 2, 0)[..., None], -1)[..., 0]
+        hi = np.take_along_axis(w, np.maximum(cnt // 2, 0)[..., None], -1)[..., 0]
+        med = 0.5 * (lo + hi)
+        med[cnt < min_valid] = np.nan
+        coarse[..., e, :] = _MAD_TO_STD * med
+    if tt.size == 1:
+        return np.repeat(coarse, nra, axis=-1)
+    t = np.arange(nra)
+    i = np.clip(np.searchsorted(tt, t, side="right") - 1, 0, tt.size - 2)
+    f = ((t - tt[i]) / (tt[i + 1] - tt[i])).astype(np.float32)
+    return coarse[..., i] * (1 - f) + coarse[..., i + 1] * f
+
+
+class _RollingNoiseParams:
+    """Settings shared by the rolling noise calibration tasks."""
+
+    window = config.Property(proptype=int, default=45)
+    gap = config.Property(proptype=int, default=15)
+    nrow = config.Property(proptype=int, default=3)
+    step_t = config.Property(proptype=int, default=5)
+    min_valid = config.Property(proptype=int, default=50)
+
+    def _check_params(self, wmax=1):
+        if self.gap < wmax - 1:
+            raise ValueError(
+                f"Durations up to {wmax} samples need gap >= {wmax - 1} (gap = {self.gap})."
+            )
+        if self.window <= self.gap or self.nrow < 0 or self.step_t < 1:
+            raise ValueError("Need window > gap, nrow >= 0 and step_t >= 1.")
+
+    def _sigma(self, absval, off, nel, comm):
+        """Rolling spread of ``absval`` [..., el_local, ra], NaN where masked."""
+        a = _el_halo(absval, off, self.nrow, nel, comm, axis=-2)
+        return _rolling_robust_sigma(
+            a, self.nrow, self.window, self.gap, self.step_t, self.min_valid
+        )
+
+    def _attrs(self, cont):
+        cont.attrs["noise_calibrated"] = True
+        for name in ("window", "gap", "nrow", "step_t", "min_valid"):
+            cont.attrs[f"noise_cal_{name}"] = getattr(self, name)
+
+
+def _global_median(vals, comm):
+    """Median over ranks of the local medians of the finite values (for logging)."""
+    v = vals[np.isfinite(vals)]
+    loc = float(np.median(v)) if v.size else np.nan
+    allv = np.array(comm.allgather(loc) if comm is not None else [loc])
+    allv = allv[np.isfinite(allv)]
+    return float(np.median(allv)) if allv.size else np.nan
+
+
+class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
+    """Rescale the noise of the matched filter by its measured spread.
+
+    The noise model of the matched filter (the thermal noise, the in-band scale and
+    the sky term) does not follow every change of the noise: the S/N of the all-band
+    map has a robust spread of 1.2-1.4 over a day, up to ~2 in a scintillating night,
+    and more at low frequency.  So at every elevation, start time, telescope-x and
+    trial, the S/N is divided by
+
+        sigma = 1.4826 x median |S/N|
+
+    over the rows within ``nrow`` and the start times with ``gap < |dt| <= window``
+    of the same telescope-x and trial (masked samples, of zero weight, left out).
+    The gap leaves the pulse out of its own estimate, so it must be at least the
+    longest duration minus one.  sigma is evaluated every ``step_t`` samples and
+    interpolated between them; where fewer than ``min_valid`` samples are present
+    the weight is set to zero.  The weights are divided by sigma^2, in place; the
+    amplitudes are unchanged.  The result does not depend on the number of ranks.
+
+    Attributes
+    ----------
+    window : int
+        Half-width of the window in samples.  Default is 45.
+    gap : int
+        Samples within this many of the one being calibrated are left out.  Default
+        is 15.
+    nrow : int
+        Rows either side included.  Default is 3.
+    step_t : int
+        Samples between the evaluations of sigma.  Default is 5.
+    min_valid : int
+        Least number of samples for an estimate.  Default is 50.
+    """
+
+    def process(self, trials):
+        """Calibrate the trials.
+
+        Parameters
+        ----------
+        trials : containers.TransientMatchedFilterTrials
+            Matched filter output.
+
+        Returns
+        -------
+        trials : containers.TransientMatchedFilterTrials
+            The input, with its weights rescaled.
+        """
+        durations = [int(d) for d in trials.index_map["duration"][:]]
+        self._check_params(max(durations))
+        trials.redistribute("el")
+        amp = trials.amplitude[:].local_array  # pol, dur, alpha, el, ra, x
+        wgt = trials.weight[:].local_array
+        off = trials.weight[:].local_offset[3]
+        nel = trials.weight.shape[3]
+        comm = trials.comm
+        npol, ndur, nalpha = amp.shape[:3]
+        med = np.full((npol, ndur, nalpha), np.nan)
+        for p, d, a in np.ndindex(npol, ndur, nalpha):
+            w = wgt[p, d, a]
+            av = np.where(w > 0, np.abs(amp[p, d, a]) * np.sqrt(np.abs(w)), np.nan)
+            sig = self._sigma(np.moveaxis(av, -1, 0), off, nel, comm)  # x, el, ra
+            sig = np.moveaxis(sig, 0, -1)
+            ok = np.isfinite(sig) & (sig > 0)
+            wgt[p, d, a] = np.where(ok, w / np.where(ok, sig, 1.0) ** 2, 0.0)
+            med[p, d, a] = _global_median(sig[ok & (w > 0)], comm)
+        self._attrs(trials)
+        for d in range(ndur):
+            self.log.info(
+                f"Duration {durations[d]}: median noise rescaling "
+                + ", ".join(f"{v:.2f}" for v in med[:, d].ravel())
+            )
+        return trials
+
+
+class CalibrateGroupNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
+    """Rescale the band-group maps by the measured spread of their S/N.
+
+    As :class:`CalibrateTrialNoise`, for the single-sample maps of
+    :class:`CollapseBandsToGroups` (or of the sky-noise matched filter): sigma is
+    measured on the map at a fixed telescope-x (normally 0) for each group, and
+    both that map and the map at the best telescope-x are divided by it.  (The
+    best-x map is a maximum over telescope-x, whose spread is not that of a
+    Gaussian, so it is not measured on its own.)
+
+    Attributes
+    ----------
+    window, gap, nrow, step_t, min_valid
+        As :class:`CalibrateTrialNoise`.
+    """
+
+    def process(self, maxx, x0):
+        """Calibrate the two maps.
+
+        Parameters
+        ----------
+        maxx : containers.TransientBandGroupMap
+            Map at the best telescope-x.
+        x0 : containers.TransientBandGroupMap
+            Map at a single telescope-x, on which sigma is measured.
+
+        Returns
+        -------
+        maxx, x0 : containers.TransientBandGroupMap
+            The inputs, rescaled in place.
+        """
+        self._check_params()
+        if maxx.snr.shape != x0.snr.shape:
+            raise ValueError("The two group maps differ in shape.")
+        if str(x0.attrs.get("x_reduce", "")) == "max":
+            raise ValueError("The second map must be at a fixed telescope-x.")
+        maxx.redistribute("el")
+        x0.redistribute("el")
+        s0 = x0.snr[:].local_array  # pol, group, el, ra
+        s1 = maxx.snr[:].local_array
+        off = x0.snr[:].local_offset[2]
+        nel = x0.snr.shape[2]
+        groups = _decode_names(x0.index_map["group"][:])
+        for p, g in np.ndindex(s0.shape[:2]):
+            av = np.where(s0[p, g] != 0, np.abs(s0[p, g]), np.nan)
+            sig = self._sigma(av, off, nel, x0.comm)
+            ok = np.isfinite(sig) & (sig > 0)
+            inv = np.where(ok, 1.0 / np.where(ok, sig, 1.0), 0.0)
+            s0[p, g] *= inv
+            s1[p, g] *= inv
+            self.log.info(
+                f"Group {groups[g]}: median noise rescaling "
+                f"{_global_median(sig[ok], x0.comm):.2f}"
+            )
+        self._attrs(maxx)
+        self._attrs(x0)
+        return maxx, x0
+
+
 class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
     """Find the trial with the highest signal-to-noise ratio.
 
@@ -7746,11 +7864,13 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
       telescope-y and in time (s), and the slope (telescope-y per degree of RA) and
       correlation of telescope-y with RA of its pixels, weighted by S/N.  Arcs from
       moving objects have large extents in both and a high correlation.  The
-      "extent" is the same but with pixels above ``grow_snr`` joined across gaps of
-      up to ``join_dy`` in telescope-y and ``join_dt`` samples, so that a chain of
-      blobs (an arc broken up by the fringes) counts as one: ``ext_npix`` (its
-      pixels above ``grow_snr``), ``ext_dy`` and ``ext_dt`` (s).  A pulse from a
-      point source extends ~0.01 in telescope-y.
+      "extent" is the same but with pixels above ``max(grow_snr, ext_frac x
+      peak)`` joined across gaps of up to ``join_dy`` in telescope-y and
+      ``join_dt`` samples, so that a chain of blobs (an arc broken up by the
+      fringes) counts as one: ``ext_npix`` (its pixels above the threshold),
+      ``ext_dy`` and ``ext_dt`` (s).  A pulse from a point source extends ~0.01 in
+      telescope-y.  The threshold rises with the peak so that the sidelobes of a
+      bright pulse (below 5% in telescope-y) and the noise around it do not count.
     - Along the row: ``row_npeak``, the number of other peaks (local maxima within 1
       row and +-``row_peak_dra``, merged as for the candidates, whose trials do not
       overlap the candidate's) within +-``row_dy`` in telescope-y and
@@ -7805,6 +7925,9 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     join_dy, join_dt : float, int
         Largest gaps in telescope-y and in samples bridged in the extent.  Defaults
         are 0.005 (3 rows) and 1.
+    ext_frac : float
+        Threshold of the extent as a fraction of the peak, where that is above
+        ``grow_snr``.  Default is 0.05.
     row_snr, row_ratio : float
         Smallest S/N of another peak along the row, absolute and relative to the
         candidate.  Defaults are 8 and 1/3.
@@ -7848,6 +7971,7 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     box_dra = config.Property(proptype=float, default=2.0)
     join_dy = config.Property(proptype=float, default=0.005)
     join_dt = config.Property(proptype=int, default=1)
+    ext_frac = config.Property(proptype=float, default=0.05)
     row_snr = config.Property(proptype=float, default=8.0)
     row_ratio = config.Property(proptype=float, default=1.0 / 3.0)
     row_dy = config.Property(proptype=float, default=0.01)
@@ -8003,8 +8127,8 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         out.attrs["lsd"] = lsd
         for key in (
             "seed_snr", "peak_dy", "peak_dt", "grow_snr", "join_dy", "join_dt",
-            "row_snr", "row_ratio", "row_dy", "row_dra", "col_snr", "group_snr_min",
-            "cat_ddec", "cat_dra",
+            "ext_frac", "row_snr", "row_ratio", "row_dy", "row_dra", "col_snr",
+            "group_snr_min", "cat_ddec", "cat_dra",
         ):  # fmt: skip
             out.attrs[key] = getattr(self, key)
         if self.catalogue:
@@ -8086,7 +8210,7 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
                 rec["island_slope"][k] = cyr / vr
                 rec["island_corr"][k] = cyr / np.sqrt(vr * vy)
 
-            lit = sub >= self.grow_snr
+            lit = sub >= max(self.grow_snr, self.ext_frac * peak)
             lab, _ = scipy.ndimage.label(
                 scipy.ndimage.binary_dilation(lit, structure=join), eight
             )
@@ -8340,7 +8464,7 @@ class _NSBeam:
         return np.interp(np.abs(u), self.u, self.G, right=0.0)
 
 
-def _ns_profile_fit(nsb, yr, amp, wgt, freq, shifts, scales, min_rows, eig_tol=1e-9):
+def _ns_profile_fit(nsb, yr, amp, wgt, freq, shifts, scales, min_rows, eig_tol=1e-2):
     """Fit the north-south beam to a candidate's profile in each band.
 
     The model in band b is ``a_b B_b((y - y0) / s)`` with a free amplitude ``a_b``
@@ -8530,7 +8654,11 @@ class AddNSProfile(tasklib.base.ContainerTask):
     band is free (scintillation and calibration errors change it), while the shift
     ``dy`` and the width scale ``s`` are common to all bands.  The rows oversample
     the beam and their noise is correlated (0.84 between neighbours at 600 MHz); the
-    fit uses the covariance from the beamforming, scaled by the weights.
+    fit uses the covariance from the beamforming, scaled by the weights, whitened
+    with its eigenvectors above ``eig_tol`` of the largest eigenvalue.  The rest are
+    nearly empty in the model, but real data are not exactly the model (sky noise,
+    the beamforming weights, rounding) and whitening amplifies them enormously: with
+    1e-9 J1634 had a reduced chi-squared of 1.5e6, with 1e-2 it is ~3.
 
     Columns added: ``ns_nband``, the bands used; ``ns_dof``; ``ns_snr``, the S/N of
     the fitted point-source model; ``ns_dy``, its shift; ``ns_chi2``, its reduced
@@ -8560,6 +8688,9 @@ class AddNSProfile(tasklib.base.ContainerTask):
     ns_max : float
         Longest north-south baseline (m), as for MaskBaselines (mask_long_ns).
         Default is 73.
+    eig_tol : float
+        Eigenvalues of the row covariance below this fraction of the largest are
+        left out of the fit.  Default is 1e-2.
     """
 
     pol = config.Property(proptype=int, default=0)
@@ -8570,6 +8701,7 @@ class AddNSProfile(tasklib.base.ContainerTask):
     scale_range = config.list_type(type_=float, length=2, default=[0.5, 8.0])
     ns_spacing = config.Property(proptype=float, default=0.3048)
     ns_max = config.Property(proptype=float, default=73.0)
+    eig_tol = config.Property(proptype=float, default=1e-2)
 
     def process(self, table, bands):
         """Fit the profiles.
@@ -8625,7 +8757,7 @@ class AddNSProfile(tasklib.base.ContainerTask):
             yr = np.where(inside, el[np.clip(rows, 0, el.size - 1)] - el[e[k]], 0.0)
             w = np.where(inside[np.newaxis], wgt[k], 0.0)
             chi2, snr2, dof, nb = _ns_profile_fit(
-                nsb, yr, amp[k], w, centre, shifts, scales, self.min_rows
+                nsb, yr, amp[k], w, centre, shifts, scales, self.min_rows, self.eig_tol
             )
             res[k, 0], res[k, 1] = nb, dof
             if nb == 0 or dof <= 0:
@@ -8658,6 +8790,7 @@ class AddNSProfile(tasklib.base.ContainerTask):
         out.candidate[:] = rec
         out.attrs["ns_nrow"] = self.nrow
         out.attrs["ns_max"] = self.ns_max
+        out.attrs["ns_eig_tol"] = self.eig_tol
         nfit = int(np.sum(rec["ns_dof"] > 0))
         self.log.info(f"Fitted the north-south profiles of {nfit} of {ncand} candidates.")
         return out
