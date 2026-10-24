@@ -1743,8 +1743,10 @@ _LPT_PULSE_COLUMNS = [
     ["pulse", np.int64],
     ["injected", bool],
     ["nulled", bool],
+    ["in_day", bool],
     ["unix_center", np.float64],
     ["t_offset", np.float64],
+    ["ha_center", np.float64],
     ["flux", np.float64],
     ["duration", np.float64],
     ["spectral_index", np.float64],
@@ -1766,13 +1768,16 @@ class LPTInjectionLog(TableSpec):
     """The pulses of simulated LPTs that fell in the main lobe on one day.
 
     One row per pulse (``pulse`` axis): the ``source`` (row of the
-    :class:`LPTCatalog`) and ``pulse`` number (0 for one pulse a day), whether it
-    was ``injected`` (not ``nulled``, above the horizon), the time of its centre
-    (topocentric unix) and offset from transit (s), its peak ``flux`` (after the
-    pulse-to-pulse scatter), duration, spectral index and polarisation fractions,
-    the ICRS and CIRS position, telescope-y at transit, telescope-x and meridian RA
-    (degrees) at the start of the pulse, the XX primary beam averaged over the pulse
-    and the band (``beam_mean``), and the seed of its scintillation.
+    :class:`LPTCatalog`) and ``pulse`` number (the LSD for one pulse a day), whether
+    it was ``injected`` (not ``nulled``, on samples covered by the beam model),
+    whether its centre is ``in_day`` (meridian RA 0-360 of the LSD, where the
+    candidate maps are), the time of its centre (topocentric unix), its offset from
+    the nearest upper transit (s) and hour angle (degrees), its peak ``flux`` (after
+    the pulse-to-pulse scatter), duration, spectral index and polarisation
+    fractions, the ICRS and CIRS position, telescope-y at the centre, telescope-x
+    and meridian RA (degrees) at the start of the pulse, the XX primary beam
+    averaged over the pulse and the band (``beam_mean``), and the seed of its
+    scintillation.
     """
 
     _table_spec: ClassVar = {"pulse": {"columns": _LPT_PULSE_COLUMNS, "axis": "pulse"}}

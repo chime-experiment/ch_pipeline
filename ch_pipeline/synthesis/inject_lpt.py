@@ -13,8 +13,8 @@ The catalogue holds the intrinsic properties of the sources only
 
 The properties are drawn with :mod:`ch_pipeline.synthesis.lpt_population`.
 
-Each day, :class:`InjectLPT` finds the pulses that fall within ``window_sigma``
-primary-beam widths of transit (periodic in barycentric time if ``barycentric``),
+Each day, :class:`InjectLPT` finds the pulses that fall where the beam model covers
+the source (periodic in barycentric time if ``barycentric``),
 writes them to an :class:`~ch_pipeline.core.containers.LPTInjectionLog` (where and
 when each appears: the truth), and adds them to a copy of the stacked visibilities
 restricted to the samples they touch, with the masked weights of the day.  The
@@ -157,8 +157,9 @@ class GenerateLPTCatalog(tasklib.base.ContainerTask):
     Attributes
     ----------
     n_source : int
-        Number of sources.  Default is 80 (with the default periods and a window of
-        +-2 beam sigma, ~60-100 pulses fall in the main lobe each day).
+        Number of sources.  Default is 80 (with the default periods, ~0.35 pulses
+        per source per day fall where the XX beam at 600 MHz is above half its peak,
+        and ~300 pulses a day where the beam model is defined).
     seed : int
         Random seed.  Default is 0.
     profile : {"tophat", "gaussian"}
@@ -244,21 +245,28 @@ class GenerateDailyLPTCatalog(GenerateLPTCatalog):
 
 
 class InjectLPT(BeamExternal):
-    """Find the pulses of a catalogue on the day and inject them (sparse stream).
+    """Find the pulses of a catalogue in the day's data and inject them (sparse stream).
 
-    The transit of each source on the day is at the meridian RA of its CIRS
-    position (in [0, 360) for the LSD of the data).  A source with a period pulses
-    at ``epoch + k period`` at the barycentre (at the Earth earlier by the Roemer
-    delay if ``barycentric``); those pulses whose centre is within ``window_sigma``
-    widths of the XX primary beam at 600 MHz (plus half the duration) of transit are
-    taken.  A source with period 0 has one pulse at ``t_offset_beam`` beam widths
-    from transit.  Each pulse gets its own random draws (seeded by the source and
-    the pulse number, so the same on any day that sees it): nulled with probability
+    Every pulse that falls on a sample of the input where the source is above the
+    horizon and within the beam model (for a beam in telescope coordinates, within
+    its range of telescope-x; in celestial coordinates, its range of hour angle) is
+    injected; the primary beam itself sets how much signal it gives, which is small
+    far from transit.  Outside the beam model nothing is injected (the model would
+    have to be extrapolated).  A circumpolar source is also seen below the pole.
+
+    A source with a period pulses at ``epoch + k period`` at the barycentre (at the
+    Earth earlier by the Roemer delay at that time if ``barycentric``).  A source
+    with period 0 has one pulse at ``t_offset_beam`` widths of a Gaussian XX beam at
+    600 MHz from its upper transit on the day (in [0, 360) of meridian RA).  Each
+    pulse gets its own random draws (seeded by the source and the pulse number, so
+    the same on any day whose data contain it): nulled with probability
     ``null_fraction``, a flux scattered by exp(``flux_scatter`` N(0, 1)), and the
-    seed of its scintillation.
+    seed of its scintillation.  The input of a day extends beyond 0-360 degrees of
+    RA, so a pulse near the ends can be in the data of two days; it is the same
+    pulse in both (``in_day`` marks the day whose candidate maps contain it).
 
     The pulses are added to a copy of the input restricted to the samples where
-    any has a mean profile above ``min_profile`` (and is above the horizon), with
+    any has a mean profile above ``min_profile`` (and is covered by the beam), with
     the input's weights there and zero visibilities otherwise:
 
         V_pp(nu, t) = A_pp(nu, t) B_pp(nu, HA) exp(2 pi i b . s / lambda)
@@ -273,8 +281,6 @@ class InjectLPT(BeamExternal):
     ----------
     polarization : {"copol", "full", "single"}
         Products to inject into (see :class:`BaseInject`).  Default is "full".
-    window_sigma : float
-        Half-width of the window around transit in beam widths.  Default is 2.
     barycentric : bool
         Periodic in barycentric time.  Default is True.
     min_profile : float
@@ -284,7 +290,6 @@ class InjectLPT(BeamExternal):
     """
 
     polarization = config.enum(["full", "copol", "single"], default="full")
-    window_sigma = config.Property(proptype=float, default=2.0)
     barycentric = config.Property(proptype=bool, default=True)
     min_profile = config.Property(proptype=float, default=1e-4)
     parallactic = config.Property(proptype=bool, default=True)
@@ -306,41 +311,71 @@ class InjectLPT(BeamExternal):
         self.process_pol = inject_pol
         self.profile = catalog.attrs.get("profile", "tophat")
         self.reference_freq = float(catalog.attrs.get("reference_freq", 600.0))
+        phi = np.asarray(beam.phi, dtype=float)
+        if beam.coords == "telescope":
+            self._cover = ("x", phi.min(), phi.max())
+        else:
+            ha = np.radians((phi + 180.0) % 360.0 - 180.0)
+            self._cover = ("ha", ha.min(), ha.max())
 
-    def _schedule(self, lsd):
-        """The pulses of the day: a dict of arrays, one entry per pulse."""
+    def _covered(self, ha, dec):
+        """True where a source at ``dec`` and hour angle ``ha`` (radians) is above the
+        horizon and within the beam model."""
+        sin_alt = np.sin(dec) * np.sin(self.latitude) + np.cos(dec) * np.cos(self.latitude) * np.cos(ha)
+        kind, lo, hi = self._cover
+        if kind == "x":
+            q = -np.cos(dec) * np.sin(ha)
+        else:
+            podal = np.abs(ha) <= 0.5 * np.pi
+            q = np.where(podal, ha, ((ha + 2.0 * np.pi) % (2.0 * np.pi)) - np.pi)
+        return (sin_alt > 0.0) & (q >= lo) & (q <= hi)
+
+    def _schedule(self, lsd, t_all, covered):
+        """The pulses in the data: a dict of arrays, one entry per pulse.
+
+        ``covered`` [source, sample] marks the samples within the beam model.
+        """
         tab = self.catalog["lpt"][:]
         ra_i, dec_i = self.catalog["position"]["ra"][:], self.catalog["position"]["dec"][:]
         ra_c, dec_c = np.degrees(self.sra) % 360.0, np.degrees(self.sdec)
         t_tr = self.telescope.lsd_to_unix(lsd + ra_c / 360.0)
         sig_t = _beam_sigma_time(dec_c)
-        half = self.window_sigma * sig_t + 0.5 * tab["duration"]
+        dt = np.median(np.diff(t_all))
         rows = []
         for s in range(tab.size):
-            per = tab["period"][s]
+            cov = covered[s]
+            if not cov.any():
+                continue
+            dur, per = tab["duration"][s], tab["period"][s]
             if per > 0:
-                delay = _roemer_delay(t_tr[s], ra_i[s], dec_i[s])[0] if self.barycentric else 0.0
                 ep = tab["epoch"][s]
-                k0 = int(np.ceil((t_tr[s] - half[s] + delay - ep) / per))
-                k1 = int(np.floor((t_tr[s] + half[s] + delay - ep) / per))
-                pulses = [(k, ep + k * per - delay) for k in range(k0, k1 + 1)]
+                t0 = t_all[cov].min() - 0.5 * dur - dt
+                t1 = t_all[cov].max() + 0.5 * dur + dt
+                pad = 600.0 if self.barycentric else 0.0  # > the largest Roemer delay
+                k = np.arange(np.ceil((t0 - pad - ep) / per), np.floor((t1 + pad - ep) / per) + 1)
+                tc = ep + k * per
+                if self.barycentric and tc.size:
+                    # arrival at the Earth: the delay at the (approximate) arrival time
+                    tc = tc - _roemer_delay(tc - _roemer_delay(tc, ra_i[s], dec_i[s]), ra_i[s], dec_i[s])
+                pulses = list(zip(k.astype(np.int64), tc))
             else:
                 pulses = [(int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s])]
-            for k, tc in pulses:
-                rng = np.random.default_rng([int(tab["seed"][s]), int(k) + 2**40])
+            for kk, tc in pulses:
+                on = np.abs(t_all - tc) <= 0.5 * (dur + dt)
+                if not (on & cov).any():
+                    continue
+                rng = np.random.default_rng([int(tab["seed"][s]), int(kk) + 2**40])
                 nulled = rng.uniform() < tab["null_fraction"][s]
                 flux = tab["flux"][s] * np.exp(tab["flux_scatter"][s] * rng.standard_normal())
-                rows.append((s, k, nulled, tc, tc - t_tr[s], flux, int(rng.integers(0, 2**31 - 1))))
-        out = {
-            name: np.array([r[i] for r in rows])
-            for i, name in enumerate(("source", "pulse", "nulled", "unix_center", "t_offset", "flux", "scint_seed"))
-        }
+                rows.append((s, kk, nulled, tc, flux, int(rng.integers(0, 2**31 - 1))))
+        names = ("source", "pulse", "nulled", "unix_center", "flux", "scint_seed")
+        out = {name: np.array([r[i] for r in rows]) for i, name in enumerate(names)}
         if not rows:
-            out = {k: np.zeros(0) for k in out}
-        return out, ra_c, dec_c, t_tr
+            out = {k: np.zeros(0) for k in names}
+        return out, ra_c, dec_c
 
     def process(self, data):
-        """Inject the pulses of the day.
+        """Inject the pulses in the day's data.
 
         Parameters
         ----------
@@ -364,20 +399,18 @@ class InjectLPT(BeamExternal):
         dt = np.median(np.diff(t_all))
 
         self._process_catalog()
-        sched, ra_c, dec_c, t_tr = self._schedule(lsd)
+        ha_src = tools.correct_phase_wrap(np.radians(ra_deg)[np.newaxis] - self.sra[:, np.newaxis])
+        covered = self._covered(ha_src, self.sdec[:, np.newaxis])
+        sched, ra_c, dec_c = self._schedule(lsd, t_all, covered)
         tab = self.catalog["lpt"][:]
         npulse = sched["source"].size
         src = sched["source"].astype(int)
 
         # Samples touched by each pulse, on the full RA axis
-        ha_all = tools.correct_phase_wrap(np.radians(ra_deg)[np.newaxis] - self.sra[src][:, np.newaxis])
-        sin_alt = np.sin(self.sdec[src])[:, None] * np.sin(self.latitude) + np.cos(self.sdec[src])[:, None] * np.cos(
-            self.latitude
-        ) * np.cos(ha_all)
         prof = np.zeros((npulse, ra_deg.size))
         for p in range(npulse):
             prof[p] = _pulse_profile(t_all, dt, sched["unix_center"][p], tab["duration"][src[p]], self.profile)
-        use = (prof > self.min_profile) & (sin_alt > 0.0) & ~sched["nulled"].astype(bool)[:, None]
+        use = (prof > self.min_profile) & covered[src] & ~sched["nulled"].astype(bool)[:, None]
         injected = use.any(axis=1)
         isel = np.flatnonzero(use.any(axis=0))
         if isel.size == 0:
@@ -417,7 +450,7 @@ class InjectLPT(BeamExternal):
             sdec = self.sdec[s]
             cols = np.flatnonzero(use[p, isel])
             w = prof[p, isel][cols]
-            sha = ha_all[p, isel][cols]
+            sha = ha_src[s, isel][cols]
             spec = (
                 sched["flux"][p]
                 * x_nu ** tab["spectral_index"][s]
@@ -461,16 +494,24 @@ class InjectLPT(BeamExternal):
         rec = log.pulse[:].copy()
         if npulse:
             dec_r = self.sdec[src]
-            _, y, _ = spherical.sph_to_ground(0.0, self.latitude, dec_r)
-            t_start = sched["unix_center"] - 0.5 * tab["duration"][src]
-            ha_start = _OMEGA * (t_start - t_tr[src])
+            tc = sched["unix_center"]
+            lsd_c = self.telescope.unix_to_lsd(tc)
+            # the nearest upper transit, and the hour angle at the centre and start
+            n_tr = np.rint(lsd_c - lsd - ra_c[src] / 360.0)
+            t_up = self.telescope.lsd_to_unix(lsd + n_tr + ra_c[src] / 360.0)
+            ha_c = tools.correct_phase_wrap(_OMEGA * (tc - t_up))
+            t_start = tc - 0.5 * tab["duration"][src]
+            ha_start = tools.correct_phase_wrap(_OMEGA * (t_start - t_up))
+            _, y, _ = spherical.sph_to_ground(ha_c, self.latitude, dec_r)
             x_start, _, _ = spherical.sph_to_ground(ha_start, self.latitude, dec_r)
             rec["source"] = src
             rec["pulse"] = sched["pulse"]
             rec["injected"] = injected
             rec["nulled"] = sched["nulled"].astype(bool)
-            rec["unix_center"] = sched["unix_center"]
-            rec["t_offset"] = sched["t_offset"]
+            rec["in_day"] = (lsd_c >= lsd) & (lsd_c < lsd + 1)
+            rec["unix_center"] = tc
+            rec["t_offset"] = tc - t_up
+            rec["ha_center"] = np.degrees(ha_c)
             rec["flux"] = sched["flux"]
             rec["duration"] = tab["duration"][src]
             rec["spectral_index"] = tab["spectral_index"][src]
@@ -482,17 +523,18 @@ class InjectLPT(BeamExternal):
             rec["dec_cirs"] = dec_c[src]
             rec["y"] = y
             rec["x_start"] = x_start
-            rec["ra_start"] = (ra_c[src] + np.degrees(ha_start)) % 360.0
+            rec["ra_start"] = 360.0 * (self.telescope.unix_to_lsd(t_start) - lsd) % 360.0
             rec["beam_mean"] = bsum * tools.invert_no_zero(wsum)
             rec["scint_seed"] = sched["scint_seed"]
         log.pulse[:] = rec
         log.attrs["lsd"] = lsd
         log.attrs["tag"] = f"lsd_{lsd}"
-        log.attrs["window_sigma"] = self.window_sigma
+        log.attrs["beam_cover"] = json.dumps([self._cover[0], float(self._cover[1]), float(self._cover[2])])
         log.attrs["barycentric"] = self.barycentric
         self.log.info(
-            f"LSD {lsd}: {npulse} pulses in the main lobe, {int(injected.sum())} injected "
-            f"({int(sched['nulled'].astype(bool).sum()) if npulse else 0} nulled), on {isel.size} samples."
+            f"LSD {lsd}: {npulse} pulses within the beam model, {int(injected.sum())} injected "
+            f"({int(sched['nulled'].astype(bool).sum()) if npulse else 0} nulled), "
+            f"{int(rec['in_day'].sum()) if npulse else 0} in the day, on {isel.size} of {ra_deg.size} samples."
         )
         return sparse, log
 
