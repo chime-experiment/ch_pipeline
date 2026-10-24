@@ -1,41 +1,55 @@
-"""Inject simulated long-period transients (LPTs) into sidereal streams.
+"""Inject simulated long-period transients (LPTs) into the transient search.
 
-Three tasks, used around the transient search:
+The catalogue holds the intrinsic properties of the sources only
+(:class:`ch_pipeline.core.containers.LPTCatalog`).  Two ways to make one:
 
-- :class:`GenerateLPTCatalog` draws a random catalogue of LPT pulses for one
-  sidereal day (reproducible: the random seed is set by ``seed`` and the LSD) and
-  records where each should appear (the truth).
-- :class:`InjectLPT` adds them to the stacked visibilities of the day, through the
-  primary beam, before any processing.  It builds on the injection tasks of
-  :mod:`ch_pipeline.synthesis.inject_modified` (catalogue as input, external beam,
-  ICRS to CIRS), but only touches the samples of each pulse.
-- :class:`MatchLPTInjections` matches the candidate table of the search to the
-  catalogue.
+- :class:`GenerateLPTCatalog` draws a fixed catalogue once (to be saved and used
+  for every day): each source pulses with a period, at a fixed position, so the
+  same sources reappear on the days their pulses fall in the main lobe.  This tests
+  the combination of days and folds in CHIME's observing window.
+- :class:`GenerateDailyLPTCatalog` draws a new catalogue every day (seeded by the
+  LSD), each source with one pulse near its transit.  This samples sky position and
+  day for the selection function of the single-day search.
+
+The properties are drawn with :mod:`ch_pipeline.synthesis.lpt_population`.
+
+Each day, :class:`InjectLPT` finds the pulses that fall within ``window_sigma``
+primary-beam widths of transit (periodic in barycentric time if ``barycentric``),
+writes them to an :class:`~ch_pipeline.core.containers.LPTInjectionLog` (where and
+when each appears: the truth), and adds them to a copy of the stacked visibilities
+restricted to the samples they touch, with the masked weights of the day.  The
+search config grids and beamforms that sparse stream as it does the data (both
+are linear and act sample by sample) and, once the real search is done,
+:class:`AddInjectedHybrid` adds the result in place to the unfiltered hybrid
+stream, from which the search runs again.  :class:`MatchLPTInjections` then
+matches the injected pulses to the candidates of that second search.
 
 Conventions for the polarisation.  The Stokes parameters are defined in the frame
 of the feeds: Q > 0 along the X (east-west) feeds, so that for a source at the
 centre of the beam XX = I + Q, YY = I - Q, XY = U + iV and YX = U - iV (the
 uncalibrated phase between the X and Y arrays is not applied).  The polarisation
 angle is psi = pol_angle + RM lambda^2 + q(HA), with pol_angle the angle from the
-X feed at transit and lambda = 0, and q the parallactic angle (zero at transit),
-which rotates the plane of polarisation relative to the feeds as the source
-drifts.  The co-polar products take the beam of their own polarisation, and the
-cross-polar products the geometric mean of the XX and YY beams (as the matched
-filter does with ``cross_beam: copol``).
+X feed at transit and lambda = 0, and q the parallactic angle (zero at transit).
+The co-polar products take the beam of their own polarisation, and the cross-polar
+products the geometric mean of the XX and YY beams (as the matched filter does with
+``cross_beam: copol``).
 """
+
+import json
 
 import numpy as np
 import scipy.constants
 import scipy.ndimage
 from caput import config
 from caput.astro.coordinates import spherical
-from caput.pipeline import tasklib
+from caput.pipeline import exceptions, tasklib
 from draco.core import io
 from draco.util import interferometry, tools
 from scipy.special import erf
 
 from ..core import containers
-from .inject_modified import SIGMA, BaseInject, BeamExternal, _get_baseline_info, _icrs_to_cirs
+from .inject_modified import SIGMA, BaseInject, BeamExternal, _get_baseline_info
+from .lpt_population import draw_population, merge_population
 
 # Angular speed of the sky in rad / s
 _OMEGA = 2.0 * np.pi / 86164.0905
@@ -94,208 +108,175 @@ def _scintillation(freq, index, bw, seed):
     return out
 
 
+
+
+def _beam_sigma_time(dec_deg):
+    """Width sigma (s) of the XX primary beam at 600 MHz, in time, at a declination."""
+    return SIGMA["XX"] / 600.0 / np.cos(np.radians(dec_deg)) / _OMEGA
+
+
+def _roemer_delay(unix, ra, dec):
+    """Delay (s) of a pulse at the solar-system barycentre after its arrival at the Earth.
+
+    The projection of the Earth's barycentric position on the direction of the
+    source (ICRS degrees), divided by c: a pulse that reaches the barycentre at t
+    reaches the Earth at t - delay.
+    """
+    from caput.astro import skyfield as skf
+
+    t = skf.unix_to_skyfield_time(np.atleast_1d(np.asarray(unix, dtype=float)))
+    r = skf.skyfield_wrapper.ephemeris["earth"].at(t).position.m  # (3, n), ICRS
+    ra, dec = np.radians(ra), np.radians(dec)
+    s = np.array([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec) * np.ones_like(ra)])
+    return np.sum(r * s.reshape(3, -1), axis=0) / scipy.constants.c
+
+
+def _make_catalog(pop, seed_rng, epoch_ref, attrs):
+    n = pop["ra"].size
+    cat = containers.LPTCatalog(object_id=np.arange(n))
+    cat["position"]["ra"][:] = pop["ra"]
+    cat["position"]["dec"][:] = pop["dec"]
+    cat["position"].attrs["coords"] = "icrs"
+    tab = cat["lpt"]
+    period = pop["period"]
+    epoch = np.where(period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan)
+    for name in ("flux", "flux_scatter", "null_fraction", "period", "t_offset_beam", "duration",
+                 "spectral_index", "spectral_curvature", "frac_lin", "frac_circ", "pol_angle", "rm",
+                 "scint_index", "scint_bw", "distance"):  # fmt: skip
+        tab[name][:] = pop[name]
+    tab["epoch"][:] = epoch
+    tab["seed"][:] = seed_rng.integers(0, 2**62, n)
+    for k, v in attrs.items():
+        cat.attrs[k] = v
+    return cat
+
+
 class GenerateLPTCatalog(tasklib.base.ContainerTask):
-    """Draw a random catalogue of long-period transient pulses for one day.
-
-    The sources transit at RAs spread over ``ra_range`` (at least ``min_sep``
-    degrees apart), at declinations uniform in sin(dec) over ``dec_range``.  Each
-    has one pulse, centred ``t_offset`` seconds from its transit (uniform within
-    +-``t_offset_sigma`` times the width sigma of the XX primary beam in hour angle
-    at 600 MHz), of the given ``profile`` and ``duration`` (log-uniform), with a
-    peak flux (log-uniform, Jy at ``reference_freq``) and a spectrum
-    ``(nu / nu_ref)^alpha exp(beta ln^2(nu / nu_ref))``.  Linear and circular
-    polarisation fractions, rotation measure and polarisation angle are uniform
-    (the fractions scaled down together if L^2 + V^2 > 1), and, if
-    ``scint_index_range`` is not zero, a scintillation with that modulation index
-    and a bandwidth log-uniform in ``scint_bw_range`` (MHz).
-
-    The seed of the random draws is (``seed``, LSD), so a day always gets the same
-    catalogue.  The truth on the day (CIRS position, telescope-y at transit, and the
-    telescope-x and meridian RA at the start of the pulse) is computed with the
-    telescope's ICRS to CIRS conversion, as :class:`InjectLPT` does.
+    """Draw a fixed catalogue of periodic LPTs (once; save it and use it every day).
 
     Attributes
     ----------
     n_source : int
-        Number of pulses.  Default is 20.
+        Number of sources.  Default is 80 (with the default periods and a window of
+        +-2 beam sigma, ~60-100 pulses fall in the main lobe each day).
     seed : int
-        Base random seed.  Default is 0.
+        Random seed.  Default is 0.
     profile : {"tophat", "gaussian"}
         Pulse profile (``duration`` is its width or FWHM).  Default is "tophat".
     reference_freq : float
         Frequency (MHz) of the flux and spectrum.  Default is 600.
-    ra_range, dec_range : list of float
-        Ranges in degrees.  Defaults are [0, 360] and [-10, 89].
-    min_sep : float
-        Smallest separation in RA (degrees) between transits.  Default is 3.
-    flux_range : list of float
-        Peak flux in Jy (log-uniform).  Default is [0.02, 2].
-    duration_range : list of float
-        Duration in s (log-uniform).  Default is [10, 300].
-    spectral_index_range, curvature_range : list of float
-        Uniform ranges.  Defaults are [-3, 1] and [0, 0].
-    t_offset_sigma : float
-        Half-range of the pulse time about transit, in beam sigmas.  Default is 1.
-    frac_lin_range, frac_circ_range : list of float
-        Defaults are [0, 1] and [-0.5, 0.5].
-    rm_range : list of float
-        Rotation measure (rad / m^2).  Default is [-300, 300].
-    scint_index_range, scint_bw_range : list of float
-        Defaults are [0, 0] (none) and [0.5, 20] MHz.
+    epoch_ref : float
+        The epoch of each source is ``epoch_ref`` plus a random fraction of its
+        period (unix time at the barycentre).  Default is 2020-01-01 00:00 UTC.
+    population : dict
+        Distributions of the properties, updating
+        :data:`ch_pipeline.synthesis.lpt_population.DEFAULT_POPULATION` (see
+        :func:`~ch_pipeline.synthesis.lpt_population.draw_population`).
     """
 
-    n_source = config.Property(proptype=int, default=20)
+    n_source = config.Property(proptype=int, default=80)
     seed = config.Property(proptype=int, default=0)
     profile = config.enum(["tophat", "gaussian"], default="tophat")
     reference_freq = config.Property(proptype=float, default=600.0)
-    ra_range = config.list_type(type_=float, length=2, default=[0.0, 360.0])
-    dec_range = config.list_type(type_=float, length=2, default=[-10.0, 89.0])
-    min_sep = config.Property(proptype=float, default=3.0)
-    flux_range = config.list_type(type_=float, length=2, default=[0.02, 2.0])
-    duration_range = config.list_type(type_=float, length=2, default=[10.0, 300.0])
-    spectral_index_range = config.list_type(type_=float, length=2, default=[-3.0, 1.0])
-    curvature_range = config.list_type(type_=float, length=2, default=[0.0, 0.0])
-    t_offset_sigma = config.Property(proptype=float, default=1.0)
-    frac_lin_range = config.list_type(type_=float, length=2, default=[0.0, 1.0])
-    frac_circ_range = config.list_type(type_=float, length=2, default=[-0.5, 0.5])
-    rm_range = config.list_type(type_=float, length=2, default=[-300.0, 300.0])
-    scint_index_range = config.list_type(type_=float, length=2, default=[0.0, 0.0])
-    scint_bw_range = config.list_type(type_=float, length=2, default=[0.5, 20.0])
+    epoch_ref = config.Property(proptype=float, default=1577836800.0)
+    population = config.Property(proptype=dict, default={})
 
-    def setup(self, manager):
-        """Get the telescope.
+    _done = False
 
-        Parameters
-        ----------
-        manager : ProductManager, BeamTransfer or TransitTelescope
+    def _attrs(self, tag, spec):
+        return {
+            "tag": tag,
+            "seed": self.seed,
+            "profile": self.profile,
+            "reference_freq": self.reference_freq,
+            "population": json.dumps(spec),
+        }
+
+    def process(self):
+        """Draw the catalogue (the first call only).
+
+        Returns
+        -------
+        catalog : containers.LPTCatalog
         """
-        self.telescope = io.get_telescope(manager)
-        self.latitude = np.radians(self.telescope.latitude)
+        if self._done:
+            raise exceptions.PipelineStopIteration
+        self._done = True
+        spec = merge_population(self.population)
+        rng = np.random.default_rng(self.seed)
+        pop = draw_population(rng, self.n_source, spec)
+        cat = _make_catalog(pop, rng, self.epoch_ref, self._attrs(f"lpt_seed{self.seed}", spec))
+        self.log.info(
+            f"Drew {self.n_source} LPTs: periods {np.min(pop['period']):.0f}-{np.max(pop['period']):.0f} s, "
+            f"flux {pop['flux'].min():.4f}-{pop['flux'].max():.3f} Jy."
+        )
+        return cat
+
+
+class GenerateDailyLPTCatalog(GenerateLPTCatalog):
+    """Draw a new catalogue for each day, each source pulsing once near its transit.
+
+    As :class:`GenerateLPTCatalog`, but seeded by (``seed``, LSD of the input), with
+    the period set to 0: one pulse a day, ``t_offset_beam`` (from the population)
+    primary-beam widths from transit.  For the selection function of the single-day
+    search, marginalised over sky position and day.  Default ``n_source`` is 30.
+    """
+
+    n_source = config.Property(proptype=int, default=30)
 
     def process(self, data):
-        """Draw the catalogue for the day of ``data``.
-
-        Parameters
-        ----------
-        data : SiderealStream (or any container with an ``lsd`` attribute)
+        """Draw the catalogue for the day of ``data`` (any container with ``lsd``).
 
         Returns
         -------
         catalog : containers.LPTCatalog
         """
         lsd = int(np.atleast_1d(data.attrs["lsd"])[0])
+        spec = merge_population(self.population)
+        spec["period"] = 0.0
         rng = np.random.default_rng([self.seed, lsd])
-        n = self.n_source
-
-        def uniform(r):
-            return rng.uniform(r[0], r[1], n) if r[1] > r[0] else np.full(n, r[0])
-
-        def loguniform(r):
-            return np.exp(uniform(np.log(r)))
-
-        # RAs at least min_sep apart (on the circle)
-        lo, hi = self.ra_range
-        ra = []
-        for _ in range(100 * n):
-            if len(ra) == n:
-                break
-            r = rng.uniform(lo, hi)
-            if all(abs((r - q + 180.0) % 360.0 - 180.0) >= self.min_sep for q in ra):
-                ra.append(r)
-        if len(ra) < n:
-            raise RuntimeError(f"Could not place {n} sources {self.min_sep} deg apart.")
-        ra = np.array(ra) % 360.0
-        sdec = rng.uniform(*np.sin(np.radians(self.dec_range)), n)
-        dec = np.degrees(np.arcsin(sdec))
-
-        flux = loguniform(self.flux_range)
-        duration = loguniform(self.duration_range)
-        alpha = uniform(self.spectral_index_range)
-        beta = uniform(self.curvature_range)
-        sig_ha = SIGMA["XX"] / 600.0 / np.cos(np.radians(dec))  # rad
-        t_off = rng.uniform(-1.0, 1.0, n) * self.t_offset_sigma * sig_ha / _OMEGA
-        lin = uniform(self.frac_lin_range)
-        circ = uniform(self.frac_circ_range)
-        tot = np.hypot(lin, circ)
-        lin, circ = lin / np.maximum(tot, 1.0), circ / np.maximum(tot, 1.0)
-        rm = uniform(self.rm_range)
-        angle = rng.uniform(0.0, 180.0, n)
-        sindex = uniform(self.scint_index_range)
-        sbw = loguniform(self.scint_bw_range)
-        sseed = rng.integers(0, 2**31 - 1, n)
-
-        # The truth on this day
-        epoch = self.telescope.lsd_to_unix(lsd)
-        ra_c, dec_c = _icrs_to_cirs(ra, dec, epoch, self.telescope)
-        ra_c, dec_c = np.atleast_1d(ra_c) % 360.0, np.atleast_1d(dec_c)
-        dec_r = np.radians(dec_c)
-        _, y, _ = spherical.sph_to_ground(0.0, self.latitude, dec_r)
-        # start of the pulse (for the Gaussian, half the FWHM before the peak)
-        ha_start = _OMEGA * (t_off - 0.5 * duration)
-        x_start, _, _ = spherical.sph_to_ground(ha_start, self.latitude, dec_r)
-        ra_start = (ra_c + np.degrees(ha_start)) % 360.0
-        unix_center = np.array(
-            [self.telescope.lsd_to_unix(lsd + r / 360.0) for r in ra_c]
-        ) + t_off
-
-        cat = containers.LPTCatalog(object_id=np.arange(n))
-        cat["position"]["ra"][:] = ra
-        cat["position"]["dec"][:] = dec
-        cat["position"].attrs["coords"] = "icrs"
-        tab = cat["lpt"]
-        for name, val in (
-            ("flux", flux),
-            ("spectral_index", alpha),
-            ("spectral_curvature", beta),
-            ("duration", duration),
-            ("t_offset", t_off),
-            ("frac_lin", lin),
-            ("frac_circ", circ),
-            ("rm", rm),
-            ("pol_angle", angle),
-            ("scint_index", sindex),
-            ("scint_bw", sbw),
-            ("scint_seed", sseed),
-            ("ra_cirs", ra_c),
-            ("dec_cirs", dec_c),
-            ("y", y),
-            ("x_start", x_start),
-            ("ra_start", ra_start),
-            ("unix_center", unix_center),
-        ):
-            tab[name][:] = val
-        cat.attrs["tag"] = f"lpt_lsd_{lsd}"
-        cat.attrs["lsd"] = lsd
-        cat.attrs["seed"] = self.seed
-        cat.attrs["profile"] = self.profile
-        cat.attrs["reference_freq"] = self.reference_freq
-        self.log.info(
-            f"Drew {n} LPT pulses for LSD {lsd}: flux {flux.min():.3f}-{flux.max():.3f} "
-            f"Jy, duration {duration.min():.0f}-{duration.max():.0f} s."
-        )
+        pop = draw_population(rng, self.n_source, spec)
+        attrs = self._attrs(f"lpt_daily_lsd_{lsd}", spec)
+        attrs["lsd"] = lsd
+        cat = _make_catalog(pop, rng, self.epoch_ref, attrs)
+        self.log.info(f"Drew {self.n_source} single LPT pulses for LSD {lsd}.")
         return cat
 
 
 class InjectLPT(BeamExternal):
-    """Inject the pulses of an :class:`GenerateLPTCatalog` catalogue into a stream.
+    """Find the pulses of a catalogue on the day and inject them (sparse stream).
 
-    For each source, the samples where its pulse profile (averaged over the sample)
-    exceeds ``min_profile`` and it is above the horizon get
+    The transit of each source on the day is at the meridian RA of its CIRS
+    position (in [0, 360) for the LSD of the data).  A source with a period pulses
+    at ``epoch + k period`` at the barycentre (at the Earth earlier by the Roemer
+    delay if ``barycentric``); those pulses whose centre is within ``window_sigma``
+    widths of the XX primary beam at 600 MHz (plus half the duration) of transit are
+    taken.  A source with period 0 has one pulse at ``t_offset_beam`` beam widths
+    from transit.  Each pulse gets its own random draws (seeded by the source and
+    the pulse number, so the same on any day that sees it): nulled with probability
+    ``null_fraction``, a flux scattered by exp(``flux_scatter`` N(0, 1)), and the
+    seed of its scintillation.
+
+    The pulses are added to a copy of the input restricted to the samples where
+    any has a mean profile above ``min_profile`` (and is above the horizon), with
+    the input's weights there and zero visibilities otherwise:
 
         V_pp(nu, t) = A_pp(nu, t) B_pp(nu, HA) exp(2 pi i b . s / lambda)
 
-    with the visibility phase of :mod:`inject_modified` (the conjugate of the
-    fringe-stopping phase), the beam ``B`` from the external beam (the geometric
-    mean of XX and YY for the cross-polar products) and ``A`` the Stokes
-    combination of the module docstring times the spectrum, the scintillation and
-    the profile.  Only the samples of each pulse are touched.
+    with the phase of :mod:`inject_modified` (the conjugate of the fringe-stopping
+    phase), the beam of the external beam model (the geometric mean of XX and YY for
+    the cross-polar products) and ``A`` the Stokes combination of the module
+    docstring times the spectrum, the scintillation and the profile.  The input is
+    not modified.
 
     Attributes
     ----------
     polarization : {"copol", "full", "single"}
         Products to inject into (see :class:`BaseInject`).  Default is "full".
-    inject : bool
-        Add to the input stream (default True) or to a copy with zero visibilities.
+    window_sigma : float
+        Half-width of the window around transit in beam widths.  Default is 2.
+    barycentric : bool
+        Periodic in barycentric time.  Default is True.
     min_profile : float
         Smallest mean profile of a sample to inject.  Default is 1e-4.
     parallactic : bool
@@ -303,7 +284,8 @@ class InjectLPT(BeamExternal):
     """
 
     polarization = config.enum(["full", "copol", "single"], default="full")
-    inject = config.Property(proptype=bool, default=True)
+    window_sigma = config.Property(proptype=float, default=2.0)
+    barycentric = config.Property(proptype=bool, default=True)
     min_profile = config.Property(proptype=float, default=1e-4)
     parallactic = config.Property(proptype=bool, default=True)
 
@@ -325,122 +307,268 @@ class InjectLPT(BeamExternal):
         self.profile = catalog.attrs.get("profile", "tophat")
         self.reference_freq = float(catalog.attrs.get("reference_freq", 600.0))
 
+    def _schedule(self, lsd):
+        """The pulses of the day: a dict of arrays, one entry per pulse."""
+        tab = self.catalog["lpt"][:]
+        ra_i, dec_i = self.catalog["position"]["ra"][:], self.catalog["position"]["dec"][:]
+        ra_c, dec_c = np.degrees(self.sra) % 360.0, np.degrees(self.sdec)
+        t_tr = self.telescope.lsd_to_unix(lsd + ra_c / 360.0)
+        sig_t = _beam_sigma_time(dec_c)
+        half = self.window_sigma * sig_t + 0.5 * tab["duration"]
+        rows = []
+        for s in range(tab.size):
+            per = tab["period"][s]
+            if per > 0:
+                delay = _roemer_delay(t_tr[s], ra_i[s], dec_i[s])[0] if self.barycentric else 0.0
+                ep = tab["epoch"][s]
+                k0 = int(np.ceil((t_tr[s] - half[s] + delay - ep) / per))
+                k1 = int(np.floor((t_tr[s] + half[s] + delay - ep) / per))
+                pulses = [(k, ep + k * per - delay) for k in range(k0, k1 + 1)]
+            else:
+                pulses = [(int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s])]
+            for k, tc in pulses:
+                rng = np.random.default_rng([int(tab["seed"][s]), int(k) + 2**40])
+                nulled = rng.uniform() < tab["null_fraction"][s]
+                flux = tab["flux"][s] * np.exp(tab["flux_scatter"][s] * rng.standard_normal())
+                rows.append((s, k, nulled, tc, tc - t_tr[s], flux, int(rng.integers(0, 2**31 - 1))))
+        out = {
+            name: np.array([r[i] for r in rows])
+            for i, name in enumerate(("source", "pulse", "nulled", "unix_center", "t_offset", "flux", "scint_seed"))
+        }
+        if not rows:
+            out = {k: np.zeros(0) for k in out}
+        return out, ra_c, dec_c, t_tr
+
     def process(self, data):
-        """Inject the pulses.
+        """Inject the pulses of the day.
 
         Parameters
         ----------
         data : SiderealStream
-            Stacked visibilities of one day, with an ``lsd`` attribute.
+            Stacked visibilities of one day (masked), with an ``lsd`` attribute.
 
         Returns
         -------
-        out : SiderealStream
-            The input (``inject``) or a copy with only the pulses.
+        sparse : SiderealStream
+            The pulses alone, on the samples they touch, with the input's weights.
+        log : containers.LPTInjectionLog
+            The pulses of the day.
         """
         if "ra" not in data.index_map:
             raise ValueError("InjectLPT needs a stream with an RA axis.")
-        ra = np.radians(data.index_map["ra"][:])
-        lsd = np.mean(data.attrs["lsd"]) if "lsd" in data.attrs else None
-        self.epoch = self.telescope.lsd_to_unix(lsd) if lsd is not None else None
-
+        lsd = int(np.atleast_1d(data.attrs["lsd"])[0])
+        self.epoch = self.telescope.lsd_to_unix(lsd)
         data.redistribute("freq")
-        if self.inject:
-            out = data
-        else:
-            out = data.__class__(
-                axes_from=data, attrs_from=data, distributed=data.distributed, comm=data.comm
-            )
-            out.redistribute("freq")
-            out.vis[:] = 0.0
-            out.weight[:] = data.weight[:].copy() if self.copy_weight else 1.0
-        out.attrs["lpt_catalog"] = self.catalog_tag
-
-        vis = out.vis[:]
-        lo, nf = vis.local_offset[0], vis.local_shape[0]
-        freq_all = out.index_map["freq"]["centre"][:]
-        self.freq_local = out.index_map["freq"][lo : lo + nf]
-        nu = self.freq_local["centre"]
-        lam = scipy.constants.c / (nu * 1e6)
+        ra_deg = data.index_map["ra"][:]
+        t_all = self.telescope.lsd_to_unix(lsd + ra_deg / 360.0)
+        dt = np.median(np.diff(t_all))
 
         self._process_catalog()
+        sched, ra_c, dec_c, t_tr = self._schedule(lsd)
+        tab = self.catalog["lpt"][:]
+        npulse = sched["source"].size
+        src = sched["source"].astype(int)
+
+        # Samples touched by each pulse, on the full RA axis
+        ha_all = tools.correct_phase_wrap(np.radians(ra_deg)[np.newaxis] - self.sra[src][:, np.newaxis])
+        sin_alt = np.sin(self.sdec[src])[:, None] * np.sin(self.latitude) + np.cos(self.sdec[src])[:, None] * np.cos(
+            self.latitude
+        ) * np.cos(ha_all)
+        prof = np.zeros((npulse, ra_deg.size))
+        for p in range(npulse):
+            prof[p] = _pulse_profile(t_all, dt, sched["unix_center"][p], tab["duration"][src[p]], self.profile)
+        use = (prof > self.min_profile) & (sin_alt > 0.0) & ~sched["nulled"].astype(bool)[:, None]
+        injected = use.any(axis=1)
+        isel = np.flatnonzero(use.any(axis=0))
+        if isel.size == 0:
+            isel = np.array([0])
+
+        # The sparse copy: the input's weights on those samples, no visibilities
+        sparse = data.__class__(
+            axes_from=data, attrs_from=data, ra=ra_deg[isel], distributed=data.distributed, comm=data.comm
+        )
+        sparse.redistribute("freq")
+        sparse.vis[:] = 0.0
+        sparse.weight[:].local_array[:] = data.weight[:].local_array[..., isel]
+        sparse.attrs["lpt_catalog"] = self.catalog_tag
+
+        vis = sparse.vis[:]
+        lo, nf = vis.local_offset[0], vis.local_shape[0]
+        freq_all = sparse.index_map["freq"]["centre"][:]
+        self.freq_local = sparse.index_map["freq"][lo : lo + nf]
+        nu = self.freq_local["centre"]
+        lam = scipy.constants.c / (nu * 1e6)
         self._initialize_beam_with_data()
 
-        dist, pol = _get_baseline_info(out, self.telescope)
+        dist, pol = _get_baseline_info(sparse, self.telescope)
         pol_index = {p: np.flatnonzero(pol == p) for p in self.process_pol}
         pol_index = {p: v for p, v in pol_index.items() if v.size}
         ib = np.sort(np.concatenate(list(pol_index.values())))
         pos = {p: np.searchsorted(ib, v) for p, v in pol_index.items()}
         uv = dist[:, ib][:, np.newaxis, :, np.newaxis] / lam[np.newaxis, :, np.newaxis, np.newaxis]
-
-        dra = np.median(np.diff(ra))
-        dt = dra / _OMEGA
-        tab = self.catalog["lpt"][:]
         x_nu = nu / self.reference_freq
-        ninj = 0
-        for ss in range(self.nsource):
-            sra, sdec = self.sra[ss], self.sdec[ss]
-            ha = tools.correct_phase_wrap(ra - sra)
-            sin_alt = np.sin(sdec) * np.sin(self.latitude) + np.cos(sdec) * np.cos(
-                self.latitude
-            ) * np.cos(ha)
-            w = _pulse_profile(
-                ha / _OMEGA, dt, tab["t_offset"][ss], tab["duration"][ss], self.profile
-            )
-            idx = np.flatnonzero((w > self.min_profile) & (sin_alt > 0.0))
-            if idx.size == 0:
-                self.log.info(f"Source {ss} has no samples to inject.")
+
+        bsum = np.zeros(npulse)
+        wsum = np.zeros(npulse)
+        for p in range(npulse):
+            if not injected[p]:
                 continue
-            ninj += 1
-
+            s = src[p]
+            sdec = self.sdec[s]
+            cols = np.flatnonzero(use[p, isel])
+            w = prof[p, isel][cols]
+            sha = ha_all[p, isel][cols]
             spec = (
-                tab["flux"][ss]
-                * x_nu ** tab["spectral_index"][ss]
-                * np.exp(tab["spectral_curvature"][ss] * np.log(x_nu) ** 2)
+                sched["flux"][p]
+                * x_nu ** tab["spectral_index"][s]
+                * np.exp(tab["spectral_curvature"][s] * np.log(x_nu) ** 2)
             )
-            gain = _scintillation(
-                freq_all, tab["scint_index"][ss], tab["scint_bw"][ss], tab["scint_seed"][ss]
+            spec = spec * _scintillation(
+                freq_all, tab["scint_index"][s], tab["scint_bw"][s], int(sched["scint_seed"][p])
             )[lo : lo + nf]
-            spec = spec * gain
+            stokes_i = spec[:, np.newaxis] * w[np.newaxis]  # freq, time
+            psi = np.radians(tab["pol_angle"][s]) + tab["rm"][s] * lam[:, np.newaxis] ** 2
+            if self.parallactic:
+                psi = psi + _parallactic_angle(sha, self.latitude, sdec)[np.newaxis]
+            lin = tab["frac_lin"][s] * stokes_i
+            q, u = lin * np.cos(2 * psi), lin * np.sin(2 * psi)
+            v = tab["frac_circ"][s] * stokes_i
+            bxx = self._beamfunc(nu, "XX", sdec, sha)
+            byy = self._beamfunc(nu, "YY", sdec, sha)
+            bxy = np.sqrt(np.abs(bxx * byy))
+            bsum[p] = np.sum(bxx * w[np.newaxis])
+            wsum[p] = nf * np.sum(w)
+            amp = {
+                "XX": (stokes_i + q) * bxx,
+                "YY": (stokes_i - q) * byy,
+                "XY": (u + 1j * v) * bxy,
+                "YX": (u - 1j * v) * bxy,
+            }
+            phase = interferometry.fringestop_phase(
+                sha[np.newaxis, np.newaxis, :], self.latitude, sdec, *uv
+            ).conj()  # freq, baseline, time
+            for pp, ii in pos.items():
+                phase[:, ii] *= amp[pp][:, np.newaxis, :]
+            vis.local_array[np.ix_(np.arange(nf), ib, cols)] += phase.astype(vis.local_array.dtype)
 
-            for slc in tools.find_contiguous_slices(idx):
-                sha = ha[slc]
-                stokes_i = spec[:, np.newaxis] * w[slc][np.newaxis]  # freq, time
-                psi = np.radians(tab["pol_angle"][ss]) + tab["rm"][ss] * lam[:, np.newaxis] ** 2
-                if self.parallactic:
-                    psi = psi + _parallactic_angle(sha, self.latitude, sdec)[np.newaxis]
-                lin = tab["frac_lin"][ss] * stokes_i
-                q, u = lin * np.cos(2 * psi), lin * np.sin(2 * psi)
-                v = tab["frac_circ"][ss] * stokes_i
+        from mpi4py import MPI
 
-                bxx = self._beamfunc(nu, "XX", sdec, sha)
-                byy = self._beamfunc(nu, "YY", sdec, sha)
-                bxy = np.sqrt(np.abs(bxx * byy))
-                amp = {
-                    "XX": (stokes_i + q) * bxx,
-                    "YY": (stokes_i - q) * byy,
-                    "XY": (u + 1j * v) * bxy,
-                    "YX": (u - 1j * v) * bxy,
-                }
-                phase = interferometry.fringestop_phase(
-                    sha[np.newaxis, np.newaxis, :], self.latitude, sdec, *uv
-                ).conj()  # freq, baseline, time
-                for p, ii in pos.items():
-                    phase[:, ii] *= amp[p][:, np.newaxis, :]
-                vis.local_array[:, ib, slc] += phase.astype(vis.local_array.dtype)
+        sparse.comm.Allreduce(MPI.IN_PLACE, bsum, op=MPI.SUM)
+        sparse.comm.Allreduce(MPI.IN_PLACE, wsum, op=MPI.SUM)
 
-        self.log.info(f"Injected {ninj} of {self.nsource} LPT pulses.")
-        out.attrs["lpt_ninjected"] = ninj
-        return out
+        # The log: where and when each pulse appears
+        log = containers.LPTInjectionLog(pulse=npulse, attrs_from=self.catalog)
+        rec = log.pulse[:].copy()
+        if npulse:
+            dec_r = self.sdec[src]
+            _, y, _ = spherical.sph_to_ground(0.0, self.latitude, dec_r)
+            t_start = sched["unix_center"] - 0.5 * tab["duration"][src]
+            ha_start = _OMEGA * (t_start - t_tr[src])
+            x_start, _, _ = spherical.sph_to_ground(ha_start, self.latitude, dec_r)
+            rec["source"] = src
+            rec["pulse"] = sched["pulse"]
+            rec["injected"] = injected
+            rec["nulled"] = sched["nulled"].astype(bool)
+            rec["unix_center"] = sched["unix_center"]
+            rec["t_offset"] = sched["t_offset"]
+            rec["flux"] = sched["flux"]
+            rec["duration"] = tab["duration"][src]
+            rec["spectral_index"] = tab["spectral_index"][src]
+            rec["frac_lin"] = tab["frac_lin"][src]
+            rec["frac_circ"] = tab["frac_circ"][src]
+            rec["ra"] = self.catalog["position"]["ra"][:][src]
+            rec["dec"] = self.catalog["position"]["dec"][:][src]
+            rec["ra_cirs"] = ra_c[src]
+            rec["dec_cirs"] = dec_c[src]
+            rec["y"] = y
+            rec["x_start"] = x_start
+            rec["ra_start"] = (ra_c[src] + np.degrees(ha_start)) % 360.0
+            rec["beam_mean"] = bsum * tools.invert_no_zero(wsum)
+            rec["scint_seed"] = sched["scint_seed"]
+        log.pulse[:] = rec
+        log.attrs["lsd"] = lsd
+        log.attrs["tag"] = f"lsd_{lsd}"
+        log.attrs["window_sigma"] = self.window_sigma
+        log.attrs["barycentric"] = self.barycentric
+        self.log.info(
+            f"LSD {lsd}: {npulse} pulses in the main lobe, {int(injected.sum())} injected "
+            f"({int(sched['nulled'].astype(bool).sum()) if npulse else 0} nulled), on {isel.size} samples."
+        )
+        return sparse, log
+
+
+class AddInjectedHybrid(tasklib.base.ContainerTask):
+    """Add the beamformed injections to the hybrid stream, in place.
+
+    ``setup`` takes the hybrid stream of the injections (the sparse stream of
+    :class:`InjectLPT`, gridded and beamformed as the data) and any number of
+    products of the real search that must exist before the data are changed: list
+    the last products of every branch of the search that reads the hybrid stream,
+    so that nothing of the real search sees the injections.  ``process`` adds the
+    injections to the matching samples (by RA) of the hybrid stream, in place.
+    """
+
+    def setup(self, injection, *done):
+        """Keep the injections.
+
+        Parameters
+        ----------
+        injection : HybridVisStream
+            The injections alone, on their samples.
+        *done
+            Products of the real search, only to order the tasks.
+        """
+        self.injection = injection
+        self.log.info(f"The real search is done ({len(done)} products); injecting.")
+
+    def process(self, data):
+        """Add the injections.
+
+        Parameters
+        ----------
+        data : HybridVisStream
+
+        Returns
+        -------
+        data : HybridVisStream
+            The same container, with the injections added.
+        """
+        inj = self.injection
+        data.redistribute("freq")
+        inj.redistribute("freq")
+        for ax in ("pol", "ew", "el"):
+            a, b = data.index_map[ax][:], inj.index_map[ax][:]
+            if a.shape != b.shape or not np.array_equal(a, b):
+                raise ValueError(f"The {ax} axes of the data and the injections differ.")
+        if not np.allclose(data.freq, inj.freq):
+            raise ValueError("The frequency axes of the data and the injections differ.")
+        ra_d, ra_i = data.index_map["ra"][:], inj.index_map["ra"][:]
+        dra = np.median(np.diff(ra_d))
+        idx = np.clip(np.searchsorted(ra_d, ra_i - 0.5 * dra), 0, ra_d.size - 1)
+        ok = np.abs(ra_d[idx] - ra_i) < 0.01 * abs(dra)
+        if not ok.all():
+            self.log.warning(f"{np.sum(~ok)} injected samples are not in the data.")
+        data.vis[:].local_array[..., idx[ok]] += inj.vis[:].local_array[..., ok]
+        data.attrs["lpt_injected"] = True
+        self.log.info(f"Added the injections on {int(ok.sum())} samples.")
+        return data
+
+
+class DiscardInput(tasklib.base.ContainerTask):
+    """Take an input and output nothing (to switch off a branch of a config)."""
+
+    def process(self, data):
+        return None
 
 
 class MatchLPTInjections(tasklib.base.ContainerTask):
-    """Match the candidates of the search to the injected pulses.
+    """Match the candidates of the search to the injected pulses of the day.
 
-    An injection is found if a candidate lies within ``match_dy`` of its
+    An injected pulse is found if a candidate lies within ``match_dy`` of its
     telescope-y at transit and starts within the pulse, widened by ``match_dt``
     seconds on each side (start times in RA of the meridian).  Of several, the one
-    with the highest S/N is taken.
+    with the highest S/N is taken.  Pulses that were not injected (nulled, below the
+    horizon) are kept, with ``found`` False.
 
     Attributes
     ----------
@@ -453,15 +581,14 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
     match_dy = config.Property(proptype=float, default=0.01)
     match_dt = config.Property(proptype=float, default=30.0)
 
-    def process(self, table, catalog):
+    def process(self, table, log):
         """Match.
 
         Parameters
         ----------
         table : containers.TransientCandidateTable
-            Sifted candidates (the ``sift`` table is used if present).
-        catalog : containers.LPTCatalog
-            The injected pulses.
+            Sifted candidates of the search with the injections.
+        log : containers.LPTInjectionLog
 
         Returns
         -------
@@ -469,15 +596,12 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
         """
         rec = table.candidate[:]
         sift = table.datasets["sift"][:] if "sift" in table.datasets else None
-        lpt = catalog["lpt"][:]
-        n = lpt.size
-        out = containers.LPTInjectionResults(object_id=n, attrs_from=catalog)
+        pl = log.pulse[:]
+        n = pl.size
+        out = containers.LPTInjectionResults(pulse=n, attrs_from=log)
         res = out.injection[:].copy()
-        res["ra"] = catalog["position"]["ra"][:]
-        res["dec"] = catalog["position"]["dec"][:]
-        for name in ("flux", "spectral_index", "duration", "t_offset", "frac_lin",
-                     "frac_circ", "y", "x_start", "ra_start"):  # fmt: skip
-            res[name] = lpt[name]
+        for name in pl.dtype.names:
+            res[name] = pl[name]
         res["candidate"] = -1
         for name in ("snr", "amplitude", "cand_duration", "cand_spectral_index",
                      "cand_y", "cand_x", "cand_ra", "ns_scale", "ns_dchi2"):  # fmt: skip
@@ -485,11 +609,13 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
 
         deg_s = np.degrees(_OMEGA)
         for k in range(n):
-            d_ra = (rec["ra"] - lpt["ra_start"][k] + 180.0) % 360.0 - 180.0
+            if not pl["injected"][k]:
+                continue
+            d_ra = (rec["ra"] - pl["ra_start"][k] + 180.0) % 360.0 - 180.0
             win = (d_ra >= -self.match_dt * deg_s) & (
-                d_ra <= (lpt["duration"][k] + self.match_dt) * deg_s
+                d_ra <= (pl["duration"][k] + self.match_dt) * deg_s
             )
-            near = win & (np.abs(rec["y"] - lpt["y"][k]) <= self.match_dy)
+            near = win & (np.abs(rec["y"] - pl["y"][k]) <= self.match_dy)
             res["n_match"][k] = near.sum()
             if not near.any():
                 continue
@@ -513,8 +639,9 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             out.attrs["sift_flags"] = table.attrs["sift_flags"]
         out.attrs["match_dy"] = self.match_dy
         out.attrs["match_dt"] = self.match_dt
+        ninj = int(pl["injected"].sum())
         self.log.info(
-            f"Found {res['found'].sum()} of {n} injected pulses; "
+            f"Found {res['found'].sum()} of {ninj} injected pulses; "
             f"{(res['found'] & res['keep']).sum()} kept by the sifter."
         )
         return out
