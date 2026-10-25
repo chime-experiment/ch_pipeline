@@ -379,8 +379,10 @@ class InjectLPT(BeamExternal):
 
         Parameters
         ----------
-        data : SiderealStream
-            Stacked visibilities of one day (masked), with an ``lsd`` attribute.
+        data : SiderealStream or TimeStream
+            Stacked visibilities of one day (masked), with an ``lsd`` attribute.  A
+            TimeStream (the daily ``tstream`` files) has its RA computed from the
+            times as in MakeVisGrid.
 
         Returns
         -------
@@ -389,13 +391,19 @@ class InjectLPT(BeamExternal):
         log : containers.LPTInjectionLog
             The pulses of the day.
         """
-        if "ra" not in data.index_map:
-            raise ValueError("InjectLPT needs a stream with an RA axis.")
         lsd = int(np.atleast_1d(data.attrs["lsd"])[0])
         self.epoch = self.telescope.lsd_to_unix(lsd)
         data.redistribute("freq")
-        ra_deg = data.index_map["ra"][:]
-        t_all = self.telescope.lsd_to_unix(lsd + ra_deg / 360.0)
+        if "ra" in data.index_map:
+            ra_deg = data.index_map["ra"][:]
+            t_all = self.telescope.lsd_to_unix(lsd + ra_deg / 360.0)
+            axis = {"ra": None}
+        elif "time" in data.index_map:
+            t_all = np.asarray(data.time, dtype=np.float64)
+            ra_deg = 360.0 * (self.telescope.unix_to_lsd(t_all) - lsd)
+            axis = {"time": data.index_map["time"][:]}
+        else:
+            raise ValueError("InjectLPT needs a stream with an RA or a time axis.")
         dt = np.median(np.diff(t_all))
 
         self._process_catalog()
@@ -417,8 +425,10 @@ class InjectLPT(BeamExternal):
             isel = np.array([0])
 
         # The sparse copy: the input's weights on those samples, no visibilities
+        name, full = next(iter(axis.items()))
+        sub = ra_deg[isel] if full is None else full[isel]
         sparse = data.__class__(
-            axes_from=data, attrs_from=data, ra=ra_deg[isel], distributed=data.distributed, comm=data.comm
+            axes_from=data, attrs_from=data, distributed=data.distributed, comm=data.comm, **{name: sub}
         )
         sparse.redistribute("freq")
         sparse.vis[:] = 0.0
