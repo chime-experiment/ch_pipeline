@@ -430,6 +430,12 @@ class InjectLPT(BeamExternal):
         sparse = data.__class__(
             axes_from=data, attrs_from=data, distributed=data.distributed, comm=data.comm, **{name: sub}
         )
+        # A new axis loses its attributes; for the time axis ``alignment`` says
+        # whether the times are the start, centre or end of each sample, and
+        # ``.time`` (and so the RA of MakeVisGrid) depends on it
+        for k, v in data.index_attrs[name].items():
+            if not str(k).startswith("__memh5"):
+                sparse.index_attrs[name][k] = v
         sparse.redistribute("freq")
         sparse.vis[:] = 0.0
         sparse.weight[:].local_array[:] = data.weight[:].local_array[..., isel]
@@ -598,6 +604,11 @@ class AddInjectedHybrid(tasklib.base.ContainerTask):
         dra = np.median(np.diff(ra_d))
         idx = np.clip(np.searchsorted(ra_d, ra_i - 0.5 * dra), 0, ra_d.size - 1)
         ok = np.abs(ra_d[idx] - ra_i) < 0.01 * abs(dra)
+        if ra_i.size and not ok.any():
+            raise ValueError(
+                f"None of the {ra_i.size} injected samples is on the RA grid of the data "
+                f"(offsets {np.min(np.abs(ra_d[idx] - ra_i)):.4g} deg or more)."
+            )
         if not ok.all():
             self.log.warning(f"{np.sum(~ok)} injected samples are not in the data.")
         data.vis[:].local_array[..., idx[ok]] += inj.vis[:].local_array[..., ok]
