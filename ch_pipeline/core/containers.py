@@ -1759,6 +1759,8 @@ _LPT_PULSE_COLUMNS = [
     ["spectral_index", np.float64],
     ["frac_lin", np.float64],
     ["frac_circ", np.float64],
+    ["pol_angle", np.float64],
+    ["rm", np.float64],
     ["ra", np.float64],
     ["dec", np.float64],
     ["ra_cirs", np.float64],
@@ -1780,8 +1782,8 @@ class LPTInjectionLog(TableSpec):
     whether its centre is ``in_day`` (meridian RA 0-360 of the LSD, where the
     candidate maps are), the time of its centre (topocentric unix), its offset from
     the nearest upper transit (s) and hour angle (degrees), its peak ``flux`` (after
-    the pulse-to-pulse scatter), duration, spectral index and polarisation
-    fractions, the ICRS and CIRS position, telescope-y at the centre, telescope-x
+    the pulse-to-pulse scatter), duration, spectral index, polarisation
+    fractions, angle (degrees, from the X feed at transit and lambda = 0) and RM, the ICRS and CIRS position, telescope-y at the centre, telescope-x
     and meridian RA (degrees) at the start of the pulse, the XX primary beam
     averaged over the pulse and the band (``beam_mean``), and the seed of its
     scintillation.
@@ -1800,7 +1802,9 @@ class LPTInjectionResults(TableSpec):
     The columns of the :class:`LPTInjectionLog`, then whether a candidate was found
     within the match window (``found``, ``candidate`` its row in the candidate
     table or -1, ``n_match`` the number in the window), and that candidate's
-    properties and sifting result.
+    properties and sifting result.  ``cand_imag`` is the candidate's
+    ``amplitude_imag`` (for the Stokes search: U at RM 0 for V, the best RM for L).
+    The ``pol`` attribute names the polarisation of the candidates (I, V, L, co).
     """
 
     _table_spec: ClassVar = {
@@ -1821,6 +1825,7 @@ class LPTInjectionResults(TableSpec):
                 ["flags", np.uint32],
                 ["ns_scale", np.float32],
                 ["ns_dchi2", np.float32],
+                ["cand_imag", np.float32],
             ],
             "axis": "pulse",
         }

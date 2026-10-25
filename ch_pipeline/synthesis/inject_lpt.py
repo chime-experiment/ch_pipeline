@@ -545,6 +545,8 @@ class InjectLPT(BeamExternal):
             rec["spectral_index"] = tab["spectral_index"][src]
             rec["frac_lin"] = tab["frac_lin"][src]
             rec["frac_circ"] = tab["frac_circ"][src]
+            rec["pol_angle"] = tab["pol_angle"][src]
+            rec["rm"] = tab["rm"][src]
             rec["ra"] = self.catalog["position"]["ra"][:][src]
             rec["dec"] = self.catalog["position"]["dec"][:][src]
             rec["ra_cirs"] = ra_c[src]
@@ -679,7 +681,8 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             res[name] = pl[name]
         res["candidate"] = -1
         for name in ("snr", "amplitude", "cand_duration", "cand_spectral_index",
-                     "cand_y", "cand_x", "cand_ra", "ns_scale", "ns_dchi2"):  # fmt: skip
+                     "cand_y", "cand_x", "cand_ra", "ns_scale", "ns_dchi2",
+                     "cand_imag"):  # fmt: skip
             res[name] = np.nan
 
         deg_s = np.degrees(_OMEGA)
@@ -706,6 +709,8 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             res["cand_ra"][k] = rec["ra"][j]
             res["ns_scale"][k] = rec["ns_scale"][j]
             res["ns_dchi2"][k] = rec["ns_dchi2"][j]
+            if "amplitude_imag" in rec.dtype.names:
+                res["cand_imag"][k] = rec["amplitude_imag"][j]
             if sift is not None:
                 res["keep"][k] = sift["keep"][j]
                 res["flags"][k] = sift["flags"][j]
@@ -714,9 +719,11 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             out.attrs["sift_flags"] = table.attrs["sift_flags"]
         out.attrs["match_dy"] = self.match_dy
         out.attrs["match_dt"] = self.match_dt
+        pol = str(table.attrs.get("pol", "co"))
+        out.attrs["pol"] = pol
         ninj = int(pl["injected"].sum())
         self.log.info(
-            f"Found {res['found'].sum()} of {ninj} injected pulses; "
+            f"{pol}: found {res['found'].sum()} of {ninj} injected pulses; "
             f"{(res['found'] & res['keep']).sum()} kept by the sifter."
         )
         return out

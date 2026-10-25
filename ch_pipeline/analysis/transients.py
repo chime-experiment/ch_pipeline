@@ -9044,6 +9044,7 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
                 rec[name] = np.nan
         rec["band_nsig"] = -1
         out.attrs["lsd"] = lsd
+        out.attrs["pol"] = _decode_names(cand.index_map["pol"][:])[pp]
         for key in (
             "seed_snr", "peak_dy", "peak_dt", "grow_snr", "join_dy", "join_dt",
             "ext_frac", "row_snr", "row_ratio", "row_dy", "row_dra", "col_snr",
