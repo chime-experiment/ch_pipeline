@@ -7745,6 +7745,70 @@ class SelectRARange(tasklib.base.ContainerTask):
         return out
 
 
+class SelectElRange(tasklib.base.ContainerTask):
+    """Keep the elevations (telescope-y) of a container within a range.
+
+    For example to cut a small window around a source from a hybrid stream before
+    the matched filter.  Datasets without an ``el`` axis (the weights, the filter
+    response) are copied unchanged, unlike draco's Downselect, which drops them.
+
+    Attributes
+    ----------
+    el_min, el_max : float
+        Keep rows with ``el_min <= el < el_max``.  Defaults are -1 and 1.
+    """
+
+    el_min = config.Property(proptype=float, default=-1.0)
+    el_max = config.Property(proptype=float, default=1.0)
+
+    def process(self, cont):
+        """Select the rows.
+
+        Parameters
+        ----------
+        cont : container with an ``el`` axis
+            For example a (filtered) HybridVisStream.
+
+        Returns
+        -------
+        out : same type as ``cont``
+            The rows within the range.
+        """
+        from caput.containers import copy_datasets_filter
+
+        el = cont.index_map["el"][:]
+        keep = np.flatnonzero((el >= self.el_min) & (el < self.el_max))
+        if keep.size == 0:
+            raise ValueError(
+                f"No rows with {self.el_min} <= el < {self.el_max} "
+                f"(the axis spans {el.min():.3f} to {el.max():.3f})."
+            )
+        sel = slice(keep[0], keep[-1] + 1)
+        # Distributed over el: gather the rows on every rank first
+        for ax in ("freq", "ra", "pol"):
+            if ax in cont.index_map:
+                try:
+                    cont.redistribute(ax)
+                    break
+                except (ValueError, KeyError):
+                    continue
+        out = cont.__class__(
+            axes_from=cont,
+            attrs_from=cont,
+            el=el[sel],
+            skip_datasets=True,
+            distributed=cont.distributed,
+            comm=cont.comm,
+        )
+        copy_datasets_filter(
+            cont, out, selection={"el": sel}, copy_without_selection=True
+        )
+        self.log.info(
+            f"Kept {keep.size} of {el.size} rows (el {el[sel][0]:.4f} to {el[sel][-1]:.4f})."
+        )
+        return out
+
+
 # ----------------------------------------------------------------------------
 # Grouping candidates and sifting them
 # ----------------------------------------------------------------------------
