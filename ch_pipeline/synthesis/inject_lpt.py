@@ -26,8 +26,11 @@ matches the injected pulses to the candidates of that second search.
 
 Conventions for the polarisation.  The Stokes parameters are defined in the frame
 of the feeds: Q > 0 along the X (east-west) feeds, so that for a source at the
-centre of the beam XX = I + Q, YY = I - Q, XY = U + iV and YX = U - iV (the
-uncalibrated phase between the X and Y arrays is not applied).  The polarisation
+centre of the beam XX = I + Q, YY = I - Q, XY = (U + iV) e^{i phi} and
+YX = (U - iV) e^{-i phi}, with phi = xy_offset + 2 pi nu xy_delay the phase between
+the X and Y arrays (zero by default; the Stokes search of
+:class:`ch_pipeline.analysis.transients.TransientMatchedFilterSkyNoise` removes the
+same phase).  The polarisation
 angle is psi = pol_angle + RM lambda^2 + q(HA), with pol_angle the angle from the
 X feed at transit and lambda = 0, and q the parallactic angle (zero at transit).
 The co-polar products take the beam of their own polarisation, and the cross-polar
@@ -287,12 +290,18 @@ class InjectLPT(BeamExternal):
         Smallest mean profile of a sample to inject.  Default is 1e-4.
     parallactic : bool
         Rotate the polarisation by the parallactic angle.  Default is True.
+    xy_delay : float
+        Delay of the X-Y phase in ns (see the module docstring).  Default is 0.
+    xy_offset : float
+        Offset of the X-Y phase in degrees.  Default is 0.
     """
 
     polarization = config.enum(["full", "copol", "single"], default="full")
     barycentric = config.Property(proptype=bool, default=True)
     min_profile = config.Property(proptype=float, default=1e-4)
     parallactic = config.Property(proptype=bool, default=True)
+    xy_delay = config.Property(proptype=float, default=0.0)
+    xy_offset = config.Property(proptype=float, default=0.0)
 
     def setup(self, manager, catalog, beam):
         """Get the telescope and the catalogue, and set up the co-polar beams.
@@ -456,6 +465,9 @@ class InjectLPT(BeamExternal):
         pos = {p: np.searchsorted(ib, v) for p, v in pol_index.items()}
         uv = dist[:, ib][:, np.newaxis, :, np.newaxis] / lam[np.newaxis, :, np.newaxis, np.newaxis]
         x_nu = nu / self.reference_freq
+        xy_phase = np.exp(
+            1j * (np.radians(self.xy_offset) + 2 * np.pi * nu * 1e6 * self.xy_delay * 1e-9)
+        )[:, np.newaxis]
 
         bsum = np.zeros(npulse)
         wsum = np.zeros(npulse)
@@ -490,8 +502,8 @@ class InjectLPT(BeamExternal):
             amp = {
                 "XX": (stokes_i + q) * bxx,
                 "YY": (stokes_i - q) * byy,
-                "XY": (u + 1j * v) * bxy,
-                "YX": (u - 1j * v) * bxy,
+                "XY": (u + 1j * v) * bxy * xy_phase,
+                "YX": (u - 1j * v) * bxy * xy_phase.conj(),
             }
             phase = interferometry.fringestop_phase(
                 sha[np.newaxis, np.newaxis, :], self.latitude, sdec, *uv

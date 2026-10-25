@@ -1665,6 +1665,13 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "distributed": True,
             "distributed_axis": "el",
         },
+        "amplitude_imag": {
+            "axes": ["pol", "el", "ra"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+        },
         "ha": {
             "axes": ["el", "x"],
             "dtype": np.float64,
@@ -1935,6 +1942,9 @@ class TransientCandidateTable(TableSpec):
                 ["amplitude", np.float32],
                 ["duration", np.float32],
                 ["spectral_index", np.float32],
+                # The imaginary part of the best trial, if saved (for the Stokes
+                # search: U at RM 0 for V, the best RM for L)
+                ["amplitude_imag", np.float32],
                 # Position on the sky (ICRS) and hour angle
                 ["ra_icrs", np.float64],
                 ["dec_icrs", np.float64],
@@ -2038,6 +2048,94 @@ class TransientCandidateTable(TableSpec):
     def group(self):
         return self.index_map["group"]
 
+
+
+class PolarisationCalibration(TableSpec):
+    """The X-Y phase and polarisation of calibrator pulsars on one day.
+
+    From :class:`ch_pipeline.analysis.transients.FitPolarisationCalibrators`: one
+    row of ``calibrator`` per pulsar and transit (upper or lower) with its fitted
+    RM, linear fraction and angle, and the X-Y phase (delay and offset, both the
+    total and the residual after the phase applied by the matched filter), the
+    amplitude check ``|A|`` and the constant term ``B / A`` (``i v`` plus leakage),
+    and the quality of the fit.  The per-band datasets hold the fractional Q and C
+    (``U + iV`` after the applied phase) from the regression on I, with their
+    noise; ``band_used`` marks the bands of the fit.
+    """
+
+    _axes = ("freq",)
+
+    _table_spec: ClassVar = {
+        "calibrator": {
+            "columns": [
+                ["name", "S16"],
+                ["transit", "S8"],
+                ["ok", bool],
+                ["ra", np.float64],
+                ["dec", np.float64],
+                ["y", np.float32],
+                ["x_mean", np.float32],
+                ["nsamp", np.int32],
+                ["nband", np.int16],
+                ["frac_noise", np.float32],
+                ["rm_cat", np.float32],
+                ["rm", np.float32],
+                ["rm_abs", np.float32],
+                ["rm_dchi2", np.float32],
+                ["rot_deg", np.float32],
+                ["pfrac", np.float32],
+                ["chi_deg", np.float32],
+                ["delay_ns", np.float32],
+                ["offset_deg", np.float32],
+                ["delay_resid_ns", np.float32],
+                ["offset_resid_deg", np.float32],
+                ["abs_a", np.float32],
+                ["b_re", np.float32],
+                ["b_im", np.float32],
+                ["phase_rms_deg", np.float32],
+                ["chi2", np.float32],
+                ["dof", np.int32],
+            ],
+            "axis": "calibrator",
+        }
+    }
+
+    _dataset_spec: ClassVar = {
+        "q": {
+            "axes": ["calibrator", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "q_err": {
+            "axes": ["calibrator", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "c": {
+            "axes": ["calibrator", "freq"],
+            "dtype": np.complex64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "c_err": {
+            "axes": ["calibrator", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "band_used": {
+            "axes": ["calibrator", "freq"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def calibrator(self):
+        return self.datasets["calibrator"]
 
 class RawContainer(TODContainer):
     """Base class for using raw CHIME data via the draco containers API.
