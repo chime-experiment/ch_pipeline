@@ -8844,6 +8844,18 @@ class AddNSProfile(tasklib.base.ContainerTask):
         return out
 
 
+def _extend_axis(axis, idx):
+    """Values of ``axis`` at the integer positions ``idx``, continued linearly with the
+    end spacings beyond either end."""
+    n = axis.size
+    inside = axis[np.clip(idx, 0, n - 1)]
+    if n < 2:
+        return inside
+    lo = axis[0] + idx * (axis[1] - axis[0])
+    hi = axis[-1] + (idx - (n - 1)) * (axis[-1] - axis[-2])
+    return np.where(idx < 0, lo, np.where(idx >= n, hi, inside))
+
+
 class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     """Windows of the per-band matched filter around candidates.
 
@@ -8924,7 +8936,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         rows = e[:, np.newaxis] + roff[np.newaxis]
         rin = (rows >= 0) & (rows < el.size)
         out.datasets["el_index"][:] = np.where(rin, rows, -1)
-        out.datasets["el"][:] = np.where(rin, el[np.clip(rows, 0, el.size - 1)], np.nan)
+        # Outside the map the coordinates continue the grid; there is no data there
+        # (zero weight, index -1)
+        out.datasets["el"][:] = _extend_axis(el, rows)
         ts = tb[:, np.newaxis] + toff[np.newaxis]
         if periodic:
             tin = np.ones(ts.shape, dtype=bool)
@@ -8932,7 +8946,7 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         else:
             tin = (ts >= 0) & (ts < ra_b.size)
         out.datasets["ra_index"][:] = np.where(tin, ts, -1)
-        out.datasets["ra"][:] = np.where(tin, ra_b[np.clip(ts, 0, ra_b.size - 1)], np.nan)
+        out.datasets["ra"][:] = _extend_axis(ra_b, ts)
 
         # Each rank's block of candidates, summed from the rows on every rank
         la = out.amplitude[:]

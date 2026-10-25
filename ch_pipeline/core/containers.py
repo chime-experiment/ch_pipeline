@@ -1831,8 +1831,8 @@ class TransientCandidateCutouts(FreqContainer):
     amplitude (Jy) and weight of each band in a window of ``el_offset`` elevations
     and ``ra_offset`` start times centred on the candidate, at its telescope-x
     (``x_index``) and for single samples.  ``el_index`` and ``ra_index`` give the
-    indices into the maps, -1 outside them (weight zero there).  Distributed over
-    candidates.
+    indices into the maps, -1 outside them, where the weight is zero; ``el`` and
+    ``ra`` continue the grid there.  Distributed over candidates.
     """
 
     _axes = ("candidate", "el_offset", "ra_offset")
