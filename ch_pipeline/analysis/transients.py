@@ -4467,8 +4467,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
        over the blocks of right ascension.
 
     Samples whose sky term is negligible (below 1e-3 of the noise for a coefficient
-    of ``kappa_prior``) only constrain ``alpha``, so a random fraction
-    ``noise_fraction`` of them is used.  Band sums use the samples with at least
+    of ``kappa_prior``) only constrain ``alpha``, the nuisance scale of the
+    thermal noise, so every ``noise_stride``-th of them is used, on a regular grid
+    in global (channel, elevation, RA) indices (the same for any distribution over
+    the ranks).  Band sums use the samples with at least
     two valid channels.  The weights (inverse variances) for the whole day are from
     a jackknife over the blocks of right ascension.  Those of the fits within blocks
     and around sources are from the Fisher matrix, which ignores the correlation of
@@ -4499,8 +4501,8 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     kappa_prior : float
         Typical coefficient, used to select the samples with a significant sky term.
         Default is 1e-3.
-    noise_fraction : float
-        Fraction of the other samples to use.  Default is 0.02.
+    noise_stride : int
+        Use one in this many of the other samples (0 for none).  Default is 50.
     sources : list of str
         Sources (names in `ch_ephem.sources.source_dictionary`, or "sun") around
         whose transit the coefficients are also fitted.  Default is none.
@@ -4516,8 +4518,6 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     nqbin : int
         Number of logarithmic bins.  The first bin also contains everything below
         ``qmin``.  Default is 40.
-    seed : int
-        Seed for the random selection of samples.  Default is 0.
     """
 
     pol = config.list_type(str, default=["XX", "YY"])
@@ -4527,7 +4527,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     clip = config.Property(proptype=float, default=20.0)
     niter = config.Property(proptype=int, default=20)
     kappa_prior = config.Property(proptype=float, default=1e-3)
-    noise_fraction = config.Property(proptype=float, default=0.02)
+    noise_stride = config.Property(proptype=int, default=50)
     sources = config.list_type(str, default=[])
     positions = config.Property(proptype=dict, default={})
     source_el_width = config.Property(proptype=int, default=10)
@@ -4535,7 +4535,6 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     qmin = config.Property(proptype=float, default=1e-2)
     qmax = config.Property(proptype=float, default=1e8)
     nqbin = config.Property(proptype=int, default=40)
-    seed = config.Property(proptype=int, default=0)
 
     rfi_mask = None
     inband_noise = None
@@ -4716,18 +4715,19 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             )
 
         kp2 = self.kappa_prior**2
-        def subsample(valid, informative, key, axis):
-            # One random stream per global elevation (and fit, band, baseline,
-            # polarisation), so that the samples do not depend on the distribution
-            # of the elevations over the ranks
-            keep = np.empty(valid.shape, dtype=bool)
-            for le, ge in enumerate(iel):
-                sl = (slice(None),) * axis + (le,)
-                rng = np.random.default_rng([self.seed, *key, ge])
-                keep[sl] = (
-                    rng.random(valid[sl].shape, dtype=np.float32) < self.noise_fraction
+        # Flattened global index of each local (elevation, RA) sample
+        gidx = iel.astype(np.int64)[:, np.newaxis] * nra + np.arange(nra)
+
+        def subsample(valid, informative, chans=None):
+            # Every noise_stride-th sample by global index ([chan,] el, ra)
+            if self.noise_stride <= 0:
+                return valid & informative
+            idx = gidx
+            if chans is not None:
+                idx = idx + chans.astype(np.int64)[:, np.newaxis, np.newaxis] * (
+                    el.size * nra
                 )
-            return valid & (informative | keep)
+            return valid & (informative | (idx % self.noise_stride == 0))
 
         for oe, (xf, xu) in enumerate(zip(iew, iewu)):
             # Band sums of each band, kept for the correlation between bands
@@ -4763,7 +4763,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                     X = np.abs(F) ** 2
                     R2 = np.abs(R) ** 2
 
-                    keep = subsample(valid, R2 * kp2 > 1e-3 * N, (0, bb, oe, jp), 1)
+                    keep = subsample(valid, R2 * kp2 > 1e-3 * N, chans)
                     _, ke, kt = np.nonzero(keep)
                     s1["X"].append(X[keep].astype(np.float64))
                     s1["N"].append(N[keep].astype(np.float64))
@@ -4815,10 +4815,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 #    X = alpha A + kappa2_tot B + kappa2_coh (|Rb|^2 - B)
                 s2 = {k: [] for k in ("X", "A", "Q", "off", "t", "e")}
                 ninf = 0
-                for js, sm in enumerate(sums):
+                for sm in sums:
                     rb2 = np.abs(sm["Rb"]) ** 2
                     inf = rb2 * kp2 > 1e-3 * sm["A"]
-                    keep = subsample(sm["ok"], inf, (1, bb, oe, js), 0)
+                    keep = subsample(sm["ok"], inf)
                     ninf += int((sm["ok"] & inf).sum())
                     ke, kt = np.nonzero(keep)
                     s2["X"].append(np.abs(sm["m"][keep]) ** 2)
@@ -4919,7 +4919,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                     )
                     cross = 2.0 * (sx["Rb"] * np.conj(sy["Rb"])).real
                     rb2 = np.abs(sx["Rb"] + sy["Rb"]) ** 2
-                    keep = subsample(ok, rb2 * kp2 > 1e-3 * A, (2, bb, oe), 0)
+                    keep = subsample(ok, rb2 * kp2 > 1e-3 * A)
                     ke, kt = np.nonzero(keep)
                     cols = np.stack([A[keep], cross[keep]], axis=1).astype(np.float64)
                     fit3 = self._fit(
