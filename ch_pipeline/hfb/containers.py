@@ -9,6 +9,7 @@ Containers
 - :py:class:`HFBData`
 - :py:class:`HFBReader`
 - :py:class:`HFBRFIMask`
+- :py:class:`SiderealRFIMaskStack`
 - :py:class:`HFBTimeAverage`
 - :py:class:`HFBHighResContainer`
 - :py:class:`HFBHighResData`
@@ -313,6 +314,27 @@ class HFBRFIMask(TODContainer, FreqContainer):
     def sens(self):
         """Get the sensitivity metric dataset."""
         return self.datasets["sens"]
+
+
+class SiderealRFIMaskStack(FreqContainer, SiderealContainer):
+    """RFI masks of several sidereal days."""
+
+    _axes = ("csd",)
+
+    _dataset_spec: ClassVar = {
+        "mask": {
+            "axes": ["csd", "freq", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+        }
+    }
+
+    @property
+    def mask(self):
+        """Get the mask dataset."""
+        return self.datasets["mask"]
 
 
 class HFBTimeAverage(FreqContainer, HFBBeamContainer):
