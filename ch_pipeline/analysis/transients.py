@@ -4638,10 +4638,17 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             )
 
         kp2 = self.kappa_prior**2
-        rng = np.random.default_rng([self.seed, self.comm.rank])
-
-        def subsample(valid, informative):
-            keep = rng.random(valid.shape, dtype=np.float32) < self.noise_fraction
+        def subsample(valid, informative, key, axis):
+            # One random stream per global elevation (and fit, band, baseline,
+            # polarisation), so that the samples do not depend on the distribution
+            # of the elevations over the ranks
+            keep = np.empty(valid.shape, dtype=bool)
+            for le, ge in enumerate(iel):
+                sl = (slice(None),) * axis + (le,)
+                rng = np.random.default_rng([self.seed, *key, ge])
+                keep[sl] = (
+                    rng.random(valid[sl].shape, dtype=np.float32) < self.noise_fraction
+                )
             return valid & (informative | keep)
 
         for oe, (xf, xu) in enumerate(zip(iew, iewu)):
@@ -4678,7 +4685,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                     X = np.abs(F) ** 2
                     R2 = np.abs(R) ** 2
 
-                    keep = subsample(valid, R2 * kp2 > 1e-3 * N)
+                    keep = subsample(valid, R2 * kp2 > 1e-3 * N, (0, bb, oe, jp), 1)
                     _, ke, kt = np.nonzero(keep)
                     s1["X"].append(X[keep].astype(np.float64))
                     s1["N"].append(N[keep].astype(np.float64))
@@ -4730,10 +4737,10 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 #    X = alpha A + kappa2_tot B + kappa2_coh (|Rb|^2 - B)
                 s2 = {k: [] for k in ("X", "A", "Q", "off", "t", "e")}
                 ninf = 0
-                for sm in sums:
+                for js, sm in enumerate(sums):
                     rb2 = np.abs(sm["Rb"]) ** 2
                     inf = rb2 * kp2 > 1e-3 * sm["A"]
-                    keep = subsample(sm["ok"], inf)
+                    keep = subsample(sm["ok"], inf, (1, bb, oe, js), 0)
                     ninf += int((sm["ok"] & inf).sum())
                     ke, kt = np.nonzero(keep)
                     s2["X"].append(np.abs(sm["m"][keep]) ** 2)
@@ -4834,7 +4841,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                     )
                     cross = 2.0 * (sx["Rb"] * np.conj(sy["Rb"])).real
                     rb2 = np.abs(sx["Rb"] + sy["Rb"]) ** 2
-                    keep = subsample(ok, rb2 * kp2 > 1e-3 * A)
+                    keep = subsample(ok, rb2 * kp2 > 1e-3 * A, (2, bb, oe), 0)
                     ke, kt = np.nonzero(keep)
                     cols = np.stack([A[keep], cross[keep]], axis=1).astype(np.float64)
                     fit3 = self._fit(
@@ -6820,12 +6827,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         """Amplitude ``sign(z) |P|`` and weight ``(z / |P|)^2`` of the RM search.
 
         ``z`` is the Gaussian S/N of the largest chi-squared ``tmax`` (-1 where
-        there is no trial) over ``ntrials`` independent RM trials.
+        there is no trial) over ``ntrials`` independent RM trials.  Where ``|P|`` is
+        zero the weight is zero (no data), not infinite.
         """
-        ok = tmax >= 0
+        ok = (tmax >= 0) & (pol_amp > 0)
         tt = np.where(ok, tmax, 0.0)
         zz = _chi2max_to_gaussian(tt, ntrials(tt))
-        p = np.maximum(pol_amp, 1e-30)
+        p = np.where(ok, pol_amp, 1.0)
         amp = np.where(ok, np.sign(zz) * p, 0.0).astype(np.float32)
         wgt = np.where(ok, (zz / p) ** 2, 0.0).astype(np.float32)
         return amp, wgt
