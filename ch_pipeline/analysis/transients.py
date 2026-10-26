@@ -4332,7 +4332,10 @@ def _log_memory(task, label):
         return
     from mpi4py import MPI
 
-    rss = psutil.Process().memory_info().rss
+    # Private memory of the rank: the arrays shared by the ranks of a node (see
+    # _NodeSharedFreq) count once, in the node total
+    mi = psutil.Process().memory_info()
+    rss = mi.rss - getattr(mi, "shared", 0)
     vm = psutil.virtual_memory()
     node = vm.total - vm.available
     comm = task.comm
@@ -4341,9 +4344,84 @@ def _log_memory(task, label):
         node = comm.allreduce(node, op=MPI.MAX)
     if comm is None or comm.rank == 0:
         task.log.info(
-            f"Memory ({label}): largest rank {rss / 2**30:.1f} GiB, largest node "
-            f"{node / 2**30:.0f} GiB."
+            f"Memory ({label}): largest rank {rss / 2**30:.1f} GiB (private), largest "
+            f"node {node / 2**30:.0f} GiB."
         )
+
+
+def _node_comms(comm):
+    """Communicators of the ranks of each node, and of one rank (the leader) per node.
+
+    The leaders' communicator is ``MPI.COMM_NULL`` on the other ranks.
+    """
+    from mpi4py import MPI
+
+    node = comm.Split_type(MPI.COMM_TYPE_SHARED, key=comm.rank)
+    leaders = comm.Split(0 if node.rank == 0 else MPI.UNDEFINED, comm.rank)
+    return node, leaders
+
+
+class _NodeSharedFreq:
+    """The whole frequency axis of a frequency-distributed dataset, one copy per node.
+
+    The copy is in memory shared by the ranks of a node (an MPI shared window), with
+    frequency as its first axis; ``array`` is a read-only view.  Each rank writes its
+    own frequencies, and the leaders of the nodes broadcast them to each other, so
+    every node receives the dataset once, whatever the number of ranks on it.  Call
+    :meth:`free` (collective) when done.
+
+    Parameters
+    ----------
+    dset : MPIArray
+        Distributed over its second axis (frequency).
+    comm : MPI.Comm
+        The communicator of ``dset``.
+    take : callable, optional
+        Applied to the local array [axis 0, freq, ...] before it is stored, for a
+        selection or a change of type (the frequency axis must stay).
+    """
+
+    def __init__(self, dset, comm, take=None):
+        from mpi4py import MPI
+
+        local = dset.local_array if take is None else take(dset.local_array)
+        local = np.ascontiguousarray(np.moveaxis(local, 1, 0))
+        lo, nloc = dset.local_offset[1], dset.local_shape[1]
+        shape = (dset.global_shape[1], *local.shape[1:])
+        dtype = local.dtype
+
+        node, leaders = _node_comms(comm)
+        self._comms = (node, leaders)
+        nbytes = int(np.prod(shape)) * dtype.itemsize if node.rank == 0 else 0
+        self._win = MPI.Win.Allocate_shared(nbytes, dtype.itemsize, comm=node)
+        buf, _ = self._win.Shared_query(0)
+        full = np.ndarray(buffer=buf, dtype=dtype, shape=shape)
+        full[lo : lo + nloc] = local
+        del local
+
+        # The leader of each rank's node (its rank among the leaders) and the
+        # frequencies of each rank
+        lid = node.bcast(leaders.rank if node.rank == 0 else None, root=0)
+        owner = comm.allgather((lid, lo, nloc))
+        node.Barrier()
+        if node.rank == 0 and leaders.size > 1:
+            for root, o, n in owner:
+                if n > 0:
+                    leaders.Bcast(full[o : o + n], root=root)
+        node.Barrier()
+        full.flags.writeable = False
+        self.array = full
+
+    def free(self):
+        """Release the shared memory (collective over the communicator)."""
+        from mpi4py import MPI
+
+        self.array = None
+        self._win.Free()
+        node, leaders = self._comms
+        node.Free()
+        if leaders != MPI.COMM_NULL:
+            leaders.Free()
 
 
 def _optional_inputs(*args):
@@ -6160,16 +6238,32 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         kcoh = np.sqrt(k2coh)  # band, ew, yband, ra
         lam, qvec = self._modes(rho_band)
 
-        # Thermal weights, gathered over frequency
+        # Thermal weights and the filter response, gathered over frequency once per
+        # node into memory shared by its ranks (every rank needs all frequencies)
         hvis.redistribute("freq")
         wname = "noise_weight" if has_response else hvis._weight_dset_name
         if "elevation_vis_weight" in hvis.datasets:
             raise ValueError("Elevation-dependent weights are not supported.")
-        weight_all = hvis[wname][:].allgather()[ipol][:, :, iew].astype(np.float32)
         self_conj = _self_conjugate([pol[ii] for ii in ipol], ew[iew])
-        weight_all *= np.where(self_conj, 0.5, 1.0).astype(np.float32)[
+        half = np.where(self_conj, 0.5, 1.0).astype(np.float32)[
             :, np.newaxis, :, np.newaxis
         ]
+        shared = [
+            _NodeSharedFreq(
+                hvis[wname][:],
+                hvis.comm,
+                take=lambda a: a[ipol][:, :, iew].astype(np.float32) * half,
+            )
+        ]
+        weight_all = np.moveaxis(shared[0].array, 0, 1)  # pol, freq, ew, ra
+        if has_response:
+            shared.append(
+                _NodeSharedFreq(
+                    hvis.ra_response[:], hvis.comm, take=lambda a: a[ipol][:, :, iew]
+                )
+            )
+            resp_all = shared[1].array  # freq, pol, ew, ra, lag
+        _log_memory(self, "matched filter, weights and filter response gathered")
 
         hvis.redistribute(["el", "freq"])
         unfiltered.redistribute(["el", "freq"])
@@ -6380,7 +6474,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 fsel = np.flatnonzero(band_index == bb)
                 wb = weight_all[:, fsel]  # pol, freq, ew, ra
                 if has_response:
-                    resp_t = self._gather_freq(hvis.ra_response, fsel)[ipol][:, :, iew]
+                    # A view of the shared copy where the band's channels are contiguous
+                    fs = (
+                        slice(fsel[0], fsel[-1] + 1)
+                        if fsel.size and np.all(np.diff(fsel) == 1)
+                        else fsel
+                    )
+                    resp_t = np.moveaxis(resp_all[fs], 0, 1)  # pol, freq, ew, ra, lag
                     one_m_p = (1.0 - resp_t[..., lag_index[0]].real).astype(np.float32)
                 else:
                     one_m_p = np.ones(wb.shape, dtype=np.float32)
@@ -6612,9 +6712,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 f"matched filter, end of pass {ipass + 1}/{npass} ({t_bands:.0f} s in "
                 f"the band loop, {time.time() - t_pass:.0f} s in all)",
             )
-            del numer, numer_im, resp, vinc, vplus, vminus
-            if long_w:
-                del cross_r, cross_v
+            # Free the arrays of the pass (the closures above refer to them by name)
+            numer = numer_im = resp = vinc = vplus = vminus = None
+            cross_r = cross_v = None
+
+        # No view of the shared memory may outlive it (the per-band arrays are copies)
+        del weight_all
+        if has_response:
+            del resp_all
+        for sh in shared:
+            sh.free()
 
         if self.stokes:
             # Linear polarisation as a Gaussian S/N, with the number of independent
