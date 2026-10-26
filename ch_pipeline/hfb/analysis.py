@@ -22,37 +22,94 @@ from . import containers
 from .io import BeamSelectionMixin
 
 
+def _average_axis(data, weight, axis_index, weighting="inverse_variance"):
+    """Average data and weights along one axis.
+
+    Parameters
+    ----------
+    data, weight : np.ndarray
+        HFB data and weights.
+    axis_index : int
+        Index of the axis over which to average.
+    weighting : {"inverse_variance", "uniform"}
+        The weighting to use.
+
+    Returns
+    -------
+    avg_data, avg_weight : np.ndarray
+        Averaged data and weights, with that axis removed.
+    """
+    if weighting == "uniform":
+        # Binary weights for uniform weighting
+        binary_weight = np.zeros(weight.shape)
+        binary_weight[weight != 0] = 1
+
+        # Number of samples with non-zero weight in each bin
+        nsamples = np.sum(binary_weight, axis=axis_index)
+
+        # For uniform weighting, the variance of averaged data is
+        # sum( variance ) / nsamples**2,
+        # and the weight is the inverse of that
+        variance = tools.invert_no_zero(weight)
+        avg_weight = nsamples**2 * tools.invert_no_zero(
+            np.sum(variance, axis=axis_index)
+        )
+
+        # For uniform weighting, the averaged data is the average of all
+        # non-zero data
+        avg_data = np.sum(binary_weight * data, axis=axis_index) * tools.invert_no_zero(
+            nsamples
+        )
+
+    else:
+        # For inverse-variance weighting, the averaged weight turns out to
+        # be equal to the sum of the weights
+        avg_weight = np.sum(weight, axis=axis_index)
+
+        # For inverse-variance weighting, the averaged data is the weighted
+        # sum of the data, normalized by the sum of the weights
+        avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
+            avg_weight
+        )
+
+    return avg_data, avg_weight
+
+
 class HFBAverage(tasklib.base.ContainerTask):
     """Take average of HFB data over any axis.
 
     Used for making sub-frequency band shape template and general time averaging,
-    and for taking the average of HFB data over beam axis.
+    for taking the average of HFB data over beam axis, and for averaging all the
+    days of an absorber stack.
 
     Attributes
     ----------
     axis: str (default: "time")
         Axis over which to take average.
-        Options are `freq`, `subfreq`, `beam`, and `time`.
+        Options are `freq`, `subfreq`, `beam`, `beam_ew`, `time` and `csd`.
     weighting: str (default: "inverse_variance")
         The weighting to use in the stack.
         Either `uniform` or `inverse_variance`.
     """
 
-    axis = config.enum(["freq", "subfreq", "beam", "beam_ew", "time"], default="time")
+    axis = config.enum(
+        ["freq", "subfreq", "beam", "beam_ew", "time", "csd"], default="time"
+    )
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
-        """Take average over time axis.
+        """Take average over the chosen axis.
 
         Parameters
         ----------
-        stream : HFBData, HFBHighResData
+        stream : HFBData, HFBHighResData, HFBHighResTimeAverage,
+                 HFBHighResRingMap, or HFBHighResRingMapStack
             Container with HFB data and weights.
 
         Returns
         -------
-        out : HFBTimeAverage, HFBHighResTimeAverage
-            Average of stream over time axis.
+        out : container
+            Average of stream over the chosen axis.
         """
         contmap = {
             "freq": {},
@@ -62,10 +119,15 @@ class HFBAverage(tasklib.base.ContainerTask):
             },
             "beam_ew": {
                 containers.HFBHighResRingMap: containers.HFBHighResBeamAvgRingMap,
+                containers.HFBHighResRingMapStack: containers.HFBHighResBeamAvgRingMapStack,
             },
             "time": {
                 containers.HFBData: containers.HFBTimeAverage,
                 containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            },
+            "csd": {
+                containers.HFBHighResRingMapStack: containers.HFBHighResRingMap,
+                containers.HFBHighResBeamAvgRingMapStack: containers.HFBHighResBeamAvgRingMap,
             },
         }
 
@@ -75,6 +137,13 @@ class HFBAverage(tasklib.base.ContainerTask):
                 f"Averaging {stream.__class__} over {self.axis} is not implemented."
             )
 
+        # For ringmaps and stacks, distribute over freq, so that the averaged
+        # axis (csd or beam_ew) is complete on every rank, and the input and
+        # output containers are distributed the same way
+        redistribute = self.axis in ("csd", "beam_ew")
+        if redistribute:
+            stream.redistribute("freq")
+
         # Find index of axis over which to average
         axis_index = stream._dataset_spec["hfb"]["axes"].index(self.axis)
 
@@ -83,44 +152,15 @@ class HFBAverage(tasklib.base.ContainerTask):
         weight = stream.weight[:]
 
         # Average the data and compute the weight of the averaged data
-        if self.weighting == "uniform":
-            # Binary weights for uniform weighting
-            binary_weight = np.zeros(weight.shape)
-            binary_weight[weight != 0] = 1
-
-            # Number of samples with non-zero weight in each time bin
-            nsamples = np.sum(binary_weight, axis=axis_index)
-
-            # For uniform weighting, the variance of averaged data is
-            # sum( variance ) / nsamples**2,
-            # and the weight is the inverse of that
-            variance = tools.invert_no_zero(weight)
-            avg_weight = nsamples**2 * tools.invert_no_zero(
-                np.sum(variance, axis=axis_index)
-            )
-
-            # For uniform weighting, the averaged data is the average of all
-            # non-zero data
-            avg_data = np.sum(
-                binary_weight * data, axis=axis_index
-            ) * tools.invert_no_zero(nsamples)
-
-        else:
-            # For inverse-variance weighting, the averaged weight turns out to
-            # be equal to the sum of the weights
-            avg_weight = np.sum(weight, axis=axis_index)
-
-            # For inverse-variance weighting, the averaged data is the weighted
-            # sum of the data, normalized by the sum of the weights
-            avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
-                avg_weight
-            )
+        avg_data, avg_weight = _average_axis(data, weight, axis_index, self.weighting)
 
         # Get the output container
         out_cont_type = contmap[self.axis][stream.__class__]
 
         # Create container to hold output
         out = out_cont_type(axes_from=stream, attrs_from=stream)
+        if redistribute:
+            out.redistribute("freq")
 
         # Save data and weights to output container
         out.hfb[:] = avg_data
@@ -128,6 +168,98 @@ class HFBAverage(tasklib.base.ContainerTask):
 
         # Add index map of axis that was averaged over to attributes
         out.attrs[self.axis] = stream._data["index_map"][self.axis][:]
+
+        # For a stack of days, also record them as the LSDs of the average, so
+        # that HFBDopplerShift knows when the data were taken
+        if self.axis == "csd":
+            out.attrs["lsd"] = np.asarray(stream.index_map["csd"]).astype(float)
+
+        return out
+
+
+class HFBSelectDays(tasklib.base.ContainerTask):
+    """Keep a subset of the days in an absorber stack.
+
+    Days are kept if they are inside `csd_range` (if given), are in `csd_list`
+    (if given), are not in `csd_exclude` (if given).
+
+    Attributes
+    ----------
+    csd_range : list, optional
+        Keep days with start <= csd < end. Either one range, [start, end], or
+        several, [[start1, end1], [start2, end2], ...], in which case days
+        inside any of them are kept.
+    csd_list : list of int, optional
+        Keep only these CSDs (e.g. a list of good days).
+    csd_exclude : list of int, optional
+        Drop these CSDs.
+    """
+
+    csd_range = config.Property(proptype=list, default=None)
+    csd_list = config.Property(proptype=list, default=None)
+    csd_exclude = config.Property(proptype=list, default=None)
+
+    def process(self, stream):
+        """Select days.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Absorber stack, with csd as the first axis.
+
+        Returns
+        -------
+        out : same type as `stream`
+            Same stack, restricted to the selected days.
+        """
+        # Distribute over freq, so that every rank holds all days
+        stream.redistribute("freq")
+
+        # Load data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data and weights to numpy arrays, so that they can be indexed
+        if isinstance(data, mpiarray.MPIArray):
+            data = data.local_array
+            weight = weight.local_array
+
+        # Build a mask of the days to keep, applying each criterion in turn
+        csd = np.asarray(stream.index_map["csd"])
+        keep = np.ones(csd.size, dtype=bool)
+
+        if self.csd_range is not None:
+            # Accept a single [start, end] or a list of them
+            ranges = np.atleast_2d(np.asarray(self.csd_range, dtype=float))
+            if ranges.shape[1] != 2:
+                raise config.CaputConfigError(
+                    f"csd_range must be [start, end] or a list of them, got {self.csd_range}."
+                )
+            in_range = np.zeros(csd.size, dtype=bool)
+            for start, end in ranges:
+                in_range |= (csd >= start) & (csd < end)
+            keep &= in_range
+
+        if self.csd_list is not None:
+            keep &= np.isin(csd.astype(int), np.asarray(self.csd_list, dtype=int))
+
+        if self.csd_exclude is not None:
+            keep &= ~np.isin(csd.astype(int), np.asarray(self.csd_exclude, dtype=int))
+
+        if not keep.any():
+            raise RuntimeError("No days left after the selection.")
+
+        self.log.info(f"Kept {keep.sum()} of {csd.size} days.")
+
+        # Create output container of the same type as the input, with the selected days only
+        out = stream.__class__(
+            csd=stream.index_map["csd"][keep], axes_from=stream, attrs_from=stream
+        )
+        out.redistribute("freq")
+
+        # Copy over the selected days
+        out.hfb[:] = data[keep]
+        out.weight[:] = weight[keep]
 
         return out
 
