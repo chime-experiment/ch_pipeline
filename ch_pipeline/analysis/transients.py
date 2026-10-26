@@ -4324,6 +4324,28 @@ def _merge_flags(rfi, flag, nel_local):
     return full.copy() if rfi is None else rfi | full
 
 
+def _log_memory(task, label):
+    """Log the largest resident memory of a rank and of a node (collective)."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    from mpi4py import MPI
+
+    rss = psutil.Process().memory_info().rss
+    vm = psutil.virtual_memory()
+    node = vm.total - vm.available
+    comm = task.comm
+    if comm is not None and comm.size > 1:
+        rss = comm.allreduce(rss, op=MPI.MAX)
+        node = comm.allreduce(node, op=MPI.MAX)
+    if comm is None or comm.rank == 0:
+        task.log.info(
+            f"Memory ({label}): largest rank {rss / 2**30:.1f} GiB, largest node "
+            f"{node / 2**30:.0f} GiB."
+        )
+
+
 def _optional_inputs(*args):
     """Sort optional requirements into an RFI mask and an in-band noise scale."""
     mask, noise = None, None
@@ -5928,6 +5950,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         of the RM spread function gives too few, a mean of +0.6).
     rm_chunk : int
         RM trials processed at once.  Default is 32.
+    el_pass : int
+        Number of local elevations processed in each pass.  The per-band sums
+        (numerators, responses, variances and sky terms of every band, telescope-x
+        and sample) are held for one pass at a time, which bounds the memory; the
+        filter response of each band is gathered once per pass.  Default is None
+        (all at once).
     rm_sky_modes : int
         Modes of the correlation between bands for which the sky term of Q in the
         RM search is computed at each RM; the others are taken at their mean over
@@ -5989,6 +6017,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     rm_ntrials_eff = config.Property(proptype=float, default=None)
     rm_chunk = config.Property(proptype=int, default=32)
     rm_sky_modes = config.Property(proptype=int, default=3)
+    el_pass = config.Property(
+        proptype=lambda v: None if v is None else int(v), default=None
+    )
 
     rfi_mask = None
 
@@ -6032,6 +6063,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         groups : ch_pipeline.core.containers.TransientBandGroupMap
             One for each entry of ``group_x_reduce``, if ``groups`` is set.
         """
+        _log_memory(self, "matched filter, start")
         durations = sorted(set(self.durations))
         if min(durations) < 1:
             raise ValueError("Durations must be at least one sample.")
@@ -6216,19 +6248,22 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             trials.attrs["rm_spectral_indices"] = alphas[rm_alpha]
             trials.attrs["amplitude_imag"] = "I: imaginary part; V: U at RM 0; L: best RM"
 
-        # Per-band sums kept for combining the bands: [pol group, band, el, x, ra]
-        shp = (ngp, nband, nel_local, nx, nra)
-        numer = np.zeros(shp, dtype=np.float32)
-        numer_im = (
-            np.zeros(shp, dtype=np.float32) if self.save_imag or self.stokes else None
-        )
-        resp = np.zeros(shp, dtype=np.float32)
-        vinc = np.zeros(shp, dtype=np.float32)
+        from mpi4py import MPI
+
+        # The local elevations are processed in passes of el_pass, so that the
+        # per-band sums [pol group, band, el, x, ra] are held for one pass at a
+        # time.  The gathers of the filter response are collective, so every rank
+        # makes the same number of passes (some of them empty).
+        el_pass = nel_local if self.el_pass is None else max(int(self.el_pass), 1)
+        npass = -(-nel_local // el_pass) if nel_local > 0 else 0
+        npass = self.comm.allreduce(npass, op=MPI.MAX)
+        if self.el_pass is not None and self.comm.rank == 0:
+            self.log.info(
+                f"Processing the elevations in {npass} passes of up to {el_pass}."
+            )
         # With stokes, only I and Q have a sky term
-        sshp = (2 if self.stokes else ngp,) + shp[1:]
-        vplus = np.zeros(sshp, dtype=np.complex64)
+        nsky = 2 if self.stokes else ngp
         two_pol = self.stokes or any(len(g) == 2 for g in pgroups)
-        vminus = np.zeros(sshp, dtype=np.complex64) if two_pol else None
 
         pbeam *= visible[el_slc][np.newaxis, np.newaxis]
         lmbda = scipy.constants.c / (freq * 1e6)
@@ -6241,161 +6276,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         periodic = _is_full_day(ra) and bool(hvis.attrs.get("ra_periodic", True))
         if long_w:
             track = self._tracks(ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax)
-            cshp = (alphas.size, len(long_w), len(pgroups), nel_local, nx, nra)
-            cross_r = np.zeros(cshp, dtype=np.float32)
-            cross_v = np.zeros(cshp, dtype=np.float32)
 
-        for bb in range(nband):
-            fsel = np.flatnonzero(band_index == bb)
-            wb = weight_all[:, fsel]  # pol, freq, ew, ra
-            if has_response:
-                resp_t = self._gather_freq(hvis.ra_response, fsel)[ipol][:, :, iew]
-                one_m_p = (1.0 - resp_t[..., lag_index[0]].real).astype(np.float32)
-            else:
-                one_m_p = np.ones(wb.shape, dtype=np.float32)
-            inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
-            omp = one_m_p[:, :, :, np.newaxis, :]
-            # In-band scale of the thermal noise [pol, freq, ew, el, ra]
-            gb = gfac[:, gband[fsel]] if gfac is not None else None
-
-            for e0 in range(0, nel_local, self.nel_chunk):
-                esl = slice(e0, min(e0 + self.nel_chunk, nel_local))
-                yel = el_local[esl]
-                # Coefficients for these elevations: [(pol), (freq), ew, el, ra]
-                yb = yband_local[esl]
-                kt = k2tot[bb][:, yb][np.newaxis, np.newaxis]
-                ki = k2inc[bb][:, yb][np.newaxis, np.newaxis]
-                kc = kcoh[bb][:, yb][np.newaxis]
-                phase = (
-                    2.0
-                    * np.pi
-                    * u[fsel][:, :, np.newaxis, np.newaxis]
-                    * (
-                        np.cos(self.rot) * x[np.newaxis, :]
-                        + np.sin(self.rot) * yel[:, np.newaxis]
-                    )
-                )
-                template = (
-                    pbeam[:, fsel][:, :, np.newaxis, esl] * np.exp(1.0j * phase)
-                ).astype(
-                    np.complex64
-                )  # pol, freq, ew, el, x
-
-                data = vis[:, :, :, esl][
-                    np.ix_(ipol, fsel, iew)
-                ]  # pol, freq, ew, el, ra
-                sky_v = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
-                var_th = nscale[:, fsel][..., esl, np.newaxis] * inv_w
-                if gb is not None:
-                    var_th = var_th * gb[..., esl, :]
-                s2 = np.abs(sky_v) ** 2
-                ok = (
-                    (inv_w > 0)
-                    & (nscale[:, fsel][..., esl, np.newaxis] > 0)
-                    & np.isfinite(data)
-                    & np.isfinite(sky_v)
-                )
-                if rfi is not None:
-                    ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
-                wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
-                data = np.where(ok, data, 0.0)
-                sky_v = np.where(ok, sky_v, 0.0)
-
-                wd = (wt * data).astype(np.complex64)
-                wr = (wt * omp).astype(np.float32)
-                wv = (wt**2 * (var_th * omp + ki * s2)).astype(np.float32)
-                ws = (wt * kc * sky_v).astype(np.complex64)
-
-                if self.stokes:
-                    self._stokes_band(
-                        bb,
-                        esl,
-                        sidx,
-                        template,
-                        wd,
-                        wr,
-                        wv,
-                        ws,
-                        rho_pol[bb],
-                        xy_phase[bb],
-                        numer,
-                        numer_im,
-                        resp,
-                        vinc,
-                        vplus,
-                        vminus,
-                    )
-                    for ci, grp in enumerate(pgroups):
-                        if not long_w:
-                            break
-                        tc = template[grp].reshape(-1, *template.shape[3:])
-                        cr, cv = self._track_cross(
-                            tc,
-                            wt[grp].reshape(-1, *wt.shape[3:]).transpose(1, 0, 2),
-                            var_th[grp].reshape(-1, *var_th.shape[3:]).transpose(1, 0, 2),
-                            resp_t[grp].reshape(-1, *resp_t.shape[3:]),
-                            lag_index,
-                            track[:, esl],
-                            long_w,
-                        )
-                        for iw in range(len(long_w)):
-                            for ia in range(alphas.size):
-                                sb2 = scale[bb, ia] ** 2
-                                cross_r[ia, iw, ci, esl] += sb2 * cr[iw]
-                                cross_v[ia, iw, ci, esl] += sb2 * cv[iw]
-                    continue
-
-                for gg, grp in enumerate(pgroups):
-                    tc = template[grp].reshape(-1, *template.shape[3:])  # k, el, x
-                    tch = tc.transpose(1, 2, 0).conj()  # el, x, k
-                    g2 = np.abs(tch) ** 2
-
-                    def kmat(a, g=grp):
-                        return (
-                            a[g].reshape(-1, *a.shape[3:]).transpose(1, 0, 2)
-                        )  # el, k, ra
-
-                    n1 = np.matmul(tch, kmat(wd))  # el, x, ra
-                    numer[gg, bb, esl] = n1.real
-                    if numer_im is not None:
-                        numer_im[gg, bb, esl] = n1.imag
-                    resp[gg, bb, esl] = np.matmul(g2, kmat(wr))
-                    vinc[gg, bb, esl] = np.matmul(g2, kmat(wv))
-
-                    if long_w:
-                        cr, cv = self._track_cross(
-                            tc,
-                            kmat(wt),
-                            kmat(var_th),
-                            resp_t[grp].reshape(-1, *resp_t.shape[3:]),
-                            lag_index,
-                            track[:, esl],
-                            long_w,
-                        )
-                        for iw in range(len(long_w)):
-                            for ia in range(alphas.size):
-                                sb2 = scale[bb, ia] ** 2
-                                cross_r[ia, iw, gg, esl] += sb2 * cr[iw]
-                                cross_v[ia, iw, gg, esl] += sb2 * cv[iw]
-
-                    vp = []
-                    for pp in grp:
-                        tp = template[pp].reshape(-1, *template.shape[3:])
-                        vp.append(
-                            np.matmul(
-                                tp.transpose(1, 2, 0).conj(),
-                                ws[pp].reshape(-1, *ws.shape[3:]).transpose(1, 0, 2),
-                            )
-                        )
-                    if len(vp) == 2:
-                        r = rho_pol[bb]
-                        vplus[gg, bb, esl] = (vp[0] + vp[1]) * np.sqrt(0.5 * (1 + r))
-                        vminus[gg, bb, esl] = (vp[0] - vp[1]) * np.sqrt(0.5 * (1 - r))
-                    else:
-                        vplus[gg, bb, esl] = vp[0]
-
-        # Each band on its own: (group, part) of each output polarisation, part 0
-        # the real and 1 the imaginary numerator
+        # Outputs
         bamp = bands.amplitude[:].local_array
         bwgt = bands.weight[:].local_array
         bimag = (
@@ -6403,25 +6285,6 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             if "amplitude_imag" in bands.datasets
             else None
         )
-        if self.stokes:
-            bsrc = [(0, 0), (1, 0), (2, 0), (2, 1)]  # I, Q, U, V
-        else:
-            bsrc = [(gg, 0) for gg in range(ngp)]
-        for op, (gg, part) in enumerate(bsrc):
-            for bb in range(nband):
-                var = 0.5 * vinc[gg, bb]
-                for vv in (vplus, vminus):
-                    if vv is not None and gg < vv.shape[0]:
-                        var = var + 0.5 * np.abs(vv[gg, bb]) ** 2
-                nm = numer[gg, bb] if part == 0 else numer_im[gg, bb]
-                amp, wgt = self._amp_weight(nm, resp[gg, bb], var)
-                bamp[op, 0, bb] = amp.transpose(0, 2, 1)
-                bwgt[op, 0, bb] = wgt.transpose(0, 2, 1)
-                if bimag is not None:
-                    im, _ = self._amp_weight(numer_im[gg, bb], resp[gg, bb], var)
-                    bimag[op, 0, bb] = im.transpose(0, 2, 1)
-
-        # All bands, for each spectral index
         tamp = trials.amplitude[:].local_array
         twgt = trials.weight[:].local_array
         timag = (
@@ -6429,13 +6292,28 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             if "amplitude_imag" in trials.datasets
             else None
         )
+        gsl = slice(0, 1) if self.stokes else slice(None)
+        groups = self._group_maps_setup(hvis, band_map, x, opol[gsl], ha, dec, rho_band)
+        # Each band on its own: (group, part) of each output polarisation, part 0
+        # the real and 1 the imaginary numerator
+        if self.stokes:
+            bsrc = [(0, 0), (1, 0), (2, 0), (2, 1)]  # I, Q, U, V
+            # All bands: (output, group, swap the real and imaginary parts)
+            srcs = [(0, 0, False), (1, 2, True)]  # I, and V from C
+            rtot = np.zeros(nband, dtype=np.float64)
+        else:
+            bsrc = [(gg, 0) for gg in range(ngp)]
+            srcs = [(gg, gg, False) for gg in range(ngp)]
         allb = np.arange(nband)
 
         def valid_w(W):
             return np.ones(nra, dtype=bool) if periodic else np.arange(nra) <= nra - W
 
-        def per_duration(ia, ee, gg, nm, rs, vr, ni):
-            """[numerator, response, variance, imaginary numerator] per duration."""
+        def per_duration(ia, ee, le, gg, nm, rs, vr, ni):
+            """[numerator, response, variance, imaginary numerator] per duration.
+
+            ``ee`` is the local elevation and ``le`` its index in the pass.
+            """
             out = [(nm, rs, vr, ni)]
             if not long_w:
                 return out
@@ -6446,8 +6324,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             ]
             for iw, W in enumerate(long_w):
                 iwd = durations.index(W)
-                rs_w = sums[0][iwd][0].real + cross_r[ia, iw, cmap[gg], ee]
-                vr_w = sums[1][iwd][0].real + 0.5 * cross_v[ia, iw, cmap[gg], ee]
+                rs_w = sums[0][iwd][0].real + cross_r[ia, iw, cmap[gg], le]
+                vr_w = sums[1][iwd][0].real + 0.5 * cross_v[ia, iw, cmap[gg], le]
                 rs_w = np.where(valid_w(W), rs_w, 0.0)
                 rest = [s[iwd][0].real for s in sums[2:]]
                 nm_w = rest.pop(0) if nm is not None else None
@@ -6464,87 +6342,289 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     im, _ = self._amp_weight(ni, rs, vr)
                     timag[op, iwd, ia, ee] = im.T
 
-        def combine(gg, ee, sb):
+        def combine(gg, le, sb):
             return self._combine(
-                gg, ee, allb, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus
+                gg, le, allb, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus
             )
 
-        # (output, group, swap the real and imaginary parts)
+        _log_memory(self, "matched filter, before the passes")
+        for ipass in range(npass):
+            t_pass = time.time()
+            p0 = min(ipass * el_pass, nel_local)
+            p1 = min(p0 + el_pass, nel_local)
+            npe = p1 - p0
+            shp = (ngp, nband, npe, nx, nra)
+            numer = np.zeros(shp, dtype=np.float32)
+            numer_im = (
+                np.zeros(shp, dtype=np.float32)
+                if self.save_imag or self.stokes
+                else None
+            )
+            resp = np.zeros(shp, dtype=np.float32)
+            vinc = np.zeros(shp, dtype=np.float32)
+            vplus = np.zeros((nsky, *shp[1:]), dtype=np.complex64)
+            vminus = np.zeros((nsky, *shp[1:]), dtype=np.complex64) if two_pol else None
+            if long_w:
+                cshp = (alphas.size, len(long_w), len(pgroups), npe, nx, nra)
+                cross_r = np.zeros(cshp, dtype=np.float32)
+                cross_v = np.zeros(cshp, dtype=np.float32)
+
+            for bb in range(nband):
+                fsel = np.flatnonzero(band_index == bb)
+                wb = weight_all[:, fsel]  # pol, freq, ew, ra
+                if has_response:
+                    resp_t = self._gather_freq(hvis.ra_response, fsel)[ipol][:, :, iew]
+                    one_m_p = (1.0 - resp_t[..., lag_index[0]].real).astype(np.float32)
+                else:
+                    one_m_p = np.ones(wb.shape, dtype=np.float32)
+                inv_w = tools.invert_no_zero(wb)[:, :, :, np.newaxis, :]
+                omp = one_m_p[:, :, :, np.newaxis, :]
+                # In-band scale of the thermal noise [pol, freq, ew, el, ra]
+                gb = gfac[:, gband[fsel]] if gfac is not None else None
+
+                for e0 in range(p0, p1, self.nel_chunk):
+                    # esl: the local elevations, psl: their place in the pass
+                    esl = slice(e0, min(e0 + self.nel_chunk, p1))
+                    psl = slice(esl.start - p0, esl.stop - p0)
+                    yel = el_local[esl]
+                    # Coefficients for these elevations: [(pol), (freq), ew, el, ra]
+                    yb = yband_local[esl]
+                    kt = k2tot[bb][:, yb][np.newaxis, np.newaxis]
+                    ki = k2inc[bb][:, yb][np.newaxis, np.newaxis]
+                    kc = kcoh[bb][:, yb][np.newaxis]
+                    phase = (
+                        2.0
+                        * np.pi
+                        * u[fsel][:, :, np.newaxis, np.newaxis]
+                        * (
+                            np.cos(self.rot) * x[np.newaxis, :]
+                            + np.sin(self.rot) * yel[:, np.newaxis]
+                        )
+                    )
+                    template = (
+                        pbeam[:, fsel][:, :, np.newaxis, esl] * np.exp(1.0j * phase)
+                    ).astype(
+                        np.complex64
+                    )  # pol, freq, ew, el, x
+
+                    data = vis[:, :, :, esl][
+                        np.ix_(ipol, fsel, iew)
+                    ]  # pol, freq, ew, el, ra
+                    sky_v = uvis[:, :, :, esl][np.ix_(ipu, fsel, iewu)]
+                    var_th = nscale[:, fsel][..., esl, np.newaxis] * inv_w
+                    if gb is not None:
+                        var_th = var_th * gb[..., esl, :]
+                    s2 = np.abs(sky_v) ** 2
+                    ok = (
+                        (inv_w > 0)
+                        & (nscale[:, fsel][..., esl, np.newaxis] > 0)
+                        & np.isfinite(data)
+                        & np.isfinite(sky_v)
+                    )
+                    if rfi is not None:
+                        ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
+                    wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
+                    data = np.where(ok, data, 0.0)
+                    sky_v = np.where(ok, sky_v, 0.0)
+
+                    wd = (wt * data).astype(np.complex64)
+                    wr = (wt * omp).astype(np.float32)
+                    wv = (wt**2 * (var_th * omp + ki * s2)).astype(np.float32)
+                    ws = (wt * kc * sky_v).astype(np.complex64)
+
+                    if self.stokes:
+                        self._stokes_band(
+                            bb,
+                            psl,
+                            sidx,
+                            template,
+                            wd,
+                            wr,
+                            wv,
+                            ws,
+                            rho_pol[bb],
+                            xy_phase[bb],
+                            numer,
+                            numer_im,
+                            resp,
+                            vinc,
+                            vplus,
+                            vminus,
+                        )
+                        for ci, grp in enumerate(pgroups):
+                            if not long_w:
+                                break
+                            tc = template[grp].reshape(-1, *template.shape[3:])
+                            cr, cv = self._track_cross(
+                                tc,
+                                wt[grp].reshape(-1, *wt.shape[3:]).transpose(1, 0, 2),
+                                var_th[grp]
+                                .reshape(-1, *var_th.shape[3:])
+                                .transpose(1, 0, 2),
+                                resp_t[grp].reshape(-1, *resp_t.shape[3:]),
+                                lag_index,
+                                track[:, esl],
+                                long_w,
+                            )
+                            for iw in range(len(long_w)):
+                                for ia in range(alphas.size):
+                                    sb2 = scale[bb, ia] ** 2
+                                    cross_r[ia, iw, ci, psl] += sb2 * cr[iw]
+                                    cross_v[ia, iw, ci, psl] += sb2 * cv[iw]
+                        continue
+
+                    for gg, grp in enumerate(pgroups):
+                        tc = template[grp].reshape(-1, *template.shape[3:])  # k, el, x
+                        tch = tc.transpose(1, 2, 0).conj()  # el, x, k
+                        g2 = np.abs(tch) ** 2
+
+                        def kmat(a, g=grp):
+                            return (
+                                a[g].reshape(-1, *a.shape[3:]).transpose(1, 0, 2)
+                            )  # el, k, ra
+
+                        n1 = np.matmul(tch, kmat(wd))  # el, x, ra
+                        numer[gg, bb, psl] = n1.real
+                        if numer_im is not None:
+                            numer_im[gg, bb, psl] = n1.imag
+                        resp[gg, bb, psl] = np.matmul(g2, kmat(wr))
+                        vinc[gg, bb, psl] = np.matmul(g2, kmat(wv))
+
+                        if long_w:
+                            cr, cv = self._track_cross(
+                                tc,
+                                kmat(wt),
+                                kmat(var_th),
+                                resp_t[grp].reshape(-1, *resp_t.shape[3:]),
+                                lag_index,
+                                track[:, esl],
+                                long_w,
+                            )
+                            for iw in range(len(long_w)):
+                                for ia in range(alphas.size):
+                                    sb2 = scale[bb, ia] ** 2
+                                    cross_r[ia, iw, gg, psl] += sb2 * cr[iw]
+                                    cross_v[ia, iw, gg, psl] += sb2 * cv[iw]
+
+                        vp = []
+                        for pp in grp:
+                            tp = template[pp].reshape(-1, *template.shape[3:])
+                            vp.append(
+                                np.matmul(
+                                    tp.transpose(1, 2, 0).conj(),
+                                    ws[pp].reshape(-1, *ws.shape[3:]).transpose(1, 0, 2),
+                                )
+                            )
+                        if len(vp) == 2:
+                            r = rho_pol[bb]
+                            vplus[gg, bb, psl] = (vp[0] + vp[1]) * np.sqrt(0.5 * (1 + r))
+                            vminus[gg, bb, psl] = (vp[0] - vp[1]) * np.sqrt(
+                                0.5 * (1 - r)
+                            )
+                        else:
+                            vplus[gg, bb, psl] = vp[0]
+            t_bands = time.time() - t_pass
+
+            # Each band on its own
+            for op, (gg, part) in enumerate(bsrc):
+                for bb in range(nband):
+                    var = 0.5 * vinc[gg, bb]
+                    for vv in (vplus, vminus):
+                        if vv is not None and gg < vv.shape[0]:
+                            var = var + 0.5 * np.abs(vv[gg, bb]) ** 2
+                    nm = numer[gg, bb] if part == 0 else numer_im[gg, bb]
+                    amp, wgt = self._amp_weight(nm, resp[gg, bb], var)
+                    bamp[op, 0, bb, p0:p1] = amp.transpose(0, 2, 1)
+                    bwgt[op, 0, bb, p0:p1] = wgt.transpose(0, 2, 1)
+                    if bimag is not None:
+                        im, _ = self._amp_weight(numer_im[gg, bb], resp[gg, bb], var)
+                        bimag[op, 0, bb, p0:p1] = im.transpose(0, 2, 1)
+
+            # All bands, for each spectral index
+            for ia in range(alphas.size):
+                sb = scale[:, ia]
+                for le in range(npe):
+                    ee = p0 + le
+                    for op, gg, swap in srcs:
+                        nm, rs, vr, ni = combine(gg, le, sb)
+                        if swap:
+                            nm, ni = ni, nm
+                        write(op, ia, ee, per_duration(ia, ee, le, gg, nm, rs, vr, ni))
+                    if not self.stokes:
+                        continue
+                    if ia not in rm_alpha:
+                        tamp[2, :, ia, ee] = 0.0
+                        twgt[2, :, ia, ee] = 0.0
+                        timag[2, :, ia, ee] = 0.0
+                        continue
+                    # Linear polarisation: response and thermal variance of Q and U;
+                    # the sky term of Q depends on the RM and is added in _rm_search
+                    _, rsq, vrq, _ = self._combine(
+                        1, le, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
+                    )
+                    _, rsc, vrc, _ = combine(2, le, sb)
+                    rv = [
+                        (0.5 * (q[1] + c[1]), 0.5 * (q[2] + c[2]))
+                        for q, c in zip(
+                            per_duration(ia, ee, le, 1, None, rsq, vrq, None),
+                            per_duration(ia, ee, le, 2, None, rsc, vrc, None),
+                        )
+                    ]
+                    # The largest chi-squared over RM and |P|; converted to a
+                    # Gaussian S/N after the last pass, when the weights of the
+                    # bands (summed over all elevations) are known
+                    tmax, pol_amp, brm = self._rm_search(
+                        numer[1, :, le],
+                        numer[2, :, le],
+                        sb[:, np.newaxis] * rm_coef,
+                        rm,
+                        None,
+                        rv,
+                        track[:, ee] if long_w else None,
+                        durations,
+                        [valid_w(W) for W in durations],
+                        self._rm_sky(le, sb, lam, qvec, vplus, vminus),
+                    )
+                    tamp[2, :, ia, ee] = tmax.transpose(0, 2, 1)
+                    twgt[2, :, ia, ee] = pol_amp.transpose(0, 2, 1)
+                    timag[2, :, ia, ee] = brm.transpose(0, 2, 1)
+            if self.stokes:
+                rtot += np.sum(resp[1], axis=(1, 2, 3), dtype=np.float64)
+
+            self._group_maps_fill(
+                groups,
+                numer[gsl],
+                resp[gsl],
+                vinc[gsl],
+                vplus[gsl],
+                vminus[gsl] if vminus is not None else None,
+                p0,
+            )
+            _log_memory(
+                self,
+                f"matched filter, end of pass {ipass + 1}/{npass} ({t_bands:.0f} s in "
+                f"the band loop, {time.time() - t_pass:.0f} s in all)",
+            )
+            del numer, numer_im, resp, vinc, vplus, vminus
+            if long_w:
+                del cross_r, cross_v
+
         if self.stokes:
-            srcs = [(0, 0, False), (1, 2, True)]  # I, and V from C
-        else:
-            srcs = [(gg, gg, False) for gg in range(ngp)]
-        if self.stokes:
-            rtot = np.sum(resp[1], axis=(1, 2, 3), dtype=np.float64)  # band
-            ntrials = {
-                ia: self._rm_ntrials(lam2_b, scale[:, ia] ** 2 * rtot, hvis.comm)
-                for ia in rm_alpha
-            }
+            # Linear polarisation as a Gaussian S/N, with the number of independent
+            # RM trials from the weights of the bands over all elevations
             for ia in rm_alpha:
+                ntrials = self._rm_ntrials(lam2_b, scale[:, ia] ** 2 * rtot, hvis.comm)
                 self.log.info(
-                    f"Spectral index {alphas[ia]:+.1f}: {ntrials[ia](25.0):.0f} "
+                    f"Spectral index {alphas[ia]:+.1f}: {ntrials(25.0):.0f} "
                     "independent RM trials at chi2 = 25."
                 )
-        for ia in range(alphas.size):
-            sb = scale[:, ia]
-            for ee in range(nel_local):
-                for op, gg, swap in srcs:
-                    nm, rs, vr, ni = combine(gg, ee, sb)
-                    if swap:
-                        nm, ni = ni, nm
-                    write(op, ia, ee, per_duration(ia, ee, gg, nm, rs, vr, ni))
-                if not self.stokes:
-                    continue
-                if ia not in rm_alpha:
-                    tamp[2, :, ia, ee] = 0.0
-                    twgt[2, :, ia, ee] = 0.0
-                    timag[2, :, ia, ee] = 0.0
-                    continue
-                # Linear polarisation: response and thermal variance of Q and U; the
-                # sky term of Q depends on the RM and is added in _rm_search
-                _, rsq, vrq, _ = self._combine(
-                    1, ee, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
-                )
-                _, rsc, vrc, _ = combine(2, ee, sb)
-                rv = [
-                    (0.5 * (q[1] + c[1]), 0.5 * (q[2] + c[2]))
-                    for q, c in zip(
-                        per_duration(ia, ee, 1, None, rsq, vrq, None),
-                        per_duration(ia, ee, 2, None, rsc, vrc, None),
-                    )
-                ]
-                amp, wgt, brm = self._rm_search(
-                    numer[1, :, ee],
-                    numer[2, :, ee],
-                    sb[:, np.newaxis] * rm_coef,
-                    rm,
-                    ntrials[ia],
-                    rv,
-                    track[:, ee] if long_w else None,
-                    durations,
-                    [valid_w(W) for W in durations],
-                    self._rm_sky(ee, sb, lam, qvec, vplus, vminus),
-                )
-                tamp[2, :, ia, ee] = amp.transpose(0, 2, 1)
-                twgt[2, :, ia, ee] = wgt.transpose(0, 2, 1)
-                timag[2, :, ia, ee] = brm.transpose(0, 2, 1)
+                amp, wgt = self._rm_gaussian(tamp[2, :, ia], twgt[2, :, ia], ntrials)
+                tamp[2, :, ia] = amp
+                twgt[2, :, ia] = wgt
 
-        gsl = slice(0, 1) if self.stokes else slice(None)
-        group_maps = self._group_maps(
-            hvis,
-            band_map,
-            x,
-            opol[gsl],
-            ha,
-            dec,
-            numer[gsl],
-            resp[gsl],
-            vinc[gsl],
-            vplus[gsl],
-            vminus[gsl] if vminus is not None else None,
-            rho_band,
-            nel_local,
-        )
+        group_maps = groups[0] if groups is not None else []
+        if group_maps:
+            self.log.info(f"Made maps for {len(groups[2])} groups of bands.")
         return (trials, bands, *group_maps)
 
     def _stokes_index(self):
@@ -6662,8 +6742,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             ``s_b e^{-2 i RM l_b^2}``.
         rm : np.ndarray[rm]
             The RM trials.
-        ntrials : callable
-            Number of independent RM trials at a level of chi-squared.
+        ntrials : callable or None
+            Number of independent RM trials at a level of chi-squared.  If None,
+            the largest chi-squared and |P| are returned instead of the amplitude and
+            weight (see :meth:`_rm_gaussian`).
         rv : list of (np.ndarray[x, ra], np.ndarray[x, ra])
             Response and thermal variance of the real part for each duration.
         track : np.ndarray[wmax, x] or None
@@ -6679,6 +6761,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         Returns
         -------
         amp, wgt, best_rm : np.ndarray[duration, x, ra]
+            Or the largest chi-squared (-1 where there is no trial) and |P| in place
+            of amp and wgt, if ``ntrials`` is None.
         """
         nb, nx, nra = nq.shape
         ndur = len(durations)
@@ -6719,17 +6803,32 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 if jj > 0 and jj + 1 in durations:
                     update(durations.index(jj + 1), acc, accv, k0)
 
-        amp = np.zeros((ndur, nx, nra), dtype=np.float32)
-        wgt = np.zeros((ndur, nx, nra), dtype=np.float32)
+        tmax = np.full((ndur, nx, nra), -1.0, dtype=np.float32)
+        pol_amp = np.zeros((ndur, nx, nra), dtype=np.float32)
         for iwd in range(ndur):
             rs, vr = rv[iwd]
             ok = (rs > 0) & (vr > 0) & valid[iwd][np.newaxis] & (best_t[iwd] >= 0)
-            tt = np.where(ok, best_t[iwd], 0.0)
-            zz = _chi2max_to_gaussian(tt, ntrials(tt))
-            p = np.maximum(best_s[iwd] * tools.invert_no_zero(rs), 1e-30)
-            amp[iwd] = np.where(ok, np.sign(zz) * p, 0.0)
-            wgt[iwd] = np.where(ok, (zz / p) ** 2, 0.0)
+            tmax[iwd] = np.where(ok, best_t[iwd], -1.0)
+            pol_amp[iwd] = np.where(ok, best_s[iwd] * tools.invert_no_zero(rs), 0.0)
+        if ntrials is None:
+            return tmax, pol_amp, rm[best_k].astype(np.float32)
+        amp, wgt = self._rm_gaussian(tmax, pol_amp, ntrials)
         return amp, wgt, rm[best_k].astype(np.float32)
+
+    @staticmethod
+    def _rm_gaussian(tmax, pol_amp, ntrials):
+        """Amplitude ``sign(z) |P|`` and weight ``(z / |P|)^2`` of the RM search.
+
+        ``z`` is the Gaussian S/N of the largest chi-squared ``tmax`` (-1 where
+        there is no trial) over ``ntrials`` independent RM trials.
+        """
+        ok = tmax >= 0
+        tt = np.where(ok, tmax, 0.0)
+        zz = _chi2max_to_gaussian(tt, ntrials(tt))
+        p = np.maximum(pol_amp, 1e-30)
+        amp = np.where(ok, np.sign(zz) * p, 0.0).astype(np.float32)
+        wgt = np.where(ok, (zz / p) ** 2, 0.0).astype(np.float32)
+        return amp, wgt
 
     def _rm_sky(self, ee, sb, lam, qvec, vplus, vminus):
         """Sky term of Q for the RM search at one elevation.
@@ -6910,25 +7009,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             var = var + np.sum(np.abs(y) ** 2, axis=0)
         return nm, rs, 0.5 * var, ni
 
-    def _group_maps(
-        self,
-        hvis,
-        band_map,
-        x,
-        opol,
-        ha,
-        dec,
-        numer,
-        resp,
-        vinc,
-        vplus,
-        vminus,
-        rho_band,
-        nel_local,
-    ):
-        """S/N maps for the groups of bands, one for each entry of group_x_reduce."""
+    def _group_maps_setup(self, hvis, band_map, x, opol, ha, dec, rho_band):
+        """Containers of the group maps, one for each entry of group_x_reduce.
+
+        Returns None without groups, else (outputs, telescope-x index of each
+        output (None for the best), group names, and for each group the bands, the
+        modes of their correlation and the band weights).
+        """
         if not self.groups:
-            return []
+            return None
         centre = band_map["centre"]
         names, used = [], []
         for name, ranges in self.groups.items():
@@ -6978,27 +7067,27 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             outs.append(out)
 
         sb = (centre / self.reference_freq) ** self.group_spectral_index
-        ngp = numer.shape[0]
-        for ig, inc in enumerate(used):
+        modes = []
+        for inc in used:
             idx = np.flatnonzero(inc)
             lam, qvec = self._modes(rho_band[np.ix_(idx, idx)])
             sg = np.zeros(centre.size)
             sg[idx] = sb[idx]
+            modes.append((idx, lam, qvec, sg))
+        return outs, fixed, names, modes
+
+    def _group_maps_fill(self, groups, numer, resp, vinc, vplus, vminus, e0):
+        """S/N of the group maps for the elevations of one pass (from local ``e0``)."""
+        if groups is None:
+            return
+        outs, fixed, _, modes = groups
+        ngp, _, npe = numer.shape[:3]
+        for ig, (idx, lam, qvec, sg) in enumerate(modes):
             for gg in range(ngp):
-                for ee in range(nel_local):
+                for le in range(npe):
+                    ee = e0 + le
                     nm, rs, vr, _ = self._combine(
-                        gg,
-                        ee,
-                        idx,
-                        sg,
-                        lam,
-                        qvec,
-                        numer,
-                        None,
-                        resp,
-                        vinc,
-                        vplus,
-                        vminus,
+                        gg, le, idx, sg, lam, qvec, numer, None, resp, vinc, vplus, vminus
                     )
                     snr = np.where(
                         (rs > 0) & (vr > 0), nm * tools.invert_no_zero(np.sqrt(vr)), 0.0
@@ -7012,8 +7101,6 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             out.datasets["x_index"][:].local_array[gg, ig, ee] = ix
                         else:
                             out.snr[:].local_array[gg, ig, ee] = snr[ix0]
-        self.log.info(f"Made maps for {len(names)} groups of bands.")
-        return outs
 
     def _sky_coefficients(self, sky, band_map, ew_used, ra, el):
         """Coefficients of the sky term on the data's axes.
