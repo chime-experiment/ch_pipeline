@@ -1213,10 +1213,8 @@ def apply_mmode_filter(
 
     valid = flag & (denominator != 0.0)
 
-    inv_denominator = np.zeros_like(denominator, dtype=np.complex128)
-    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        np.divide(1.0, denominator, out=inv_denominator, where=valid)
-        foreground = numerator * inv_denominator
+    inv_denominator = tools.invert_no_zero(np.where(valid, denominator, 0.0))
+    foreground = numerator * inv_denominator
 
     filtered = data - foreground
     valid &= np.isfinite(filtered)
@@ -2175,7 +2173,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                     pw[pf] += wt * np.abs(d) ** 2
                     # E|n|^2 = 1 / w, so the weighted noise power is wt / w
                     w = weight[pp, ff][:, np.newaxis, :].astype(np.float64)
-                    npw[pf] += np.where(wt > 0, wt / np.where(w > 0, w, 1.0), 0.0)
+                    npw[pf] += wt * tools.invert_no_zero(w)
             allreduce(pw, npw)
             return pw, npw
 
@@ -2244,15 +2242,15 @@ class SubtractScintillation(tasklib.base.ContainerTask):
                         G1 = np.where(good, g_init, 0.0)
                     if it == self.niter:
                         break
-                    a = np.where(G1 > 0, B1 / np.where(G1 > 0, G1, 1.0), 0.0)
+                    inv_g = tools.invert_no_zero(G1)
+                    a = B1 * inv_g
                     # Clip the weights at a few times their typical size in the row
                     power = np.where(G1 > 0, np.abs(a) ** 2, np.nan)
                     typical = np.nanmedian(power, axis=-1, keepdims=True)
                     typical = np.where(np.isfinite(typical), typical, 0.0)
-                    inv_g = np.divide(1.0, G1, out=np.zeros_like(G1), where=G1 > 0)
                     lim = np.sqrt(self.clip * (typical + inv_g))
                     big = np.abs(a) > lim
-                    a = np.where(big, a / np.where(big, np.abs(a), 1.0) * lim, a)
+                    a = np.where(big, a * tools.invert_no_zero(np.abs(a)) * lim, a)
                     e_chunk = rebuild(a, esl, use)
                 G = G1[..., np.newaxis, np.newaxis]
                 B = B1[..., np.newaxis]
@@ -2328,7 +2326,7 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         # The noise level of each row, relative to the weights, is the median over
         # RA of the measured to the expected power (the weights do not include the
         # noise scale)
-        ratio = np.where(ok & (npw > 0), pw / np.where(npw > 0, npw, 1.0), np.nan)
+        ratio = np.where(ok & (npw > 0), pw * tools.invert_no_zero(npw), np.nan)
         scale = np.nanmedian(ratio, axis=-1, keepdims=True)
         scale = np.where(np.isfinite(scale), scale, 1.0)
         excess = pw - scale * npw
@@ -2359,18 +2357,17 @@ class SubtractScintillation(tasklib.base.ContainerTask):
         lo, hi = self.prior_floor**2, self.prior_cap**2
         var = np.zeros((*G.shape[:-2], nparam), dtype=np.float64)
         for j in range(nparam):
-            gjj = np.where(has, G[..., j, j], 1.0)
-            noise = np.where(has, 1.0 / gjj, 0.0)
-            x = np.where(has, np.abs(B[..., j] / gjj) ** 2, 0.0)
+            noise = tools.invert_no_zero(np.where(has, G[..., j, j], 0.0))
+            x = np.abs(B[..., j] * noise) ** 2
             s = np.full((*G.shape[:-3], blk_start.size), np.clip(var0[j], lo, hi))
             for _ in range(niter):
                 tot = s[..., blk] + noise
-                u = np.where(has, 1.0 / tot**2, 0.0)
+                u = np.where(has, tools.invert_no_zero(tot**2), 0.0)
                 xc = np.minimum(x, self.prior_clip * tot)
                 num = np.add.reduceat(u * (xc - noise), blk_start, axis=-1)
                 den = np.add.reduceat(u, blk_start, axis=-1)
                 s = np.clip(
-                    np.where(den > 0, num / np.where(den > 0, den, 1.0), lo), lo, hi
+                    np.where(den > 0, num * tools.invert_no_zero(den), lo), lo, hi
                 )
             var[..., j] = s[..., blk]
         return var
@@ -2913,7 +2910,7 @@ def _ground_to_sph_clipped(x, y, lat):
     with ``x^2 + y^2 > 1`` are moved to the nearest point on the horizon.
     """
     r2 = x**2 + y**2
-    scale = np.where(r2 > 1.0, 1.0 / np.sqrt(np.where(r2 > 0, r2, 1.0)), 1.0)
+    scale = np.where(r2 > 1.0, tools.invert_no_zero(np.sqrt(r2)), 1.0)
     x, y = x * scale, y * scale
     z = np.sqrt(np.maximum(1.0 - x**2 - y**2, 0.0))
 
@@ -3495,7 +3492,7 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             if not valid.any():
                 continue
             s = _power_scale(Z[bb], nz[bb], z_med, self.local_window, periodic)
-            zs = np.where(valid, Z[bb] / s, 0.0)
+            zs = np.where(valid, Z[bb] * tools.invert_no_zero(s), 0.0)
             excess = np.where(valid, zs - nz[bb], 0.0)
             near = scipy.ndimage.maximum_filter(
                 excess, size=(2 * L + 1, 5), mode="constant"
@@ -3815,7 +3812,7 @@ def _power_scale(Z, nz, z_med, window, periodic):
         return np.ones(Z.shape)
     valid = nz > 0
     nra = Z.shape[-1]
-    r = np.where(valid, Z / z_med[nz], 0.0).astype(np.float64)
+    r = np.where(valid, Z * tools.invert_no_zero(z_med[nz]), 0.0).astype(np.float64)
     w = valid.astype(np.float64)
     pad = window if periodic else 0
     if pad:
@@ -6940,9 +6937,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         ok = (tmax >= 0) & (pol_amp > 0)
         tt = np.where(ok, tmax, 0.0)
         zz = _chi2max_to_gaussian(tt, ntrials(tt))
-        p = np.where(ok, pol_amp, 1.0)
-        amp = np.where(ok, np.sign(zz) * p, 0.0).astype(np.float32)
-        wgt = np.where(ok, (zz / p) ** 2, 0.0).astype(np.float32)
+        amp = np.where(ok, np.sign(zz) * pol_amp, 0.0).astype(np.float32)
+        wgt = (zz * tools.invert_no_zero(np.where(ok, pol_amp, 0.0))) ** 2
+        wgt = wgt.astype(np.float32)
         return amp, wgt
 
     def _rm_sky(self, ee, sb, lam, qvec, vplus, vminus):
@@ -7977,7 +7974,7 @@ class FitPolarisationCalibrators(tasklib.base.ContainerTask):
                 good = np.all(ww > 0, axis=0)
 
                 def inv(w, g=good):
-                    return 1.0 / np.where(g, w, 1.0)
+                    return tools.invert_no_zero(np.where(g, w, 0.0))
 
                 if mode == "stokes":
                     I, Q = vals[0].real, vals[1].real
@@ -8060,14 +8057,14 @@ def _fit_pol_calibrator(
     :class:`FitPolarisationCalibrators`).  I, Q, C and their noise are [band,
     sample]; returns the fit (a dict) and the per-band values."""
     nb = freq.size
-    wt = np.where(good, 1.0 / np.where(good, sI, 1.0) ** 2, 0.0)
+    wt = tools.invert_no_zero(np.where(good, sI, 0.0) ** 2)
     den = np.sum(wt * (I**2 - sI**2), axis=1)
     use = den > 0
-    dd = np.where(use, den, 1.0)
-    q = np.where(use, np.sum(wt * Q * I, axis=1) / dd, np.nan)
-    c = np.where(use, np.sum(wt * C * I, axis=1) / dd, np.nan)
-    sq = np.where(use, np.sqrt(np.sum(wt**2 * sQ**2 * I**2, axis=1)) / dd, np.inf)
-    sc = np.where(use, np.sqrt(np.sum(wt**2 * sC**2 * I**2, axis=1)) / dd, np.inf)
+    idd = tools.invert_no_zero(np.where(use, den, 0.0))
+    q = np.where(use, np.sum(wt * Q * I, axis=1) * idd, np.nan)
+    c = np.where(use, np.sum(wt * C * I, axis=1) * idd, np.nan)
+    sq = np.where(use, np.sqrt(np.sum(wt**2 * sQ**2 * I**2, axis=1)) * idd, np.inf)
+    sc = np.where(use, np.sqrt(np.sum(wt**2 * sC**2 * I**2, axis=1)) * idd, np.inf)
     keep = use & np.isfinite(q) & np.isfinite(c) & (sq < frac_max)
     pb = {
         "q": np.where(use, q, 0.0),
@@ -8087,7 +8084,7 @@ def _fit_pol_calibrator(
 
     # 1. |RM|, p and chi from the fractional Q
     rms = np.arange(0.5, rm_max, 0.1)
-    w = 1.0 / sqk**2
+    w = tools.invert_no_zero(sqk**2)
     ph = 2.0 * rms[:, np.newaxis] * lam2[np.newaxis, :]
     dep = np.abs(np.sinc(rms[:, np.newaxis] * dl2[np.newaxis, :] / np.pi))
     tc, ts = dep * np.cos(ph), dep * np.sin(ph)
@@ -8108,7 +8105,7 @@ def _fit_pol_calibrator(
     ub = pfrac * depk * np.sin(2.0 * (chi_s + rm * lam2))
     taus = np.arange(-delay_max, delay_max + 1e-9, 0.02) * 1e-9
     M = np.stack([ub, np.ones_like(ub)], axis=1).astype(complex)  # band, 2
-    wc = 1.0 / sck**2
+    wc = tools.invert_no_zero(sck**2)
     Wm = M * wc[:, np.newaxis]
     G = M.conj().T @ Wm
     chi2 = np.empty(taus.size)
@@ -8150,9 +8147,11 @@ def _chi2_to_gaussian(q, k):
     """
     k = np.asarray(k, dtype=np.float64)
     ok = k > 0
-    kk = np.where(ok, k, 1.0)
-    c = 2.0 / (9.0 * kk)
-    z = (np.cbrt(np.where(ok, q, 0.0) / kk) - (1.0 - c)) / np.sqrt(c)
+    ik = tools.invert_no_zero(np.where(ok, k, 0.0))
+    c = 2.0 * ik / 9.0
+    z = (np.cbrt(np.where(ok, q, 0.0) * ik) - (1.0 - c)) * tools.invert_no_zero(
+        np.sqrt(c)
+    )
     return np.where(ok, z, 0.0)
 
 
@@ -8401,7 +8400,7 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
             sig = self._sigma(np.moveaxis(av, -1, 0), off, nel, comm)  # x, el, ra
             sig = np.moveaxis(sig, 0, -1)
             ok = np.isfinite(sig) & (sig > 0)
-            wgt[p, d, a] = np.where(ok, w / np.where(ok, sig, 1.0) ** 2, 0.0)
+            wgt[p, d, a] = w * tools.invert_no_zero(np.where(ok, sig, 0.0) ** 2)
             med[p, d, a] = _global_median(sig[ok & (w > 0)], comm)
         self._attrs(trials)
         for d in range(ndur):
@@ -8459,7 +8458,7 @@ class CalibrateGroupNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
             av = np.where(s0[p, g] != 0, np.abs(s0[p, g]), np.nan)
             sig = self._sigma(av, off, nel, x0.comm)
             ok = np.isfinite(sig) & (sig > 0)
-            inv = np.where(ok, 1.0 / np.where(ok, sig, 1.0), 0.0)
+            inv = tools.invert_no_zero(np.where(ok, sig, 0.0))
             s0[p, g] *= inv
             s1[p, g] *= inv
             self.log.info(
