@@ -2018,7 +2018,13 @@ class TransientCandidateTable(TableSpec):
             "axis": "candidate",
         },
         "sift": {
-            "columns": [["keep", bool], ["flags", np.uint32]],
+            "columns": [
+                ["keep", bool],
+                ["flags", np.uint32],
+                # The counts used by the row_repeat and crowded tests
+                ["row_npeak", np.int16],
+                ["crowd_ratio", np.float32],
+            ],
             "axis": "candidate",
             "initialise": False,
         },

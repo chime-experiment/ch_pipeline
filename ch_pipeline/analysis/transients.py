@@ -10197,10 +10197,19 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     - 4 ``broadband``: ``col_nrows_max`` or more rows lit at the same time, more
       than the running median over the neighbouring samples.
     - 5 ``row_repeat``: more than ``row_npeak_max`` other peaks along the row, unless
-      they are periodic.
+      they are periodic.  With ``row_sky_sep`` set, the peaks are the other
+      candidates of the table along the row (within the ``row_dy``, ``row_dra``,
+      ``row_snr`` and ``row_ratio`` of :class:`GroupTransientCandidates`) whose sky
+      position is at least ``row_sky_sep`` degrees from the candidate's: the other
+      pulses of a periodic source come from the same position and do not count,
+      while the peaks of a region of excess noise come from anywhere.  Without it,
+      ``row_npeak`` of the table (all peaks) is used.
     - 6 ``catalogue``: a catalogue source brighter than ``cat_flux_ratio`` times the
       candidate's amplitude within the match region, which could leave a residual
-      of that size.
+      of that size.  The residuals of catalogue sources are below ~0.3% of their
+      flux (scripts/sift/source_residual.py), so the default of 100 leaves a margin
+      of ~3 without vetoing the many faint pulses that fall near a bright source
+      by chance (the match region holds a source above 0.3 Jy for ~1/3 of the sky).
     - 7 ``narrowband``: more than ``band_frac_max`` of the S/N^2 in one band (if the
       spectra were added), or else more than ``group_frac_max`` in one group of
       bands.
@@ -10216,14 +10225,21 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       ``smooth_frac_min`` of its power explained by the fit.  Both are needed:
       bright pulses have a large chi-squared from small deviations but are well
       explained, and faint ones are poorly explained only because of the noise.
-    - 13 ``extended``: the extent (pixels joined across small gaps) reaches at least
-      ``ext_dy_min`` in telescope-y, far more than a point source.  This catches
-      arcs broken into blobs and short vertical streaks, which the ``arc`` test
-      misses.
+    - 13 ``extended`` (unless ``ext_dy_min`` is None): the extent (pixels joined
+      across small gaps) reaches at least ``ext_dy_min`` in telescope-y, far more
+      than a point source.  This catches arcs broken into blobs and short vertical
+      streaks, which the ``arc`` test misses.  In I, where the sky noise leaves
+      wide regions of S/N > 5, the extent of a real pulse joins them (median 0.12
+      for the injected pulses of 2418), so the test should be off there.
     - 14 ``ns_shape`` (only with the north-south fit, see :class:`AddNSProfile`):
       the profile across telescope-y is not the synthesized beam: the best width
       scale is above ``ns_scale_max`` or below ``ns_scale_min`` and improves the
       chi-squared by at least ``ns_dchi2_min`` over the point source.
+    - 15 ``crowded`` (if ``crowd_ratio_max`` is set): another candidate of the
+      table within +-``crowd_dy`` in telescope-y and +-``crowd_dra`` degrees of
+      start RA, at least ``row_sky_sep`` degrees away on the sky (or anywhere,
+      without it), has at least ``crowd_ratio_max`` times the S/N: the candidate
+      does not stand out of the noise around it.
     - 16 ``periodic`` (information only): at least ``periodic_npeak_min`` other
       peaks along the row, spaced by at least ``periodic_spacing_min`` seconds with
       a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
@@ -10253,6 +10269,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "unsmooth": 12,
         "extended": 13,
         "ns_shape": 14,
+        "crowded": 15,
         "periodic": 16,
     }
     INFO: ClassVar = ("periodic",)
@@ -10262,18 +10279,28 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     track_dy_max = config.Property(proptype=float, default=0.02)
     lobe_ha_max = config.Property(proptype=float, default=10.0)
     col_nrows_max = config.Property(proptype=int, default=50)
-    row_npeak_max = config.Property(proptype=int, default=0)
+    row_npeak_max = config.Property(proptype=int, default=3)
+    row_sky_sep = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=0.3
+    )
     periodic_npeak_min = config.Property(proptype=int, default=3)
     periodic_cv_max = config.Property(proptype=float, default=0.15)
     periodic_spacing_min = config.Property(proptype=float, default=240.0)
-    cat_flux_ratio = config.Property(proptype=float, default=10.0)
+    cat_flux_ratio = config.Property(proptype=float, default=100.0)
+    crowd_ratio_max = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    crowd_dy = config.Property(proptype=float, default=0.1)
+    crowd_dra = config.Property(proptype=float, default=2.0)
     band_frac_max = config.Property(proptype=float, default=0.5)
     group_frac_max = config.Property(proptype=float, default=0.7)
     arc_dy_min = config.Property(proptype=float, default=0.02)
     arc_dt_min = config.Property(proptype=float, default=20.0)
     arc_corr_min = config.Property(proptype=float, default=0.7)
     fwhm_y_max = config.Property(proptype=float, default=0.03)
-    ext_dy_min = config.Property(proptype=float, default=0.05)
+    ext_dy_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=0.05
+    )
     weight_ratio_min = config.Property(proptype=float, default=0.05)
     horizon_y_max = config.Property(proptype=float, default=0.95)
     smooth_chi2_max = config.Property(proptype=float, default=5.0)
@@ -10302,6 +10329,25 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         def flag(name, cond):
             flags[np.asarray(cond, dtype=bool)] |= np.uint32(1 << self.FLAGS[name])
 
+        # The other candidates along the row, and around, at other sky positions
+        sky_sep = self.row_sky_sep if self.row_sky_sep and self.row_sky_sep > 0 else None
+        if sky_sep is not None:
+            row_npeak, _ = _other_candidates(
+                rec,
+                float(table.attrs.get("row_dy", 0.01)),
+                float(table.attrs.get("row_dra", 5.0)),
+                sky_sep,
+                float(table.attrs.get("row_snr", 8.0)),
+                float(table.attrs.get("row_ratio", 1.0 / 3.0)),
+            )
+        else:
+            row_npeak = rec["row_npeak"].astype(int)
+        crowd = np.zeros(rec.size)
+        if self.crowd_ratio_max is not None:
+            _, crowd = _other_candidates(
+                rec, self.crowd_dy, self.crowd_dra, sky_sep, 0.0, 0.0
+            )
+
         with np.errstate(invalid="ignore"):
             flag("snr", rec["snr"] < self.snr_min)
             flag("sun", np.abs(rec["sun_ha"]) < self.sun_ha_max)
@@ -10322,7 +10368,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 & (rec["row_spacing"] >= self.periodic_spacing_min)
             )
             flag("periodic", periodic)
-            flag("row_repeat", (rec["row_npeak"] > self.row_npeak_max) & ~periodic)
+            flag("row_repeat", (row_npeak > self.row_npeak_max) & ~periodic)
             flag(
                 "catalogue",
                 rec["cat_flux"] >= self.cat_flux_ratio * np.abs(rec["amplitude"]),
@@ -10343,7 +10389,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 & (np.abs(rec["island_corr"]) >= self.arc_corr_min),
             )
             flag("wide", rec["fwhm_y"] > self.fwhm_y_max)
-            flag("extended", rec["ext_dy"] >= self.ext_dy_min)
+            if self.ext_dy_min is not None:
+                flag("extended", rec["ext_dy"] >= self.ext_dy_min)
             flag("low_weight", rec["weight_ratio"] < self.weight_ratio_min)
             flag("horizon", np.abs(rec["y"]) > self.horizon_y_max)
             flag(
@@ -10361,6 +10408,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                     | (rec["ns_scale"] < self.ns_scale_min)
                 ),
             )
+            if self.crowd_ratio_max is not None:
+                flag("crowded", crowd >= self.crowd_ratio_max)
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -10382,25 +10431,76 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             comm=table.comm,
         )
         for name in table.datasets:
+            if name == "sift":  # replaced (and an older table may lack columns)
+                continue
             if name not in out.datasets:
                 out.add_dataset(name)
             out.datasets[name][:] = table.datasets[name][:][rows]
-        if "sift" not in out.datasets:
-            out.add_dataset("sift")
+        out.add_dataset("sift")
         sift = np.zeros(rows.size, dtype=out.datasets["sift"][:].dtype)
         sift["keep"] = keep[rows]
         sift["flags"] = flags[rows]
+        sift["row_npeak"] = row_npeak[rows]
+        sift["crowd_ratio"] = crowd[rows]
         out.datasets["sift"][:] = sift
         out.attrs["sift_flags"] = json.dumps(self.FLAGS)
         for key in (
             "snr_min", "sun_ha_max", "track_dy_max", "lobe_ha_max", "col_nrows_max",
-            "row_npeak_max", "periodic_npeak_min", "periodic_cv_max",
-            "periodic_spacing_min", "cat_flux_ratio",
+            "row_npeak_max", "row_sky_sep", "periodic_npeak_min", "periodic_cv_max",
+            "periodic_spacing_min", "cat_flux_ratio", "crowd_ratio_max", "crowd_dy",
+            "crowd_dra",
             "band_frac_max", "group_frac_max", "arc_dy_min", "arc_dt_min",
             "arc_corr_min", "fwhm_y_max", "ext_dy_min", "weight_ratio_min",
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
             "ns_scale_min",
         ):  # fmt: skip
-            out.attrs[f"sift_{key}"] = getattr(self, key)
+            val = getattr(self, key)
+            out.attrs[f"sift_{key}"] = "none" if val is None else val
         return out
+
+
+def _other_candidates(rec, dy, dra, sky_sep, snr_min, ratio):
+    """The other candidates around each candidate of a table.
+
+    For candidate k, the others within +-``dy`` in telescope-y and +-``dra`` degrees
+    of start RA, and (if ``sky_sep`` is not None) at least ``sky_sep`` degrees from
+    its sky position (ICRS).
+
+    Returns
+    -------
+    nstrong : np.ndarray[int]
+        The number of them with S/N at least max(``snr_min``, ``ratio`` x that of
+        candidate k).
+    max_ratio : np.ndarray[float]
+        The largest S/N among them over that of candidate k (0 if there are none).
+    """
+    n = rec.size
+    nstrong = np.zeros(n, dtype=int)
+    max_ratio = np.zeros(n)
+    if n == 0:
+        return nstrong, max_ratio
+    snr = rec["snr"].astype(np.float64)
+    order = np.argsort(rec["y"], kind="stable")
+    ys = rec["y"][order]
+    lo = np.searchsorted(ys, rec["y"] - dy, side="left")
+    hi = np.searchsorted(ys, rec["y"] + dy, side="right")
+    cosd = np.cos(np.radians(rec["dec_icrs"]))
+    for k in range(n):
+        idx = order[lo[k] : hi[k]]
+        idx = idx[idx != k]
+        if idx.size == 0:
+            continue
+        idx = idx[np.abs(_wrap_deg(rec["ra"][idx] - rec["ra"][k])) <= dra]
+        if sky_sep is not None and idx.size:
+            dsky = np.hypot(
+                _wrap_deg(rec["ra_icrs"][idx] - rec["ra_icrs"][k]) * cosd[k],
+                rec["dec_icrs"][idx] - rec["dec_icrs"][k],
+            )
+            idx = idx[~(dsky < sky_sep)]
+        if idx.size == 0 or not snr[k] > 0:
+            continue
+        s = snr[idx]
+        nstrong[k] = np.sum(s >= max(snr_min, ratio * snr[k]))
+        max_ratio[k] = s.max() / snr[k]
+    return nstrong, max_ratio

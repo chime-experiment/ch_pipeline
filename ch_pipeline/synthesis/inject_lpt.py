@@ -9,7 +9,9 @@ The catalogue holds the intrinsic properties of the sources only
   the combination of days and folds in CHIME's observing window.
 - :class:`GenerateDailyLPTCatalog` draws a new catalogue every day (seeded by the
   LSD), each source with one pulse near its transit.  This samples sky position and
-  day for the selection function of the single-day search.
+  day for the selection function of the single-day search.  With ``periodic`` the
+  sources keep their periods and pulse every period around that pulse: trains of
+  pulses through the main lobe, as an LPT gives, for tuning the sifter.
 
 The properties are drawn with :mod:`ch_pipeline.synthesis.lpt_population`.
 
@@ -224,9 +226,21 @@ class GenerateDailyLPTCatalog(GenerateLPTCatalog):
     the period set to 0: one pulse a day, ``t_offset_beam`` (from the population)
     primary-beam widths from transit.  For the selection function of the single-day
     search, marginalised over sky position and day.  Default ``n_source`` is 30.
+
+    With ``periodic``, the sources keep the periods of the population and their
+    epochs are left NaN: :class:`InjectLPT` then puts a pulse at ``t_offset_beam``
+    beam widths from the transit of the day and others every period before and
+    after it (in Earth time), so each source gives a train of pulses through the
+    main lobe.
+
+    Attributes
+    ----------
+    periodic : bool
+        Keep the periods.  Default is False.
     """
 
     n_source = config.Property(proptype=int, default=30)
+    periodic = config.Property(proptype=bool, default=False)
 
     def process(self, data):
         """Draw the catalogue for the day of ``data`` (any container with ``lsd``).
@@ -237,13 +251,23 @@ class GenerateDailyLPTCatalog(GenerateLPTCatalog):
         """
         lsd = int(np.atleast_1d(data.attrs["lsd"])[0])
         spec = merge_population(self.population)
-        spec["period"] = 0.0
+        if not self.periodic:
+            spec["period"] = 0.0
         rng = np.random.default_rng([self.seed, lsd])
         pop = draw_population(rng, self.n_source, spec)
         attrs = self._attrs(f"lpt_daily_lsd_{lsd}", spec)
         attrs["lsd"] = lsd
+        attrs["periodic"] = self.periodic
         cat = _make_catalog(pop, rng, self.epoch_ref, attrs)
-        self.log.info(f"Drew {self.n_source} single LPT pulses for LSD {lsd}.")
+        if self.periodic:
+            # anchored at the transit of the day by InjectLPT
+            cat["lpt"]["epoch"][:] = np.nan
+            self.log.info(
+                f"Drew {self.n_source} LPTs for LSD {lsd} pulsing around transit "
+                f"(periods {np.min(pop['period']):.0f}-{np.max(pop['period']):.0f} s)."
+            )
+        else:
+            self.log.info(f"Drew {self.n_source} single LPT pulses for LSD {lsd}.")
         return cat
 
 
@@ -260,7 +284,10 @@ class InjectLPT(BeamExternal):
     A source with a period pulses at ``epoch + k period`` at the barycentre (at the
     Earth earlier by the Roemer delay at that time if ``barycentric``).  A source
     with period 0 has one pulse at ``t_offset_beam`` widths of a Gaussian XX beam at
-    600 MHz from its upper transit on the day (in [0, 360) of meridian RA).  Each
+    600 MHz from its upper transit on the day (in [0, 360) of meridian RA).  A
+    source with a period and a NaN epoch (:class:`GenerateDailyLPTCatalog` with
+    ``periodic``) has that pulse and others every period before and after it, at
+    the Earth.  Each
     pulse gets its own random draws (seeded by the source and the pulse number, so
     the same on any day whose data contain it): nulled with probability
     ``null_fraction``, a flux scattered by exp(``flux_scatter`` N(0, 1)), and the
@@ -356,7 +383,14 @@ class InjectLPT(BeamExternal):
             if not cov.any():
                 continue
             dur, per = tab["duration"][s], tab["period"][s]
-            if per > 0:
+            if per > 0 and not np.isfinite(tab["epoch"][s]):
+                # a train through the transit of the day, at the Earth
+                ep = t_tr[s] + tab["t_offset_beam"][s] * sig_t[s]
+                t0 = t_all[cov].min() - 0.5 * dur - dt
+                t1 = t_all[cov].max() + 0.5 * dur + dt
+                k = np.arange(np.ceil((t0 - ep) / per), np.floor((t1 - ep) / per) + 1)
+                pulses = list(zip(k.astype(np.int64), ep + k * per))
+            elif per > 0:
                 ep = tab["epoch"][s]
                 t0 = t_all[cov].min() - 0.5 * dur - dt
                 t1 = t_all[cov].max() + 0.5 * dur + dt
