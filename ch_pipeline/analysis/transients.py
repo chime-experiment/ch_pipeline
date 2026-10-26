@@ -4116,8 +4116,10 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                         G = Am.T @ (W[m, np.newaxis] * Am)
                         G += self.ridge * np.trace(G) / nmode * np.eye(nmode)
                         Gi = np.linalg.inv(G)
+                        # Diagonal of the hat matrix, as a matrix product (a
+                        # three-operand einsum is ~50x slower and dominated the task)
                         lev = np.zeros(freq.size)
-                        lev[m] = W[m] * np.einsum("fk,kl,fl->f", Am, Gi, Am)
+                        lev[m] = W[m] * np.sum((Am @ Gi) * Am, axis=1)
                         # Channels the fit nearly reproduces on their own (isolated
                         # between masked stretches) say little about the noise and
                         # make the ratio unstable: leave them out
@@ -5926,6 +5928,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         of the RM spread function gives too few, a mean of +0.6).
     rm_chunk : int
         RM trials processed at once.  Default is 32.
+    rm_sky_modes : int
+        Modes of the correlation between bands for which the sky term of Q in the
+        RM search is computed at each RM; the others are taken at their mean over
+        RM.  Default is 3 (the leading mode holds ~88% of the trace on 2418 and
+        3035).
 
     With ``stokes``, the products are combined in each band before the bands are
     combined.  I is formed as for the co-polar search (``combine_pol``, so its
@@ -5953,9 +5960,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
       ``rm_ntrials_eff`` independent trials.  The amplitude is ``sign(z) |P|`` (Jy
       at the reference frequency) and the weight ``(z / |P|)^2``, so that the S/N
       is ``z``; the imaginary part holds the best RM.  The response and the
-      variance are the means of those of Q and U, which differ by the beam and the
-      weights of the products; the depolarisation within a band is left out of the
-      template (``sinc(RM d l^2)``, ~0.5 at 400 MHz for |RM| = 120).
+      thermal variance are the means of those of Q and U, which differ by the beam
+      and the weights of the products; the depolarisation within a band is left out
+      of the template (``sinc(RM d l^2)``, ~0.5 at 400 MHz for |RM| = 120).  The
+      sky term of Q is coherent between the bands only near RM = 0: its variance in
+      ``S`` is ``sum_bb' c_b c_b'^* rho_bb' Re(V_b V_b'^*) / 2`` with
+      ``c_b = s_b e^{-2 i RM l_b^2}``, computed at every RM for the leading
+      ``rm_sky_modes`` modes of ``rho`` and at its mean over RM (the diagonal) for
+      the rest.  Using the RM = 0 value at every RM suppressed L wherever the sky
+      term is large (the night clouds, the horizon).
 
     The per-band output has I, Q, U and V.  The group maps are made for I.
     """
@@ -5975,6 +5988,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     rm_spectral_indices = config.list_type((int, float), default=[0.0])
     rm_ntrials_eff = config.Property(proptype=float, default=None)
     rm_chunk = config.Property(proptype=int, default=32)
+    rm_sky_modes = config.Property(proptype=int, default=3)
 
     rfi_mask = None
 
@@ -6486,8 +6500,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     twgt[2, :, ia, ee] = 0.0
                     timag[2, :, ia, ee] = 0.0
                     continue
-                # Linear polarisation: response and variance of Q and U
-                _, rsq, vrq, _ = combine(1, ee, sb)
+                # Linear polarisation: response and thermal variance of Q and U; the
+                # sky term of Q depends on the RM and is added in _rm_search
+                _, rsq, vrq, _ = self._combine(
+                    1, ee, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
+                )
                 _, rsc, vrc, _ = combine(2, ee, sb)
                 rv = [
                     (0.5 * (q[1] + c[1]), 0.5 * (q[2] + c[2]))
@@ -6506,6 +6523,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     track[:, ee] if long_w else None,
                     durations,
                     [valid_w(W) for W in durations],
+                    self._rm_sky(ee, sb, lam, qvec, vplus, vminus),
                 )
                 tamp[2, :, ia, ee] = amp.transpose(0, 2, 1)
                 twgt[2, :, ia, ee] = wgt.transpose(0, 2, 1)
@@ -6631,7 +6649,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         resp[2, bb, esl] = rxy + ryx
         vinc[2, bb, esl] = vxy + vyx
 
-    def _rm_search(self, nq, nu, coef, rm, ntrials, rv, track, durations, valid):
+    def _rm_search(
+        self, nq, nu, coef, rm, ntrials, rv, track, durations, valid, sky=None
+    ):
         """Search in linear polarisation over RM at one elevation.
 
         Parameters
@@ -6645,13 +6665,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         ntrials : callable
             Number of independent RM trials at a level of chi-squared.
         rv : list of (np.ndarray[x, ra], np.ndarray[x, ra])
-            Response and variance of the real part for each duration.
+            Response and thermal variance of the real part for each duration.
         track : np.ndarray[wmax, x] or None
             From :meth:`_tracks` at this elevation (None for single samples only).
         durations : list of int
             The durations, starting with 1.
         valid : list of np.ndarray[ra] of bool
             Start samples with a complete trial, for each duration.
+        sky : tuple, optional
+            Sky term of Q, from :meth:`_rm_sky`; it is independent between samples,
+            so its variance is summed along the track.
 
         Returns
         -------
@@ -6664,10 +6687,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         best_t = np.full((ndur, nx, nra), -1.0, dtype=np.float32)
         best_s = np.zeros((ndur, nx, nra), dtype=np.float32)
         best_k = np.zeros((ndur, nx, nra), dtype=np.int32)
-        inv_v = [tools.invert_no_zero(v).astype(np.float32) for _, v in rv]
+        var_th = [v.astype(np.float32) for _, v in rv]
 
-        def update(iwd, s, k0):
-            t = (s.real**2 + s.imag**2) * inv_v[iwd]  # rm, x, ra
+        def update(iwd, s, vs, k0):
+            v = var_th[iwd] if vs is None else var_th[iwd] + vs
+            t = (s.real**2 + s.imag**2) * tools.invert_no_zero(v)  # rm, x, ra
             k = np.argmax(t, axis=0)
             tk = np.take_along_axis(t, k[np.newaxis], 0)[0]
             better = tk > best_t[iwd]
@@ -6679,17 +6703,21 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         for k0 in range(0, rm.size, self.rm_chunk):
             ks = slice(k0, min(k0 + self.rm_chunk, rm.size))
             s1 = (coef[:, ks].T.astype(np.complex64) @ z).reshape(-1, nx, nra)
-            update(0, s1, k0)
+            v1 = None if sky is None else self._rm_sky_var(coef[:, ks], sky, nx, nra)
+            update(0, s1, v1, k0)
             if track is None:
                 continue
             acc = np.zeros_like(s1)
+            accv = None if v1 is None else np.zeros_like(v1)
             for jj in range(wmax):
                 idx = track[jj]
                 ok = (idx >= 0)[np.newaxis, :, np.newaxis]
-                sj = s1[:, np.maximum(idx, 0)]
-                acc += np.where(ok, np.roll(sj, -jj, axis=-1), 0.0)
+                ii = np.maximum(idx, 0)
+                acc += np.where(ok, np.roll(s1[:, ii], -jj, axis=-1), 0.0)
+                if accv is not None:
+                    accv += np.where(ok, np.roll(v1[:, ii], -jj, axis=-1), 0.0)
                 if jj > 0 and jj + 1 in durations:
-                    update(durations.index(jj + 1), acc, k0)
+                    update(durations.index(jj + 1), acc, accv, k0)
 
         amp = np.zeros((ndur, nx, nra), dtype=np.float32)
         wgt = np.zeros((ndur, nx, nra), dtype=np.float32)
@@ -6702,6 +6730,56 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             amp[iwd] = np.where(ok, np.sign(zz) * p, 0.0)
             wgt[iwd] = np.where(ok, (zz / p) ** 2, 0.0)
         return amp, wgt, rm[best_k].astype(np.float32)
+
+    def _rm_sky(self, ee, sb, lam, qvec, vplus, vminus):
+        """Sky term of Q for the RM search at one elevation.
+
+        Returns None if Q has no sky term here, else (data, wmode, rest): the real
+        and imaginary parts of the sky term of Q of each band (for each of vplus and
+        vminus) [band, x * ra], the weights ``sqrt(lam_m) q_bm`` of the leading
+        ``rm_sky_modes`` modes of the correlation between bands [band, mode], and
+        the variance of the other modes at its mean over RM [x, ra].
+        """
+        parts = [
+            vv[1, :, ee]
+            for vv in (vplus, vminus)
+            if vv is not None and np.any(vv[1, :, ee])
+        ]
+        if not parts or lam.size == 0:
+            return None
+        nb, nx, nra = parts[0].shape
+        order = np.argsort(lam)[::-1]
+        keep, drop = order[: self.rm_sky_modes], order[self.rm_sky_modes :]
+        wmode = (qvec[:, keep] * np.sqrt(lam[keep])).astype(np.float32)
+        dband = np.sum(qvec[:, drop] ** 2 * lam[drop], axis=1)  # band
+        data = []
+        rest = np.zeros((nx, nra), dtype=np.float64)
+        for v in parts:
+            for a in (v.real, v.imag):
+                data.append(np.ascontiguousarray(a.reshape(nb, -1), dtype=np.float32))
+            rest += np.tensordot(sb**2 * dband, np.abs(v) ** 2, axes=1)
+        return data, wmode, (0.25 * rest).astype(np.float32)
+
+    @staticmethod
+    def _rm_sky_var(coef, sky, nx, nra):
+        """Variance of the sky term of L at the RM trials ``coef`` [band, rm].
+
+        For single samples [rm, x, ra], in the units of the variance of L (half the
+        expected ``|S|^2``): ``(1/4) sum_m (|sum_b c_b w_bm A_b|^2 + |sum_b c_b w_bm
+        B_b|^2)`` with ``V_b = A_b + i B_b``, plus the other modes.
+        """
+        data, wmode, rest = sky
+        nb, nr = coef.shape
+        cm = (coef[:, np.newaxis, :] * wmode[:, :, np.newaxis]).reshape(nb, -1)
+        cr = np.ascontiguousarray(
+            np.concatenate([cm.real, cm.imag], axis=1).T, dtype=np.float32
+        )  # (re/im, mode, rm), band
+        out = np.zeros((nr, nx * nra), dtype=np.float32)
+        for d in data:
+            y = cr @ d
+            np.square(y, out=y)
+            out += y.reshape(-1, nr, nx * nra).sum(axis=0)
+        return 0.25 * out.reshape(nr, nx, nra) + rest[np.newaxis]
 
     @staticmethod
     def _track_cross(tc, wt, var_th, presp, lag_index, track, long_w):
@@ -7887,10 +7965,12 @@ def _chi2max_to_gaussian(t, n_eff):
     n_eff = np.asarray(n_eff, dtype=np.float64)
     e = np.exp(-0.5 * t)
     log_cdf = n_eff * np.log1p(-np.minimum(e, 1.0 - 1e-12))
-    # In the far tail log(1 - cdf) = log(n_eff) - t / 2
-    log_sf = np.where(
-        n_eff * e < 1e-8, np.log(n_eff) - 0.5 * t, np.log(-np.expm1(log_cdf))
-    )
+    # In the far tail log(1 - cdf) = log(n_eff) - t / 2 (both branches are
+    # evaluated, and the unused one can be log 0)
+    with np.errstate(divide="ignore"):
+        log_sf = np.where(
+            n_eff * e < 1e-8, np.log(n_eff) - 0.5 * t, np.log(-np.expm1(log_cdf))
+        )
     z = np.where(
         log_cdf < np.log(0.5),
         scipy.special.ndtri_exp(log_cdf),
@@ -8229,9 +8309,12 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         for pp, name in enumerate(pol):
             if name in self.abs_pol:
                 snr[pp] = np.abs(snr[pp])
-        # [pol, el, ra, dur, alpha, x], flattened over the trial parameters
+        # [pol, el, ra, dur, alpha, x], flattened over the trial parameters.  Trials
+        # without data are left out, so that where every trial is negative (L can
+        # be) the best of them is kept rather than an empty one with S/N 0
         flat = np.moveaxis(snr, (1, 2), (3, 4)).reshape(npol, nel, nra, -1)
-        best = np.argmax(flat, axis=-1)
+        has = np.moveaxis(wgt > 0, (1, 2), (3, 4)).reshape(npol, nel, nra, -1)
+        best = np.argmax(np.where(has, flat, -np.inf), axis=-1)
         idur, ialpha, ix = np.unravel_index(best, (ndur, nalpha, nx))
 
         out = containers.TransientCandidateMap(
@@ -9444,6 +9527,39 @@ def _ns_profile_fit(nsb, yr, amp, wgt, freq, shifts, scales, min_rows, eig_tol=1
     return chi2, snr2, (dof - 2 if nb else 0), nb
 
 
+def _derotate_linear(centre, aq, wq, au, wu, rm):
+    """Linear polarisation of each band derotated by the RM and the mean angle.
+
+    Parameters
+    ----------
+    centre : np.ndarray[band]
+        Band centres in MHz.
+    aq, wq, au, wu : np.ndarray[cand, band]
+        Amplitudes and inverse variances of Q and U.
+    rm : np.ndarray[cand]
+        RM of each candidate (rad/m^2).
+
+    Returns
+    -------
+    amp, wgt : np.ndarray[cand, band]
+        ``Re[(Q + iU) e^{-i phi}]`` with ``phi = 2 RM l^2 + psi`` and ``psi`` the
+        angle of the weighted sum over the bands, and its inverse variance
+        ``1 / (cos^2 phi / w_Q + sin^2 phi / w_U)``.
+    """
+    lam2 = (scipy.constants.c / (np.asarray(centre) * 1e6)) ** 2
+    ok = (wq > 0) & (wu > 0)
+    vq = np.where(ok, tools.invert_no_zero(wq), 0.0)
+    vu = np.where(ok, tools.invert_no_zero(wu), 0.0)
+    p = (aq + 1j * au) * np.exp(-2.0j * np.asarray(rm, dtype=np.float64)[:, np.newaxis] * lam2)
+    wmean = np.where(ok, tools.invert_no_zero(0.5 * (vq + vu)), 0.0)
+    psi = np.angle(np.sum(wmean * p, axis=1))
+    phi = 2.0 * rm[:, np.newaxis] * lam2 + psi[:, np.newaxis]
+    amp = np.where(ok, (p * np.exp(-1.0j * psi[:, np.newaxis])).real, 0.0)
+    var = np.cos(phi) ** 2 * vq + np.sin(phi) ** 2 * vu
+    wgt = np.where(ok, tools.invert_no_zero(var), 0.0)
+    return amp.astype(np.float32), wgt.astype(np.float32)
+
+
 class AddCandidateSpectra(tasklib.base.ContainerTask):
     """Add the amplitude in each band to a table of candidates.
 
@@ -9466,10 +9582,22 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     filter, so its weights are approximate, but the shape of the spectrum, which the
     tests use, is barely affected.  Without it, every spectrum is for ``duration``.
 
+    For the candidates of the search in linear polarisation (``lin_pol``, the
+    indices of Q and U in the bands), Q and U rotate with the RM across the band, so
+    their spectra are not smooth even for a real source.  The spectrum is then the
+    linear polarisation derotated by the candidate's RM (the ``amplitude_imag``
+    column) and by the angle of its weighted sum over the bands,
+    ``Re[(Q_b + i U_b) e^{-2 i RM l_b^2 - i psi}]``, with the variance of that
+    projection; for a source at the right RM it is |P| in each band (less the
+    depolarisation within the band).
+
     Attributes
     ----------
     pol : int
         Index of the polarisation.  Default is 0.
+    lin_pol : list of int
+        Indices of Q and U for the derotated spectrum of linear polarisation
+        (``pol`` is then unused).  Default is None.
     duration : int
         Duration of the trial (in samples) without ``match_duration``.  Default is 1.
     match_duration : bool
@@ -9483,6 +9611,7 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     """
 
     pol = config.Property(proptype=int, default=0)
+    lin_pol = config.list_type(int, length=2, default=None)
     duration = config.Property(proptype=int, default=1)
     match_duration = config.Property(proptype=bool, default=True)
     snr_min = config.Property(proptype=float, default=3.0)
@@ -9523,10 +9652,19 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         e, tb, xi, wc = _candidate_positions(
             table, bands, self.match_duration, self.duration
         )
-        amp, wgt = _band_cutouts(bands, self.pol, e, tb, xi, wc, [0], [0])
-        amp, wgt = amp[:, :, 0, 0], wgt[:, :, 0, 0]
-        bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
-        bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+        cuts = []
+        for pp in [self.pol] if self.lin_pol is None else self.lin_pol:
+            amp, wgt = _band_cutouts(bands, pp, e, tb, xi, wc, [0], [0])
+            amp, wgt = amp[:, :, 0, 0], wgt[:, :, 0, 0]
+            bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
+            bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+            cuts.append((amp, wgt))
+        if self.lin_pol is None:
+            amp, wgt = cuts[0]
+        else:
+            if "amplitude_imag" not in rec.dtype.names:
+                raise ValueError("lin_pol needs the RM of each candidate (amplitude_imag).")
+            amp, wgt = _derotate_linear(centre, *cuts[0], *cuts[1], rec["amplitude_imag"])
 
         out = table.copy()
         for name in ("spectrum", "spectrum_weight"):
