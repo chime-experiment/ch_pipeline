@@ -8482,9 +8482,15 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         Polarisations whose sign carries no preference (Stokes V): the maximum is
         of |S/N|, which is kept as the S/N, while the amplitude keeps its sign.
         Default is none.
+    negate : bool
+        Find the most negative trial instead (of the other polarisations): the map
+        of -S/N and -amplitude, a null for the search, since noise and
+        scintillation are two-sided and a pulse is positive (see
+        :class:`TransientNegativePeaks`).  Default is False.
     """
 
     abs_pol = config.list_type(str, default=[])
+    negate = config.Property(proptype=bool, default=False)
 
     def process(self, trials):
         """Reduce over trials.
@@ -8506,10 +8512,14 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         snr = amp * np.sqrt(wgt)
 
         npol, ndur, nalpha, nel, nra, nx = snr.shape
-        pol = [str(p) for p in trials.index_map["pol"]]
+        pol = _decode_names(trials.index_map["pol"][:])
+        sign = np.ones(npol)
         for pp, name in enumerate(pol):
             if name in self.abs_pol:
                 snr[pp] = np.abs(snr[pp])
+            elif self.negate:
+                snr[pp] *= -1.0
+                sign[pp] = -1.0
         # [pol, el, ra, dur, alpha, x], flattened over the trial parameters.  Trials
         # without data are left out, so that where every trial is negative (L can
         # be) the best of them is kept rather than an empty one with S/N 0
@@ -8532,7 +8542,9 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         out.snr[:].local_array[:] = np.take_along_axis(
             flat, best[..., np.newaxis], axis=-1
         )[..., 0]
-        out.amplitude[:].local_array[:] = amp[pp, idur, ialpha, ee, rr, ix]
+        out.amplitude[:].local_array[:] = (
+            sign[:, np.newaxis, np.newaxis] * amp[pp, idur, ialpha, ee, rr, ix]
+        )
         out.weight[:].local_array[:] = wgt[pp, idur, ialpha, ee, rr, ix]
         if "amplitude_imag" in trials.datasets:
             out.add_dataset("amplitude_imag")
@@ -8548,6 +8560,7 @@ class MaxMatchedFilterTrials(tasklib.base.ContainerTask):
         out.datasets["x_index"][:].local_array[:] = ix
         out.datasets["ha"][:] = trials.datasets["ha"][:]
         out.datasets["dec"][:] = trials.datasets["dec"][:]
+        out.attrs["negated"] = self.negate
 
         return out
 
@@ -10182,6 +10195,277 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         return out
 
 
+class TransientNegativePeaks(tasklib.base.ContainerTask):
+    """The peaks of the negative search: a null for the significance of candidates.
+
+    Noise, and the scintillation of the sky through the ionosphere, are two-sided,
+    while a pulse is positive.  So the peaks of the map of the most negative trial
+    (:class:`MaxMatchedFilterTrials` with ``negate``), found exactly as the
+    candidates are (:class:`GroupTransientCandidates`: local maxima above
+    ``seed_snr`` within +-``peak_dy`` and +-``peak_dt``, without the ones whose
+    trial overlaps that of a brighter peak), are what the noise alone makes, with
+    its real (heavy) tails, at each place and duration.
+
+    The matched filter puts negative lobes next to every positive excursion (on its
+    rows, one to two durations before and after it, at 0.3-0.5 of its peak), which
+    are not noise.  A negative peak is marked ``bowl`` (``fidelity`` table) if a
+    positive peak of the map of the best trial within +-``bowl_dy`` in telescope-y
+    and +-(``bowl_dt_scale`` x the longer of their durations + ``bowl_dt_pad``)
+    samples has at least 1 / ``bowl_frac`` times its S/N.
+
+    The output is a candidate table with the position and best trial of each
+    negative peak (``el_index``, ``ra_index``, ``x_index``, ``y``, ``x``, ``ra``,
+    ``snr`` as a positive number, ``amplitude``, ``duration`` in s, and
+    ``weight_ratio``); the other columns are left empty.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation of the maps.  Default is 0.
+    seed_snr, peak_dy, peak_dt : float, float, int
+        As for :class:`GroupTransientCandidates` (defaults 8, 0.02 and 3), which
+        must be the same for the null to match the candidates.
+    bowl_dy : float
+        Half-width in telescope-y of the region of a positive peak's lobes.
+        Default is 0.01.
+    bowl_dt_scale, bowl_dt_pad : float, int
+        Half-width in samples of that region, in units of the duration, and
+        added.  Defaults are 2 and 4.
+    bowl_frac : float
+        Largest S/N of a lobe as a fraction of its positive peak.  Default is 0.6.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    seed_snr = config.Property(proptype=float, default=8.0)
+    peak_dy = config.Property(proptype=float, default=0.02)
+    peak_dt = config.Property(proptype=int, default=3)
+    bowl_dy = config.Property(proptype=float, default=0.01)
+    bowl_dt_scale = config.Property(proptype=float, default=2.0)
+    bowl_dt_pad = config.Property(proptype=int, default=4)
+    bowl_frac = config.Property(proptype=float, default=0.6)
+
+    def process(self, neg, cand):
+        """Find the negative peaks.
+
+        Parameters
+        ----------
+        neg : containers.TransientCandidateMap
+            The most negative trial at each elevation and start time (negated).
+        cand : containers.TransientCandidateMap
+            The best trial, on the same axes.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            One row per negative peak, with the ``fidelity`` table (``bowl``).
+        """
+        if not neg.attrs.get("negated", False):
+            raise ValueError("The first input must be a negated map (negate=True).")
+        for cont in (neg, cand):
+            cont.redistribute("el")
+        el = neg.index_map["el"][:]
+        ra = neg.index_map["ra"][:]
+        if cand.index_map["el"].size != el.size or not np.allclose(cand.index_map["ra"][:], ra):
+            raise ValueError("The two maps must have the same elevations and start times.")
+        pp = self.pol
+        dy = np.median(np.diff(el))
+        dra = np.median(np.diff(ra))
+        tsamp = float(neg.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
+        de = max(1, round(self.peak_dy / dy))
+
+        def peaks(m):
+            snr = m.snr[:].allgather()[pp].astype(np.float32)
+            wgt = m.weight[:].allgather()[pp]
+            valid = (wgt > 0) & np.isfinite(snr)
+            img = np.where(valid, snr, 0.0).astype(np.float32)
+            dur = m.datasets["duration"][:].allgather()[pp]
+            dur = np.where(valid, np.nan_to_num(dur), 1).astype(int)
+            pe, pt = _local_peaks(img, de, self.peak_dt, self.seed_snr)
+            pe, pt = _merge_overlapping(pe, pt, dur, de, self.peak_dt)
+            return pe, pt, img[pe, pt], np.maximum(dur[pe, pt], 1), wgt
+
+        ne, nt, nsnr, ndur, wgt = peaks(neg)
+        qe, qt, qsnr, qdur, _ = peaks(cand)
+
+        # The lobes of brighter positive peaks
+        bowl = np.zeros(ne.size, dtype=bool)
+        nb = max(0, round(self.bowl_dy / dy))
+        order = np.argsort(qe, kind="stable")
+        qe, qt, qsnr, qdur = qe[order], qt[order], qsnr[order], qdur[order]
+        lo = np.searchsorted(qe, ne - nb, side="left")
+        hi = np.searchsorted(qe, ne + nb, side="right")
+        for k in range(ne.size):
+            j = np.arange(lo[k], hi[k])
+            if j.size == 0:
+                continue
+            reach = self.bowl_dt_scale * np.maximum(qdur[j], ndur[k]) + self.bowl_dt_pad
+            near = np.abs(qt[j] - nt[k]) <= reach
+            bowl[k] = np.any(near & (qsnr[j] * self.bowl_frac >= nsnr[k]))
+
+        out = containers.TransientCandidateTable(
+            candidate=ne.size,
+            group=np.array(["all"]),
+            freq=np.zeros(1, dtype=[("centre", np.float64), ("width", np.float64)]),
+            attrs_from=neg,
+            comm=neg.comm,
+        )
+        rec = np.zeros(ne.size, dtype=out.candidate[:].dtype)
+        for name in rec.dtype.names:
+            if rec.dtype[name].kind == "f":
+                rec[name] = np.nan
+        rec["band_nsig"] = -1
+        if ne.size:
+            xidx = neg.datasets["x_index"][:].allgather()[pp]
+            amp = neg.amplitude[:].allgather()[pp]
+            with np.errstate(invalid="ignore"):
+                wrow = np.nanmedian(np.where(wgt > 0, wgt, np.nan), axis=1)
+            ix = xidx[ne, nt].astype(int)
+            rec["el_index"] = ne
+            rec["ra_index"] = nt
+            rec["x_index"] = ix
+            rec["y"] = el[ne]
+            rec["x"] = neg.index_map["x"][:][ix]
+            rec["ra"] = ra[nt]
+            rec["snr"] = nsnr
+            rec["amplitude"] = amp[ne, nt]
+            rec["duration"] = ndur * tsamp
+            rec["weight_ratio"] = wgt[ne, nt] * tools.invert_no_zero(np.nan_to_num(wrow[ne]))
+        out.candidate[:] = rec
+        out.add_dataset("fidelity")
+        fid = np.zeros(ne.size, dtype=out.datasets["fidelity"][:].dtype)
+        fid["bowl"] = bowl
+        out.datasets["fidelity"][:] = fid
+        out.attrs["pol"] = _decode_names(neg.index_map["pol"][:])[pp]
+        out.attrs["negative"] = True
+        for key in (
+            "seed_snr", "peak_dy", "peak_dt", "bowl_dy", "bowl_dt_scale", "bowl_dt_pad",
+            "bowl_frac",
+        ):  # fmt: skip
+            out.attrs[key] = getattr(self, key)
+        self.log.info(
+            f"Found {ne.size} negative peaks with S/N >= {self.seed_snr:g} "
+            f"({int(bowl.sum())} on the lobes of positive peaks; positive peaks {qe.size})."
+        )
+        return out
+
+
+class AddNegativeFidelity(tasklib.base.ContainerTask):
+    """Compare each candidate with the negative peaks around it.
+
+    For each candidate, ``neg_n`` is the number of negative peaks (from
+    :class:`TransientNegativePeaks`, not on the lobes of positive peaks) and
+    ``pos_n`` that of candidates (itself included) with at least its S/N, within
+    +-``fid_dy`` in telescope-y and +-``fid_dra`` degrees of start RA and with a
+    duration within a factor ``fid_dur_ratio`` of its own.  The fidelity,
+    ``1 - neg_n / pos_n`` (at least 0), estimates the probability that a candidate
+    of that S/N there is not noise, from the noise's real tail rather than a
+    Gaussian one (as the fidelity of blind line searches with ALMA, from their
+    negative peaks).  ``neg_max`` is the S/N of the brightest negative peak in the
+    region at that duration (0 if none).  The results go into the ``fidelity``
+    table.
+
+    Attributes
+    ----------
+    fid_dy : float
+        Half-width of the region in telescope-y.  Default is 0.1.
+    fid_dra : float
+        Half-width of the region in degrees of RA.  Default is 10.
+    fid_dur_ratio : float
+        Largest ratio of durations.  Default is 2.
+    """
+
+    fid_dy = config.Property(proptype=float, default=0.1)
+    fid_dra = config.Property(proptype=float, default=10.0)
+    fid_dur_ratio = config.Property(proptype=float, default=2.0)
+
+    def process(self, table, negatives):
+        """Add the fidelity.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates.
+        negatives : containers.TransientCandidateTable
+            Negative peaks, from :class:`TransientNegativePeaks` on the same maps.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy of the input, with the ``fidelity`` table.
+        """
+        if not negatives.attrs.get("negative", False):
+            raise ValueError("The second input must come from TransientNegativePeaks.")
+        rec = table.candidate[:]
+        nrec = negatives.candidate[:]
+        use = ~negatives.datasets["fidelity"][:]["bowl"]
+        neg_n, pos_n, neg_max = _fidelity_counts(
+            rec, nrec[use], self.fid_dy, self.fid_dra, self.fid_dur_ratio
+        )
+        # A new table (one read from a file cannot take a new table dataset)
+        out = containers.TransientCandidateTable(
+            candidate=rec.size, axes_from=table, attrs_from=table, comm=table.comm
+        )
+        for name in table.datasets:
+            if name == "fidelity":
+                continue
+            if name not in out.datasets:
+                out.add_dataset(name)
+            out.datasets[name][:] = table.datasets[name][:]
+        out.add_dataset("fidelity")
+        fid = np.zeros(rec.size, dtype=out.datasets["fidelity"][:].dtype)
+        fid["neg_n"] = neg_n
+        fid["pos_n"] = pos_n
+        fid["fidelity"] = np.clip(
+            1.0 - neg_n * tools.invert_no_zero(pos_n.astype(float)), 0.0, 1.0
+        )
+        fid["neg_max"] = neg_max
+        out.datasets["fidelity"][:] = fid
+        for key in ("fid_dy", "fid_dra", "fid_dur_ratio"):
+            out.attrs[key] = getattr(self, key)
+        out.attrs["fid_nneg"] = int(use.sum())
+        self.log.info(
+            f"Fidelity of {rec.size} candidates from {int(use.sum())} negative peaks: "
+            f"{int(np.sum(fid['fidelity'] < 0.5))} below 0.5."
+        )
+        return out
+
+
+def _fidelity_counts(rec, nrec, dy, dra, dur_ratio):
+    """Counts of negative (``nrec``) and positive (``rec``) peaks around each of ``rec``.
+
+    Returns neg_n, pos_n (each the number with at least the candidate's S/N within
+    +-``dy`` in y, +-``dra`` degrees of RA and durations within a factor
+    ``dur_ratio``) and the largest S/N of the negative peaks there.
+    """
+    n = rec.size
+    neg_n = np.zeros(n, dtype=np.int32)
+    pos_n = np.zeros(n, dtype=np.int32)
+    neg_max = np.zeros(n, dtype=np.float32)
+    lr = np.log(dur_ratio)
+
+    def window(src, k):
+        lo = np.searchsorted(src["ys"], rec["y"][k] - dy, side="left")
+        hi = np.searchsorted(src["ys"], rec["y"][k] + dy, side="right")
+        idx = src["order"][lo:hi]
+        r = src["rec"]
+        ok = np.abs(_wrap_deg(r["ra"][idx] - rec["ra"][k])) <= dra
+        ok &= np.abs(np.log(np.maximum(r["duration"][idx], 1e-3) / max(rec["duration"][k], 1e-3))) <= lr
+        return idx[ok]
+
+    srcs = []
+    for r in (nrec, rec):
+        order = np.argsort(r["y"], kind="stable")
+        srcs.append({"rec": r, "order": order, "ys": r["y"][order]})
+    for k in range(n):
+        s = rec["snr"][k]
+        jn = window(srcs[0], k)
+        jp = window(srcs[1], k)
+        neg_n[k] = np.sum(nrec["snr"][jn] >= s)
+        pos_n[k] = np.sum(rec["snr"][jp] >= s)
+        neg_max[k] = nrec["snr"][jn].max() if jn.size else 0.0
+    return neg_n, pos_n, neg_max
+
+
 class SiftTransientCandidates(tasklib.base.ContainerTask):
     """Flag the candidates that are explained by something other than a transient.
 
@@ -10251,6 +10535,10 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       a coefficient of variation below ``periodic_cv_max``.  The minimum spacing
       keeps out the flicker of scintillation, whose local maxima are spaced by about
       the width of the window that finds them.
+    - 17 ``fidelity`` (if ``fidelity_min`` is set and the table has the
+      ``fidelity`` table of :class:`AddNegativeFidelity`): fidelity below
+      ``fidelity_min``, as many negative peaks of at least the candidate's S/N and
+      about its duration around it as positive ones, so that noise explains it.
 
     Attributes
     ----------
@@ -10277,6 +10565,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "ns_shape": 14,
         "crowded": 15,
         "periodic": 16,
+        "fidelity": 17,
     }
     INFO: ClassVar = ("periodic",)
 
@@ -10317,6 +10606,9 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     ns_dchi2_min = config.Property(proptype=float, default=25.0)
     ns_scale_max = config.Property(proptype=float, default=1.5)
     ns_scale_min = config.Property(proptype=float, default=0.67)
+    fidelity_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -10421,6 +10713,9 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             )
             if self.crowd_ratio_max is not None:
                 flag("crowded", crowd_n >= self.crowd_nmin)
+            if self.fidelity_min is not None and "fidelity" in table.datasets:
+                fid = table.datasets["fidelity"][:]["fidelity"]
+                flag("fidelity", fid < self.fidelity_min)
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -10465,7 +10760,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "arc_corr_min", "fwhm_y_max", "ext_dy_min", "weight_ratio_min",
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
-            "ns_scale_min",
+            "ns_scale_min", "fidelity_min",
         ):  # fmt: skip
             val = getattr(self, key)
             out.attrs[f"sift_{key}"] = "none" if val is None else val

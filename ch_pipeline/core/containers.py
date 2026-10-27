@@ -1927,7 +1927,10 @@ class TransientCandidateTable(TableSpec):
     ``sift`` table holds the result of
     :class:`ch_pipeline.analysis.transients.SiftTransientCandidates`: whether each
     candidate was kept, and a bit mask of the tests it failed (the bits are named in
-    the ``sift_flags`` attribute).
+    the ``sift_flags`` attribute).  The ``fidelity`` table holds the comparison with
+    the negative search (:class:`ch_pipeline.analysis.transients.AddNegativeFidelity`;
+    in a table of negative peaks from
+    :class:`ch_pipeline.analysis.transients.TransientNegativePeaks`, only ``bowl``).
     """
 
     _axes = ("group", "freq")
@@ -2025,6 +2028,22 @@ class TransientCandidateTable(TableSpec):
                 ["row_npeak", np.int16],
                 ["crowd_ratio", np.float32],
                 ["crowd_n", np.int16],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "fidelity": {
+            "columns": [
+                # Negative and positive peaks around the candidate at least as
+                # bright, the fidelity 1 - neg_n / pos_n, and the brightest
+                # negative peak there
+                ["neg_n", np.int32],
+                ["pos_n", np.int32],
+                ["fidelity", np.float32],
+                ["neg_max", np.float32],
+                # Negative peaks only: on the filter's negative lobe of a brighter
+                # positive peak (not used as noise)
+                ["bowl", bool],
             ],
             "axis": "candidate",
             "initialise": False,
