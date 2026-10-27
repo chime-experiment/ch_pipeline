@@ -2024,6 +2024,7 @@ class TransientCandidateTable(TableSpec):
                 # The counts used by the row_repeat and crowded tests
                 ["row_npeak", np.int16],
                 ["crowd_ratio", np.float32],
+                ["crowd_n", np.int16],
             ],
             "axis": "candidate",
             "initialise": False,
