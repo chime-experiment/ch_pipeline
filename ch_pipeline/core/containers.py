@@ -1930,7 +1930,11 @@ class TransientCandidateTable(TableSpec):
     the ``sift_flags`` attribute).  The ``fidelity`` table holds the comparison with
     the negative search (:class:`ch_pipeline.analysis.transients.AddNegativeFidelity`;
     in a table of negative peaks from
-    :class:`ch_pipeline.analysis.transients.TransientNegativePeaks`, only ``bowl``).
+    :class:`ch_pipeline.analysis.transients.TransientNegativePeaks`, only ``bowl``),
+    the ``significance`` table the S/N calibrated against the local tail of the
+    negative search (:class:`ch_pipeline.analysis.transients.CalibrateSignificance`),
+    and the ``window`` table statistics of the single samples within each candidate's
+    duration (:class:`ch_pipeline.analysis.transients.AddWindowStats`).
     """
 
     _axes = ("group", "freq")
@@ -2044,6 +2048,34 @@ class TransientCandidateTable(TableSpec):
                 # Negative peaks only: on the filter's negative lobe of a brighter
                 # positive peak (not used as noise)
                 ["bowl", bool],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "significance": {
+            "columns": [
+                # Sky-to-thermal variance ratio at the candidate, the local level of
+                # the negative tail over the model, the expected number of noise
+                # peaks a day at least as bright, and the S/N with that rate in the
+                # reference class (CalibrateSignificance)
+                ["sky_q", np.float32],
+                ["local_ratio", np.float32],
+                ["far", np.float32],
+                ["snr_cal", np.float32],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "window": {
+            "columns": [
+                # The single samples along the candidate's track over its duration
+                # (AddWindowStats): their number, the fraction above zero, the
+                # self-normalised t = mean / (std / sqrt(n)), and the share of the
+                # sum from the largest two
+                ["win_n", np.int16],
+                ["win_fpos", np.float32],
+                ["win_t", np.float32],
+                ["win_top2", np.float32],
             ],
             "axis": "candidate",
             "initialise": False,

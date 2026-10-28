@@ -10401,16 +10401,7 @@ class AddNegativeFidelity(tasklib.base.ContainerTask):
         neg_n, pos_n, neg_max = _fidelity_counts(
             rec, nrec[use], self.fid_dy, self.fid_dra, self.fid_dur_ratio
         )
-        # A new table (one read from a file cannot take a new table dataset)
-        out = containers.TransientCandidateTable(
-            candidate=rec.size, axes_from=table, attrs_from=table, comm=table.comm
-        )
-        for name in table.datasets:
-            if name == "fidelity":
-                continue
-            if name not in out.datasets:
-                out.add_dataset(name)
-            out.datasets[name][:] = table.datasets[name][:]
+        out = _table_copy(table, skip=("fidelity",))
         out.add_dataset("fidelity")
         fid = np.zeros(rec.size, dtype=out.datasets["fidelity"][:].dtype)
         fid["neg_n"] = neg_n
@@ -10464,6 +10455,441 @@ def _fidelity_counts(rec, nrec, dy, dra, dur_ratio):
         pos_n[k] = np.sum(rec["snr"][jp] >= s)
         neg_max[k] = nrec["snr"][jn].max() if jn.size else 0.0
     return neg_n, pos_n, neg_max
+
+
+def _table_copy(table, skip=()):
+    """A new candidate table with the datasets of ``table`` (except ``skip``).
+
+    A table read from a file cannot take a new table dataset, so tasks that add one
+    return a copy.
+    """
+    rec = table.candidate[:]
+    out = containers.TransientCandidateTable(
+        candidate=rec.size, axes_from=table, attrs_from=table, comm=table.comm
+    )
+    for name in table.datasets:
+        if name in skip:
+            continue
+        if name not in out.datasets:
+            out.add_dataset(name)
+        out.datasets[name][:] = table.datasets[name][:]
+    return out
+
+
+class CalibrateSignificance(tasklib.base.ContainerTask):
+    """The S/N of each candidate, calibrated against the local tail of the noise.
+
+    The noise model sets the variance of the matched filter, but the ionospheric
+    scintillation of the sky has heavier tails than a Gaussian of that variance, and
+    more so where the sky dominates the variance and at night.  The negative search
+    (:class:`TransientNegativePeaks`) shows that tail at each place, since the noise
+    and the scintillation are two-sided while a pulse is positive.  For each
+    candidate:
+
+    - ``sky_q``, the sky-to-thermal variance ratio at its position: from the pixels
+      of the best-trial map whose best trial is a single sample, the row's median
+      weight over the weight, minus 1, as a median in blocks of ``q_block_e`` rows
+      by ``q_block_t`` samples.
+    - The null: the negative peaks that are not on the negative lobe of a positive
+      peak (a candidate of the table) at least as bright, within +-``lobe_dy`` in
+      telescope-y and +-(``lobe_dt_scale`` x the longer duration + ``lobe_dt_pad``)
+      samples.  These negative-dominated structures are as common as positive-
+      dominated ones if the fluctuations are symmetric.  (The matched filter puts
+      lobes of ~0.8 of a pulse's peak beside it in the best-trial maps.)
+    - The tail: for each class of ``sky_q`` (bins ``q_edges``) and duration (bins
+      ``duration_edges``, in samples), the rate per pixel of null peaks above
+      ``snr_floor`` and a generalised Pareto fit to their excess S/N (pooled with
+      the neighbouring classes of ``sky_q`` until there are ``nmin_fit`` peaks).
+    - ``local_ratio``: the null peaks of the candidate's duration class above
+      ``snr_floor`` within +-``local_dy`` and +-``local_dra`` degrees of RA, over the
+      number the class rates expect from the pixels there, as (n + ``shrink``) /
+      (n_expected + ``shrink``).  It follows the night and the clouds.
+    - ``far``: local_ratio x rate x survival(S/N) x the number of pixels, the expected
+      number of noise peaks a day at least as bright if the whole sky were like the
+      candidate's neighbourhood.
+    - ``snr_cal``: the S/N with the same rate in the reference class (single samples,
+      the first bin of ``sky_q``, local ratio 1).  Below ``snr_floor`` it is
+      extrapolated with the reference tail's exponential scale.
+
+    The fits go into the attribute ``significance_fits`` (JSON).
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation of the map.  Default is 0.
+    snr_floor : float
+        Threshold of the tail fits.  Default is 8 (the seed of the candidates).
+    q_edges : list of float
+        Edges of the classes of ``sky_q``.  Default is [0.25, 1, 3, 10, 30].
+    duration_edges : list of int
+        Edges of the classes of duration (samples).  Default is [2, 5, 10]: 1, 2-4,
+        5-9 and 10 or more.
+    q_block_e, q_block_t : int
+        Size of the blocks of the ``sky_q`` map.  Defaults are 4 and 8.
+    lobe_dy, lobe_dt_scale, lobe_dt_pad : float, float, int
+        The lobe window.  Defaults are 0.01, 2 and 4.
+    local_dy, local_dra : float
+        The local region.  Defaults are 0.1 and 10.
+    shrink : float
+        Pseudo-count of the local ratio.  Default is 5.
+    nmin_fit : int
+        Least number of peaks for a tail fit.  Default is 40.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    snr_floor = config.Property(proptype=float, default=8.0)
+    q_edges = config.list_type(float, default=[0.25, 1.0, 3.0, 10.0, 30.0])
+    duration_edges = config.list_type(int, default=[2, 5, 10])
+    q_block_e = config.Property(proptype=int, default=4)
+    q_block_t = config.Property(proptype=int, default=8)
+    lobe_dy = config.Property(proptype=float, default=0.01)
+    lobe_dt_scale = config.Property(proptype=float, default=2.0)
+    lobe_dt_pad = config.Property(proptype=int, default=4)
+    local_dy = config.Property(proptype=float, default=0.1)
+    local_dra = config.Property(proptype=float, default=10.0)
+    shrink = config.Property(proptype=float, default=5.0)
+    nmin_fit = config.Property(proptype=int, default=40)
+
+    def process(self, table, negatives, cand):
+        """Calibrate the candidates.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates, from the best-trial map ``cand``.
+        negatives : containers.TransientCandidateTable
+            The negative peaks of the same search (:class:`TransientNegativePeaks`).
+        cand : containers.TransientCandidateMap
+            The best-trial map of the candidates.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy of the table, with the ``significance`` table.
+        """
+        if not negatives.attrs.get("negative", False):
+            raise ValueError("The second input must come from TransientNegativePeaks.")
+        cand.redistribute("el")
+        el = cand.index_map["el"][:]
+        ra = cand.index_map["ra"][:]
+        dy = np.median(np.diff(el))
+        dra = np.median(np.diff(ra))
+        tsamp = float(cand.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
+        rec = table.candidate[:]
+        nrec = negatives.candidate[:]
+
+        qb, nvalid = self._q_blocks(cand)
+        nqb = len(self.q_edges) + 1
+        be, bt = self.q_block_e, self.q_block_t
+
+        def q_at(r):
+            i = np.clip(r["el_index"] // be, 0, qb.shape[0] - 1)
+            j = np.clip(r["ra_index"] // bt, 0, qb.shape[1] - 1)
+            return qb[i, j]
+
+        def qclass(q):
+            return np.searchsorted(self.q_edges, np.nan_to_num(q), side="right")
+
+        def wclass(r):
+            w = np.maximum(np.rint(np.nan_to_num(r["duration"]) / tsamp), 1)
+            return np.searchsorted(self.duration_edges, w, side="right")
+
+        nwc = len(self.duration_edges) + 1
+
+        # The null: negative-dominated peaks above the floor
+        null = nrec[_negative_dominant(nrec, rec, max(0, round(self.lobe_dy / dy)),
+                                       self.lobe_dt_scale, self.lobe_dt_pad, tsamp)]
+        null = null[null["snr"] >= self.snr_floor]
+        null_q = qclass(q_at(null))
+        null_w = wclass(null)
+
+        # Pixels per class of q (per block, for the local sums)
+        bcls = np.where(nvalid > 0, qclass(qb), -1)
+        npix = np.array([nvalid[bcls == b].sum() for b in range(nqb)])
+        ntot = nvalid.sum()
+        cum = np.zeros((nqb, qb.shape[0] + 1, qb.shape[1] + 1))
+        for b in range(nqb):
+            cum[b, 1:, 1:] = np.where(bcls == b, nvalid, 0).cumsum(0).cumsum(1)
+
+        # Tail fits per class
+        rate = np.zeros((nwc, nqb))
+        shape = np.zeros((nwc, nqb, 2))  # xi, sigma
+        nused = np.zeros((nwc, nqb), dtype=int)
+        for wk in range(nwc):
+            for b in range(nqb):
+                lo = hi = b
+                sel = (null_w == wk) & (null_q == b)
+                while sel.sum() < self.nmin_fit and (lo > 0 or hi < nqb - 1):
+                    lo, hi = max(lo - 1, 0), min(hi + 1, nqb - 1)
+                    sel = (null_w == wk) & (null_q >= lo) & (null_q <= hi)
+                shape[wk, b] = _gpd_fit(null["snr"][sel] - self.snr_floor)
+                nused[wk, b] = sel.sum()
+                rate[wk, b] = np.sum((null_w == wk) & (null_q == b)) / max(npix[b], 1)
+
+        # Each candidate
+        q = q_at(rec)
+        cq, cw = qclass(q), wclass(rec)
+        order = np.argsort(null["y"], kind="stable")
+        ys = null["y"][order]
+        half_e = max(0, round(self.local_dy / dy))
+        half_t = max(0, round(self.local_dra / dra))
+        n = rec.size
+        local = np.ones(n)
+        far = np.zeros(n)
+        snr_cal = np.zeros(n)
+        xi_r, sig_r = shape[0, 0]
+        for k in range(n):
+            wk = cw[k]
+            # expected null peaks in the region, from the class rates
+            e0 = max(rec["el_index"][k] - half_e, 0) // be
+            e1 = min(rec["el_index"][k] + half_e, el.size - 1) // be + 1
+            exp = 0.0
+            for t0, t1 in _wrapped_ranges(
+                rec["ra_index"][k] - half_t, rec["ra_index"][k] + half_t + 1, ra.size
+            ):
+                b0, b1 = t0 // bt, min(-(-t1 // bt), qb.shape[1])
+                cnt = cum[:, e1, b1] - cum[:, e0, b1] - cum[:, e1, b0] + cum[:, e0, b0]
+                exp += np.sum(cnt * rate[wk])
+            lo = np.searchsorted(ys, rec["y"][k] - self.local_dy, side="left")
+            hi = np.searchsorted(ys, rec["y"][k] + self.local_dy, side="right")
+            idx = order[lo:hi]
+            near = (np.abs(_wrap_deg(null["ra"][idx] - rec["ra"][k])) <= self.local_dra) & (
+                null_w[idx] == wk
+            )
+            local[k] = (near.sum() + self.shrink) / (exp + self.shrink)
+            xi, sig = shape[wk, cq[k]]
+            lam = local[k] * rate[wk, cq[k]] * _gpd_sf(rec["snr"][k] - self.snr_floor, xi, sig)
+            far[k] = lam * ntot
+            p = lam / rate[0, 0] if rate[0, 0] > 0 else np.inf
+            if p >= 1.0 or not np.isfinite(p):
+                snr_cal[k] = self.snr_floor - sig_r * np.log(p) if np.isfinite(p) else 0.0
+            else:
+                snr_cal[k] = self.snr_floor + _gpd_isf(p, xi_r, sig_r)
+
+        out = _table_copy(table, skip=("significance",))
+        out.add_dataset("significance")
+        sg = np.zeros(n, dtype=out.datasets["significance"][:].dtype)
+        sg["sky_q"] = q
+        sg["local_ratio"] = local
+        sg["far"] = far
+        sg["snr_cal"] = snr_cal
+        out.datasets["significance"][:] = sg
+        out.attrs["significance_fits"] = json.dumps(
+            {
+                "rate_per_pixel": rate.tolist(),
+                "xi": shape[..., 0].tolist(),
+                "sigma": shape[..., 1].tolist(),
+                "npeak": nused.tolist(),
+                "npix": npix.tolist(),
+                "nnull": int(null.size),
+            }
+        )
+        for key in (
+            "snr_floor", "q_edges", "duration_edges", "q_block_e", "q_block_t", "lobe_dy",
+            "lobe_dt_scale", "lobe_dt_pad", "local_dy", "local_dra", "shrink", "nmin_fit",
+        ):  # fmt: skip
+            out.attrs[f"sig_{key}"] = getattr(self, key)
+        self.log.info(
+            f"Calibrated {n} candidates against {null.size} negative-dominated peaks: "
+            f"{int(np.sum(snr_cal >= 10))} at snr_cal >= 10 "
+            f"({int(np.sum(rec['snr'] >= 10))} at S/N >= 10)."
+        )
+        return out
+
+    def _q_blocks(self, cand):
+        """sky_q per block of the map, and the number of valid pixels per block."""
+        import warnings
+
+        pp = self.pol
+        w = cand.weight[:].allgather()[pp]
+        snr = cand.snr[:].allgather()[pp]
+        dur = cand.datasets["duration"][:].allgather()[pp]
+        ok = (w > 0) & np.isfinite(snr)
+        one = ok & (dur == 1)
+        be, bt = self.q_block_e, self.q_block_t
+        ne, nt = w.shape
+        nbe, nbt = -(-ne // be), -(-nt // bt)
+        pad = ((0, nbe * be - ne), (0, nbt * bt - nt))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            med = np.nanmedian(np.where(one, w, np.nan), axis=1)
+            q1 = np.where(one, med[:, np.newaxis] * tools.invert_no_zero(w) - 1.0, np.nan)
+            q1 = np.pad(q1, pad, constant_values=np.nan)
+            qb = np.nanmedian(q1.reshape(nbe, be, nbt, bt), axis=(1, 3))
+        nvalid = np.pad(ok, pad).reshape(nbe, be, nbt, bt).sum(axis=(1, 3))
+        nvalid = np.where(np.isfinite(qb), nvalid, 0)
+        return qb, nvalid
+
+
+def _wrapped_ranges(t0, t1, n):
+    """[t0, t1) on a periodic axis of length n, as one or two ranges within [0, n)."""
+    if t1 - t0 >= n:
+        return [(0, n)]
+    t0m, t1m = t0 % n, t1 % n
+    if t1m == 0:
+        t1m = n
+    if t0m < t1m:
+        return [(t0m, t1m)]
+    return [(t0m, n), (0, t1m)]
+
+
+def _negative_dominant(neg, pos, nrow, dt_scale, dt_pad, tsamp):
+    """Negative peaks with no positive peak at least as bright in their lobe window."""
+    keep = np.ones(neg.size, dtype=bool)
+    if neg.size == 0 or pos.size == 0:
+        return keep
+    order = np.argsort(pos["el_index"], kind="stable")
+    ep = pos["el_index"][order]
+    wn = np.maximum(np.nan_to_num(neg["duration"]) / tsamp, 1)
+    wp = np.maximum(np.nan_to_num(pos["duration"]) / tsamp, 1)
+    lo = np.searchsorted(ep, neg["el_index"] - nrow, side="left")
+    hi = np.searchsorted(ep, neg["el_index"] + nrow, side="right")
+    for k in range(neg.size):
+        c = order[lo[k] : hi[k]]
+        if c.size == 0:
+            continue
+        reach = dt_scale * np.maximum(wp[c], wn[k]) + dt_pad
+        near = np.abs(pos["ra_index"][c].astype(int) - int(neg["ra_index"][k])) <= reach
+        keep[k] = not np.any(near & (pos["snr"][c] >= neg["snr"][k]))
+    return keep
+
+
+def _gpd_fit(excess):
+    """Maximum-likelihood generalised Pareto (xi, sigma) of positive excesses."""
+    from scipy import stats
+
+    excess = np.asarray(excess, dtype=np.float64)
+    excess = excess[excess >= 0]
+    if excess.size < 10:
+        return 0.0, max(float(np.mean(excess)) if excess.size else 2.0, 0.5)
+    xi, _, sigma = stats.genpareto.fit(excess, floc=0.0)
+    return float(xi), float(sigma)
+
+
+def _gpd_sf(x, xi, sigma):
+    from scipy import stats
+
+    return stats.genpareto.sf(np.maximum(x, 0.0), xi, loc=0.0, scale=sigma)
+
+
+def _gpd_isf(p, xi, sigma):
+    from scipy import stats
+
+    return stats.genpareto.isf(p, xi, loc=0.0, scale=sigma)
+
+
+class AddWindowStats(tasklib.base.ContainerTask):
+    """Statistics of the single samples within each candidate's duration.
+
+    A real pulse lasting W samples is an excess in each of them, while a long
+    excursion of the scintillating sky that wins a long trial is mostly a few large
+    samples among others of either sign.  For each candidate, the single-sample
+    output of every band (duration 1) is taken along the track of its sky position
+    (its telescope-x drifts with the hour angle, as in :class:`AddCandidateSpectra`)
+    for its W samples, and the bands are combined into one S/N per sample,
+    sum(w a) / sqrt(sum w).  The ``window`` table gets the number of samples
+    ``win_n``, the fraction above zero ``win_fpos``, the self-normalised
+    ``win_t`` = mean / (std / sqrt(n)), which needs no noise model, and ``win_top2``,
+    the share of the sum from its two largest samples (with ``min_samples`` or more,
+    otherwise NaN).  The matched filter's response makes a pulse's samples unequal
+    near its edges, so a pulse is only approximately a plateau.
+
+    Attributes
+    ----------
+    pol : int
+        Index of the polarisation of the band output.  Default is 0.
+    min_samples : int
+        Least number of samples for the statistics.  Default is 3.
+    """
+
+    pol = config.Property(proptype=int, default=0)
+    min_samples = config.Property(proptype=int, default=3)
+
+    def process(self, table, bands):
+        """Add the window statistics.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates.
+        bands : containers.TransientMatchedFilter
+            Matched filter output for each band, with duration 1.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy of the table, with the ``window`` table.
+        """
+        from mpi4py import MPI
+
+        durations = [int(d) for d in bands.index_map["duration"][:]]
+        if 1 not in durations:
+            raise ValueError("The band output must have duration 1.")
+        idur = durations.index(1)
+        bands.redistribute("el")
+        e, tb, xi, wc = _candidate_positions(table, bands, match_duration=True)
+        n = e.size
+        la, lw = bands.amplitude[:], bands.weight[:]
+        off, nloc = la.local_offset[3], la.local_shape[3]
+        ra_b = bands.index_map["ra"][:]
+        nra = ra_b.size
+        dra = np.radians(np.median(np.diff(ra_b)))
+        periodic = _is_full_day(ra_b)
+        xg = bands.index_map["x"][:]
+        dx = xg[1] - xg[0] if xg.size > 1 else 1.0
+        ha = np.radians(bands.datasets["ha"][:])
+        dec = np.radians(bands.datasets["dec"][:])
+
+        stats = np.zeros((n, 4))
+        mine = np.zeros(n)
+        for k in range(n):
+            if not off <= e[k] < off + nloc:
+                continue
+            mine[k] = 1.0
+            W = int(wc[k])
+            j = np.arange(W)
+            xj = -np.cos(dec[e[k], xi[k]]) * np.sin(ha[e[k], xi[k]] + j * dra)
+            ij = np.rint((xj - xg[0]) / dx).astype(int)
+            tt = tb[k] + j
+            ok = (ij >= 0) & (ij < xg.size)
+            if periodic:
+                tt = tt % nra
+            else:
+                ok &= tt < nra
+            tt, ij = tt[ok], ij[ok]
+            A = la.local_array[self.pol, idur, :, e[k] - off]  # freq, ra, x
+            Wt = lw.local_array[self.pol, idur, :, e[k] - off]
+            a, w = A[:, tt, ij], Wt[:, tt, ij]  # freq, sample
+            sw = w.sum(axis=0)
+            good = sw > 0
+            s = (w * a).sum(axis=0)[good] * tools.invert_no_zero(np.sqrt(sw[good]))
+            ns = s.size
+            stats[k, 0] = ns
+            if ns < max(self.min_samples, 2):
+                stats[k, 1:] = np.nan
+                continue
+            sd = np.std(s, ddof=1)
+            tot = s.sum()
+            stats[k, 1] = np.mean(s > 0)
+            stats[k, 2] = s.mean() / (sd / np.sqrt(ns)) if sd > 0 else np.nan
+            stats[k, 3] = np.sort(s)[-2:].sum() / tot if tot > 0 else np.nan
+        # each candidate's row is on one rank
+        stats = np.where(mine[:, np.newaxis] > 0, stats, 0.0)
+        stats = np.nan_to_num(stats, nan=-1e30)
+        bands.comm.Allreduce(MPI.IN_PLACE, stats, op=MPI.SUM)
+        stats[stats < -1e29] = np.nan
+
+        out = _table_copy(table, skip=("window",))
+        out.add_dataset("window")
+        wv = np.zeros(n, dtype=out.datasets["window"][:].dtype)
+        wv["win_n"] = stats[:, 0]
+        wv["win_fpos"] = stats[:, 1]
+        wv["win_t"] = stats[:, 2]
+        wv["win_top2"] = stats[:, 3]
+        out.datasets["window"][:] = wv
+        out.attrs["win_min_samples"] = self.min_samples
+        self.log.info(f"Window statistics of {n} candidates.")
+        return out
 
 
 class SiftTransientCandidates(tasklib.base.ContainerTask):
@@ -10539,6 +10965,12 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       ``fidelity`` table of :class:`AddNegativeFidelity`): fidelity below
       ``fidelity_min``, as many negative peaks of at least the candidate's S/N and
       about its duration around it as positive ones, so that noise explains it.
+    - 18 ``significance`` (if ``snr_cal_min`` is set and the table has the
+      ``significance`` table of :class:`CalibrateSignificance`): ``snr_cal`` below
+      ``snr_cal_min``, the S/N calibrated against the local tail of the noise.
+    - 19 ``window`` (if ``win_t_min`` is set and the table has the ``window`` table
+      of :class:`AddWindowStats`): a candidate of ``win_wmin`` or more samples whose
+      single samples are not a sustained excess, ``win_t`` below ``win_t_min``.
 
     Attributes
     ----------
@@ -10566,6 +10998,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "crowded": 15,
         "periodic": 16,
         "fidelity": 17,
+        "significance": 18,
+        "window": 19,
     }
     INFO: ClassVar = ("periodic",)
 
@@ -10609,6 +11043,13 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     fidelity_min = config.Property(
         proptype=lambda v: None if v is None else float(v), default=None
     )
+    snr_cal_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    win_t_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    win_wmin = config.Property(proptype=int, default=4)
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -10716,6 +11157,13 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             if self.fidelity_min is not None and "fidelity" in table.datasets:
                 fid = table.datasets["fidelity"][:]["fidelity"]
                 flag("fidelity", fid < self.fidelity_min)
+            if self.snr_cal_min is not None and "significance" in table.datasets:
+                cal = table.datasets["significance"][:]["snr_cal"]
+                flag("significance", cal < self.snr_cal_min)
+            if self.win_t_min is not None and "window" in table.datasets:
+                win = table.datasets["window"][:]
+                long_ = win["win_n"] >= self.win_wmin
+                flag("window", long_ & (win["win_t"] < self.win_t_min))
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -10760,7 +11208,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "arc_corr_min", "fwhm_y_max", "ext_dy_min", "weight_ratio_min",
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
-            "ns_scale_min", "fidelity_min",
+            "ns_scale_min", "fidelity_min", "snr_cal_min", "win_t_min", "win_wmin",
         ):  # fmt: skip
             val = getattr(self, key)
             out.attrs[f"sift_{key}"] = "none" if val is None else val
