@@ -348,13 +348,14 @@ class FluxCatalog(BaseInject):
         greater than this value.
     filename : str
         Name of the file containing the flux catalog.  Must be a .json
-        file that can be loaded with ch_util.fluxcat.FluxCatalog.load.
+        file that can be loaded with fluxcat.FluxCatalog.load.
+        If None, the default fluxcat catalogs are used. Default: None.
     """
 
     min_dec = config.Property(proptype=float, default=0.0)
     max_dec = config.Property(proptype=float, default=70.0)
     min_flux = config.Property(proptype=float, default=0.0)
-    filename = config.Property(proptype=str, default="")
+    filename = config.Property(proptype=str, default=None)
 
     NOMINAL_FREQ = 600.0
 
@@ -368,15 +369,20 @@ class FluxCatalog(BaseInject):
         """
         super().setup(manager)
 
-        # Delete all previously loaded catalogs
-        collections = fluxcat.FluxCatalog.loaded_collections()
-        for collection in collections:
-            fluxcat.FluxCatalog.delete_loaded_collection(collection[0])
+        if self.filename is not None:
+            # Delete all previously loaded catalogs
+            collections = fluxcat.FluxCatalog.loaded_collections()
+            for collection in collections:
+                fluxcat.FluxCatalog.delete_loaded_collection(collection[0])
 
-        # Load the flux catalog
-        fluxcat.FluxCatalog.load(self.filename, overwrite=2)
+            # Load the flux catalog
+            fluxcat.FluxCatalog.load(self.filename, overwrite=2)
 
-        self.catalog_tag = os.path.splitext(os.path.basename(self.filename))[0]
+            self.catalog_tag = os.path.splitext(os.path.basename(self.filename))[0]
+
+        else:
+            # Save comma-separated list of fluxcat default collections
+            self.catalog_tag = ",".join(fluxcat.core.DEFAULT_COLLECTIONS)
 
         # Save attributes describing the source selection to the output container
         self.output_attrs["catalog"] = self.catalog_tag
