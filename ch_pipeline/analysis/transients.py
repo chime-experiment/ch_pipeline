@@ -5953,8 +5953,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     sigma_k^2(t_j') W_k(t_j')``, since the thermal noise after the filter has
     covariance ``(delta - P[t, t']) sigma^2(t')``.  The sky term is taken as
     independent between samples (it is white at 10 s after the filter).  These need
-    the filter response out to lag W - 1.  The per-band output and the group maps
-    are single-sample only (``band_durations`` must be [1]).
+    the filter response out to lag W - 1.  The group maps are single-sample only.
+    The per-band output is for the durations in ``band_durations`` (which must
+    include 1): for a longer one, the band's own numerator, response and variance
+    summed along the track with its own coupling terms, so that the amplitude of
+    each band at that duration is unbiased (the sum of the single-sample output of
+    a band along a track leaves out the coupling, which removes much of a long
+    pulse, more at the higher frequencies).  Each longer band duration holds
+    ``[band, pol group, el, x, ra]`` coupling terms for an elevation pass, so it
+    is meant for small inputs (see :class:`CandidateBandSpectra`).
 
     The sub-band maps of :class:`CollapseBandsToGroups` are made here too, since
     the correlation between bands is needed for their noise.  Each entry of
@@ -6149,11 +6156,17 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         durations = sorted(set(self.durations))
         if min(durations) < 1:
             raise ValueError("Durations must be at least one sample.")
-        if sorted(set(self.band_durations)) != [1] or durations[0] != 1:
+        band_durations = sorted(set(self.band_durations))
+        if (
+            durations[0] != 1
+            or band_durations[0] != 1
+            or not set(band_durations) <= set(durations)
+        ):
             raise ValueError(
                 "With the sky noise, durations must include 1 and band_durations must "
-                "be [1]."
+                "include 1 and be a subset of durations."
             )
+        blong = [W for W in band_durations if W > 1]
         wmax = max(durations)
         alphas = np.array(self.spectral_indices, dtype=np.float64)
 
@@ -6302,7 +6315,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             duration=np.array(durations), spectral_index=alphas, **common
         )
         bands = containers.TransientMatchedFilter(
-            freq=band_map, duration=np.array([1]), **{**common, "pol": bpol}
+            freq=band_map, duration=np.array(band_durations), **{**common, "pol": bpol}
         )
         for cont in (trials, bands):
             if (self.save_imag and not (self.stokes and cont is bands)) or (
@@ -6466,6 +6479,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 cshp = (alphas.size, len(long_w), len(pgroups), npe, nx, nra)
                 cross_r = np.zeros(cshp, dtype=np.float32)
                 cross_v = np.zeros(cshp, dtype=np.float32)
+            if blong:
+                # The coupling of each band on its own, for the band durations
+                bshp = (nband, len(blong), len(pgroups), npe, nx, nra)
+                bcross_r = np.zeros(bshp, dtype=np.float32)
+                bcross_v = np.zeros(bshp, dtype=np.float32)
 
             for bb in range(nband):
                 fsel = np.flatnonzero(band_index == bb)
@@ -6575,6 +6593,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                     sb2 = scale[bb, ia] ** 2
                                     cross_r[ia, iw, ci, psl] += sb2 * cr[iw]
                                     cross_v[ia, iw, ci, psl] += sb2 * cv[iw]
+                            for ib, W in enumerate(blong):
+                                bcross_r[bb, ib, ci, psl] = cr[long_w.index(W)]
+                                bcross_v[bb, ib, ci, psl] = cv[long_w.index(W)]
                         continue
 
                     for gg, grp in enumerate(pgroups):
@@ -6609,6 +6630,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                     sb2 = scale[bb, ia] ** 2
                                     cross_r[ia, iw, gg, psl] += sb2 * cr[iw]
                                     cross_v[ia, iw, gg, psl] += sb2 * cv[iw]
+                            for ib, W in enumerate(blong):
+                                bcross_r[bb, ib, gg, psl] = cr[long_w.index(W)]
+                                bcross_v[bb, ib, gg, psl] = cv[long_w.index(W)]
 
                         vp = []
                         for pp in grp:
@@ -6643,6 +6667,26 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     if bimag is not None:
                         im, _ = self._amp_weight(numer_im[gg, bb], resp[gg, bb], var)
                         bimag[op, 0, bb, p0:p1] = im.transpose(0, 2, 1)
+                    if not blong:
+                        continue
+                    # Longer durations: the sums along the track, with the band's own
+                    # coupling of the samples (that of its pair of products, cmap)
+                    tr = track[:, p0:p1]
+                    parts = [resp[gg, bb], var, nm]
+                    if bimag is not None:
+                        parts.append(numer_im[gg, bb])
+                    sums = [self._track_numerator(a, tr, blong) for a in parts]
+                    for ib, W in enumerate(blong):
+                        rs_w = sums[0][ib].real + bcross_r[bb, ib, cmap[gg]]
+                        vr_w = sums[1][ib].real + 0.5 * bcross_v[bb, ib, cmap[gg]]
+                        rs_w = np.where(valid_w(W), rs_w, 0.0)
+                        iwb = band_durations.index(W)
+                        amp, wgt = self._amp_weight(sums[2][ib].real, rs_w, vr_w)
+                        bamp[op, iwb, bb, p0:p1] = amp.transpose(0, 2, 1)
+                        bwgt[op, iwb, bb, p0:p1] = wgt.transpose(0, 2, 1)
+                        if bimag is not None:
+                            im, _ = self._amp_weight(sums[3][ib].real, rs_w, vr_w)
+                            bimag[op, iwb, bb, p0:p1] = im.transpose(0, 2, 1)
 
             # All bands, for each spectral index
             for ia in range(alphas.size):
@@ -6711,7 +6755,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             )
             # Free the arrays of the pass (the closures above refer to them by name)
             numer = numer_im = resp = vinc = vplus = vminus = None
-            cross_r = cross_v = None
+            cross_r = cross_v = bcross_r = bcross_v = None
 
         # No view of the shared memory may outlive it (the per-band arrays are copies)
         del weight_all
@@ -7340,6 +7384,265 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         )
         return k2coh, k2tot, yband, rho_pol, rho
 
+
+
+class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
+    """The per-band matched filter at each candidate's own duration.
+
+    The single-sample band output summed along a candidate's track is biased for a
+    pulse longer than a sample: the m-mode filter removes much of a long pulse (it
+    drifts at the fringe rate, in the middle of the stop band), the matched filter
+    of the trials accounts for that through the coupling of the samples of the
+    track, and the plain sum does not.  The stop band scales with frequency, so the
+    loss is larger at the high frequencies and the spectral index of a long pulse
+    comes out too steep (by ~-1.5 to -2 for 4 to 16 samples on the injections of
+    2418).
+
+    This task runs the matched filter of :class:`TransientMatchedFilterSkyNoise`
+    (same configuration) again on a window of one row and W samples at each
+    candidate with a duration W > 1 and S/N of at least ``snr_min``, with the
+    candidate's duration among the band durations, so that each band has its own
+    numerator, response, variance and coupling along the track starting at the
+    candidate's telescope-x.  The window has the data, weights, filter response,
+    noise scale, RFI mask and in-band noise of the full day at those samples; the
+    telescope-x grid, the primary beam and the sky-noise coefficients are those of
+    the full day.  Each rank does the candidates on its own rows, so the cost is
+    that of the matched filter on ~(number of candidates x W) samples of one row.
+    Candidates whose window runs off the end of a day that is not periodic are left
+    out (their spectra stay the sum of single samples).
+
+    The result has the amplitude and weight of each band and polarisation of the
+    bands (I, Q, U and V for ``stokes``) at the candidate's start, duration and
+    telescope-x, for :class:`AddCandidateSpectra`.
+
+    Attributes
+    ----------
+    snr_min : float
+        Smallest S/N of the candidates.  Default is 10.
+    """
+
+    snr_min = config.Property(proptype=float, default=10.0)
+
+    # The window of the current candidate (in the helper that runs the matched filter)
+    _win = None
+
+    def _x_grid(self, freq, ew_used):
+        if self._win is not None:
+            return self._win["x"]
+        return super()._x_grid(freq, ew_used)
+
+    def _evaluate_beam(self, freq, pol, y, x, pad=8):
+        if self._win is not None:
+            return self._win["pbeam"]
+        return super()._evaluate_beam(freq, pol, y, x, pad)
+
+    def _sky_coefficients(self, sky, band_map, ew_used, ra, el):
+        if self._win is not None:
+            k2coh, k2tot, yband, rho_pol, rho = self._win["sky"]
+            ras, ee = self._win["ras"], self._win["el"]
+            return k2coh[..., ras], k2tot[..., ras], yband[ee], rho_pol, rho
+        return super()._sky_coefficients(sky, band_map, ew_used, ra, el)
+
+    def process(self, hvis, unfiltered, sky, table):
+        """Run the matched filter at the candidates.
+
+        Parameters
+        ----------
+        hvis : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The input of the matched filter.
+        unfiltered : draco.core.containers.HybridVisStream
+            The visibilities before filtering, on the same grid.
+        sky : ch_pipeline.core.containers.HybridVisSkyNoise
+            Output of :class:`EstimateSkyNoise`.
+        table : containers.TransientCandidateTable
+            Candidates, from :class:`GroupTransientCandidates`.
+
+        Returns
+        -------
+        out : containers.TransientCandidateCutouts
+            Each candidate's bands at its duration (one row and start time).
+        """
+        import copy
+        import logging
+
+        from mpi4py import MPI
+
+        comm = self.comm
+        rec = table.candidate[:]
+        el = hvis.index_map["el"][:]
+        ra = hvis.ra[:]
+        nra = ra.size
+        dra = np.median(np.diff(ra))
+        periodic = _is_full_day(ra) and bool(hvis.attrs.get("ra_periodic", True))
+        tsamp = float(table.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
+        wc = np.maximum(np.rint(np.nan_to_num(rec["duration"]) / tsamp), 1).astype(int)
+        tb = np.clip(np.searchsorted(ra, rec["ra"] - 0.5 * dra), 0, nra - 1)
+        sel = (rec["snr"] >= self.snr_min) & (wc > 1) & np.isin(wc, self.durations)
+        if not periodic:
+            sel &= tb + wc <= nra
+        idx = np.flatnonzero(sel)
+        ncut = idx.size
+
+        # The full-day quantities the windows share: the telescope-x grid, the beam
+        # (on the rows of each rank) and the sky-noise coefficients
+        pol = list(hvis.index_map["pol"])
+        ipol = [pol.index(p) for p in self.pol]
+        ew = hvis.index_map["ew"][:]
+        iew = list(range(ew.size)) if self.ew_index is None else list(self.ew_index)
+        freq = hvis.freq[:]
+        _, band_map = self._assign_bands(freq)
+        x = self._x_grid(freq, ew[iew])
+        pbeam = self._evaluate_beam(freq, [pol[ii] for ii in ipol], el, x)
+        sky_coef = self._sky_coefficients(sky, band_map, ew[iew], ra, el)
+
+        hvis.redistribute(["el", "freq"])
+        unfiltered.redistribute(["el", "freq"])
+        el_slc = hvis.vis[:].local_bounds
+        if unfiltered.vis[:].local_bounds != el_slc:
+            raise RuntimeError("The streams are not distributed in the same way.")
+        has_response = "ra_response" in hvis.datasets
+        wname = "noise_weight" if has_response else hvis._weight_dset_name
+        shared = [_NodeSharedFreq(hvis[wname][:], comm)]  # freq, pol, ew, ra
+        if has_response:
+            shared.append(_NodeSharedFreq(hvis.ra_response[:], comm))
+        vis = hvis.vis[:].local_array
+        uvis = unfiltered.vis[:].local_array
+        nscale = (
+            hvis.noise_scale[:].local_array if "noise_scale" in hvis.datasets else None
+        )
+        mask = self.rfi_mask
+        if mask is not None:
+            mask.redistribute("el")
+        noise = self.inband_noise
+        if noise is not None:
+            noise.redistribute("el")
+
+        bpol = ["I", "Q", "U", "V"] if self.stokes else (
+            ["co"] if self.combine_pol else list(self.pol)
+        )
+        nband = len(band_map)
+        amp = np.zeros((ncut, len(bpol), nband), dtype=np.float64)
+        wgt = np.zeros_like(amp)
+
+        helper = copy.copy(self)
+        helper.comm = MPI.COMM_SELF
+        helper.groups = {}
+        helper.el_pass = None
+        helper.spectral_indices = [0.0]
+        # Its log is quiet (it would repeat the matched filter's messages per window)
+        quiet = logging.getLogger(f"{__name__}.CandidateBandSpectra.window")
+        quiet.setLevel(logging.WARNING)
+        helper._log = quiet
+        self_comm = MPI.COMM_SELF
+
+        def window(cont, name, sl):
+            return cont.datasets[name][:].local_array[sl]
+
+        t0 = time.time()
+        ndone = 0
+        for ii, k in enumerate(idx):
+            e = int(rec["el_index"][k])
+            if not (el_slc.start <= e < el_slc.stop):
+                continue
+            le = e - el_slc.start
+            W = int(wc[k])
+            ras = (tb[k] + np.arange(W)) % nra
+
+            sub = type(hvis)(
+                axes_from=hvis, attrs_from=hvis, el=el[e : e + 1], ra=ra[ras],
+                comm=self_comm, distributed=True,
+            )
+            sub.attrs["ra_periodic"] = False
+            sub.vis[:].local_array[:] = vis[:, :, :, le : le + 1][..., ras]
+            sub.add_dataset(wname)
+            sub.datasets[wname][:].local_array[:] = np.moveaxis(
+                shared[0].array[:, :, :, ras], 0, 1
+            )
+            if has_response:
+                sub.add_dataset("ra_response")
+                sub.ra_response[:].local_array[:] = np.moveaxis(
+                    shared[1].array[:, :, :, ras], 0, 1
+                )
+            if nscale is not None:
+                sub.add_dataset("noise_scale")
+                sub.noise_scale[:].local_array[:] = nscale[..., le : le + 1]
+            usub = type(unfiltered)(
+                axes_from=unfiltered, attrs_from=unfiltered, el=el[e : e + 1],
+                ra=ra[ras], comm=self_comm, distributed=True,
+            )
+            usub.vis[:].local_array[:] = uvis[:, :, :, le : le + 1][..., ras]
+
+            helper.rfi_mask = helper.inband_noise = None
+            if mask is not None:
+                msub = type(mask)(
+                    axes_from=mask, attrs_from=mask, el=el[e : e + 1], ra=ra[ras],
+                    comm=self_comm, distributed=True,
+                )
+                msub.mask[:].local_array[:] = window(mask, "mask", (slice(None), ras))[
+                    ..., le : le + 1
+                ]
+                helper.rfi_mask = msub
+            if noise is not None:
+                nsub = type(noise)(
+                    axes_from=noise, attrs_from=noise, el=el[e : e + 1], ra=ra[ras],
+                    comm=self_comm, distributed=True,
+                )
+                nsub.scale[:].local_array[:] = noise.scale[:].local_array[
+                    :, :, :, le : le + 1
+                ][..., ras]
+                for name in ("dof", "common", "flag"):
+                    if name in noise.datasets and name in nsub.datasets:
+                        nsub.datasets[name][:] = noise.datasets[name][:][..., ras]
+                helper.inband_noise = nsub
+
+            helper.durations = [1, W]
+            helper.band_durations = [1, W]
+            helper._win = {
+                "x": x,
+                "pbeam": pbeam[:, :, le : le + 1],
+                "sky": sky_coef,
+                "ras": ras,
+                "el": [e],
+            }
+            res = TransientMatchedFilterSkyNoise.process(helper, sub, usub, sky)
+            bands = res[1]
+            xi = int(rec["x_index"][k])
+            amp[ii] = bands.amplitude[:].local_array[:, 1, :, 0, 0, xi]
+            wgt[ii] = bands.weight[:].local_array[:, 1, :, 0, 0, xi]
+            ndone += 1
+
+        for sh in shared:
+            sh.free()
+        comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
+        comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+        nmax = comm.allreduce(ndone, op=MPI.MAX)
+        self.log.info(
+            f"Ran the matched filter at {ncut} candidates (W > 1, S/N >= "
+            f"{self.snr_min:g}), up to {nmax} on a rank, in {time.time() - t0:.0f} s."
+        )
+
+        out = containers.TransientCandidateCutouts(
+            candidate=ncut,
+            pol=np.array(bpol),
+            freq=band_map,
+            el_offset=np.array([0]),
+            ra_offset=np.array([0]),
+            attrs_from=table,
+            distributed=True,
+            comm=comm,
+        )
+        out.datasets["candidate_index"][:] = idx
+        out.datasets["x_index"][:] = rec["x_index"][idx]
+        out.datasets["el_index"][:] = rec["el_index"][idx, np.newaxis]
+        out.datasets["ra_index"][:] = tb[idx, np.newaxis]
+        out.datasets["el"][:] = el[rec["el_index"][idx], np.newaxis]
+        out.datasets["ra"][:] = ra[tb[idx], np.newaxis]
+        out.datasets["duration"][:] = wc[idx]
+        la = out.amplitude[:]
+        sl = slice(la.local_offset[0], la.local_offset[0] + la.local_shape[0])
+        la.local_array[:] = amp[sl, :, :, np.newaxis, np.newaxis]
+        out.weight[:].local_array[:] = wgt[sl, :, :, np.newaxis, np.newaxis]
+        return out
 
 def _check_same_grid(a, b):
     """Check that two streams have the same RA, el and frequency axes."""
@@ -9789,12 +10092,15 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     is poorly fitted; an astrophysical pulse is smooth.
 
     With ``match_duration`` (the default), each candidate's spectrum is for its own
-    best duration W: from the band output for W if it has it, or else the
-    inverse-variance weighted mean of the single-sample band amplitudes along the
-    track of the source (the telescope-x of the candidate's sky position at each of
-    the W samples).  The latter leaves out the coupling of the samples by the
-    filter, so its weights are approximate, but the shape of the spectrum, which the
-    tests use, is barely affected.  Without it, every spectrum is for ``duration``.
+    best duration W: from the output of :class:`CandidateBandSpectra` if it is given
+    and has the candidate (exact), else from the band output for W if it has it, or
+    else the inverse-variance weighted mean of the single-sample band amplitudes
+    along the track of the source (the telescope-x of the candidate's sky position
+    at each of the W samples).  The last leaves out the coupling of the samples by
+    the filter, which removes more of a long pulse at the higher frequencies: its
+    spectral index is too steep (by ~-1.5 to -2 for 4 to 16 samples on the
+    injections of 2418).  Without ``match_duration``, every spectrum is for
+    ``duration``.
 
     For the candidates of the search in linear polarisation (``lin_pol``, the
     indices of Q and U in the bands), Q and U rotate with the RM across the band, so
@@ -9850,6 +10156,9 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         out : containers.TransientCandidateTable
             A copy of the input, with the spectra added.
         """
+        return self._spectra(table, bands, None)
+
+    def _spectra(self, table, bands, exact):
         from mpi4py import MPI
 
         bands.redistribute("el")
@@ -9866,12 +10175,28 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         e, tb, xi, wc = _candidate_positions(
             table, bands, self.match_duration, self.duration
         )
+        if not isinstance(exact, containers.TransientCandidateCutouts):
+            exact = None
+        if exact is not None:
+            ex_pol = _decode_names(exact.index_map["pol"][:])
+            ex_k = exact.datasets["candidate_index"][:]
+            ex_w = exact.datasets["duration"][:]
+            ex_amp = exact.amplitude[:].allgather()[..., 0, 0]  # cand, pol, band
+            ex_wgt = exact.weight[:].allgather()[..., 0, 0]
+            if ex_amp.shape[2] != centre.size:
+                raise ValueError("The exact bands differ from those of the table.")
+            use = (ex_w == wc[ex_k]) & (xi[ex_k] == exact.datasets["x_index"][:])
+        bpol = _decode_names(bands.index_map["pol"][:])
         cuts = []
         for pp in [self.pol] if self.lin_pol is None else self.lin_pol:
             amp, wgt = _band_cutouts(bands, pp, e, tb, xi, wc, [0], [0])
             amp, wgt = amp[:, :, 0, 0], wgt[:, :, 0, 0]
             bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
             bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
+            if exact is not None:
+                ip = ex_pol.index(bpol[pp])
+                amp[ex_k[use]] = ex_amp[use, ip]
+                wgt[ex_k[use]] = ex_wgt[use, ip]
             cuts.append((amp, wgt))
         if self.lin_pol is None:
             amp, wgt = cuts[0]
@@ -9908,9 +10233,42 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
         out.attrs["band_snr_min"] = self.snr_min
         out.attrs["band_match_duration"] = self.match_duration
 
-        self.log.info(f"Added the spectra of {ncand} candidates.")
+        nex = int(np.sum(use)) if exact is not None else 0
+        self.log.info(
+            f"Added the spectra of {ncand} candidates ({nex} from the matched filter "
+            "at their own duration)."
+        )
         return out
 
+
+
+class AddCandidateSpectraAtDuration(AddCandidateSpectra):
+    """:class:`AddCandidateSpectra` with the bands at each candidate's own duration.
+
+    The third input is the output of :class:`CandidateBandSpectra`; the candidates
+    it has (same duration and telescope-x) take their spectra from it, the others
+    from the band output as in :class:`AddCandidateSpectra`.  Anything else in its
+    place is ignored, so that a PassOn can stand in for it (thermal noise).
+    """
+
+    def process(self, table, bands, exact):
+        """Add the spectra.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates, from :class:`GroupTransientCandidates`.
+        bands : containers.TransientMatchedFilter
+            Matched filter output for each band.
+        exact : containers.TransientCandidateCutouts
+            The bands at the candidates' own durations.
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy of the input, with the spectra added.
+        """
+        return self._spectra(table, bands, exact)
 
 class AddNSProfile(tasklib.base.ContainerTask):
     """Fit the north-south synthesized beam to each candidate's profile in telescope-y.
@@ -10090,12 +10448,17 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     sifter if ``keep_only`` and the table has been sifted), the brightest
     ``max_cutouts`` of them: the amplitude and weight of every band over
     +-``nrow`` rows and +-``nra`` start times, at the candidate's telescope-x, for
-    single samples.  The result is distributed over candidates.
+    single samples, in the polarisation ``pol`` or each of ``pols``.  The result is
+    distributed over candidates.
 
     Attributes
     ----------
     pol : int
         Index of the polarisation.  Default is 0.
+    pols : list of str
+        Names of the polarisations of the bands to extract instead of ``pol`` (e.g.
+        ["I", "Q", "U", "V"] for the Stokes search, so that the candidates of V and
+        L can be seen in V and in Q and U).  Default is None.
     snr_min : float
         Smallest S/N.  Default is 10.
     keep_only : bool
@@ -10107,6 +10470,7 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     """
 
     pol = config.Property(proptype=int, default=0)
+    pols = config.list_type(type_=str, default=None)
     snr_min = config.Property(proptype=float, default=10.0)
     keep_only = config.Property(proptype=bool, default=False)
     max_cutouts = config.Property(proptype=int, default=1000)
@@ -10133,6 +10497,15 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         comm = bands.comm
         if 1 not in [int(d) for d in bands.index_map["duration"][:]]:
             raise ValueError("The bands need duration 1 for the cutouts.")
+        bpol = _decode_names(bands.index_map["pol"][:])
+        if self.pols is None:
+            ipol = [self.pol]
+        else:
+            missing = [p for p in self.pols if p not in bpol]
+            if missing:
+                raise ValueError(f"The bands have no polarisation {missing} ({bpol}).")
+            ipol = [bpol.index(p) for p in self.pols]
+        pnames = [bpol[ip] for ip in ipol]
         rec = table.candidate[:]
         sel = rec["snr"] >= self.snr_min
         if self.keep_only and "sift" in table.datasets:
@@ -10151,6 +10524,7 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
 
         out = containers.TransientCandidateCutouts(
             candidate=ncut,
+            pol=np.array(pnames),
             freq=bands.index_map["freq"],
             el_offset=roff,
             ra_offset=toff,
@@ -10160,6 +10534,7 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         )
         out.datasets["candidate_index"][:] = idx
         out.datasets["x_index"][:] = xi
+        out.datasets["duration"][:] = 1
         rows = e[:, np.newaxis] + roff[np.newaxis]
         rin = (rows >= 0) & (rows < el.size)
         out.datasets["el_index"][:] = np.where(rin, rows, -1)
@@ -10180,10 +10555,15 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
         for r, (o, nl) in enumerate(offs):
             k = slice(o, o + nl)
-            a, w = _band_cutouts(
-                bands, self.pol, e[k], tb[k], xi[k], np.ones(nl, int), roff, toff
-            )
-            a, w = a.astype(np.float32), w.astype(np.float32)
+            aw = [
+                _band_cutouts(
+                    bands, ip, e[k], tb[k], xi[k], np.ones(nl, int), roff, toff
+                )
+                for ip in ipol
+            ]
+            # cand, pol, freq, row, time
+            a = np.stack([x[0] for x in aw], axis=1).astype(np.float32)
+            w = np.stack([x[1] for x in aw], axis=1).astype(np.float32)
             ra_ = np.zeros_like(a) if comm.rank == r else None
             rw_ = np.zeros_like(w) if comm.rank == r else None
             comm.Reduce(a, ra_, op=MPI.SUM, root=r)
@@ -10191,9 +10571,157 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
             if comm.rank == r:
                 out.amplitude[:].local_array[:] = ra_
                 out.weight[:].local_array[:] = rw_
-        self.log.info(f"Extracted the cutouts of {ncut} candidates.")
+        self.log.info(
+            f"Extracted the cutouts of {ncut} candidates in {', '.join(pnames)}."
+        )
         return out
 
+
+
+class ExtractTrialCutouts(tasklib.base.ContainerTask):
+    """Windows of the calibrated trials of the matched filter around candidates.
+
+    For the candidates with S/N of at least ``snr_min`` (and only those kept by the
+    sifter if ``keep_only`` and the table has been sifted), the brightest
+    ``max_cutouts`` of them: the amplitude and weight (and imaginary part) of every
+    polarisation and duration of the trials over +-``nrow`` rows and +-``nra`` start
+    times, at the candidate's telescope-x and spectral index.  A polarisation with
+    no weight at that spectral index (L, searched only at ``rm_spectral_indices``)
+    is taken at the nearest one it has.  These are what the search saw at each
+    single trial, without the tail of the best-trial maps to earlier starts (a
+    window that starts before a pulse and ends on it).  The result is distributed
+    over candidates.
+
+    Attributes
+    ----------
+    snr_min : float
+        Smallest S/N.  Default is 10.
+    keep_only : bool
+        Only the candidates kept by the sifter.  Default is False.
+    max_cutouts : int
+        Largest number of cutouts (the brightest).  Default is 1000.
+    nrow, nra : int
+        Half-widths of the window in rows and samples.  Defaults are 24 and 40.
+    """
+
+    snr_min = config.Property(proptype=float, default=10.0)
+    keep_only = config.Property(proptype=bool, default=False)
+    max_cutouts = config.Property(proptype=int, default=1000)
+    nrow = config.Property(proptype=int, default=24)
+    nra = config.Property(proptype=int, default=40)
+
+    def process(self, table, trials):
+        """Extract the cutouts.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates (sifted or not).
+        trials : containers.TransientMatchedFilterTrials
+            The trials of the matched filter (after CalibrateTrialNoise).
+
+        Returns
+        -------
+        out : containers.TransientCandidateTrialCutouts
+        """
+        from mpi4py import MPI
+
+        trials.redistribute("el")
+        comm = trials.comm
+        rec = table.candidate[:]
+        sel = rec["snr"] >= self.snr_min
+        if self.keep_only and "sift" in table.datasets:
+            sel &= table.datasets["sift"][:]["keep"]
+        idx = np.flatnonzero(sel)
+        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        ncut = idx.size
+
+        el = trials.index_map["el"][:]
+        ra = trials.index_map["ra"][:]
+        nra_map = ra.size
+        dra = np.median(np.diff(ra))
+        periodic = _is_full_day(ra)
+        pol = _decode_names(trials.index_map["pol"][:])
+        alphas = np.asarray(trials.index_map["spectral_index"][:], dtype=np.float64)
+        durations = trials.index_map["duration"][:]
+        e = rec["el_index"][idx].astype(int)
+        tb = np.clip(np.searchsorted(ra, rec["ra"][idx] - 0.5 * dra), 0, nra_map - 1)
+        xi = rec["x_index"][idx].astype(int)
+
+        # The spectral index of each candidate and polarisation: its own, or the
+        # nearest one at which the polarisation was searched (L)
+        searched = np.ones((len(pol), alphas.size), dtype=bool)
+        if "L" in pol and "rm_spectral_indices" in trials.attrs:
+            rm_a = np.atleast_1d(trials.attrs["rm_spectral_indices"])
+            searched[pol.index("L")] = np.any(
+                np.isclose(alphas[:, np.newaxis], rm_a[np.newaxis]), axis=1
+            )
+        cand_a = np.nan_to_num(rec["spectral_index"][idx]) if ncut else np.zeros(0)
+        ia = np.zeros((ncut, len(pol)), dtype=int)
+        for pp in range(len(pol)):
+            dist = np.abs(cand_a[:, np.newaxis] - alphas[np.newaxis])
+            dist = np.where(searched[pp][np.newaxis], dist, np.inf)
+            ia[:, pp] = np.argmin(dist, axis=1)
+
+        roff = np.arange(-self.nrow, self.nrow + 1)
+        toff = np.arange(-self.nra, self.nra + 1)
+        has_imag = "amplitude_imag" in trials.datasets
+        out = containers.TransientCandidateTrialCutouts(
+            candidate=ncut,
+            pol=np.array(pol),
+            duration=durations,
+            el_offset=roff,
+            ra_offset=toff,
+            attrs_from=table,
+            distributed=True,
+            comm=comm,
+        )
+        if has_imag:
+            out.add_dataset("amplitude_imag")
+        out.datasets["candidate_index"][:] = idx
+        out.datasets["x_index"][:] = xi
+        out.datasets["spectral_index"][:] = alphas[ia]
+        rows = e[:, np.newaxis] + roff[np.newaxis]
+        rin = (rows >= 0) & (rows < el.size)
+        out.datasets["el_index"][:] = np.where(rin, rows, -1)
+        out.datasets["el"][:] = _extend_axis(el, rows)
+        ts = tb[:, np.newaxis] + toff[np.newaxis]
+        if periodic:
+            tin = np.ones(ts.shape, dtype=bool)
+            ts = ts % nra_map
+        else:
+            tin = (ts >= 0) & (ts < nra_map)
+        out.datasets["ra_index"][:] = np.where(tin, ts, -1)
+        out.datasets["ra"][:] = _extend_axis(ra, ts)
+
+        # Each rank's block of candidates, summed from the rows on every rank
+        names = ["amplitude", "weight"] + (["amplitude_imag"] if has_imag else [])
+        src = [trials.datasets[n][:] for n in names]
+        off, nloc = src[0].local_offset[3], src[0].local_shape[3]
+        la = out.amplitude[:]
+        blocks = comm.allgather((la.local_offset[0], la.local_shape[0]))
+        tsafe = np.where(tin, ts, 0)
+        for r, (o, nl) in enumerate(blocks):
+            shape = (len(names), nl, len(pol), durations.size, roff.size, toff.size)
+            buf = np.zeros(shape, dtype=np.float32)
+            for j in range(nl):
+                k = o + j
+                for ir in range(roff.size):
+                    er = rows[k, ir]
+                    if not rin[k, ir] or er < off or er >= off + nloc:
+                        continue
+                    for pp in range(len(pol)):
+                        for n, s in enumerate(src):
+                            v = s.local_array[pp, :, ia[k, pp], er - off]  # dur, ra, x
+                            v = v[:, tsafe[k], xi[k]]
+                            buf[n, j, pp, :, ir] = np.where(tin[k], v, 0.0)
+            red = np.zeros_like(buf) if comm.rank == r else None
+            comm.Reduce(buf, red, op=MPI.SUM, root=r)
+            if comm.rank == r:
+                for n, name in enumerate(names):
+                    out.datasets[name][:].local_array[:] = red[n]
+        self.log.info(f"Extracted the trial cutouts of {ncut} candidates.")
+        return out
 
 class TransientNegativePeaks(tasklib.base.ContainerTask):
     """The peaks of the negative search: a null for the significance of candidates.

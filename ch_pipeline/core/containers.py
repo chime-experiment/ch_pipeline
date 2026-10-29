@@ -1840,25 +1840,28 @@ class TransientCandidateCutouts(FreqContainer):
     """The per-band matched filter in windows around candidates.
 
     For each candidate (``candidate_index`` is its row in the candidate table), the
-    amplitude (Jy) and weight of each band in a window of ``el_offset`` elevations
-    and ``ra_offset`` start times centred on the candidate, at its telescope-x
-    (``x_index``) and for single samples.  ``el_index`` and ``ra_index`` give the
+    amplitude (Jy) and weight of each band and polarisation (``pol``, e.g. I, Q, U
+    and V of the Stokes search) in a window of ``el_offset`` elevations and
+    ``ra_offset`` start times centred on the candidate, at its telescope-x
+    (``x_index``), for ``duration`` samples (1 for the cutouts of
+    :class:`ExtractCandidateCutouts`; each candidate's own for
+    :class:`CandidateBandSpectra`).  ``el_index`` and ``ra_index`` give the
     indices into the maps, -1 outside them, where the weight is zero; ``el`` and
     ``ra`` continue the grid there.  Distributed over candidates.
     """
 
-    _axes = ("candidate", "el_offset", "ra_offset")
+    _axes = ("candidate", "pol", "el_offset", "ra_offset")
 
     _dataset_spec: ClassVar = {
         "amplitude": {
-            "axes": ["candidate", "freq", "el_offset", "ra_offset"],
+            "axes": ["candidate", "pol", "freq", "el_offset", "ra_offset"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
             "distributed_axis": "candidate",
         },
         "weight": {
-            "axes": ["candidate", "freq", "el_offset", "ra_offset"],
+            "axes": ["candidate", "pol", "freq", "el_offset", "ra_offset"],
             "dtype": np.float32,
             "initialise": True,
             "distributed": True,
@@ -1871,6 +1874,12 @@ class TransientCandidateCutouts(FreqContainer):
             "distributed": False,
         },
         "x_index": {
+            "axes": ["candidate"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "duration": {
             "axes": ["candidate"],
             "dtype": np.int64,
             "initialise": True,
@@ -1910,6 +1919,98 @@ class TransientCandidateCutouts(FreqContainer):
     def weight(self):
         return self.datasets["weight"]
 
+
+
+class TransientCandidateTrialCutouts(ContainerPrototype):
+    """The calibrated trials of the matched filter in windows around candidates.
+
+    For each candidate (``candidate_index`` is its row in the candidate table), the
+    amplitude and weight (and the imaginary part, e.g. the best RM of L) of each
+    polarisation of the trials (I, V and L of the Stokes search) and every duration,
+    at the candidate's telescope-x (``x_index``) and spectral index
+    (``spectral_index``, per polarisation: L is searched at fewer), in a window of
+    ``el_offset`` elevations and ``ra_offset`` start times centred on the candidate.
+    Unlike the best-trial maps, each duration is a single trial, with no tail to
+    earlier starts.  ``el_index`` and ``ra_index`` give the indices into the maps, -1
+    outside them, where the weight is zero; ``el`` and ``ra`` continue the grid
+    there.  Distributed over candidates.
+    """
+
+    _axes = ("candidate", "pol", "duration", "el_offset", "ra_offset")
+
+    _dataset_spec: ClassVar = {
+        "amplitude": {
+            "axes": ["candidate", "pol", "duration", "el_offset", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "weight": {
+            "axes": ["candidate", "pol", "duration", "el_offset", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "amplitude_imag": {
+            "axes": ["candidate", "pol", "duration", "el_offset", "ra_offset"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "candidate_index": {
+            "axes": ["candidate"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "x_index": {
+            "axes": ["candidate"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "spectral_index": {
+            "axes": ["candidate", "pol"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el_index": {
+            "axes": ["candidate", "el_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ra_index": {
+            "axes": ["candidate", "ra_offset"],
+            "dtype": np.int64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "el": {
+            "axes": ["candidate", "el_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+        "ra": {
+            "axes": ["candidate", "ra_offset"],
+            "dtype": np.float64,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
 
 class TransientCandidateTable(TableSpec):
     """Candidates found in the maps of the transient search, one row per candidate.
