@@ -9296,6 +9296,13 @@ def _run_length(mask, i):
     return hi - lo + 1
 
 
+def _sky_sep_deg(ra1, dec1, ra2, dec2):
+    """Angular separation in degrees of positions in degrees."""
+    r1, d1, r2, d2 = (np.radians(v) for v in (ra1, dec1, ra2, dec2))
+    c = np.sin(d1) * np.sin(d2) + np.cos(d1) * np.cos(d2) * np.cos(r1 - r2)
+    return np.degrees(np.arccos(np.clip(c, -1.0, 1.0)))
+
+
 def _wrap_deg(a):
     """Wrap angles in degrees to [-180, 180)."""
     return (np.asarray(a) + 180.0) % 360.0 - 180.0
@@ -9415,7 +9422,13 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     - Catalogue (if ``catalogue`` is set): of the sources within +-``cat_ddec`` in
       dec and +-``cat_dra`` in RA cos(dec) of the candidate's sky position, the
       brightest (``cat_name``, ``cat_flux`` in Jy at 600 MHz, and its offsets
-      ``cat_dra`` and ``cat_ddec`` in degrees), and their number ``cat_nmatch``.
+      ``cat_dra`` and ``cat_ddec`` in degrees), and their number ``cat_nmatch``;
+      and the brightest within ``cat_near_sep`` degrees of the candidate, under it
+      (``cat_near_name``, ``cat_near_flux``, ``cat_near_sep``), whose scintillation
+      is the commonest background (see the ``compact`` flag of the sifter).
+    - Known pulsars (if ``pulsar_catalogue`` is set): the nearest pulsar with a flux
+      density at 600 MHz of at least ``psr_flux_min`` within ``psr_sep`` degrees
+      (``psr_name``, ``psr_sep``, ``psr_flux`` in Jy).
 
     Attributes
     ----------
@@ -9475,6 +9488,21 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         not set, the catalogue columns are left empty.
     cat_ddec, cat_dra : float
         Half-widths of the catalogue match in degrees.  Defaults are 0.5 and 2.
+    cat_near_sep : float
+        Radius of the match of a source under the candidate in degrees.  Default is
+        0.1 (on 2418, 55% of the kept transients have a source above 0.3 Jy this
+        close, against 4% by chance).
+    pulsar_catalogue : str
+        HDF5 file with a dataset ``pulsar`` with fields ``psrj``, ``psrb``, ``ra``,
+        ``dec`` (J2000, degrees) and ``s600`` (mJy), from
+        scripts/sift/make_pulsar_catalog.py.  If not set, the pulsar columns are
+        left empty.
+    psr_sep : float
+        Radius of the pulsar match in degrees.  Default is 0.2.
+    psr_flux_min : float
+        Smallest flux density at 600 MHz of a pulsar to match, in Jy.  Default is
+        0.015 (on 2418 every pulsar within 0.2 deg of a kept transient was above
+        ~0.02 Jy).
     max_candidates : int
         Keep at most this many candidates (the brightest).  Default is 50000.
     """
@@ -9506,11 +9534,33 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     catalogue = config.Property(proptype=str, default=None)
     cat_ddec = config.Property(proptype=float, default=0.5)
     cat_dra = config.Property(proptype=float, default=2.0)
+    cat_near_sep = config.Property(proptype=float, default=0.1)
+    pulsar_catalogue = config.Property(proptype=str, default=None)
+    psr_sep = config.Property(proptype=float, default=0.2)
+    psr_flux_min = config.Property(proptype=float, default=0.015)
     max_candidates = config.Property(proptype=int, default=50000)
 
     def setup(self):
-        """Load the catalogue, if any."""
+        """Load the catalogues, if any."""
         self._cat = None
+        self._psr = None
+        if self.pulsar_catalogue:
+            import h5py
+
+            with h5py.File(self.pulsar_catalogue, "r") as f:
+                p = f["pulsar"][:]
+            flux = p["s600"] * 1e-3
+            ok = np.isfinite(flux) & (flux >= self.psr_flux_min)
+            self._psr = {
+                "name": np.where(p["psrb"] != b"", p["psrb"], p["psrj"])[ok],
+                "ra": p["ra"][ok],
+                "dec": p["dec"][ok],
+                "flux": flux[ok],
+            }
+            self.log.info(
+                f"Loaded {ok.sum()} pulsars of at least {self.psr_flux_min:g} Jy at "
+                f"600 MHz from {self.pulsar_catalogue}."
+            )
         if self.catalogue:
             import h5py
 
@@ -9837,6 +9887,39 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
                 rec["cat_nmatch"][k] = within.size
             nomatch = rec["cat_nmatch"] == 0
             rec["cat_flux"][nomatch] = 0.0
+
+            # The brightest source under the candidate
+            lo = np.searchsorted(cdec, rec["dec_icrs"] - self.cat_near_sep)
+            hi = np.searchsorted(cdec, rec["dec_icrs"] + self.cat_near_sep)
+            rec["cat_near_flux"] = 0.0
+            for k in range(ncand):
+                if hi[k] == lo[k]:
+                    continue
+                sl = slice(lo[k], hi[k])
+                sep = _sky_sep_deg(
+                    rec["ra_icrs"][k], rec["dec_icrs"][k], self._cat["ra"][sl],
+                    self._cat["dec"][sl],
+                )
+                within = np.flatnonzero(sep <= self.cat_near_sep)
+                if within.size == 0:
+                    continue
+                j = within[np.argmax(self._cat["flux"][sl][within])]
+                rec["cat_near_name"][k] = self._cat["name"][sl][j]
+                rec["cat_near_flux"][k] = self._cat["flux"][sl][j]
+                rec["cat_near_sep"][k] = sep[j]
+
+        # Known pulsars
+        if self._psr is not None:
+            for k in range(ncand):
+                sep = _sky_sep_deg(
+                    rec["ra_icrs"][k], rec["dec_icrs"][k], self._psr["ra"],
+                    self._psr["dec"],
+                )
+                j = int(np.argmin(sep)) if sep.size else -1
+                if j >= 0 and sep[j] <= self.psr_sep:
+                    rec["psr_name"][k] = self._psr["name"][j]
+                    rec["psr_sep"][k] = sep[j]
+                    rec["psr_flux"][k] = self._psr["flux"][j]
 
         out.candidate[:] = rec
         self.log.info(
@@ -11675,6 +11758,17 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     - 19 ``window`` (if ``win_t_min`` is set and the table has the ``window`` table
       of :class:`AddWindowStats`): a candidate of ``win_wmin`` or more samples whose
       single samples are not a sustained excess, ``win_t`` below ``win_t_min``.
+    - 20 ``compact`` (if ``cat_near_ratio`` is set): a catalogue source under the
+      candidate (``cat_near_flux``, within ``cat_near_sep`` of
+      :class:`GroupTransientCandidates`) brighter than ``cat_near_ratio`` times its
+      amplitude.  The scintillation of compact sources, by up to ~10% in the day
+      and seen in V and L through leakage, is most of the background: on 2418,
+      55% of the kept transients sit within 0.1 deg of a source above 0.3 Jy (4%
+      by chance), and a ratio of 10 removes 14 of 79 kept I, 84 of 102 V and 15 of
+      69 L candidates and none of the injected pulses.
+    - 21 ``pulsar`` (if ``reject_pulsars``): a known pulsar matched by
+      :class:`GroupTransientCandidates` (``psr_name``).  Their scintillation,
+      nulling and single pulses pass the filter.
 
     Attributes
     ----------
@@ -11704,6 +11798,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "fidelity": 17,
         "significance": 18,
         "window": 19,
+        "compact": 20,
+        "pulsar": 21,
     }
     INFO: ClassVar = ("periodic",)
 
@@ -11754,6 +11850,10 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         proptype=lambda v: None if v is None else float(v), default=None
     )
     win_wmin = config.Property(proptype=int, default=4)
+    cat_near_ratio = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    reject_pulsars = config.Property(proptype=bool, default=False)
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -11868,6 +11968,14 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 win = table.datasets["window"][:]
                 long_ = win["win_n"] >= self.win_wmin
                 flag("window", long_ & (win["win_t"] < self.win_t_min))
+            names = rec.dtype.names
+            if self.cat_near_ratio is not None and "cat_near_flux" in names:
+                flag(
+                    "compact",
+                    rec["cat_near_flux"] >= self.cat_near_ratio * np.abs(rec["amplitude"]),
+                )
+            if self.reject_pulsars and "psr_name" in names:
+                flag("pulsar", rec["psr_name"] != b"")
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -11913,6 +12021,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
             "ns_scale_min", "fidelity_min", "snr_cal_min", "win_t_min", "win_wmin",
+            "cat_near_ratio", "reject_pulsars",
         ):  # fmt: skip
             val = getattr(self, key)
             out.attrs[f"sift_{key}"] = "none" if val is None else val

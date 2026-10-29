@@ -2122,6 +2122,13 @@ class TransientCandidateTable(TableSpec):
                 ["cat_dra", np.float32],
                 ["cat_ddec", np.float32],
                 ["cat_nmatch", np.int16],
+                ["cat_near_name", "S32"],
+                ["cat_near_flux", np.float32],
+                ["cat_near_sep", np.float32],
+                # Known pulsars
+                ["psr_name", "S24"],
+                ["psr_sep", np.float32],
+                ["psr_flux", np.float32],
             ],
             "axis": "candidate",
         },
