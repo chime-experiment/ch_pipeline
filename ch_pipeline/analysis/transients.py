@@ -10723,6 +10723,179 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
         self.log.info(f"Extracted the trial cutouts of {ncut} candidates.")
         return out
 
+
+class ExtractForegroundCutouts(tasklib.base.ContainerTask):
+    """Windows of the unfiltered data around candidates: the foreground sky.
+
+    For the candidates with S/N of at least ``snr_min`` (and only those kept by the
+    sifter if ``keep_only`` and the table has been sifted), the brightest
+    ``max_cutouts`` of them: the hybrid visibilities without the m-mode filter,
+    phased to the candidate's telescope-x (each baseline and channel multiplied by
+    ``exp(-2 pi i b x / lambda)``), and their real part averaged with the weights
+    over the co-polar products, the baselines and the channels of each band of
+    ``freq_edges``, over +-``nrow`` rows and +-``nra`` samples around the start.
+    That is a beam of the sky at that telescope-x as it drifts past, in the units of
+    the data and without the RFI mask: the complement of what the search sees, so a
+    bright source (in a catalogue or not) under a candidate shows.  The weight is
+    the sum of the weights of the visibilities.  The result is distributed over
+    candidates.
+
+    The stream is used as it is distributed (over elevation, as the matched filter
+    leaves it), so the windows are summed from the rows of every rank.
+
+    Attributes
+    ----------
+    snr_min : float
+        Smallest S/N.  Default is 10.
+    keep_only : bool
+        Only the candidates kept by the sifter.  Default is False.
+    max_cutouts : int
+        Largest number of cutouts (the brightest).  Default is 1000.
+    nrow, nra : int
+        Half-widths of the window in rows and samples.  Defaults are 40 and 180.
+    freq_edges : list of float
+        Edges of the bands in MHz.  Default is [400, 500, 600, 700, 800].
+    """
+
+    snr_min = config.Property(proptype=float, default=10.0)
+    keep_only = config.Property(proptype=bool, default=False)
+    max_cutouts = config.Property(proptype=int, default=1000)
+    nrow = config.Property(proptype=int, default=40)
+    nra = config.Property(proptype=int, default=180)
+    freq_edges = config.list_type(type_=float, default=[400.0, 500.0, 600.0, 700.0, 800.0])
+
+    def process(self, table, stream):
+        """Extract the cutouts.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates (sifted or not), with ``el_index`` on the rows of the stream.
+        stream : draco.core.containers.HybridVisStream
+            The hybrid visibilities without the m-mode filter.
+
+        Returns
+        -------
+        out : containers.TransientCandidateCutouts
+            Polarisation "I"; ``freq`` holds the bands.
+        """
+        from mpi4py import MPI
+
+        comm = stream.comm
+        rec = table.candidate[:]
+        sel = rec["snr"] >= self.snr_min
+        if self.keep_only and "sift" in table.datasets:
+            sel &= table.datasets["sift"][:]["keep"]
+        idx = np.flatnonzero(sel)
+        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        ncut = idx.size
+
+        el = stream.index_map["el"][:]
+        ra = stream.ra[:]
+        nra = ra.size
+        dra = np.median(np.diff(ra))
+        periodic = _is_full_day(ra) and bool(stream.attrs.get("ra_periodic", True))
+        freq = stream.freq[:]
+        ew = stream.index_map["ew"][:]
+        pol = _decode_names(stream.index_map["pol"][:])
+        ico = [ii for ii, p in enumerate(pol) if p[0] == p[1]]
+
+        edges = np.asarray(self.freq_edges, dtype=float)
+        gidx = np.searchsorted(edges, freq, side="right") - 1
+        gidx[(freq < edges[0]) | (freq > edges[-1])] = -1
+        gidx[freq == edges[-1]] = edges.size - 2
+        band_map = np.zeros(edges.size - 1, dtype=[("centre", np.float64), ("width", np.float64)])
+        band_map["centre"] = 0.5 * (edges[1:] + edges[:-1])
+        band_map["width"] = np.diff(edges)
+
+        e = rec["el_index"][idx].astype(int)
+        tb = np.clip(np.searchsorted(ra, rec["ra"][idx] - 0.5 * dra), 0, nra - 1)
+        xc = rec["x"][idx]
+        roff = np.arange(-self.nrow, self.nrow + 1)
+        toff = np.arange(-self.nra, self.nra + 1)
+
+        out = containers.TransientCandidateCutouts(
+            candidate=ncut,
+            pol=np.array(["I"]),
+            freq=band_map,
+            el_offset=roff,
+            ra_offset=toff,
+            attrs_from=table,
+            distributed=True,
+            comm=comm,
+        )
+        out.attrs["foreground"] = True
+        out.attrs["freq_edges"] = edges
+        out.datasets["candidate_index"][:] = idx
+        out.datasets["x_index"][:] = rec["x_index"][idx]
+        out.datasets["duration"][:] = 1
+        rows = e[:, np.newaxis] + roff[np.newaxis]
+        rin = (rows >= 0) & (rows < el.size)
+        out.datasets["el_index"][:] = np.where(rin, rows, -1)
+        out.datasets["el"][:] = _extend_axis(el, rows)
+        ts = tb[:, np.newaxis] + toff[np.newaxis]
+        if periodic:
+            tin = np.ones(ts.shape, dtype=bool)
+            ts = ts % nra
+        else:
+            tin = (ts >= 0) & (ts < nra)
+        out.datasets["ra_index"][:] = np.where(tin, ts, -1)
+        out.datasets["ra"][:] = _extend_axis(ra, ts)
+
+        # The rows of this rank, and the weights of every frequency on each node
+        stream.redistribute(["el", "freq"])
+        el_slc = stream.vis[:].local_bounds
+        uvis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        wshared = _NodeSharedFreq(stream.weight[:], comm)  # freq, pol, ew, ra
+        wall = wshared.array
+        lmbda = scipy.constants.c / (freq * 1e6)
+        ngroup = edges.size - 1
+
+        def block(k):
+            """This rank's sums over its rows for the candidates ``k``."""
+            num = np.zeros((k.size, ngroup, roff.size, toff.size), dtype=np.float64)
+            den = np.zeros_like(num)
+            for jj, kk in enumerate(k):
+                rr = rows[kk]
+                local = rin[kk] & (rr >= el_slc.start) & (rr < el_slc.stop)
+                if not local.any():
+                    continue
+                # The rows are contiguous: cut out the window before selecting anything
+                lr = rr[local] - el_slc.start
+                tt = np.where(tin[kk], ts[kk], 0)
+                vw = np.take(uvis[:, :, :, lr[0] : lr[-1] + 1], tt, axis=-1)[ico]  # pol, freq, ew, row, ra
+                ww = np.moveaxis(np.take(wall, tt, axis=-1)[:, ico], 0, 1)  # pol, freq, ew, ra
+                ww = np.where(tin[kk], ww, 0.0)
+                ph = np.exp(-2.0j * np.pi * ew[np.newaxis, :] * xc[kk] / lmbda[:, np.newaxis])  # freq, ew
+                for gg in range(ngroup):
+                    ff = np.flatnonzero(gidx == gg)
+                    if ff.size == 0:
+                        continue
+                    re = (vw[:, ff] * ph[ff][np.newaxis, :, :, np.newaxis, np.newaxis]).real
+                    w = ww[:, ff]
+                    num[jj, gg, local] = np.einsum("pfbrt,pfbt->rt", re, w)
+                    den[jj, gg, local] = np.sum(w, axis=(0, 1, 2))[np.newaxis]
+            return num, den
+
+        # Each rank's block of candidates, summed from the rows on every rank
+        la = out.amplitude[:]
+        offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
+        for r, (o, nl) in enumerate(offs):
+            num, den = block(np.arange(o, o + nl))
+            rnum = np.zeros_like(num) if comm.rank == r else None
+            rden = np.zeros_like(den) if comm.rank == r else None
+            comm.Reduce(num, rnum, op=MPI.SUM, root=r)
+            comm.Reduce(den, rden, op=MPI.SUM, root=r)
+            if comm.rank == r:
+                out.amplitude[:].local_array[:, 0] = (rnum * tools.invert_no_zero(rden)).astype(np.float32)
+                out.weight[:].local_array[:, 0] = rden.astype(np.float32)
+        wshared.free()
+        self.log.info(
+            f"Extracted the foreground cutouts of {ncut} candidates in {ngroup} bands."
+        )
+        return out
+
+
 class TransientNegativePeaks(tasklib.base.ContainerTask):
     """The peaks of the negative search: a null for the significance of candidates.
 
@@ -10787,6 +10960,8 @@ class TransientNegativePeaks(tasklib.base.ContainerTask):
         out : containers.TransientCandidateTable
             One row per negative peak, with the ``fidelity`` table (``bowl``).
         """
+        import warnings
+
         if not neg.attrs.get("negated", False):
             raise ValueError("The first input must be a negated map (negate=True).")
         for cont in (neg, cand):
@@ -10845,7 +11020,8 @@ class TransientNegativePeaks(tasklib.base.ContainerTask):
         if ne.size:
             xidx = neg.datasets["x_index"][:].allgather()[pp]
             amp = neg.amplitude[:].allgather()[pp]
-            with np.errstate(invalid="ignore"):
+            with warnings.catch_warnings():  # rows with no weight
+                warnings.simplefilter("ignore", RuntimeWarning)
                 wrow = np.nanmedian(np.where(wgt > 0, wgt, np.nan), axis=1)
             ix = xidx[ne, nt].astype(int)
             rec["el_index"] = ne
