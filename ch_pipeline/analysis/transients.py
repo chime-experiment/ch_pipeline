@@ -10979,6 +10979,80 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
         return out
 
 
+class AddTemplateFlux(tasklib.base.ContainerTask):
+    """Add the template of compact sources at each candidate.
+
+    The template (configs/lpt_template.yaml) is the single-sample, flat-spectrum
+    amplitude of the matched filter on the catalogue sources alone, simulated with
+    the injection tasks on a fixed sidereal grid
+    (:class:`ch_pipeline.synthesis.inject.MakeTemplateStream`): a
+    :class:`ch_pipeline.core.containers.TransientMatchedFilterTrials` with one
+    polarisation, duration and spectral index.  It serves a year of days.  The
+    column ``tmpl_flux`` (Jy) of the candidate table is its amplitude at the
+    nearest row, telescope-x and RA sample to the candidate's start (the meridian
+    RA, ``ra``).  It has the negative east-west sidelobes of the sources, where a
+    source that fades gives a positive candidate, and their grating lobes.  The
+    sifter's ``template`` flag compares it with the amplitude.
+    """
+
+    def setup(self, template):
+        """Keep the template.
+
+        Parameters
+        ----------
+        template : containers.TransientMatchedFilterTrials
+        """
+        template.redistribute("el")
+        amp = template.amplitude[:]
+        if amp.shape[:3] != (1, 1, 1):
+            self.log.warning(
+                f"The template has {amp.shape[:3]} polarisations, durations and spectral "
+                "indices; using the first of each."
+            )
+        self.el = template.index_map["el"][:]
+        self.x = template.index_map["x"][:]
+        self.ra = template.ra[:]
+        self.r0 = amp.local_offset[3]
+        self.local = np.asarray(amp.local_array[0, 0, 0])  # el, ra, x
+        self.attrs = {"template_lsd": template.attrs.get("lsd", np.nan),
+                      "template_tag": template.attrs.get("tag", "")}
+
+    def process(self, table):
+        """Look the candidates up.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+
+        Returns
+        -------
+        table : containers.TransientCandidateTable
+            A copy with ``tmpl_flux`` filled.
+        """
+        from mpi4py import MPI
+
+        rec = table.candidate[:].copy()
+        n = rec.size
+        dra = 360.0 / self.ra.size
+        if n:
+            ie = np.argmin(np.abs(rec["y"][:, np.newaxis] - self.el[np.newaxis, :]), axis=1)
+            ix = np.argmin(np.abs(rec["x"][:, np.newaxis] - self.x[np.newaxis, :]), axis=1)
+            it = np.rint(((rec["ra"] - self.ra[0]) % 360.0) / dra).astype(int) % self.ra.size
+        else:
+            ie = ix = it = np.zeros(0, dtype=int)
+        vals = np.zeros(n)
+        mine = (ie >= self.r0) & (ie < self.r0 + self.local.shape[0])
+        k = np.flatnonzero(mine)
+        vals[k] = self.local[ie[k] - self.r0, it[k], ix[k]]
+        self.comm.Allreduce(MPI.IN_PLACE, vals, op=MPI.SUM)
+        rec["tmpl_flux"] = vals
+        out = table.copy()
+        out.candidate[:] = rec
+        for key, val in self.attrs.items():
+            out.attrs[key] = val
+        return out
+
+
 class TransientNegativePeaks(tasklib.base.ContainerTask):
     """The peaks of the negative search: a null for the significance of candidates.
 
@@ -11769,6 +11843,10 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     - 21 ``pulsar`` (if ``reject_pulsars``): a known pulsar matched by
       :class:`GroupTransientCandidates` (``psr_name``).  Their scintillation,
       nulling and single pulses pass the filter.
+    - 22 ``template`` (if ``tmpl_ratio`` is set): an amplitude below ``tmpl_ratio``
+      times the magnitude of the template of compact sources at the candidate
+      (``tmpl_flux``, :class:`AddTemplateFlux`), so within the scintillation of
+      the sources under it, in its east-west sidelobes or grating lobes.
 
     Attributes
     ----------
@@ -11800,6 +11878,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "window": 19,
         "compact": 20,
         "pulsar": 21,
+        "template": 22,
     }
     INFO: ClassVar = ("periodic",)
 
@@ -11854,6 +11933,9 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         proptype=lambda v: None if v is None else float(v), default=None
     )
     reject_pulsars = config.Property(proptype=bool, default=False)
+    tmpl_ratio = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -11976,6 +12058,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 )
             if self.reject_pulsars and "psr_name" in names:
                 flag("pulsar", rec["psr_name"] != b"")
+            if self.tmpl_ratio is not None and "tmpl_flux" in names:
+                flag("template", np.abs(rec["amplitude"]) < self.tmpl_ratio * np.abs(rec["tmpl_flux"]))
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -12021,7 +12105,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
             "ns_scale_min", "fidelity_min", "snr_cal_min", "win_t_min", "win_wmin",
-            "cat_near_ratio", "reject_pulsars",
+            "cat_near_ratio", "reject_pulsars", "tmpl_ratio",
         ):  # fmt: skip
             val = getattr(self, key)
             out.attrs[f"sift_{key}"] = "none" if val is None else val

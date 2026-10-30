@@ -2157,6 +2157,8 @@ class TransientCandidateTable(TableSpec):
                 ["psr_name", "S24"],
                 ["psr_sep", np.float32],
                 ["psr_flux", np.float32],
+                # Template of compact sources (AddTemplateFlux)
+                ["tmpl_flux", np.float32],
             ],
             "axis": "candidate",
         },
