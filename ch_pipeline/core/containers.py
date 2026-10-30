@@ -1702,6 +1702,34 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
         return self.index_map["x"]
 
 
+class FluxModelCatalog(SourceCatalog):
+    """A catalogue of sources with a model of their spectra.
+
+    ``position`` holds the ``ra`` and ``dec`` (degrees, ICRS unless the
+    ``coords`` attribute of ``position`` says otherwise).  The ``flux_model``
+    table holds the parameters of fluxcat's ``CurvedPowerLaw`` for each source,
+    ``S(nu) = p0 exp(sum_k p_k ln(nu / freq_pivot)^k)`` in Jy with ``freq_pivot``
+    in MHz (unused parameters zero), which
+    :class:`ch_pipeline.synthesis.inject.FluxCatalog` evaluates in place of a
+    fluxcat collection.
+    """
+
+    _table_spec: ClassVar = {
+        "flux_model": {
+            "columns": [
+                ["freq_pivot", np.float64],
+                ["p0", np.float64],
+                ["p1", np.float64],
+                ["p2", np.float64],
+                ["p3", np.float64],
+                ["p4", np.float64],
+                ["p5", np.float64],
+            ],
+            "axis": "object_id",
+        }
+    }
+
+
 class LPTCatalog(SourceCatalog):
     """A catalogue of simulated long-period transients (intrinsic properties only).
 

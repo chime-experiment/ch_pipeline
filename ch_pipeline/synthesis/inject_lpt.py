@@ -53,7 +53,7 @@ from draco.util import interferometry, tools
 from scipy.special import erf
 
 from ..core import containers
-from .inject_modified import SIGMA, BaseInject, BeamExternal, _get_baseline_info
+from .inject import SIGMA, BaseInject, BeamExternal, _get_baseline_info
 from .lpt_population import draw_population, merge_population
 
 # Angular speed of the sky in rad / s
@@ -301,7 +301,7 @@ class InjectLPT(BeamExternal):
 
         V_pp(nu, t) = A_pp(nu, t) B_pp(nu, HA) exp(2 pi i b . s / lambda)
 
-    with the phase of :mod:`inject_modified` (the conjugate of the fringe-stopping
+    with the phase of :mod:`inject` (the conjugate of the fringe-stopping
     phase), the beam of the external beam model (the geometric mean of XX and YY for
     the cross-polar products) and ``A`` the Stokes combination of the module
     docstring times the spectrum, the scintillation and the profile.  The input is
