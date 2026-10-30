@@ -1,4 +1,31 @@
-"""HFB containers."""
+"""HFB containers.
+
+Containers for holding various types of CHIME/HFB specific analysis data in a
+distributed fashion.
+
+Containers
+==========
+- :py:class:`HFBContainer`
+- :py:class:`HFBData`
+- :py:class:`HFBReader`
+- :py:class:`HFBRFIMask`
+- :py:class:`SiderealRFIMaskStack`
+- :py:class:`HFBTimeAverage`
+- :py:class:`HFBHighResContainer`
+- :py:class:`HFBHighResData`
+- :py:class:`HFBHighResTimeAverage`
+- :py:class:`HFBHighResSpectrum`
+- :py:class:`HFBRingMapBase`
+- :py:class:`HFBBeamRingMap`
+- :py:class:`HFBRingMap`
+- :py:class:`HFBHighResRingMap`
+- :py:class:`HFBHighResRingMapStack`
+- :py:class:`HFBHighResBeamAvgRingMap`
+- :py:class:`HFBHighResBeamAvgRingMapStack`
+- :py:class:`HFBSearchResult`
+- :py:class:`HFBDirectionalRFIMaskBitmap`
+- :py:class:`HFBAbsorberCatalog`
+"""
 
 from functools import cached_property
 from typing import ClassVar
@@ -287,6 +314,27 @@ class HFBRFIMask(TODContainer, FreqContainer):
     def sens(self):
         """Get the sensitivity metric dataset."""
         return self.datasets["sens"]
+
+
+class SiderealRFIMaskStack(FreqContainer, SiderealContainer):
+    """RFI masks of several sidereal days."""
+
+    _axes = ("csd",)
+
+    _dataset_spec: ClassVar = {
+        "mask": {
+            "axes": ["csd", "freq", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+        }
+    }
+
+    @property
+    def mask(self):
+        """Get the mask dataset."""
+        return self.datasets["mask"]
 
 
 class HFBTimeAverage(FreqContainer, HFBBeamContainer):
@@ -639,6 +687,48 @@ class HFBHighResBeamAvgRingMap(HFBRingMapBase, HFBHighResContainer):
             "distributed_axis": "el",
         },
     }
+
+
+class HFBHighResBeamAvgRingMapStack(HFBHighResBeamAvgRingMap):
+    """Container for EW-beam-averaged high-resolution ringmaps from multiple days.
+
+    With respect to HFBHighResBeamAvgRingMap, a 'csd' axis is added in front of
+    the other axes, so that EW-beam-averaged ringmaps from several sidereal days
+    (or groups of days) can be held in one container. The distributed axis is
+    'csd', as in HFBHighResRingMapStack.
+    """
+
+    _axes = ("csd",)
+
+    _dataset_spec: ClassVar = {
+        "hfb": {
+            "axes": ["csd", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 5, 2000, 1664),
+            "truncate": True,
+        },
+        "weight": {
+            "axes": ["csd", "el", "ra", "freq"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+            "chunks": (20, 5, 2000, 1664),
+            "truncate": True,
+        },
+    }
+
+    @property
+    def csd(self):
+        """The csd indices of the csd axis."""
+        return self.index_map["csd"]
 
 
 class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):

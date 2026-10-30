@@ -1,15 +1,20 @@
 """HFB Tasks for flagging data."""
 
+import os
+
 import beam_model.formed as fm
 import numpy as np
+import scipy.sparse as ss
 from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
-from caput.pipeline import tasklib
+from caput.pipeline import exceptions, tasklib
 from draco.analysis.sidereal import _search_nearest
 from draco.core.containers import LocalizedRFIMask, RFIMask
+from draco.core.io import get_telescope
+from draco.util import regrid
 from scipy.spatial.distance import cdist
 
-from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
+from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask, SiderealRFIMaskStack
 
 
 class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
@@ -488,3 +493,202 @@ def sensitivity_metric(stream, average_beams):
 
     # Compute and return the sensitivity metric
     return 2.0 * invert_no_zero(radiometer * weight)
+
+
+class HFBMakeRFIMaskStack(tasklib.base.ContainerTask):
+    """Make a stack of the daily intensity-mapping RFI masks.
+
+    The output is on the CHIME coarse freq channels and the full RA range.
+    For each CSD the selected masks are combined (OR), then rebinned from
+    time to RA once, as in SiderealRebinner. An RA pixel is flagged if any
+    time sample in it is flagged. Missing mask files are skipped.
+
+    Attributes
+    ----------
+    csd_range : list
+        Days to include, start <= csd < end. Either one range, [start, end],
+        or several, [[start1, end1], [start2, end2], ...].
+    nra : int
+        Number of RA pixels over the full range, as in the ringmaps. Default is 4280.
+    root : str
+        Directory holding <csd>/rfi_mask_<name>_lsd_<csd>.h5.
+    masks_to_include : list of str
+        Masks to combine, from `all_masks`. Default: all.
+    """
+
+    all_masks = ("freq", "sensitivity", "transient", "static", "chisq")
+
+    csd_range = config.Property(proptype=list)
+    nra = config.Property(proptype=int, default=4280)
+    root = config.Property(
+        proptype=str, default="~/projects/rpp-chime/chime/chime_processed/daily/rev_09"
+    )
+    masks_to_include = config.Property(proptype=list, default=list(all_masks))
+
+    def setup(self, manager):
+        """Set up the observer.
+
+        Parameters
+        ----------
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object holding the geographic location of the telescope.
+        """
+        self.observer = get_telescope(manager)
+        self._done = False
+
+    def process(self):
+        """Make the mask stack.
+
+        Returns
+        -------
+        out : SiderealRFIMaskStack
+            Combined mask of each day, on coarse freq and the full RA range.
+        """
+        if self._done:
+            raise exceptions.PipelineStopIteration
+        self._done = True
+
+        unknown = set(self.masks_to_include) - set(self.all_masks)
+        if unknown:
+            raise config.CaputConfigError(
+                f"Unknown masks {unknown}, use {self.all_masks}."
+            )
+
+        if self.csd_range is None:
+            raise config.CaputConfigError("csd_range must be given.")
+
+        # Days in any of the ranges
+        ranges = np.atleast_2d(np.asarray(self.csd_range, dtype=float))
+        csds = np.unique(
+            np.concatenate([np.arange(np.ceil(s), np.ceil(e)) for s, e in ranges])
+        ).astype(int)
+
+        # CHIME coarse channel centres
+        cfreq = np.linspace(
+            self.observer.freq_start,
+            self.observer.freq_end,
+            self.observer.num_freq,
+            endpoint=False,
+        )
+
+        out = SiderealRFIMaskStack(csd=csds, freq=cfreq, ra=self.nra)
+        out.redistribute("csd")
+
+        # Days held by this rank
+        mask = out.mask[:]
+        local = mask.local_array
+        c0 = mask.local_offset[0]
+
+        for ic, csd in enumerate(csds[c0 : c0 + local.shape[0]]):
+            local[ic] = self._day_mask(csd, out.ra)
+
+        return out
+
+    def _day_mask(self, csd, ra):
+        """Combined mask of one day on the (coarse freq, full RA) grid."""
+        # Combine the masks that exist.
+        mask, time = False, None
+        for name in self.masks_to_include:
+            path = os.path.join(
+                os.path.expanduser(self.root), str(csd), f"rfi_mask_{name}_lsd_{csd}.h5"
+            )
+            if not os.path.exists(path):
+                self.log.warning(f"CSD {csd}: {path} not found, skipping.")
+                continue
+            cont = RFIMask.from_file(path)
+            mask = mask | cont.mask[:]
+            time = cont.time
+
+        if time is None:
+            return False
+
+        # Rebin from time to RA, as in SiderealRebinner. R[ra, time] is the
+        # fraction of each time sample in each RA pixel.
+        lsd = self.observer.unix_to_lsd(time)
+        R = regrid.rebin_matrix(lsd, csd + ra / 360.0, width_t=np.median(np.diff(lsd)))
+
+        # Return mask @ R.T > 0 which is where a flagged time sample falls in the pixel.
+        return (mask @ ss.csr_array(R.T)) > 0
+
+
+class HFBApplyRFIMaskStack(tasklib.base.ContainerTask):
+    """Apply a SiderealRFIMaskStack to an HFB stack, in place.
+
+    The RA pixels of the stack must lie on the RA grid of the mask (the mask
+    is made on the same grid), otherwise an error is raised.
+    """
+
+    def process(self, stream, mask):
+        """Apply the mask.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Stack to mask, on part of the high-resolution freq and RA ranges.
+        mask : SiderealRFIMaskStack
+            Mask on the same csd axis, on coarse freq and the full RA range from
+            intensity mapping data.
+
+        Returns
+        -------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Same as input, with flagged samples at zero weight.
+        """
+        stream.redistribute("csd")
+        mask.redistribute("csd")
+
+        # Coarse channel of each HFB frequency: the nearest coarse centre
+        ifreq = np.abs(mask.freq[:, np.newaxis] - stream.freq).argmin(axis=0)
+
+        # Index of each RA pixel of the stream in the full RA grid of the mask
+        ra = np.asarray(stream.index_map["ra"], dtype=float)
+        ra_full = np.asarray(mask.index_map["ra"], dtype=float)
+        nra = ra_full.size
+        i0, i1 = _search_nearest(ra_full, np.array([ra[0], ra[-1]]) % 360.0)
+        ira = np.arange(i0, i1 + 1 + (nra if i1 < i0 else 0)) % nra
+
+        # The RA pixels must be on the grid of the mask
+        dra = np.median(np.diff(ra_full))
+        if ira.size != ra.size or np.any(
+            np.abs((ra - ra_full[ira] + 180.0) % 360.0 - 180.0) > 1e-3 * dra
+        ):
+            raise ValueError(
+                "The RA pixels of the stack are not on the RA grid of the mask."
+            )
+
+        # Mask of all days on the RA pixels of the stream
+        m = mask.mask[:]
+        if isinstance(m, mpiarray.MPIArray):
+            # Each rank cuts its own days, then all ranks share them; the cut is small
+            cut = np.concatenate(mask.comm.allgather(m.local_array[:, :, ira]), axis=0)
+        else:
+            cut = m[:, :, ira]  # not distributed
+
+        # Weight with (csd, freq, ra) as the last three axes. This is a view of the
+        # weight of the stream, so changing it in place changes the stream.
+        axes = list(stream.weight.attrs["axis"])
+        weight = stream.weight[:]
+        if isinstance(weight, mpiarray.MPIArray):
+            c0, weight = weight.local_offset[axes.index("csd")], weight.local_array
+        else:
+            c0 = 0  # not distributed
+        w = np.moveaxis(
+            weight, [axes.index(a) for a in ("csd", "freq", "ra")], [-3, -2, -1]
+        )
+
+        # Days of the stream held by this rank, and where they are in the mask.
+        # Days that are not in the mask are left as they are.
+        csd = np.asarray(stream.index_map["csd"], dtype=float)[c0 : c0 + w.shape[-3]]
+        pos = {
+            c: i for i, c in enumerate(np.asarray(mask.index_map["csd"], dtype=float))
+        }
+        has = np.array([c in pos for c in csd], dtype=bool)
+        if not has.all():
+            self.log.info(
+                f"CSDs {csd[~has].astype(int).tolist()} are not in the mask, not masked."
+            )
+
+        # (csd, freq, ra) mask of these days on the freq and RA of the stream
+        w[..., has, :, :] *= ~cut[[pos[c] for c in csd[has]]][:, ifreq]
+
+        return stream
