@@ -346,26 +346,25 @@ class BaseInject(tasklib.base.ContainerTask):
             groups = tools.find_contiguous_slices(np.flatnonzero(above_horizon))
             
         else:
-            # Loop over the podal and anti-podal transit
-            groups = []
+            # The RAs near the podal and anti-podal transit.  Take their union, since
+            # near the pole the two windows overlap and the RAs in both must be
+            # processed once.
+            nearby = np.zeros(ha.size, dtype=bool)
 
             for hac in self.transits:
 
                 dha = tools.correct_phase_wrap(ha - hac)
 
                 if self.nsigma > 0.0:
-                    # Split the ra axis into contiguous groups
                     sigma = SIGMA["XX"] / freq / np.cos(dec)
-                    nearby = np.flatnonzero(
-                        above_horizon & (np.abs(dha) < (self.nsigma * sigma))
-                    )
-                    groups += tools.find_contiguous_slices(nearby)
+                    nearby |= np.abs(dha) < (self.nsigma * sigma)
 
                 else:
                     # Find the nearest ra bin
-                    sind = np.argmin(np.abs(dha))
-                    if above_horizon[sind]:
-                        groups += [slice(sind, sind + 1)]
+                    nearby[np.argmin(np.abs(dha))] = True
+
+            # Split the ra axis into contiguous groups
+            groups = tools.find_contiguous_slices(np.flatnonzero(above_horizon & nearby))
 
         return groups
 
