@@ -5183,12 +5183,91 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
                 out.datasets[f"{name}_source_weight"][bb, oe, ss] = Gs[ip, ip]
 
 
+def _interp_weights(frac, m, bandwidth):
+    """Weights of a band-limited interpolation between grid points.
+
+    The least-squares weights ``c_m`` of the grid points at offsets ``m`` that
+    give a signal at offset ``frac`` (between 0 and 1) from the grid point at
+    ``m = 0``, for signals with frequencies up to ``bandwidth`` cycles per grid
+    point: ``sum_m c_m e^{2 pi i f m}`` is closest to ``e^{2 pi i f frac}`` over
+    ``|f| <= bandwidth``.
+
+    Parameters
+    ----------
+    frac : np.ndarray[n]
+        Offsets.
+    m : np.ndarray[ntap] of int
+        Offsets of the grid points used.
+    bandwidth : float
+        Largest frequency, in cycles per grid point.
+
+    Returns
+    -------
+    weights : np.ndarray[n, ntap]
+    """
+    b2 = 2.0 * bandwidth
+    gram = b2 * np.sinc(b2 * (m[:, np.newaxis] - m[np.newaxis, :]))
+    gram += 1e-10 * np.trace(gram) * np.eye(m.size)
+    rhs = b2 * np.sinc(b2 * (m[:, np.newaxis] - np.asarray(frac)[np.newaxis, :]))
+    return np.linalg.solve(gram, rhs).T
+
+
+class _Track:
+    """Tracks of sources through the telescope-x grid, as interpolation taps.
+
+    ``index`` and ``weight`` are ``[step, ..., x, tap]``: a quantity at the
+    position of a source ``step`` samples after it was at grid point ``x`` is the
+    sum over taps of ``weight`` times its value at grid point ``index``.  Samples
+    where the source is off the grid have zero weight.  Indexing a track indexes
+    its leading axes (the step and the elevation).
+    """
+
+    def __init__(self, index, weight):
+        self.index = index
+        self.weight = weight
+
+    def __getitem__(self, key):
+        return _Track(self.index[key], self.weight[key])
+
+    def taps(self, j):
+        """(index, weight) ``[..., x]`` of each tap of step ``j`` that is used."""
+        idx, wt = self.index[j], self.weight[j]
+        for t in range(idx.shape[-1]):
+            if np.any(wt[..., t]):
+                yield idx[..., t], wt[..., t]
+
+    def template(self, tc, j):
+        """The template ``tc`` [k, el, x] at the position of step ``j``."""
+        out = np.zeros(tc.shape, dtype=np.result_type(tc, np.complex64))
+        for idx, wt in self.taps(j):
+            out += wt[np.newaxis] * np.take_along_axis(tc, idx[np.newaxis], axis=2)
+        return out
+
+    def power(self, tc, j):
+        """``|tc|^2`` [k, el, x] interpolated to the position of step ``j``.
+
+        This is what a quantity of the form ``sum_k |g_k|^2 a_k`` on the grid
+        becomes when it is interpolated along the track; it differs from
+        ``|template(tc, j)|^2``, the exact value for the interpolated template.
+        """
+        out = np.zeros(tc.shape, dtype=np.float64)
+        for idx, wt in self.taps(j):
+            g = np.take_along_axis(tc, idx[np.newaxis], axis=2)
+            out += wt[np.newaxis] * (g.real**2 + g.imag**2)
+        return out
+
+
 class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     """Matched filter for transients in m-mode filtered hybrid beamformed visibilities.
 
     Searches over the start time, duration, telescope-x, and spectral index of a
     transient in each elevation.  The template follows the source as it drifts
-    through the primary beam, using the nearest x on the grid at each sample.  For
+    through the primary beam: the numerator at each sample is interpolated from
+    the grid of telescope-x to the source's position (band-limited, over
+    ``track_taps`` grid points), and the denominator uses the same interpolated
+    template.  The nearest grid point at each sample (``track_taps`` 1) loses much
+    of a long pulse: the filter leaves mostly the differences between its samples,
+    which the changing phase error of the template then corrupts.  For
     visibilities filtered as ``(I - P) y``, the amplitude is estimated as
     ``Re(b^H W (I - P) y) / b^H W (I - P) b``, where ``b`` is the template and ``W``
     the inverse noise variance, using the elements of ``P`` near the diagonal from
@@ -5245,6 +5324,13 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         Ignore the telescope rotation.  Default is False.
     nel_chunk : int
         Number of elevations to process at once.  Default is 8.
+    track_taps : int
+        Number of grid points of telescope-x over which the track is interpolated
+        for durations longer than one sample (1 for the nearest).  Default is 6.
+    track_margin : float
+        Band of the interpolation beyond the highest fringe rate on the grid
+        (``max(ew) nu_max / c`` times the spacing), in cycles per grid point, for
+        the primary beam.  Default is 0.02.
     """
 
     durations = config.list_type(int, default=[1, 2, 4, 8, 16])
@@ -5264,6 +5350,8 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     cross_beam = config.enum(["copol", "file"], default="copol")
     ignore_rot = config.Property(proptype=bool, default=False)
     nel_chunk = config.Property(proptype=int, default=8)
+    track_taps = config.Property(proptype=int, default=6)
+    track_margin = config.Property(proptype=float, default=0.02)
     stokes = config.Property(proptype=bool, default=False)
 
     def setup(self, manager, beam):
@@ -5467,8 +5555,10 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         bwgt[:] = 0.0
         bimag = bands.amplitude_imag[:].local_array if self.save_imag else None
 
-        # Track of a source starting at each (el, x): grid index of x after j samples
-        track = self._tracks(ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax)
+        # Track of a source starting at each (el, x): interpolation taps after j samples
+        track = self._make_tracks(
+            ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax, freq, ew[iew]
+        )
 
         # Zero template below the horizon
         pbeam *= visible[el_slc][np.newaxis, np.newaxis]
@@ -5580,24 +5670,72 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
     # Matched filter helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _tracks(ha, dec, visible, x, dra, wmax):
-        """Index of the x grid along the track of a source starting at each (el, x).
+    def _make_tracks(self, ha, dec, visible, x, dra, wmax, freq, ew_used):
+        """The tracks of :meth:`_tracks`, with the taps and band of this grid."""
+        ntap = max(int(self.track_taps), 1)
+        dx = x[1] - x[0] if x.size > 1 else 1.0
+        umax = np.max(np.abs(ew_used)) * np.max(freq) * 1e6 / scipy.constants.c
+        bandwidth = umax * dx + self.track_margin
+        if ntap > 1 and bandwidth >= 0.5:
+            self.log.warning(
+                f"The telescope-x grid samples the fringes too coarsely to interpolate "
+                f"({bandwidth:.2f} cycles per point); using the nearest x instead."
+            )
+            ntap = 1
+        return self._tracks(ha, dec, visible, x, dra, wmax, ntap, bandwidth)
 
-        Tracks that start below the horizon (``visible`` is False) are invalid.
+    @staticmethod
+    def _tracks(ha, dec, visible, x, dra, wmax, ntap=1, bandwidth=0.25):
+        """The track of a source starting at each (el, x), as interpolation taps.
+
+        ``j`` samples after the start the source is at telescope-x
+        ``-cos(dec) sin(ha + j dra)``.  A quantity there is the sum of its values at
+        ``ntap`` neighbouring grid points with the weights of
+        :func:`_interp_weights` (band-limited to ``bandwidth`` cycles per grid
+        point), or the value at the nearest grid point if ``ntap`` is 1, if the
+        neighbours run off the grid, or if the source is on a grid point (always the
+        case at the start).  Tracks that start below the horizon (``visible`` is
+        False), and the samples where the source has left the grid, have no taps.
 
         Returns
         -------
-        track : np.ndarray[wmax, el, x] of int
-            Index ``j`` samples after the start, or -1 if the source has left the grid.
+        track : _Track
+            Taps ``[wmax, el, x, ntap]``.
         """
         dx = x[1] - x[0] if x.size > 1 else 1.0
+        nx = x.size
         j = np.arange(wmax)[:, np.newaxis, np.newaxis]
         with np.errstate(invalid="ignore"):
             xj = -np.cos(dec)[np.newaxis] * np.sin(ha[np.newaxis] + j * dra)
-            idx = np.rint((xj - x[0]) / dx)
-        ok = np.isfinite(idx) & (idx >= 0) & (idx < x.size) & visible[np.newaxis]
-        return np.where(ok, idx, -1).astype(np.int64)
+            pos = (xj - x[0]) / dx
+            near = np.rint(pos)
+        ok = np.isfinite(near) & (near >= 0) & (near < nx) & visible[np.newaxis]
+        near = np.where(ok, near, 0).astype(np.int64)
+        pos = np.where(ok, pos, near)
+
+        index = np.zeros((*near.shape, ntap), dtype=np.int64)
+        weight = np.zeros((*near.shape, ntap), dtype=np.float64)
+        centre = (ntap - 1) // 2
+        index[...] = near[..., np.newaxis]
+        weight[..., centre] = ok
+
+        if ntap > 1:
+            m = np.arange(ntap) - centre
+            base = np.floor(pos).astype(np.int64)
+            taps = base[..., np.newaxis] + m
+            interp = (
+                ok
+                & (taps[..., 0] >= 0)
+                & (taps[..., -1] < nx)
+                & (np.abs(pos - near) > 1e-6)
+            )
+            if np.any(interp):
+                index[interp] = taps[interp]
+                weight[interp] = _interp_weights(
+                    pos[interp] - base[interp], m, bandwidth
+                )
+
+        return _Track(index, weight.astype(np.float32))
 
     @staticmethod
     def _track_numerator(n1, track, durations):
@@ -5607,8 +5745,8 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         ----------
         n1 : np.ndarray[el, x, ra]
             Numerator for each sample, evaluated with the template at each grid x.
-        track : np.ndarray[wmax, el, x]
-            From :meth:`_tracks`.
+        track : _Track
+            From :meth:`_tracks`, ``[wmax, el, x, tap]``.
         durations : list of int
             Durations in samples.
 
@@ -5622,11 +5760,13 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         wset = set(durations)
 
         for jj in range(max(durations)):
-            idx = track[jj]
-            ok = (idx >= 0)[..., np.newaxis]
-            nj = np.take_along_axis(n1, np.maximum(idx, 0)[..., np.newaxis], axis=1)
             # The statistic for a transient starting at tau uses sample tau + j
-            nacc += np.where(ok, np.roll(nj, -jj, axis=-1), 0.0)
+            nj = np.zeros(n1.shape, dtype=np.complex128)
+            for idx, wt in track.taps(jj):
+                nj += wt[..., np.newaxis] * np.take_along_axis(
+                    n1, idx[..., np.newaxis], axis=1
+                )
+            nacc += np.roll(nj, -jj, axis=-1)
             if jj + 1 in wset:
                 ntrack.append(nacc.copy())
 
@@ -5637,8 +5777,9 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         """Sum the denominator along the source tracks.
 
         ``D(tau) = sum_k sum_{j, j' < W} conj(g_kj) g_kj' A_k,(j' - j)(tau + j)``,
-        where ``g_kj`` is the template of visibility ``k`` at the grid x reached after
-        ``j`` samples, and ``A`` is from :meth:`_lag_coefficients`.
+        where ``g_kj`` is the template of visibility ``k`` interpolated to the
+        source's position after ``j`` samples (as the numerator is), and ``A`` is
+        from :meth:`_lag_coefficients`.
 
         Parameters
         ----------
@@ -5646,8 +5787,8 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
             Template at each grid x.
         ak : np.ndarray[k, lag, ra]
             From :meth:`_lag_coefficients`.
-        track : np.ndarray[wmax, el, x]
-            From :meth:`_tracks`.
+        track : _Track
+            From :meth:`_tracks`, ``[wmax, el, x, tap]``.
         durations : list of int
             Durations in samples.
 
@@ -5662,11 +5803,10 @@ class TransientMatchedFilter(_BandMixin, tasklib.base.ContainerTask):
         lag0 = (ak.shape[1] - 1) // 2
 
         # Template along the track at each step [j][k, el * x]
-        g = []
-        for jj in range(wmax):
-            idx = track[jj]
-            gj = np.take_along_axis(tc, np.maximum(idx, 0)[np.newaxis], axis=2)
-            g.append(np.where(idx >= 0, gj, 0.0).reshape(nk, -1).astype(np.complex128))
+        g = [
+            track.template(tc, jj).reshape(nk, -1).astype(np.complex128)
+            for jj in range(wmax)
+        ]
 
         acc = np.zeros((nel * nx, nra), dtype=np.complex128)
         dtrack = []
@@ -6386,7 +6526,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         long_w = [W for W in durations if W > 1]
         periodic = _is_full_day(ra) and bool(hvis.attrs.get("ra_periodic", True))
         if long_w:
-            track = self._tracks(ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax)
+            track = self._make_tracks(
+                ha[el_slc], dec[el_slc], visible[el_slc], x, dra, wmax, freq, ew[iew]
+            )
 
         # Outputs
         bamp = bands.amplitude[:].local_array
@@ -6583,6 +6725,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                 var_th[grp]
                                 .reshape(-1, *var_th.shape[3:])
                                 .transpose(1, 0, 2),
+                                wr[grp].reshape(-1, *wr.shape[3:]).transpose(1, 0, 2),
+                                wv[grp].reshape(-1, *wv.shape[3:]).transpose(1, 0, 2),
                                 resp_t[grp].reshape(-1, *resp_t.shape[3:]),
                                 lag_index,
                                 track[:, esl],
@@ -6620,6 +6764,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                 tc,
                                 kmat(wt),
                                 kmat(var_th),
+                                kmat(wr),
+                                kmat(wv),
                                 resp_t[grp].reshape(-1, *resp_t.shape[3:]),
                                 lag_index,
                                 track[:, esl],
@@ -6903,8 +7049,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             weight (see :meth:`_rm_gaussian`).
         rv : list of (np.ndarray[x, ra], np.ndarray[x, ra])
             Response and thermal variance of the real part for each duration.
-        track : np.ndarray[wmax, x] or None
-            From :meth:`_tracks` at this elevation (None for single samples only).
+        track : _Track or None
+            From :meth:`_tracks` at this elevation, ``[wmax, x, tap]`` (None for
+            single samples only).
         durations : list of int
             The durations, starting with 1.
         valid : list of np.ndarray[ra] of bool
@@ -6949,12 +7096,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             acc = np.zeros_like(s1)
             accv = None if v1 is None else np.zeros_like(v1)
             for jj in range(wmax):
-                idx = track[jj]
-                ok = (idx >= 0)[np.newaxis, :, np.newaxis]
-                ii = np.maximum(idx, 0)
-                acc += np.where(ok, np.roll(s1[:, ii], -jj, axis=-1), 0.0)
+                sj = np.zeros_like(s1)
+                vj = None if accv is None else np.zeros_like(v1)
+                for ii, wt in track.taps(jj):
+                    w3 = wt[np.newaxis, :, np.newaxis]
+                    sj += w3 * s1[:, ii]
+                    if vj is not None:
+                        vj += w3 * v1[:, ii]
+                acc += np.roll(sj, -jj, axis=-1)
                 if accv is not None:
-                    accv += np.where(ok, np.roll(v1[:, ii], -jj, axis=-1), 0.0)
+                    accv += np.roll(vj, -jj, axis=-1)
                 if jj > 0 and jj + 1 in durations:
                     update(durations.index(jj + 1), acc, accv, k0)
 
@@ -7037,12 +7188,19 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return 0.25 * out.reshape(nr, nx, nra) + rest[np.newaxis]
 
     @staticmethod
-    def _track_cross(tc, wt, var_th, presp, lag_index, track, long_w):
+    def _track_cross(tc, wt, var_th, rdiag, vdiag, presp, lag_index, track, long_w):
         """Coupling by the filter of the different samples along the tracks.
 
         For each duration W in ``long_w``, the terms ``j != j'`` (both < W) of the
         response and of the thermal variance of the numerator (see the class
         docstring), for a transient starting at each sample.
+
+        Each also holds a correction to the terms ``j = j'``.  Those are the
+        single-sample response and variance interpolated along the track, which for
+        a sum ``sum_k |g_k|^2 a_k`` gives ``|g|^2`` interpolated rather than the
+        ``|g~|^2`` of the interpolated template ``g~`` that the numerator and the
+        terms ``j != j'`` use.  For a long pulse the two parts nearly cancel, so the
+        difference is added here.
 
         The pair ``(j, j + d)`` and its mirror contribute ``Re[c X_d(t + j)]`` with
         ``c = g_j^* g_{j+d}`` and ``X_d`` depending only on the lag ``d``, so ``X_d``
@@ -7057,12 +7215,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             Template at each grid x.
         wt, var_th : np.ndarray[el, k, ra]
             Total weight and thermal variance of each visibility.
+        rdiag, vdiag : np.ndarray[el, k, ra]
+            The single-sample response and variance of each visibility, without the
+            template (``|g_k|^2`` times them gives the single-sample terms).
         presp : np.ndarray[k, ra, lag]
             Filter response ``P[t, t + d]``.
         lag_index : dict
             Index of each lag ``d`` in ``presp``.
-        track : np.ndarray[wmax, el, x]
-            From :meth:`TransientMatchedFilter._tracks`.
+        track : _Track
+            From :meth:`TransientMatchedFilter._tracks`, ``[wmax, el, x, tap]``.
         long_w : list of int
             Durations, all longer than one sample, in increasing order.
 
@@ -7076,11 +7237,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         nra = wt.shape[-1]
 
         # Template along the track at each step [j][el, x, k]
-        g = []
-        for jj in range(wmax):
-            idx = track[jj]
-            gj = np.take_along_axis(tc, np.maximum(idx, 0)[np.newaxis], axis=2)
-            g.append(np.where(idx[np.newaxis] >= 0, gj, 0.0).transpose(1, 2, 0))
+        g = [track.template(tc, jj).transpose(1, 2, 0) for jj in range(wmax)]
         wv = wt * var_th
 
         def stack(x):
@@ -7111,6 +7268,18 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 cs = np.concatenate([c.real, -c.imag], axis=-1).astype(np.float32)
                 shift_add(new_r[j + d], np.matmul(cs, x_r), j)
                 shift_add(new_v[j + d], np.matmul(cs, x_v), j)
+
+        # The terms j = j' with the interpolated template, less the interpolated
+        # single-sample terms (none at the start, which is on the grid)
+        rd = rdiag.astype(np.float32)
+        vd = vdiag.astype(np.float32)
+        for j in range(1, wmax):
+            e = np.abs(g[j]) ** 2 - track.power(tc, j).transpose(1, 2, 0)
+            if not np.any(e):
+                continue
+            e = e.astype(np.float32)  # el, x, k
+            shift_add(new_r[j], np.matmul(e, rd), j)
+            shift_add(new_v[j], np.matmul(e, vd), j)
 
         resp_cross, var_cross = [], []
         acc_r = np.zeros((nel, nx, nra), dtype=np.float64)
