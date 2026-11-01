@@ -5243,17 +5243,22 @@ class _Track:
             out += wt[np.newaxis] * np.take_along_axis(tc, idx[np.newaxis], axis=2)
         return out
 
-    def power(self, tc, j):
+    def power(self, tc, j, tc2=None):
         """``|tc|^2`` [k, el, x] interpolated to the position of step ``j``.
 
         This is what a quantity of the form ``sum_k |g_k|^2 a_k`` on the grid
         becomes when it is interpolated along the track; it differs from
         ``|template(tc, j)|^2``, the exact value for the interpolated template.
+        With ``tc2``, ``Re(conj(tc) tc2)`` instead.
         """
         out = np.zeros(tc.shape, dtype=np.float64)
         for idx, wt in self.taps(j):
             g = np.take_along_axis(tc, idx[np.newaxis], axis=2)
-            out += wt[np.newaxis] * (g.real**2 + g.imag**2)
+            if tc2 is None:
+                out += wt[np.newaxis] * (g.real**2 + g.imag**2)
+            else:
+                g2 = np.take_along_axis(tc2, idx[np.newaxis], axis=2)
+                out += wt[np.newaxis] * (g.real * g2.real + g.imag * g2.imag)
         return out
 
 
@@ -6193,14 +6198,22 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
     With ``stokes``, the products are combined in each band before the bands are
     combined.  I is formed as for the co-polar search (``combine_pol``, so its
-    trials are the same).  Q is ``(a_XX - a_YY) / 2`` with each product normalised
-    by its own response, so that I cancels where the beam model is right: the
-    numerators are weighted by ``R / (2 R_XX)`` and ``R / (2 R_YY)`` with
-    ``R = R_XX + R_YY``, and the coupling of the samples of a track is taken to be
-    that of I.  With the X-Y phase ``phi_b = xy_offset + 2 pi nu_b xy_delay``,
-    ``XY ~ (U + iV) e^{i phi}`` and ``YX ~ (U - iV) e^{-i phi}``, so
-    ``e^{-i phi_b} (N_XY + conj N_YX)`` has U in its real and V in its imaginary
-    part (YX is conjugated, which leaves the response and the coupling unchanged).
+    trials are the same).  Q is ``(1 - lambda) N_XX - (1 + lambda) N_YY``, where
+    ``lambda`` is the leakage of I into ``N_XX - N_YY`` predicted by the beam model
+    for each band, elevation and telescope-x (see :meth:`_q_leakage`), so that I
+    cancels where the beam model is right.  ``lambda`` does not depend on time, so
+    Q is a matched filter with the template of each product scaled by a constant,
+    and its response, variance and coupling of the samples of a track follow from
+    that template.  (Normalising each product by its own response at each sample
+    cancelled I more closely, but those factors change along a track, where the
+    coupling of the samples cannot follow them, and amplify a product without
+    signal where its beam is far below the other's: the variance of the long
+    durations of L was then wrong by large factors.)  A sample is used only where
+    all four products have weight.  With the X-Y phase
+    ``phi_b = xy_offset + 2 pi nu_b xy_delay``, ``XY ~ (U + iV) e^{i phi}`` and
+    ``YX ~ (U - iV) e^{-i phi}``, so ``e^{-i phi_b} (N_XY + conj N_YX)`` has U in
+    its real and V in its imaginary part (YX is conjugated, which leaves the
+    response and the coupling unchanged).
     Q has the sky term of the polarisation difference; U and V have no sky term
     (the unpolarised sky does not reach them except by leakage, which the in-band
     scale measures).
@@ -6326,15 +6339,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         upol = list(unfiltered.index_map["pol"])
         ipu = [upol.index(pol[ii]) for ii in ipol]
         if self.stokes:
-            # Groups I, Q and C (see the class docstring).  The coupling of the
-            # samples of a track is computed for the co- and the cross-polar pair
-            # (cmap: the pair of each group).
+            # Groups I, Q and C (see the class docstring), and the products whose
+            # coupling of the samples of a track each needs (cmap: its entry); that
+            # of Q is formed with its own template
             sidx = self._stokes_index()
-            pgroups = [[sidx["XX"], sidx["YY"]], [sidx["XY"], sidx["YX"]]]
+            co = [sidx["XX"], sidx["YY"]]
+            pgroups = [co, co, [sidx["XY"], sidx["YX"]]]
             opol = np.array(["I", "V", "L"])
             bpol = np.array(["I", "Q", "U", "V"])
             ngp = 3
-            cmap = [0, 0, 1]
+            cmap = [0, 1, 2]
         else:
             pgroups = (
                 [list(range(len(ipol)))]
@@ -6398,13 +6412,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         half = np.where(self_conj, 0.5, 1.0).astype(np.float32)[
             :, np.newaxis, :, np.newaxis
         ]
-        shared = [
-            _NodeSharedFreq(
-                hvis[wname][:],
-                hvis.comm,
-                take=lambda a: a[ipol][:, :, iew].astype(np.float32) * half,
-            )
-        ]
+
+        def take_weight(a):
+            w = a[ipol][:, :, iew].astype(np.float32) * half
+            if self.stokes:
+                # Only the samples where all four products are present
+                w *= np.all(w > 0, axis=0, keepdims=True)
+            return w
+
+        shared = [_NodeSharedFreq(hvis[wname][:], hvis.comm, take=take_weight)]
         weight_all = np.moveaxis(shared[0].array, 0, 1)  # pol, freq, ew, ra
         if has_response:
             shared.append(
@@ -6519,6 +6535,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         pbeam *= visible[el_slc][np.newaxis, np.newaxis]
         lmbda = scipy.constants.c / (freq * 1e6)
         u = ew[iew][np.newaxis, :] / lmbda[:, np.newaxis]  # freq, ew
+        if self.stokes:
+            lam_q = self._q_leakage(pbeam, weight_all, sidx, band_index, nband)
 
         # For durations longer than one sample: the tracks, and the coupling of the
         # samples of a track by the filter, summed over the bands for each spectral
@@ -6687,6 +6705,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     )
                     if rfi is not None:
                         ok &= ~rfi[fsel][:, esl][np.newaxis, :, np.newaxis]
+                    if self.stokes:
+                        ok &= np.all(ok, axis=0, keepdims=True)
                     wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
                     data = np.where(ok, data, 0.0)
                     sky_v = np.where(ok, sky_v, 0.0)
@@ -6697,6 +6717,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     ws = (wt * kc * sky_v).astype(np.complex64)
 
                     if self.stokes:
+                        lq = lam_q[bb][esl]
                         self._stokes_band(
                             bb,
                             psl,
@@ -6708,6 +6729,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             ws,
                             rho_pol[bb],
                             xy_phase[bb],
+                            lq,
                             numer,
                             numer_im,
                             resp,
@@ -6719,8 +6741,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             if not long_w:
                                 break
                             tc = template[grp].reshape(-1, *template.shape[3:])
+                            tf = None
+                            if ci == 1:
+                                # Q: the template of each product scaled as in its
+                                # numerator, against the signal template tc
+                                qs = np.stack([1.0 - lq, 1.0 + lq])[:, None, None]
+                                tf = (template[grp] * qs).reshape(tc.shape)
                             cr, cv = self._track_cross(
-                                tc,
+                                tc if tf is None else tf,
                                 wt[grp].reshape(-1, *wt.shape[3:]).transpose(1, 0, 2),
                                 var_th[grp]
                                 .reshape(-1, *var_th.shape[3:])
@@ -6731,6 +6759,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                 lag_index,
                                 track[:, esl],
                                 long_w,
+                                tc_sig=None if tf is None else tc,
                             )
                             for iw in range(len(long_w)):
                                 for ia in range(alphas.size):
@@ -6962,6 +6991,49 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return lambda t: 1.0 + c * np.sqrt(np.clip(t, 0.0, None))
 
     @staticmethod
+    def _q_leakage(pbeam, weight, sidx, band_index, nband):
+        """Leakage of I into ``N_XX - N_YY`` in each band, from the beam model.
+
+        For a source of Stokes I and Q, ``N_XX ~ R_XX (I + Q)`` and
+        ``N_YY ~ R_YY (I - Q)``.  With the responses taken from the beam and the
+        weights averaged over RA (the same for both products),
+        ``lambda = sum_f (B_XX^2 - B_YY^2) w_f / sum_f (B_XX^2 + B_YY^2) w_f`` and
+        ``(1 - lambda) N_XX - (1 + lambda) N_YY`` has no I.
+
+        Parameters
+        ----------
+        pbeam : np.ndarray[pol, freq, el, x]
+            Primary beam.
+        weight : np.ndarray[pol, freq, ew, ra]
+            Thermal weights.
+        sidx : dict
+            Index in ``pol`` of each product.
+        band_index : np.ndarray[freq]
+            Band of each frequency.
+        nband : int
+            Number of bands.
+
+        Returns
+        -------
+        lam : list of np.ndarray[el, x]
+            For each band.
+        """
+        wf = sum(
+            weight[sidx[p]].mean(axis=-1, dtype=np.float64).sum(axis=-1)
+            for p in ("XX", "YY")
+        )
+        bx = pbeam[sidx["XX"]].astype(np.float64) ** 2
+        by = pbeam[sidx["YY"]].astype(np.float64) ** 2
+        lam = []
+        for bb in range(nband):
+            fs = band_index == bb
+            w = wf[fs][:, np.newaxis, np.newaxis]
+            num = np.sum(w * (bx[fs] - by[fs]), axis=0)
+            den = np.sum(w * (bx[fs] + by[fs]), axis=0)
+            lam.append((num * tools.invert_no_zero(den)).astype(np.float32))
+        return lam
+
+    @staticmethod
     def _stokes_band(
         bb,
         esl,
@@ -6973,6 +7045,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         ws,
         rho,
         phi,
+        lam,
         numer,
         numer_im,
         resp,
@@ -6980,7 +7053,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         vplus,
         vminus,
     ):
-        """Sums of one band for the groups I, Q and C (see the class docstring)."""
+        """Sums of one band for the groups I, Q and C (see the class docstring).
+
+        ``lam`` [el, x] is the leakage of I into XX - YY in the band (see
+        :meth:`_q_leakage`).
+        """
         single = {}
         for name, pp in sidx.items():
             tch = template[pp].reshape(-1, *template.shape[3:]).transpose(1, 2, 0).conj()
@@ -7011,13 +7088,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         vplus[0, bb, esl] = (px + py) * a
         vminus[0, bb, esl] = (px - py) * b
 
-        ok = (rx > 0) & (ry > 0)
-        fx = np.where(ok, 0.5 * r * tools.invert_no_zero(rx), 0.0)
-        fy = np.where(ok, 0.5 * r * tools.invert_no_zero(ry), 0.0)
+        fx = (1.0 - lam)[..., np.newaxis]
+        fy = (1.0 + lam)[..., np.newaxis]
         n = fx * nx_ - fy * ny_
         numer[1, bb, esl] = n.real
         numer_im[1, bb, esl] = n.imag
-        resp[1, bb, esl] = np.where(ok, r, 0.0)
+        resp[1, bb, esl] = fx * rx + fy * ry
         vinc[1, bb, esl] = fx**2 * vx + fy**2 * vy
         vplus[1, bb, esl] = (fx * px - fy * py) * a
         vminus[1, bb, esl] = (fx * px + fy * py) * b
@@ -7188,7 +7264,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return 0.25 * out.reshape(nr, nx, nra) + rest[np.newaxis]
 
     @staticmethod
-    def _track_cross(tc, wt, var_th, rdiag, vdiag, presp, lag_index, track, long_w):
+    def _track_cross(
+        tc, wt, var_th, rdiag, vdiag, presp, lag_index, track, long_w, tc_sig=None
+    ):
         """Coupling by the filter of the different samples along the tracks.
 
         For each duration W in ``long_w``, the terms ``j != j'`` (both < W) of the
@@ -7226,6 +7304,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             From :meth:`TransientMatchedFilter._tracks`, ``[wmax, el, x, tap]``.
         long_w : list of int
             Durations, all longer than one sample, in increasing order.
+        tc_sig : np.ndarray[k, el, x], optional
+            Template of the signal, if it is not ``tc`` (the template of the
+            numerator).  The response then has ``conj(g_kj) s_kj'`` with ``s`` the
+            signal template along the track, and the pair and its mirror need
+            separate products.
 
         Returns
         -------
@@ -7238,6 +7321,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
         # Template along the track at each step [j][el, x, k]
         g = [track.template(tc, jj).transpose(1, 2, 0) for jj in range(wmax)]
+        gs = (
+            g
+            if tc_sig is None
+            else [track.template(tc_sig, jj).transpose(1, 2, 0) for jj in range(wmax)]
+        )
         wv = wt * var_th
 
         def stack(x):
@@ -7261,13 +7349,25 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             # thermal variance at the other end; Re[c a + c^* b] = Re[c (a + b^*)]
             a_d = -wt * presp[np.newaxis, :, :, lag_index[d]]
             b_d = np.roll(-wt * presp[np.newaxis, :, :, lag_index[-d]], -d, axis=-1)
-            x_r = stack(a_d + b_d.conj())
             x_v = stack(a_d * np.roll(wv, -d, axis=-1) + b_d.conj() * wv)
+            if tc_sig is None:
+                x_r = stack(a_d + b_d.conj())
+            else:
+                # Re[conj(g_j) s_j+d a] + Re[conj(g_j+d) s_j b]
+                x_ra, x_rb = stack(a_d), stack(b_d.conj())
             for j in range(wmax - d):
                 c = g[j].conj() * g[j + d]  # el, x, k
                 cs = np.concatenate([c.real, -c.imag], axis=-1).astype(np.float32)
-                shift_add(new_r[j + d], np.matmul(cs, x_r), j)
                 shift_add(new_v[j + d], np.matmul(cs, x_v), j)
+                if tc_sig is None:
+                    shift_add(new_r[j + d], np.matmul(cs, x_r), j)
+                    continue
+                for c, xr in (
+                    (g[j].conj() * gs[j + d], x_ra),
+                    (gs[j].conj() * g[j + d], x_rb),
+                ):
+                    cs = np.concatenate([c.real, -c.imag], axis=-1).astype(np.float32)
+                    shift_add(new_r[j + d], np.matmul(cs, xr), j)
 
         # The terms j = j' with the interpolated template, less the interpolated
         # single-sample terms (none at the start, which is on the grid)
@@ -7275,11 +7375,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         vd = vdiag.astype(np.float32)
         for j in range(1, wmax):
             e = np.abs(g[j]) ** 2 - track.power(tc, j).transpose(1, 2, 0)
-            if not np.any(e):
-                continue
-            e = e.astype(np.float32)  # el, x, k
-            shift_add(new_r[j], np.matmul(e, rd), j)
-            shift_add(new_v[j], np.matmul(e, vd), j)
+            if tc_sig is None:
+                er = e
+            else:
+                er = (g[j].conj() * gs[j]).real - track.power(tc, j, tc_sig).transpose(
+                    1, 2, 0
+                )
+            if np.any(er):
+                shift_add(new_r[j], np.matmul(er.astype(np.float32), rd), j)
+            if np.any(e):
+                shift_add(new_v[j], np.matmul(e.astype(np.float32), vd), j)
 
         resp_cross, var_cross = [], []
         acc_r = np.zeros((nel, nx, nra), dtype=np.float64)
