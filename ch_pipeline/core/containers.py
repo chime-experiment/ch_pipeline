@@ -1483,7 +1483,7 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
     declination of each ``(el, x)``.
 
     ``snr_q`` (optional, for a search in Stokes parameters) is the S/N of Stokes Q
-    summed over the bands at RM 0, NaN where there is no trial; the noise
+    summed over the bands at RM 0, 0 where there is no trial; the noise
     calibration of L uses it.
     """
 

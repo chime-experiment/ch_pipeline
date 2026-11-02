@@ -6540,9 +6540,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             cont.attrs["time_axis"] = "start of the transient"
             cont.attrs["sky_noise"] = True
         if self.stokes:
-            # Q at RM 0, for the noise calibration of L (CalibrateTrialNoise)
+            # Q at RM 0, for the noise calibration of L (CalibrateTrialNoise); 0
+            # where there is no trial (NaN would trip the pipeline's NaN check)
             trials.add_dataset("snr_q")
-            trials.datasets["snr_q"][:].local_array[:] = np.nan
+            trials.datasets["snr_q"][:].local_array[:] = 0.0
         trials.attrs["reference_freq"] = self.reference_freq
         bands.attrs["band_start"] = self.band_start
         bands.attrs["band_width"] = self.band_width
@@ -6980,7 +6981,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     ):
                         ok = (rs > 0) & (vr > 0)
                         snr = nm * tools.invert_no_zero(np.sqrt(np.where(ok, vr, 0.0)))
-                        tsnrq[iwd, ia, ee] = np.where(ok, snr, np.nan).T
+                        tsnrq[iwd, ia, ee] = np.where(ok, snr, 0.0).T
             if self.stokes:
                 rtot += np.sum(resp[1], axis=(1, 2, 3), dtype=np.float64)
 
@@ -9125,7 +9126,7 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
                     f"L has trials at spectral index {alphas[a]}, which was not in "
                     "the RM search."
                 )
-            sq = sigma(np.abs(snrq[d, a]))
+            sq = sigma(np.where(snrq[d, a] != 0, np.abs(snrq[d, a]), np.nan))
             wv = wgt[iv, d, a]
             au = np.where(wv > 0, np.abs(imag[iv, d, a]) * np.sqrt(np.abs(wv)), np.nan)
             su = sigma(au)
