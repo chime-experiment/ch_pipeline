@@ -6284,7 +6284,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
       ``c_b = s_b e^{-2 i RM l_b^2}``, computed at every RM for the leading
       ``rm_sky_modes`` modes of ``rho`` and at its mean over RM (the diagonal) for
       the rest.  Using the RM = 0 value at every RM suppressed L wherever the sky
-      term is large (the night clouds, the horizon).
+      term is large (the night clouds, the horizon).  The coefficients of
+      ``n(t) = a + c sqrt(t)`` are kept in the ``rm_ntrials_coef`` attribute, and the
+      S/N of Q at RM 0 (with its sky term) in ``snr_q``, for the noise calibration
+      of L (see :class:`CalibrateTrialNoise`).  The statistic takes Q and U to have
+      the same variance; it is ``(V_Q - V_U) / (V_Q + V_U)`` <~ 0.1 for
+      |telescope-y| < 0.85, and up to ~0.6 beyond, where the XX and YY responses
+      differ by up to ~80 and the tail of L is too heavy at RM ~ 0 (the sifter's
+      ``horizon_y_max``).
 
     The per-band output has I, Q, U and V.  The group maps are made for I.
     """
@@ -6532,6 +6539,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             cont.attrs["duration_unit_seconds"] = 86164.0905 / 360.0 * np.degrees(dra)
             cont.attrs["time_axis"] = "start of the transient"
             cont.attrs["sky_noise"] = True
+        if self.stokes:
+            # Q at RM 0, for the noise calibration of L (CalibrateTrialNoise)
+            trials.add_dataset("snr_q")
+            trials.datasets["snr_q"][:].local_array[:] = np.nan
         trials.attrs["reference_freq"] = self.reference_freq
         bands.attrs["band_start"] = self.band_start
         bands.attrs["band_width"] = self.band_width
@@ -6607,6 +6618,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             if "amplitude_imag" in trials.datasets
             else None
         )
+        tsnrq = trials.datasets["snr_q"][:].local_array if self.stokes else None
         gsl = slice(0, 1) if self.stokes else slice(None)
         groups = self._group_maps_setup(hvis, band_map, x, opol[gsl], ha, dec, rho_band)
         # Each band on its own: (group, part) of each output polarisation, part 0
@@ -6960,6 +6972,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     tamp[2, :, ia, ee] = tmax.transpose(0, 2, 1)
                     twgt[2, :, ia, ee] = pol_amp.transpose(0, 2, 1)
                     timag[2, :, ia, ee] = brm.transpose(0, 2, 1)
+                    # Q at RM 0 with its sky term (U at RM 0 is the imaginary part
+                    # of V), whose measured spread calibrates the noise of L
+                    nmq, rsq0, vrq0, _ = combine(1, le, sb)
+                    for iwd, (nm, rs, vr, _) in enumerate(
+                        per_duration(ia, ee, le, 1, nmq, rsq0, vrq0, None)
+                    ):
+                        ok = (rs > 0) & (vr > 0)
+                        snr = nm * tools.invert_no_zero(np.sqrt(np.where(ok, vr, 0.0)))
+                        tsnrq[iwd, ia, ee] = np.where(ok, snr, np.nan).T
             if self.stokes:
                 rtot += np.sum(resp[1], axis=(1, 2, 3), dtype=np.float64)
 
@@ -6990,9 +7011,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
         if self.stokes:
             # Linear polarisation as a Gaussian S/N, with the number of independent
-            # RM trials from the weights of the bands over all elevations
+            # RM trials from the weights of the bands over all elevations (kept
+            # for the noise calibration, which goes back to chi-squared)
+            coef = []
             for ia in rm_alpha:
-                ntrials = self._rm_ntrials(lam2_b, scale[:, ia] ** 2 * rtot, hvis.comm)
+                coef.append(
+                    self._rm_ntrials_coef(lam2_b, scale[:, ia] ** 2 * rtot, hvis.comm)
+                )
+                ntrials = _rm_ntrials_fn(*coef[-1])
                 self.log.info(
                     f"Spectral index {alphas[ia]:+.1f}: {ntrials(25.0):.0f} "
                     "independent RM trials at chi2 = 25."
@@ -7000,6 +7026,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 amp, wgt = self._rm_gaussian(tamp[2, :, ia], twgt[2, :, ia], ntrials)
                 tamp[2, :, ia] = amp
                 twgt[2, :, ia] = wgt
+            # [a, c] of n(t) = a + c sqrt(t) at each of rm_spectral_indices
+            trials.attrs["rm_ntrials_coef"] = np.array(coef, dtype=np.float64).reshape(
+                -1, 2
+            )
 
         group_maps = groups[0] if groups is not None else []
         if group_maps:
@@ -7026,18 +7056,21 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     def _rm_ntrials(self, lam2, wb, comm):
         """Number of independent RM trials as a function of the level (see
         ``rm_ntrials_eff``), for band weights ``wb`` summed over the ranks."""
+        return _rm_ntrials_fn(*self._rm_ntrials_coef(lam2, wb, comm))
+
+    def _rm_ntrials_coef(self, lam2, wb, comm):
+        """``(a, c)`` with ``n(t) = a + c sqrt(t)`` (see :meth:`_rm_ntrials`)."""
         if self.rm_ntrials_eff is not None:
-            n = float(self.rm_ntrials_eff)
-            return lambda t: n
+            return float(self.rm_ntrials_eff), 0.0
         if comm is not None and comm.size > 1:
             wb = comm.allreduce(wb)
         wb = np.where(wb > 0, wb, 0.0)
         if wb.sum() <= 0:
-            return lambda t: 1.0
+            return 1.0, 0.0
         mean = np.sum(wb * lam2) / wb.sum()
         var = np.sum(wb * (lam2 - mean) ** 2) / wb.sum()
         c = 2.0 * self.rm_max * np.sqrt(4.0 * var / (2.0 * np.pi))
-        return lambda t: 1.0 + c * np.sqrt(np.clip(t, 0.0, None))
+        return 1.0, float(c)
 
     @staticmethod
     def _stokes_band(
@@ -8743,12 +8776,12 @@ def _chi2_to_gaussian(q, k):
     return np.where(ok, z, 0.0)
 
 
-def _chi2max_to_gaussian(t, n_eff):
+def _chi2max_to_gaussian(t, n_eff, single=True):
     """Equivalent Gaussian S/N of the largest of ``n_eff`` chi-squared values (2 dof).
 
     For independent trials ``P(max < t) = (1 - e^{-t/2})^n_eff``; ``z`` has the
     same probability under a unit Gaussian.  ``n_eff`` may be an array (the
-    number at each ``t``).
+    number at each ``t``).  The result is float32 if ``single``, else float64.
     """
     t = np.clip(np.asarray(t, dtype=np.float64), 0.0, None)
     n_eff = np.asarray(n_eff, dtype=np.float64)
@@ -8765,7 +8798,35 @@ def _chi2max_to_gaussian(t, n_eff):
         scipy.special.ndtri_exp(log_cdf),
         -scipy.special.ndtri_exp(log_sf),
     )
-    return z.astype(np.float32)
+    return z.astype(np.float32) if single else z
+
+
+def _rm_ntrials_fn(a, c):
+    """``n(t) = a + c sqrt(t)``: the number of independent RM trials at level t."""
+    return lambda t: a + c * np.sqrt(np.clip(t, 0.0, None))
+
+
+def _gaussian_to_chi2max(z, a, c, npoint=40001):
+    """Inverse of :func:`_chi2max_to_gaussian` for ``n_eff = a + c sqrt(t)``.
+
+    ``z`` is tabulated on a grid of ``npoint`` values of ``s = sqrt(t)`` out to the
+    largest ``z`` and interpolated.  With ``c > 0`` it first falls, as ``n(t)``
+    grows from ``a`` (to a minimum at ``t ~ 0.3``, below any maximum over many RM
+    trials), and then rises; the rising branch is used, and lower ``z`` are given
+    its minimum.
+    """
+    n = _rm_ntrials_fn(a, c)
+    z = np.asarray(z, dtype=np.float64)
+    zmax = max(float(np.max(z, initial=0.0)), 1.0)
+    # In the tail t = 2 (log n(t) - log P(Z > z)), solved by a few iterations
+    lsf = scipy.special.log_ndtr(-zmax)
+    t = -2.0 * lsf
+    for _ in range(5):
+        t = 2.0 * (np.log(n(t)) - lsf)
+    s = np.linspace(1e-4, 1.05 * np.sqrt(t) + 1.0, npoint)
+    zg = _chi2max_to_gaussian(s**2, n(s**2), single=False)
+    k = int(np.argmin(zg))
+    return np.interp(z, zg[k:], s[k:]) ** 2
 
 
 _MAD_TO_STD = 1.482602218505602
@@ -8938,6 +8999,19 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
     samples are present the weight is set to zero.  The weights are divided by sigma^2, in place; the
     amplitudes are unchanged.  The result does not depend on the number of ranks.
 
+    L (the RM search of a search in Stokes parameters) is not Gaussian in its bulk:
+    the conversion of the largest chi-squared over RM to a Gaussian S/N
+    (:func:`_chi2max_to_gaussian`) is right in the tail but conservative below
+    z ~ 2-3, so that for noise 1.4826 median |z| is 1.1-1.45, depending on the
+    weights of the bands.  Its own spread would rescale real noise by that much.
+    So L is calibrated through Q and U at RM 0, which are Gaussian: sigma_Q from
+    ``snr_q`` and sigma_U from the imaginary part of V (U at RM 0, with the
+    weight of V), as above.  The chi-squared of L, recovered from z with the
+    ``rm_ntrials_coef`` of the search, is divided by ``(sigma_Q^2 + sigma_U^2) / 2``
+    and converted back to z; the amplitude keeps |P| and takes the sign of the new
+    z.  ``snr_q`` is then removed.  Without ``snr_q`` (older trials) L is calibrated
+    like the others.
+
     Attributes
     ----------
     window : int
@@ -8979,7 +9053,21 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
         comm = trials.comm
         npol, ndur, nalpha = amp.shape[:3]
         med = np.full((npol, ndur, nalpha), np.nan)
+        pol = _decode_names(trials.index_map["pol"][:])
+        il = None
+        if "L" in pol and "snr_q" in trials.datasets:
+            # First, while the weights of V (for U) are those of the model
+            il = pol.index("L")
+            med[il], qu = self._calibrate_l(trials, pol, off, nel, comm)
+            del trials._data["snr_q"]
+        elif "L" in pol and "V" in pol and "rm_trials" in trials.attrs:
+            self.log.warning(
+                "No snr_q in the trials: L is calibrated by its own spread, which "
+                "is not that of a Gaussian."
+            )
         for p, d, a in np.ndindex(npol, ndur, nalpha):
+            if p == il:
+                continue
             w = wgt[p, d, a]
             # Trials without data anywhere (the RM search at other spectral indices)
             if not _any_global(w > 0, comm):
@@ -8995,8 +9083,69 @@ class CalibrateTrialNoise(_RollingNoiseParams, tasklib.base.ContainerTask):
             self.log.info(
                 f"Duration {durations[d]}: median noise rescaling "
                 + ", ".join(f"{v:.2f}" for v in med[:, d].ravel())
+                + (
+                    ""
+                    if il is None
+                    else " (L: sqrt of the mean of Q and U; sigma_Q / sigma_U "
+                    + ", ".join(f"{v:.2f}" for v in qu[d])
+                    + ")"
+                )
             )
         return trials
+
+    def _calibrate_l(self, trials, pol, off, nel, comm):
+        """Calibrate L through the spread of Q and U (see the class docstring).
+
+        Returns the median of ``sqrt((sigma_Q^2 + sigma_U^2) / 2)`` and of
+        ``sigma_Q / sigma_U`` for each duration and spectral index.
+        """
+        amp = trials.amplitude[:].local_array
+        wgt = trials.weight[:].local_array
+        imag = trials.amplitude_imag[:].local_array
+        snrq = trials.datasets["snr_q"][:].local_array
+        il, iv = pol.index("L"), pol.index("V")
+        alphas = np.asarray(trials.index_map["spectral_index"][:], dtype=np.float64)
+        rm_a = np.atleast_1d(trials.attrs["rm_spectral_indices"])
+        coef = np.atleast_2d(trials.attrs["rm_ntrials_coef"])
+        ndur, nalpha = amp.shape[1:3]
+        med = np.full((ndur, nalpha), np.nan)
+        ratio = np.full((ndur, nalpha), np.nan)
+
+        def sigma(absval):  # [el, ra, x], NaN where masked
+            s = self._sigma(np.moveaxis(absval, -1, 0), off, nel, comm)  # x, el, ra
+            return np.moveaxis(s, 0, -1)
+
+        for d, a in np.ndindex(ndur, nalpha):
+            w = wgt[il, d, a]
+            if not _any_global(w > 0, comm):
+                continue
+            k = np.flatnonzero(np.isclose(rm_a, alphas[a]))
+            if k.size == 0:
+                raise ValueError(
+                    f"L has trials at spectral index {alphas[a]}, which was not in "
+                    "the RM search."
+                )
+            sq = sigma(np.abs(snrq[d, a]))
+            wv = wgt[iv, d, a]
+            au = np.where(wv > 0, np.abs(imag[iv, d, a]) * np.sqrt(np.abs(wv)), np.nan)
+            su = sigma(au)
+            ok = np.isfinite(sq) & np.isfinite(su) & (sq > 0) & (su > 0)
+            s2 = np.where(ok, 0.5 * (sq**2 + su**2), 1.0)
+            pa = np.abs(amp[il, d, a])
+            has = ok & (w > 0) & (pa > 0)
+            # z = sign(z) |P| * |z| / |P|
+            z = amp[il, d, a][has] * np.sqrt(w[has])
+            t = _gaussian_to_chi2max(z, *coef[k[0]]) / s2[has]
+            zn = _chi2max_to_gaussian(t, _rm_ntrials_fn(*coef[k[0]])(t))
+            new_a = np.zeros_like(amp[il, d, a])
+            new_w = np.zeros_like(w)
+            new_a[has] = np.sign(zn) * pa[has]
+            new_w[has] = (zn / pa[has]) ** 2
+            amp[il, d, a] = np.where(has, new_a, amp[il, d, a])
+            wgt[il, d, a] = np.where(ok, new_w, 0.0)
+            med[d, a] = _global_median(np.sqrt(s2[has]), comm)
+            ratio[d, a] = _global_median((sq / np.where(ok, su, 1.0))[has], comm)
+        return med, [ratio[d][np.isfinite(ratio[d])] for d in range(ndur)]
 
 
 class CalibrateGroupNoise(_RollingNoiseParams, tasklib.base.ContainerTask):

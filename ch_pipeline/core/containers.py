@@ -1481,6 +1481,10 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
     attribute.  The ``ra`` axis is the start of the transient, ``x`` is its
     telescope-x at the start, and ``ha`` and ``dec`` give the hour angle and
     declination of each ``(el, x)``.
+
+    ``snr_q`` (optional, for a search in Stokes parameters) is the S/N of Stokes Q
+    summed over the bands at RM 0, NaN where there is no trial; the noise
+    calibration of L uses it.
     """
 
     _axes = ("pol", "duration", "spectral_index", "el", "x")
@@ -1513,6 +1517,16 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
             "distributed": True,
             "distributed_axis": "el",
             "chunks": (1, 1, 1, 32, 1024, 32),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "snr_q": {
+            "axes": ["duration", "spectral_index", "el", "ra", "x"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "el",
+            "chunks": (1, 1, 32, 1024, 32),
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
         },
