@@ -4075,7 +4075,8 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
         num = np.zeros(shp, dtype=np.float32)
         den = np.zeros(shp, dtype=np.float32)
         dof = np.zeros((len(ipol), nband, len(iew), nra), dtype=np.float32)
-        corr = np.ones((len(ipol), nband, len(iew), nra), dtype=np.float32)
+        # The correction for correlated channels of each elevation, from its block
+        corr = np.ones(shp, dtype=np.float32)
 
         t0 = time.time()
         for oe, ie in enumerate(iew):
@@ -4091,7 +4092,7 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                     else np.ones((freq.size, nel_local), dtype=np.float32)
                 )
                 isc = tools.invert_no_zero(sc)
-                for bi_, (rows, bk) in enumerate(blocks):
+                for rows, bk in blocks:
                     esl = slice(rows[0], rows[-1] + 1)
                     # The fit is weighted by the mean inverse static scale of the
                     # block, which changes slowly with elevation
@@ -4102,8 +4103,14 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                         else np.ones(freq.size)
                     )
                     # Channels left out at some elevation of the block (noise scale
-                    # zero) are left out of the block's fit
-                    blk_ok = np.all(sc[:, esl] > 0, axis=1)
+                    # zero) are left out of the block's fit.  All of the block's
+                    # elevations, not only the local ones: a block spans ranks, and
+                    # the fit must not depend on how it is split
+                    blk_ok = (
+                        np.all(nscale_all[ip, :, ie, gsl] > 0, axis=1)
+                        if nscale_all is not None
+                        else np.ones(freq.size, dtype=bool)
+                    )
                     for tt in range(nra):
                         W = w[:, tt] * isc_b * blk_ok  # inverse variance of each channel
                         m = W > 0
@@ -4133,13 +4140,17 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
                         )
                         num[op, :, oe, esl, tt] = bsum @ p2
                         den[op, :, oe, esl, tt] = (bsum @ h1)[:, np.newaxis]
-                        if bi_ == 0:
-                            nb = bsum @ m
+                        nb = bsum @ m
+                        pairs = bsum @ (same & m & np.roll(m, -1))
+                        corr[op, :, oe, esl, tt] = (
+                            1.0
+                            + (2.0 * self.channel_correlation * pairs)
+                            * tools.invert_no_zero(nb)
+                        )[:, np.newaxis]
+                        # The degrees of freedom saved are those of the first block
+                        # (on rank 0, which writes them)
+                        if bk == 0:
                             dof[op, :, oe, tt] = bsum @ h1
-                            pairs = bsum @ (same & m & np.roll(m, -1))
-                            corr[op, :, oe, tt] = 1.0 + (
-                                2.0 * self.channel_correlation * pairs
-                            ) * tools.invert_no_zero(nb)
         if flagged is not None:
             num *= ~flagged[np.newaxis, :, np.newaxis]
             den *= ~flagged[np.newaxis, :, np.newaxis]
@@ -4199,7 +4210,7 @@ class EstimateInbandNoise(_BandMixin, tasklib.base.ContainerTask):
             cnum = self.comm.allreduce(cnum)
             common = np.where(valid, cnum * tools.invert_no_zero(cden), 1.0)
 
-        scale = h * common[:, :, :, np.newaxis] * corr[:, :, :, np.newaxis, :]
+        scale = h * common[:, :, :, np.newaxis] * corr
 
         # Samples of a band where the noise of every elevation jumped by more than
         # flag_common (in any polarisation or baseline)
