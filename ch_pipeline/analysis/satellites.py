@@ -202,12 +202,22 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
     each sample, and a band is flagged at the samples where the sum exceeds its
     expectation for noise by ``snr_detect`` standard deviations, and at the
     ``detect_dilate`` samples on either side.  Without ``detect`` the whole track
-    is flagged in every band.  The flags are then grown by ``grow_dt`` samples.
+    is flagged in every band, and the visibilities are not looked at.  The flags
+    are then grown by ``grow_dt`` samples.
+
+    ``freq_ranges`` restricts the flags to the bands a satellite transmits in, for
+    example to mask a known downlink in those bands whether or not each sample is
+    bright enough to be detected.  A satellite away from the meridian can still be
+    seen, in the aliases of the east-west beam (spaced by wavelength / 22 m in
+    telescope-x) and in its sidelobes, so ``x_max`` can be much larger than the range
+    of telescope-x searched.
 
     The output is a mask with one entry per band, like that of
     :class:`~ch_pipeline.analysis.transients.FlagMovingRFI`.  If another such mask
     is given as an optional requirement (for example the output of
-    ``FlagMovingRFI``), the output is the union of the two.
+    ``FlagMovingRFI``), the output is the union of the two.  Satellites with
+    different downlinks are handled by chaining tasks in this way, one for each set
+    of ``norad_ids`` and ``freq_ranges``.
 
     Attributes
     ----------
@@ -225,6 +235,9 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
         0.2.
     half_dy : float
         Half-width of the track in telescope-y.  Default is 0.015.
+    freq_ranges : list of [float, float]
+        Flag only the bands with centres in these ranges, as [low, high) in MHz.
+        Default is all bands.
     detect : bool
         Flag only the bands and samples where the satellite is seen.  Default is
         True.
@@ -250,6 +263,7 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
     min_alt = config.Property(proptype=float, default=0.0)
     x_max = config.Property(proptype=float, default=0.2)
     half_dy = config.Property(proptype=float, default=0.015)
+    freq_ranges = config.Property(proptype=list, default=None)
     detect = config.Property(proptype=bool, default=True)
     snr_detect = config.Property(proptype=float, default=5.0)
     detect_dilate = config.Property(proptype=int, default=5)
@@ -309,13 +323,23 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
             f"{self.max_epoch_offset} days."
         )
 
-        terms = _power_terms(stream, self.pol, self.ew_index, self.log)
-        Z, nz, el_slc = _band_power(stream, terms, chans, self.nsample_chunk, self.log)
+        band_sel = self._band_selection(band_map["centre"])
+
+        if self.detect:
+            terms = _power_terms(stream, self.pol, self.ew_index, self.log)
+            Z, nz, el_slc = _band_power(
+                stream, terms, chans, self.nsample_chunk, self.log
+            )
+            z_med = np.concatenate(
+                [[1.0], gamma(np.arange(1, len(terms) + 1)).median()]
+            )
+        else:
+            stream.redistribute(["el", "freq"])
+            el_slc = stream.vis[:].local_bounds
         el_local = el[el_slc]
-        z_med = np.concatenate([[1.0], gamma(np.arange(1, len(terms) + 1)).median()])
 
         zs = None
-        flag = np.zeros(Z.shape, dtype=bool)  # band, el_local, ra
+        flag = np.zeros((nband, el_local.size, nra), dtype=bool)  # band, el_local, ra
         for nid, (x, y, alt, tle) in tracks.items():
             seen = (alt > self.min_alt) & (np.abs(x) < self.x_max)
             nseen = int(seen.sum())
@@ -348,9 +372,9 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
                     on = scipy.ndimage.binary_dilation(
                         on, structure=np.ones((1, 2 * self.detect_dilate + 1), bool)
                     )
-                on &= seen[np.newaxis]
+                on &= seen[np.newaxis] & band_sel[:, np.newaxis]
             else:
-                on = np.broadcast_to(seen[np.newaxis], (nband, nra))
+                on = seen[np.newaxis] & band_sel[:, np.newaxis]
 
             flag |= strip[np.newaxis] & on[:, np.newaxis, :]
             bands_on = np.flatnonzero(on.any(axis=1))
@@ -380,6 +404,20 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
         out.redistribute("el")
         out.mask[:].local_array[:] = flag.transpose(0, 2, 1)
         return out
+
+    def _band_selection(self, centre):
+        """The bands to flag, from ``freq_ranges``."""
+        if self.freq_ranges is None:
+            return np.ones(centre.size, dtype=bool)
+        sel = np.zeros(centre.size, dtype=bool)
+        for lo, hi in self.freq_ranges:
+            sel |= (centre >= lo) & (centre < hi)
+        if sel.any():
+            centres = ", ".join(f"{c:.0f}" for c in centre[sel])
+            self.log.info(f"Flagging only the bands at {centres} MHz.")
+        else:
+            self.log.warning(f"No bands in freq_ranges {self.freq_ranges}.")
+        return sel
 
     def _tracks(self, unix):
         """Predicted tracks {norad_id: (x, y, alt, element_set)} at the times."""
