@@ -9473,8 +9473,11 @@ class FillRAGaps(tasklib.base.ContainerTask):
         # Index of each input sample on the filled axis
         index = np.concatenate([[0], np.cumsum(nstep)])
         nnew = index[-1] + 1
-        new_ra = ra[0] + dra * np.arange(nnew)
-        new_ra[index] = ra  # keep the original values exactly
+        # Input samples keep their RA exactly; the filled samples are evenly spaced
+        # between them.  A grid built from dra would drift away from the data, as the
+        # median step differs slightly from the mean, and fail the uniformity check of
+        # the filters.
+        new_ra = np.interp(np.arange(nnew), index, ra)
         gaps = np.flatnonzero(nstep > 1)
         self.log.info(
             f"Filling {gaps.size} gaps in the RA axis with {nnew - ra.size} samples: "
