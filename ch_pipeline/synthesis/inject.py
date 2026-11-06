@@ -2,27 +2,28 @@
 
 import os
 
+import fluxcat
 import numpy as np
 import scipy.interpolate
 import scipy.stats
 from caput import config
+from caput.astro import constants
 from caput.containers import empty_like
-from ch_util import fluxcat
-from cora.util import units
+from caput.pipeline import tasklib
 from draco.analysis.beamform import icrs_to_cirs
-from draco.core import io, task
+from draco.core import io
 from draco.util import interferometry, tools
 
 from ..core import containers
 
 # Constants
-NU21 = units.nu21
-C = units.c
+NU21 = constants.nu21
+C = constants.c
 
 SIGMA = {"XX": 14.87857614, "YY": 9.95746878, "XY": 12.17180995, "YX": 12.17180995}
 
 
-class BaseInject(task.SingleTask):
+class BaseInject(tasklib.base.ContainerTask):
     """Base class for injecting point source catalogs into visibility data.
 
     Attributes
@@ -40,6 +41,9 @@ class BaseInject(task.SingleTask):
         in the input container.  If False, then create a new container where the
         visibilities consist of the signal from the source catalog alone.  Default
         is False.
+    anti_podal : bool
+        Inject sources at antipodal transits in addition to main transits.
+        Default: False.
     nsigma : float
         Track sources for nsigma times the standard deviation of the theoretical
         beam response on each side of transit.  Default is 0.0, which results in
@@ -344,13 +348,14 @@ class FluxCatalog(BaseInject):
         greater than this value.
     filename : str
         Name of the file containing the flux catalog.  Must be a .json
-        file that can be loaded with ch_util.fluxcat.FluxCatalog.load.
+        file that can be loaded with fluxcat.FluxCatalog.load.
+        If None, the default fluxcat catalogs are used. Default: None.
     """
 
     min_dec = config.Property(proptype=float, default=0.0)
     max_dec = config.Property(proptype=float, default=70.0)
     min_flux = config.Property(proptype=float, default=0.0)
-    filename = config.Property(proptype=str, default="")
+    filename = config.Property(proptype=str, default=None)
 
     NOMINAL_FREQ = 600.0
 
@@ -364,15 +369,20 @@ class FluxCatalog(BaseInject):
         """
         super().setup(manager)
 
-        # Delete all previously loaded catalogs
-        collections = fluxcat.FluxCatalog.loaded_collections()
-        for collection in collections:
-            fluxcat.FluxCatalog.delete_loaded_collection(collection[0])
+        if self.filename is not None:
+            # Delete all previously loaded catalogs
+            collections = fluxcat.FluxCatalog.loaded_collections()
+            for collection in collections:
+                fluxcat.FluxCatalog.delete_loaded_collection(collection[0])
 
-        # Load the flux catalog
-        fluxcat.FluxCatalog.load(self.filename, overwrite=2)
+            # Load the flux catalog
+            fluxcat.FluxCatalog.load(self.filename, overwrite=2)
 
-        self.catalog_tag = os.path.splitext(os.path.basename(self.filename))[0]
+            self.catalog_tag = os.path.splitext(os.path.basename(self.filename))[0]
+
+        else:
+            # Save comma-separated list of fluxcat default collections
+            self.catalog_tag = ",".join(fluxcat.core.DEFAULT_COLLECTIONS)
 
         # Save attributes describing the source selection to the output container
         self.output_attrs["catalog"] = self.catalog_tag
