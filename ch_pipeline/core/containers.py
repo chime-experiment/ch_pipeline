@@ -2054,6 +2054,82 @@ class TransientCandidateTrialCutouts(ContainerPrototype):
     def weight(self):
         return self.datasets["weight"]
 
+class TransientTargetWindows(FreqContainer):
+    """The matched filter in windows around targets, with no maximum over trials.
+
+    For each target, in a window of ``el_offset`` rows and ``ra_offset`` start times
+    centred on it, at its telescope-x (``x_index``, into the ``x`` attribute): the
+    amplitude (Jy) and weight of each band and polarisation (``pol``) for each
+    ``duration``, and the trials over all bands (``trial_amplitude``,
+    ``trial_weight``, ``trial_imag``; ``trial_pol``) for each ``duration`` and
+    ``spectral_index``.  ``trial_imag`` of L is the best RM.  The weights are before
+    the calibration of the noise (see :class:`ch_pipeline.analysis.transients.TargetWindows`).
+    ``el_index`` and ``ra_index`` are -1 outside the data.  Distributed over targets.
+    """
+
+    _axes = ("target", "pol", "trial_pol", "duration", "spectral_index", "el_offset", "ra_offset")
+
+    _dataset_spec: ClassVar = {
+        **{
+            name: {
+                "axes": ["target", "pol", "duration", "freq", "el_offset", "ra_offset"],
+                "dtype": np.float32,
+                "initialise": True,
+                "distributed": True,
+                "distributed_axis": "target",
+            }
+            for name in ("amplitude", "weight")
+        },
+        **{
+            name: {
+                "axes": ["target", "trial_pol", "duration", "spectral_index", "el_offset", "ra_offset"],
+                "dtype": np.float32,
+                "initialise": True,
+                "distributed": True,
+                "distributed_axis": "target",
+            }
+            for name in ("trial_amplitude", "trial_weight", "trial_imag")
+        },
+        **{
+            name: {
+                "axes": ["target"],
+                "dtype": np.int64,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name in ("x_index", "target_duration")
+        },
+        **{
+            name: {
+                "axes": ["target", "el_offset"],
+                "dtype": dtype,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name, dtype in (
+                ("el_index", np.int64), ("el", np.float64), ("dec", np.float64), ("ha", np.float64)
+            )
+        },
+        **{
+            name: {
+                "axes": ["target", "ra_offset"],
+                "dtype": dtype,
+                "initialise": True,
+                "distributed": False,
+            }
+            for name, dtype in (("ra_index", np.int64), ("ra", np.float64))
+        },
+    }
+
+    @property
+    def amplitude(self):
+        return self.datasets["amplitude"]
+
+    @property
+    def weight(self):
+        return self.datasets["weight"]
+
+
 class TransientCandidateTable(TableSpec):
     """Candidates found in the maps of the transient search, one row per candidate.
 

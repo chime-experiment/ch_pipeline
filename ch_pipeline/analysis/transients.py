@@ -7730,8 +7730,8 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
 
     This task runs the matched filter of :class:`TransientMatchedFilterSkyNoise`
     (same configuration) again on a window of one row and W samples at each
-    candidate with a duration W > 1 and S/N of at least ``snr_min``, with the
-    candidate's duration among the band durations, so that each band has its own
+    candidate with S/N of at least ``snr_min``, with the candidate's duration among
+    the band durations, so that each band has its own
     numerator, response, variance and coupling along the track starting at the
     candidate's telescope-x.  The window has the data, weights, filter response,
     noise scale, RFI mask and in-band noise of the full day at those samples; the
@@ -7743,7 +7743,9 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
 
     The result has the amplitude and weight of each band and polarisation of the
     bands (I, Q, U and V for ``stokes``) at the candidate's start, duration and
-    telescope-x, for :class:`AddCandidateSpectra`.
+    telescope-x, for :class:`AddCandidateSpectra`.  Candidates of a single sample
+    have no bias to correct, but they are included so that Q and U per band are
+    saved for every candidate.
 
     Attributes
     ----------
@@ -7807,66 +7809,19 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
         tsamp = float(table.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
         wc = np.maximum(np.rint(np.nan_to_num(rec["duration"]) / tsamp), 1).astype(int)
         tb = np.clip(np.searchsorted(ra, rec["ra"] - 0.5 * dra), 0, nra - 1)
-        sel = (rec["snr"] >= self.snr_min) & (wc > 1) & np.isin(wc, self.durations)
+        sel = (rec["snr"] >= self.snr_min) & np.isin(wc, self.durations)
         if not periodic:
             sel &= tb + wc <= nra
         idx = np.flatnonzero(sel)
         ncut = idx.size
 
-        # The full-day quantities the windows share: the telescope-x grid, the beam
-        # (on the rows of each rank) and the sky-noise coefficients
-        pol = list(hvis.index_map["pol"])
-        ipol = [pol.index(p) for p in self.pol]
-        ew = hvis.index_map["ew"][:]
-        iew = list(range(ew.size)) if self.ew_index is None else list(self.ew_index)
-        freq = hvis.freq[:]
-        _, band_map = self._assign_bands(freq)
-        x = self._x_grid(freq, ew[iew])
-        pbeam = self._evaluate_beam(freq, [pol[ii] for ii in ipol], el, x)
-        sky_coef = self._sky_coefficients(sky, band_map, ew[iew], ra, el)
-
-        hvis.redistribute(["el", "freq"])
-        unfiltered.redistribute(["el", "freq"])
-        el_slc = hvis.vis[:].local_bounds
-        if unfiltered.vis[:].local_bounds != el_slc:
-            raise RuntimeError("The streams are not distributed in the same way.")
-        has_response = "ra_response" in hvis.datasets
-        wname = "noise_weight" if has_response else hvis._weight_dset_name
-        shared = [_NodeSharedFreq(hvis[wname][:], comm)]  # freq, pol, ew, ra
-        if has_response:
-            shared.append(_NodeSharedFreq(hvis.ra_response[:], comm))
-        vis = hvis.vis[:].local_array
-        uvis = unfiltered.vis[:].local_array
-        nscale = (
-            hvis.noise_scale[:].local_array if "noise_scale" in hvis.datasets else None
-        )
-        mask = self.rfi_mask
-        if mask is not None:
-            mask.redistribute("el")
-        noise = self.inband_noise
-        if noise is not None:
-            noise.redistribute("el")
-
-        bpol = ["I", "Q", "U", "V"] if self.stokes else (
-            ["co"] if self.combine_pol else list(self.pol)
-        )
+        c = self._window_setup(hvis, unfiltered, sky)
+        el_slc = c["el_slc"]
+        bpol = c["bpol"]
+        band_map = c["band_map"]
         nband = len(band_map)
         amp = np.zeros((ncut, len(bpol), nband), dtype=np.float64)
         wgt = np.zeros_like(amp)
-
-        helper = copy.copy(self)
-        helper.comm = MPI.COMM_SELF
-        helper.groups = {}
-        helper.el_pass = None
-        helper.spectral_indices = [0.0]
-        # Its log is quiet (it would repeat the matched filter's messages per window)
-        quiet = logging.getLogger(f"{__name__}.CandidateBandSpectra.window")
-        quiet.setLevel(logging.WARNING)
-        helper._log = quiet
-        self_comm = MPI.COMM_SELF
-
-        def window(cont, name, sl):
-            return cont.datasets[name][:].local_array[sl]
 
         t0 = time.time()
         ndone = 0
@@ -7874,80 +7829,22 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
             e = int(rec["el_index"][k])
             if not (el_slc.start <= e < el_slc.stop):
                 continue
-            le = e - el_slc.start
             W = int(wc[k])
             ras = (tb[k] + np.arange(W)) % nra
-
-            sub = type(hvis)(
-                axes_from=hvis, attrs_from=hvis, el=el[e : e + 1], ra=ra[ras],
-                comm=self_comm, distributed=True,
-            )
-            sub.attrs["ra_periodic"] = False
-            sub.vis[:].local_array[:] = vis[:, :, :, le : le + 1][..., ras]
-            sub.add_dataset(wname)
-            sub.datasets[wname][:].local_array[:] = np.moveaxis(
-                shared[0].array[:, :, :, ras], 0, 1
-            )
-            if has_response:
-                sub.add_dataset("ra_response")
-                sub.ra_response[:].local_array[:] = np.moveaxis(
-                    shared[1].array[:, :, :, ras], 0, 1
-                )
-            if nscale is not None:
-                sub.add_dataset("noise_scale")
-                sub.noise_scale[:].local_array[:] = nscale[..., le : le + 1]
-            usub = type(unfiltered)(
-                axes_from=unfiltered, attrs_from=unfiltered, el=el[e : e + 1],
-                ra=ra[ras], comm=self_comm, distributed=True,
-            )
-            usub.vis[:].local_array[:] = uvis[:, :, :, le : le + 1][..., ras]
-
-            helper.rfi_mask = helper.inband_noise = None
-            if mask is not None:
-                msub = type(mask)(
-                    axes_from=mask, attrs_from=mask, el=el[e : e + 1], ra=ra[ras],
-                    comm=self_comm, distributed=True,
-                )
-                msub.mask[:].local_array[:] = window(mask, "mask", (slice(None), ras))[
-                    ..., le : le + 1
-                ]
-                helper.rfi_mask = msub
-            if noise is not None:
-                nsub = type(noise)(
-                    axes_from=noise, attrs_from=noise, el=el[e : e + 1], ra=ra[ras],
-                    comm=self_comm, distributed=True,
-                )
-                nsub.scale[:].local_array[:] = noise.scale[:].local_array[
-                    :, :, :, le : le + 1
-                ][..., ras]
-                for name in ("dof", "common", "flag"):
-                    if name in noise.datasets and name in nsub.datasets:
-                        nsub.datasets[name][:] = noise.datasets[name][:][..., ras]
-                helper.inband_noise = nsub
-
-            helper.durations = [1, W]
-            helper.band_durations = [1, W]
-            helper._win = {
-                "x": x,
-                "pbeam": pbeam[:, :, le : le + 1],
-                "sky": sky_coef,
-                "ras": ras,
-                "el": [e],
-            }
-            res = TransientMatchedFilterSkyNoise.process(helper, sub, usub, sky)
-            bands = res[1]
+            durations = sorted({1, W})
+            _, bands = self._window_run(c, e, ras, durations)
             xi = int(rec["x_index"][k])
-            amp[ii] = bands.amplitude[:].local_array[:, 1, :, 0, 0, xi]
-            wgt[ii] = bands.weight[:].local_array[:, 1, :, 0, 0, xi]
+            iw = durations.index(W)
+            amp[ii] = bands.amplitude[:].local_array[:, iw, :, 0, 0, xi]
+            wgt[ii] = bands.weight[:].local_array[:, iw, :, 0, 0, xi]
             ndone += 1
 
-        for sh in shared:
-            sh.free()
+        self._window_free(c)
         comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
         comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
         nmax = comm.allreduce(ndone, op=MPI.MAX)
         self.log.info(
-            f"Ran the matched filter at {ncut} candidates (W > 1, S/N >= "
+            f"Ran the matched filter at {ncut} candidates (S/N >= "
             f"{self.snr_min:g}), up to {nmax} on a rank, in {time.time() - t0:.0f} s."
         )
 
@@ -7973,6 +7870,369 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
         la.local_array[:] = amp[sl, :, :, np.newaxis, np.newaxis]
         out.weight[:].local_array[:] = wgt[sl, :, :, np.newaxis, np.newaxis]
         return out
+
+    def _window_setup(self, hvis, unfiltered, sky):
+        """The full-day quantities the windows share, and the helper that runs them.
+
+        The telescope-x grid, the beam (on the rows of each rank) and the sky-noise
+        coefficients, with the streams distributed over elevation.  Call
+        :meth:`_window_free` when done.
+        """
+        import copy
+        import logging
+
+        from mpi4py import MPI
+
+        comm = self.comm
+        el = hvis.index_map["el"][:]
+        ra = hvis.ra[:]
+        pol = list(hvis.index_map["pol"])
+        ipol = [pol.index(p) for p in self.pol]
+        ew = hvis.index_map["ew"][:]
+        iew = list(range(ew.size)) if self.ew_index is None else list(self.ew_index)
+        freq = hvis.freq[:]
+        _, band_map = self._assign_bands(freq)
+        x = self._x_grid(freq, ew[iew])
+        pbeam = self._evaluate_beam(freq, [pol[ii] for ii in ipol], el, x)
+        sky_coef = self._sky_coefficients(sky, band_map, ew[iew], ra, el)
+
+        hvis.redistribute(["el", "freq"])
+        unfiltered.redistribute(["el", "freq"])
+        el_slc = hvis.vis[:].local_bounds
+        if unfiltered.vis[:].local_bounds != el_slc:
+            raise RuntimeError("The streams are not distributed in the same way.")
+        has_response = "ra_response" in hvis.datasets
+        wname = "noise_weight" if has_response else hvis._weight_dset_name
+        shared = [_NodeSharedFreq(hvis[wname][:], comm)]  # freq, pol, ew, ra
+        if has_response:
+            shared.append(_NodeSharedFreq(hvis.ra_response[:], comm))
+        mask = self.rfi_mask
+        if mask is not None:
+            mask.redistribute("el")
+        noise = self.inband_noise
+        if noise is not None:
+            noise.redistribute("el")
+
+        bpol = ["I", "Q", "U", "V"] if self.stokes else (
+            ["co"] if self.combine_pol else list(self.pol)
+        )
+
+        helper = copy.copy(self)
+        helper.comm = MPI.COMM_SELF
+        helper.groups = {}
+        helper.el_pass = None
+        helper.spectral_indices = self._window_alphas()
+        # Its log is quiet (it would repeat the matched filter's messages per window)
+        quiet = logging.getLogger(f"{__name__}.CandidateBandSpectra.window")
+        quiet.setLevel(logging.WARNING)
+        helper._log = quiet
+
+        return {
+            "hvis": hvis, "unfiltered": unfiltered, "sky": sky, "el": el, "ra": ra,
+            "x": x, "pbeam": pbeam, "sky_coef": sky_coef, "el_slc": el_slc,
+            "has_response": has_response, "wname": wname, "shared": shared,
+            "vis": hvis.vis[:].local_array, "uvis": unfiltered.vis[:].local_array,
+            "nscale": (
+                hvis.noise_scale[:].local_array if "noise_scale" in hvis.datasets else None
+            ),
+            "mask": mask, "noise": noise, "bpol": bpol, "band_map": band_map,
+            "helper": helper,
+        }
+
+    def _window_alphas(self):
+        """The spectral indices of the trials of a window."""
+        return [0.0]
+
+    @staticmethod
+    def _window_free(c):
+        for sh in c["shared"]:
+            sh.free()
+
+    def _window_run(self, c, e, ras, durations):
+        """Run the matched filter on one local row at the samples ``ras``.
+
+        Returns the trials and the bands, for the durations given (which include 1
+        and are all band durations).
+        """
+        from mpi4py import MPI
+
+        self_comm = MPI.COMM_SELF
+        hvis, unfiltered, sky = c["hvis"], c["unfiltered"], c["sky"]
+        el, ra, shared, wname = c["el"], c["ra"], c["shared"], c["wname"]
+        mask, noise, helper = c["mask"], c["noise"], c["helper"]
+        le = e - c["el_slc"].start
+
+        def window(cont, name, sl):
+            return cont.datasets[name][:].local_array[sl]
+
+        sub = type(hvis)(
+            axes_from=hvis, attrs_from=hvis, el=el[e : e + 1], ra=ra[ras],
+            comm=self_comm, distributed=True,
+        )
+        sub.attrs["ra_periodic"] = False
+        sub.vis[:].local_array[:] = c["vis"][:, :, :, le : le + 1][..., ras]
+        sub.add_dataset(wname)
+        sub.datasets[wname][:].local_array[:] = np.moveaxis(
+            shared[0].array[:, :, :, ras], 0, 1
+        )
+        if c["has_response"]:
+            sub.add_dataset("ra_response")
+            sub.ra_response[:].local_array[:] = np.moveaxis(
+                shared[1].array[:, :, :, ras], 0, 1
+            )
+        if c["nscale"] is not None:
+            sub.add_dataset("noise_scale")
+            sub.noise_scale[:].local_array[:] = c["nscale"][..., le : le + 1]
+        usub = type(unfiltered)(
+            axes_from=unfiltered, attrs_from=unfiltered, el=el[e : e + 1],
+            ra=ra[ras], comm=self_comm, distributed=True,
+        )
+        usub.vis[:].local_array[:] = c["uvis"][:, :, :, le : le + 1][..., ras]
+
+        helper.rfi_mask = helper.inband_noise = None
+        if mask is not None:
+            msub = type(mask)(
+                axes_from=mask, attrs_from=mask, el=el[e : e + 1], ra=ra[ras],
+                comm=self_comm, distributed=True,
+            )
+            msub.mask[:].local_array[:] = window(mask, "mask", (slice(None), ras))[
+                ..., le : le + 1
+            ]
+            helper.rfi_mask = msub
+        if noise is not None:
+            nsub = type(noise)(
+                axes_from=noise, attrs_from=noise, el=el[e : e + 1], ra=ra[ras],
+                comm=self_comm, distributed=True,
+            )
+            nsub.scale[:].local_array[:] = noise.scale[:].local_array[
+                :, :, :, le : le + 1
+            ][..., ras]
+            for name in ("dof", "common", "flag"):
+                if name in noise.datasets and name in nsub.datasets:
+                    nsub.datasets[name][:] = noise.datasets[name][:][..., ras]
+            helper.inband_noise = nsub
+
+        helper.durations = list(durations)
+        helper.band_durations = list(durations)
+        helper._win = {
+            "x": c["x"],
+            "pbeam": c["pbeam"][:, :, le : le + 1],
+            "sky": c["sky_coef"],
+            "ras": ras,
+            "el": [e],
+        }
+        res = TransientMatchedFilterSkyNoise.process(helper, sub, usub, sky)
+        return res[0], res[1]
+
+
+class TargetWindows(CandidateBandSpectra):
+    """The matched filter in windows around listed targets, at one telescope-x.
+
+    For looking at a transient without searching the day again.  For each target, the
+    matched filter of :class:`TransientMatchedFilterSkyNoise` (same configuration) is
+    run on each row of +-``nrow`` rows, at the start times within +-``nra`` samples of
+    the target's, for the target's telescope-x alone.  There is no maximum over
+    duration, telescope-x or spectral index: each pixel of a map is one trial.  The
+    result holds:
+
+    - ``amplitude``, ``weight``: each band (I, Q, U and V for ``stokes``) for each of
+      ``durations`` and the target's own duration, with that duration's coupling of
+      the samples in each band;
+    - ``trial_amplitude``, ``trial_weight``, ``trial_imag``: the trials of I, V and L
+      over all bands, for each duration and spectral index, as in the search (the
+      imaginary part of L is the best RM).
+
+    These are before :class:`CalibrateTrialNoise`, which rescales the weight by the
+    measured spread around each sample, so the amplitude is the search's and the S/N
+    differs from the search's by that scale.
+
+    The targets are given by value, from the search's own axes
+    (scripts/multiday/make_inspect_config.py): ``name``, ``ra`` (start of the
+    transient, deg), ``el_index``, ``x_index``, ``x`` and ``duration`` (samples).  A
+    second output is a candidate table of the targets, for
+    :class:`ExtractForegroundCutouts`.
+
+    The stream has to have its filter response out to the longest duration, as for
+    the search.  Windows reaching past the ends of the data are cut there; their
+    samples have zero weight.
+
+    Attributes
+    ----------
+    targets : list of dict
+        The targets.
+    nrow, nra : int
+        Half-widths of the window in rows and start times.  Defaults are 44 and 90
+        (about +-4 deg at dec 45, and +-15 min).
+    durations : list of int
+        Durations in samples.  Default is [1, 2, 4, 8, 16].
+    """
+
+    targets = config.Property(proptype=list, default=[])
+    nrow = config.Property(proptype=int, default=44)
+    nra = config.Property(proptype=int, default=90)
+
+    def _window_alphas(self):
+        return list(self.spectral_indices)
+
+    def process(self, hvis, unfiltered, sky):
+        """Run the matched filter around the targets.
+
+        Parameters
+        ----------
+        hvis : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The input of the matched filter.
+        unfiltered : draco.core.containers.HybridVisStream
+            The visibilities before filtering, on the same grid.
+        sky : ch_pipeline.core.containers.HybridVisSkyNoise
+            Output of :class:`EstimateSkyNoise`.
+
+        Returns
+        -------
+        out : containers.TransientTargetWindows
+            The windows of the targets.
+        table : containers.TransientCandidateTable
+            The targets as candidates.
+        """
+        from mpi4py import MPI
+
+        comm = self.comm
+        nt = len(self.targets)
+        if nt == 0:
+            raise ValueError("No targets.")
+        names = np.array([str(t["name"]) for t in self.targets])
+        el = hvis.index_map["el"][:]
+        ra = hvis.ra[:]
+        nra = ra.size
+        dra = np.median(np.diff(ra))
+        tsamp = float(hvis.attrs.get("duration_unit_seconds", dra * 240.0 * 0.99727))
+        wt = np.array([int(t["duration"]) for t in self.targets])
+        durations = sorted(set(self.durations) | set(wt.tolist()) | {1})
+        wmax = max(durations)
+        tc = np.array([
+            int(np.clip(np.searchsorted(ra, float(t["ra"]) - 0.5 * dra), 0, nra - 1))
+            for t in self.targets
+        ])
+        ec = np.array([int(t["el_index"]) for t in self.targets])
+        xc = np.array([int(t["x_index"]) for t in self.targets])
+
+        c = self._window_setup(hvis, unfiltered, sky)
+        x = c["x"]
+        for t, xi in zip(self.targets, xc):
+            if not 0 <= xi < x.size or abs(x[xi] - float(t.get("x", x[xi]))) > 1e-6:
+                raise ValueError(
+                    f"Target {t['name']}: x_index {xi} does not give x = {t.get('x')} on "
+                    f"this grid ({x.size} values to {x[-1]:.4f})."
+                )
+        el_slc, bpol, band_map = c["el_slc"], c["bpol"], c["band_map"]
+        alphas = np.array(self.spectral_indices, dtype=np.float64)
+        tpol = np.array(["I", "V", "L"] if self.stokes else c["bpol"])
+        nel, ntime = 2 * self.nrow + 1, 2 * self.nra + 1
+
+        out = containers.TransientTargetWindows(
+            target=names,
+            pol=np.array(bpol),
+            trial_pol=tpol,
+            freq=band_map,
+            duration=np.array(durations),
+            spectral_index=alphas,
+            el_offset=np.arange(-self.nrow, self.nrow + 1),
+            ra_offset=np.arange(-self.nra, self.nra + 1),
+            attrs_from=hvis,
+            distributed=True,
+            comm=comm,
+        )
+        out.attrs["duration_unit_seconds"] = tsamp
+        out.attrs["x"] = x
+        out.attrs["targets"] = json.dumps(self.targets)
+        out.attrs["time_axis"] = "start of the transient"
+        out.datasets["x_index"][:] = xc
+        out.datasets["target_duration"][:] = wt
+        dec_all = np.full((nt, nel), np.nan)
+        ha_all = np.full((nt, nel), np.nan)
+
+        la = out.amplitude[:]
+        span = comm.allgather((la.local_offset[0], la.local_shape[0]))
+        names_b = ("amplitude", "weight")
+        names_t = ("trial_amplitude", "trial_weight", "trial_imag")
+        shape_b = (len(bpol), len(durations), len(band_map), nel, ntime)
+        shape_t = (tpol.size, len(durations), alphas.size, nel, ntime)
+
+        t0 = time.time()
+        for k in range(nt):
+            buf = {n: np.zeros(shape_b, dtype=np.float32) for n in names_b}
+            buf.update({n: np.zeros(shape_t, dtype=np.float32) for n in names_t})
+            starts = tc[k] + np.arange(-self.nra, self.nra + 1)
+            # Each start needs the samples of the longest track after it
+            first, last = max(starts[0], 0), min(starts[-1] + wmax - 1, nra - 1)
+            ras = np.arange(first, last + 1)
+            keep = (starts >= 0) & (starts < nra)
+            it = np.flatnonzero(keep)
+            rows = ec[k] + np.arange(-self.nrow, self.nrow + 1)
+            row_el = np.where((rows >= 0) & (rows < el.size), rows, -1)
+            for ir, e in enumerate(rows):
+                if not (0 <= e < el.size and el_slc.start <= e < el_slc.stop):
+                    continue
+                trials, bands = self._window_run(c, int(e), ras, durations)
+                bi = starts[keep] - first
+                for n, ds in (("amplitude", bands.amplitude), ("weight", bands.weight)):
+                    v = ds[:].local_array[:, :, :, 0, :, xc[k]]  # pol, dur, band, ra
+                    buf[n][:, :, :, ir, it] = v[:, :, :, bi]
+                for n, ds in (
+                    ("trial_amplitude", trials.datasets["amplitude"]),
+                    ("trial_weight", trials.datasets["weight"]),
+                ):
+                    v = ds[:].local_array[:, :, :, 0, :, xc[k]]
+                    buf[n][:, :, :, ir, it] = v[:, :, :, bi]
+                if "amplitude_imag" in trials.datasets:
+                    v = trials.datasets["amplitude_imag"][:].local_array[:, :, :, 0, :, xc[k]]
+                    buf["trial_imag"][:, :, :, ir, it] = v[:, :, :, bi]
+                dec_all[k, ir] = trials.datasets["dec"][0, xc[k]]
+                ha_all[k, ir] = trials.datasets["ha"][0, xc[k]]
+
+            owner = next(r for r, (o, n) in enumerate(span) if o <= k < o + n)
+            for n, b in buf.items():
+                if comm.rank == owner:
+                    comm.Reduce(MPI.IN_PLACE, b, op=MPI.SUM, root=owner)
+                    ds = out.datasets[n][:]
+                    ds.local_array[k - ds.local_offset[0]] = b
+                else:
+                    comm.Reduce(b, None, op=MPI.SUM, root=owner)
+            out.datasets["el_index"][k] = row_el
+            out.datasets["el"][k] = np.where(row_el >= 0, el[np.clip(rows, 0, el.size - 1)], np.nan)
+            out.datasets["ra_index"][k] = np.where(keep, starts, -1)
+            out.datasets["ra"][k] = np.where(keep, ra[np.clip(starts, 0, nra - 1)], np.nan)
+            self.log.info(
+                f"Target {names[k]}: {nel} rows at {ras.size} samples, "
+                f"{time.time() - t0:.0f} s so far."
+            )
+
+        self._window_free(c)
+        out.datasets["dec"][:] = _allreduce_nanmax(comm, dec_all)
+        out.datasets["ha"][:] = _allreduce_nanmax(comm, ha_all)
+
+        table = containers.TransientCandidateTable(
+            candidate=nt, group=np.array(["all"]), freq=band_map, attrs_from=hvis, comm=comm
+        )
+        rec = np.zeros(nt, dtype=table.candidate[:].dtype)
+        rec["el_index"], rec["ra_index"], rec["x_index"] = ec, tc, xc
+        rec["ra"] = ra[tc]
+        rec["x"] = x[xc]
+        rec["y"] = el[ec]
+        rec["duration"] = wt * tsamp
+        rec["snr"] = 1e6  # Every target passes any cut on the S/N
+        table.candidate[:] = rec
+        table.attrs["duration_unit_seconds"] = tsamp
+        return out, table
+
+
+def _allreduce_nanmax(comm, a):
+    """The largest of an array over the ranks, where each entry is set on one rank."""
+    from mpi4py import MPI
+
+    b = np.where(np.isnan(a), -np.inf, a)
+    comm.Allreduce(MPI.IN_PLACE, b, op=MPI.MAX)
+    return np.where(np.isinf(b), np.nan, b)
+
 
 def _check_same_grid(a, b):
     """Check that two streams have the same RA, el and frequency axes."""
