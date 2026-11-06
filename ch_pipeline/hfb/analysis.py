@@ -1593,7 +1593,7 @@ class HFBDopplerShift(tasklib.base.ContainerTask):
         `ch_util.hfbcat.HFBCatalog`. Single-day containers only.
     time_override : float
         Unix time used to calculate Doppler shift, to override the time calculated
-    from the LSD and the RA of the source found in the container attributes.
+        from the LSD and the RA of the source found in the container attributes.
     """
 
     reference = config.enum(

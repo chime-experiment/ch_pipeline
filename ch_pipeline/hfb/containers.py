@@ -332,6 +332,11 @@ class SiderealRFIMaskStack(FreqContainer, SiderealContainer):
     }
 
     @property
+    def csd(self):
+        """The csd indices of the csd axis."""
+        return self.index_map["csd"]
+
+    @property
     def mask(self):
         """Get the mask dataset."""
         return self.datasets["mask"]
