@@ -13,7 +13,6 @@ from draco.core.containers import LocalizedRFIMask, RFIMask
 from draco.core.io import get_telescope
 from draco.util import regrid
 from scipy.spatial.distance import cdist
-from ch_ephem.observers import chime as observer
 
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask, SiderealRFIMaskStack
 
