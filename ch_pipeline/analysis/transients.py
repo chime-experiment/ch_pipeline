@@ -6125,7 +6125,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     baseline) with unfiltered visibility ``S_k``, ``kappa_coh e S_k + kappa_inc e_k
     S_k``.  ``e`` is common to the channels and baselines of a band, with
     correlation ``rho_pol`` between polarisations and ``rho_band`` between bands,
-    and ``e_k`` is independent.  Both are assumed independent between samples.
+    and ``e_k`` is independent.  Both are assumed independent between samples before
+    the filter.
 
     The weights are the inverse of the total variance of each visibility,
     ``W_k = 1 / (sigma_k^2 + kappa_tot^2 |S_k|^2)``, where ``sigma_k^2`` is the
@@ -6150,9 +6151,28 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     ``sum_k sum_{j != j'} g_kj^* g_kj' W_k(t_j) (-P_k[t_j, t_j'])`` and the variance
     the thermal ``sum_k sum_{j != j'} g_kj^* g_kj' W_k(t_j) (-P_k[t_j, t_j'])
     sigma_k^2(t_j') W_k(t_j')``, since the thermal noise after the filter has
-    covariance ``(delta - P[t, t']) sigma^2(t')``.  The sky term is taken as
-    independent between samples (it is white at 10 s after the filter).  These need
-    the filter response out to lag W - 1.  The group maps are single-sample only.
+    covariance ``(delta - P[t, t']) sigma^2(t')``.  These need the filter response
+    out to lag W - 1.  The group maps are single-sample only.
+
+    The filter acts on the sky residual too, so the sky term is coupled in the same
+    way.  The residual ``e S`` has covariance ``(1 - P) D (1 - P)^H`` after the filter,
+    with ``D = kappa^2 |S|^2``, and a sample ``t''`` contributes to the numerator through
+    ``e(t'') sum_k sum_j g_kj^* W_k(t_j) (delta - P_k[t_j, t'']) S_k(t'')``, including
+    samples outside the track.  For a sky that moves with the track and whose ``|S|^2``
+    changes slowly over the extent of the filter, this is the single-sample numerator
+    of the sky times the filtered boxcar, whose sum of squares is the response, so
+    the sky variance summed along the track is multiplied by
+
+        f(W) = R(W) / sum_j R(1, t + j)
+
+    for each pixel, spectral index and polarisation.  ``e_k`` gets the terms ``j != j'``
+    of the thermal noise instead, with ``sigma_k^2`` plus ``kappa_inc^2 |S_k|^2 /
+    (1 - P_kk)``, since the fit is to the data after the filter.  The approximation
+    has been compared with the variance over realisations through the real filter
+    (for a sky of drifting sources and f(W) of 0.71, 0.31, 0.12 and 0.07 at 2, 4, 8 and
+    16 samples, the true variance is 0.86-1.04 of the model at every duration and
+    level of the sky).  It is low next to sources much brighter than the sample
+    itself, where the filter spreads their noise onto the track.
     The per-band output is for the durations in ``band_durations`` (which must
     include 1): for a longer one, the band's own numerator, response and variance
     summed along the track with its own coupling terms, so that the amplitude of
@@ -6648,32 +6668,38 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         def valid_w(W):
             return np.ones(nra, dtype=bool) if periodic else np.arange(nra) <= nra - W
 
-        def per_duration(ia, ee, le, gg, nm, rs, vr, ni):
-            """[numerator, response, variance, imaginary numerator] per duration.
+        def per_duration(ia, ee, le, gg, nm, rs, vr, ni, vs=None):
+            """[numerator, response, variance, imaginary numerator, f] per duration.
 
-            ``ee`` is the local elevation and ``le`` its index in the pass.
+            ``ee`` is the local elevation and ``le`` its index in the pass.  ``vs`` is
+            the part of ``vr`` from the coherent sky term, and ``f`` the fraction of
+            such a term left by the filter (see the class docstring).
             """
-            out = [(nm, rs, vr, ni)]
+            out = [(nm, rs, vr, ni, 1.0)]
             if not long_w:
                 return out
             tr = track[:, ee : ee + 1]
-            parts = [rs, vr] + [a for a in (nm, ni) if a is not None]
+            parts = [rs, vr] + [a for a in (nm, ni, vs) if a is not None]
             sums = [
                 self._track_numerator(a[np.newaxis], tr, durations) for a in parts
             ]
             for iw, W in enumerate(long_w):
                 iwd = durations.index(W)
-                rs_w = sums[0][iwd][0].real + cross_r[ia, iw, cmap[gg], le]
+                rs_sum = sums[0][iwd][0].real
+                rs_w = rs_sum + cross_r[ia, iw, cmap[gg], le]
                 vr_w = sums[1][iwd][0].real + 0.5 * cross_v[ia, iw, cmap[gg], le]
                 rs_w = np.where(valid_w(W), rs_w, 0.0)
                 rest = [s[iwd][0].real for s in sums[2:]]
                 nm_w = rest.pop(0) if nm is not None else None
                 ni_w = rest.pop(0) if ni is not None else None
-                out.append((nm_w, rs_w, vr_w, ni_w))
+                fs = self._sky_fraction(rs_w, rs_sum)
+                if vs is not None:
+                    vr_w = vr_w - (1.0 - fs) * rest.pop(0)
+                out.append((nm_w, rs_w, vr_w, ni_w, fs))
             return out
 
         def write(op, ia, ee, res):
-            for iwd, (nm, rs, vr, ni) in enumerate(res):
+            for iwd, (nm, rs, vr, ni, _) in enumerate(res):
                 amp, wgt = self._amp_weight(nm, rs, vr)
                 tamp[op, iwd, ia, ee] = amp.T
                 twgt[op, iwd, ia, ee] = wgt.T
@@ -6776,6 +6802,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     if self.stokes:
                         ok &= np.all(ok, axis=0, keepdims=True)
                     wt = np.where(ok, tools.invert_no_zero(var_th + kt * s2), 0.0)
+                    # What the filter couples like the thermal noise; the fit of the
+                    # incoherent sky term is after the filter, which keeps 1 - P_kk
+                    var_c = var_th
+                    if long_w and np.any(ki):
+                        var_c = var_th + ki * s2 * tools.invert_no_zero(omp)
                     data = np.where(ok, data, 0.0)
                     sky_v = np.where(ok, sky_v, 0.0)
 
@@ -6825,7 +6856,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             cr, cv = self._track_cross(
                                 tc if tf is None else tf,
                                 kg(wt_g),
-                                kg(var_th[grp]),
+                                kg(var_c[grp]),
                                 kg(wr_g),
                                 kg(wv_g),
                                 resp_t[grp].reshape(-1, *resp_t.shape[3:]),
@@ -6865,7 +6896,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             cr, cv = self._track_cross(
                                 tc,
                                 kmat(wt),
-                                kmat(var_th),
+                                kmat(var_c),
                                 kmat(wr),
                                 kmat(wv),
                                 resp_t[grp].reshape(-1, *resp_t.shape[3:]),
@@ -6904,10 +6935,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             # Each band on its own
             for op, (gg, part) in enumerate(bsrc):
                 for bb in range(nband):
-                    var = 0.5 * vinc[gg, bb]
+                    vs = None
                     for vv in (vplus, vminus):
                         if vv is not None and gg < vv.shape[0]:
-                            var = var + 0.5 * np.abs(vv[gg, bb]) ** 2
+                            vs = 0.0 if vs is None else vs
+                            vs = vs + 0.5 * np.abs(vv[gg, bb]) ** 2
+                    var = 0.5 * vinc[gg, bb] if vs is None else 0.5 * vinc[gg, bb] + vs
                     nm = numer[gg, bb] if part == 0 else numer_im[gg, bb]
                     amp, wgt = self._amp_weight(nm, resp[gg, bb], var)
                     bamp[op, 0, bb, p0:p1] = amp.transpose(0, 2, 1)
@@ -6923,11 +6956,17 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     parts = [resp[gg, bb], var, nm]
                     if bimag is not None:
                         parts.append(numer_im[gg, bb])
+                    if vs is not None:
+                        parts.append(vs)
                     sums = [self._track_numerator(a, tr, blong) for a in parts]
                     for ib, W in enumerate(blong):
-                        rs_w = sums[0][ib].real + bcross_r[bb, ib, cmap[gg]]
+                        rs_sum = sums[0][ib].real
+                        rs_w = rs_sum + bcross_r[bb, ib, cmap[gg]]
                         vr_w = sums[1][ib].real + 0.5 * bcross_v[bb, ib, cmap[gg]]
                         rs_w = np.where(valid_w(W), rs_w, 0.0)
+                        if vs is not None:
+                            fs = self._sky_fraction(rs_w, rs_sum)
+                            vr_w = vr_w - (1.0 - fs) * sums[-1][ib].real
                         iwb = band_durations.index(W)
                         amp, wgt = self._amp_weight(sums[2][ib].real, rs_w, vr_w)
                         bamp[op, iwb, bb, p0:p1] = amp.transpose(0, 2, 1)
@@ -6942,10 +6981,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 for le in range(npe):
                     ee = p0 + le
                     for op, gg, swap in srcs:
-                        nm, rs, vr, ni = combine(gg, le, sb)
+                        nm, rs, vr, ni, vs = combine(gg, le, sb)
                         if swap:
                             nm, ni = ni, nm
-                        write(op, ia, ee, per_duration(ia, ee, le, gg, nm, rs, vr, ni))
+                        write(
+                            op, ia, ee, per_duration(ia, ee, le, gg, nm, rs, vr, ni, vs)
+                        )
                     if not self.stokes:
                         continue
                     if ia not in rm_alpha:
@@ -6955,16 +6996,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                         continue
                     # Linear polarisation: response and thermal variance of Q and U;
                     # the sky term of Q depends on the RM and is added in _rm_search
-                    _, rsq, vrq, _ = self._combine(
+                    _, rsq, vrq, _, _ = self._combine(
                         1, le, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
                     )
-                    _, rsc, vrc, _ = combine(2, le, sb)
+                    _, rsc, vrc, _, _ = combine(2, le, sb)
+                    dq = per_duration(ia, ee, le, 1, None, rsq, vrq, None)
+                    dc = per_duration(ia, ee, le, 2, None, rsc, vrc, None)
                     rv = [
                         (0.5 * (q[1] + c[1]), 0.5 * (q[2] + c[2]))
-                        for q, c in zip(
-                            per_duration(ia, ee, le, 1, None, rsq, vrq, None),
-                            per_duration(ia, ee, le, 2, None, rsc, vrc, None),
-                        )
+                        for q, c in zip(dq, dc)
                     ]
                     # The largest chi-squared over RM and |P|; converted to a
                     # Gaussian S/N after the last pass, when the weights of the
@@ -6980,15 +7020,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                         durations,
                         [valid_w(W) for W in durations],
                         self._rm_sky(le, sb, lam, qvec, vplus, vminus),
+                        [q[4] for q in dq],
                     )
                     tamp[2, :, ia, ee] = tmax.transpose(0, 2, 1)
                     twgt[2, :, ia, ee] = pol_amp.transpose(0, 2, 1)
                     timag[2, :, ia, ee] = brm.transpose(0, 2, 1)
                     # Q at RM 0 with its sky term (U at RM 0 is the imaginary part
                     # of V), whose measured spread calibrates the noise of L
-                    nmq, rsq0, vrq0, _ = combine(1, le, sb)
-                    for iwd, (nm, rs, vr, _) in enumerate(
-                        per_duration(ia, ee, le, 1, nmq, rsq0, vrq0, None)
+                    nmq, rsq0, vrq0, _, vsq0 = combine(1, le, sb)
+                    for iwd, (nm, rs, vr, _, _) in enumerate(
+                        per_duration(ia, ee, le, 1, nmq, rsq0, vrq0, None, vsq0)
                     ):
                         ok = (rs > 0) & (vr > 0)
                         snr = nm * tools.invert_no_zero(np.sqrt(np.where(ok, vr, 0.0)))
@@ -7163,7 +7204,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return qa, qb
 
     def _rm_search(
-        self, nq, nu, coef, rm, ntrials, rv, track, durations, valid, sky=None
+        self, nq, nu, coef, rm, ntrials, rv, track, durations, valid, sky=None, sky_f=None
     ):
         """Search in linear polarisation over RM at one elevation.
 
@@ -7189,8 +7230,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         valid : list of np.ndarray[ra] of bool
             Start samples with a complete trial, for each duration.
         sky : tuple, optional
-            Sky term of Q, from :meth:`_rm_sky`; it is independent between samples,
-            so its variance is summed along the track.
+            Sky term of Q, from :meth:`_rm_sky`.  Its variance is summed along the
+            track and multiplied by ``sky_f``.
+        sky_f : list, optional
+            Fraction of the sky variance left by the filter for each duration, each a
+            number or np.ndarray[x, ra] (see the class docstring).  Default is 1.
 
         Returns
         -------
@@ -7208,7 +7252,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         var_th = [v.astype(np.float32) for _, v in rv]
 
         def update(iwd, s, vs, k0):
-            v = var_th[iwd] if vs is None else var_th[iwd] + vs
+            if vs is None:
+                v = var_th[iwd]
+            elif sky_f is None:
+                v = var_th[iwd] + vs
+            else:
+                v = var_th[iwd] + np.asarray(sky_f[iwd], dtype=np.float32) * vs
             t = (s.real**2 + s.imag**2) * tools.invert_no_zero(v)  # rm, x, ra
             k = np.argmax(t, axis=0)
             tk = np.take_along_axis(t, k[np.newaxis], 0)[0]
@@ -7455,6 +7504,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         return resp_cross, var_cross
 
     @staticmethod
+    def _sky_fraction(resp_w, resp_sum):
+        """Fraction of the sky variance summed along a track left by the filter.
+
+        ``f(W) = R(W) / sum_j R(1, t + j)``, see the class docstring.
+        """
+        return np.where(
+            resp_sum > 0, np.maximum(resp_w, 0.0) * tools.invert_no_zero(resp_sum), 1.0
+        )
+
+    @staticmethod
     def _amp_weight(numer, resp, var):
         """Amplitude ``Re N / R`` and its inverse variance ``R^2 / Var(Re N)``."""
         valid = (resp > 0) & (var > 0)
@@ -7476,7 +7535,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         """Sum the bands ``idx`` with weights ``sb`` at one elevation.
 
         Returns the real and imaginary numerator, the response and the variance of
-        the real part, each [x, ra].
+        the real part, each [x, ra], and the part of that variance from the coherent
+        sky term (None if ``gg`` has none).
         """
         s = sb[idx].astype(np.float64)
         nm = np.tensordot(s, numer[gg, idx, ee], axes=1)
@@ -7488,12 +7548,16 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         rs = np.tensordot(s**2, resp[gg, idx, ee], axes=1)
         var = np.tensordot(s**2, vinc[gg, idx, ee], axes=1)
         coeff = (s[:, np.newaxis] * qvec) * np.sqrt(lam)[np.newaxis, :]  # band, mode
+        vsky = None
         for vv in (vplus, vminus):
             if vv is None or gg >= vv.shape[0]:
                 continue
             y = np.tensordot(coeff.T.astype(np.complex64), vv[gg, idx, ee], axes=1)
-            var = var + np.sum(np.abs(y) ** 2, axis=0)
-        return nm, rs, 0.5 * var, ni
+            vsky = 0.0 if vsky is None else vsky
+            vsky = vsky + np.sum(np.abs(y) ** 2, axis=0)
+        if vsky is None:
+            return nm, rs, 0.5 * var, ni, None
+        return nm, rs, 0.5 * (var + vsky), ni, 0.5 * vsky
 
     def _group_maps_setup(self, hvis, band_map, x, opol, ha, dec, rho_band):
         """Containers of the group maps, one for each entry of group_x_reduce.
@@ -7572,7 +7636,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             for gg in range(ngp):
                 for le in range(npe):
                     ee = e0 + le
-                    nm, rs, vr, _ = self._combine(
+                    nm, rs, vr, _, _ = self._combine(
                         gg, le, idx, sg, lam, qvec, numer, None, resp, vinc, vplus, vminus
                     )
                     snr = np.where(
