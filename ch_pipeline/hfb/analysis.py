@@ -1577,34 +1577,48 @@ class HFBDividePFB(tasklib.base.ContainerTask):
 class HFBDopplerShift(tasklib.base.ContainerTask):
     """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
 
+    Each day is shifted with the Doppler shift at the source's transit on
+    that day, to the frame set by `reference`. A stack (with a csd axis) has
+    one shift per day; any other container counts as one day, at the transit
+    on the day in its 'lsd' attribute, or at `time_override`. If 'lsd' holds
+    several days (e.g. a stack averaged over csd), the mean of their shifts
+    is used.
+
+    The source position is taken from, in order:
+    1. the absorber catalog passed to `setup`, by the container's
+       'object_id' (or 'tag') attribute;
+    2. `source_ra` and `source_dec`;
+    3. `source_name` in `ch_util.hfbcat.HFBCatalog`;
+    4. the container's 'source_name' attribute in `ch_util.hfbcat.HFBCatalog`.
+
+    The attributes 'doppler_reference' and 'doppler_reference_velocity'
+    (km/s, positive toward the source) are set on the output, and a container
+    that already has them is rejected.
+
+
     Attributes
     ----------
-    reference : {"barycentric", "mean", "pos", "neg"}
-        Frame to shift a stack to. Default "barycentric".
-    source_name : str
-        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
-        not provided, the task will look for it in the input container attributes.
-        Single-day containers only.
-    source_ra : float
-        Right ascension of the source in degrees, in case the source is not in
-        `ch_util.hfbcat.HFBCatalog`. Single-day containers only.
-    source_dec : float
-        Declination of the source in degrees, in case the source is not in
-        `ch_util.hfbcat.HFBCatalog`. Single-day containers only.
-    time_override : float
-        Unix time used to calculate Doppler shift, to override the time calculated
-        from the LSD and the RA of the source found in the container attributes.
+    reference : {"barycentric", "mean"}
+        Frame to shift to: the barycentric frame, or the mean Doppler shift
+        of the days (for checking the correction on days chosen with
+        HFBSelectDays' `doppler_side`). For a single day, "mean" leaves the
+        data unshifted. Default "barycentric".
+    source_name : str, optional
+        Name of the source in `ch_util.hfbcat.HFBCatalog`.
+    source_ra : float, optional
+        Right ascension of the source in degrees.
+    source_dec : float, optional
+        Declination of the source in degrees.
+    time_override : float, optional
+        Unix time used for the Doppler shift of a container without a csd
+        axis, instead of the transit on the day in its 'lsd' attribute.
     """
 
-    reference = config.enum(
-        ["barycentric", "mean", "pos", "neg"], default="barycentric"
-    )
+    reference = config.enum(["barycentric", "mean"], default="barycentric")
     source_name = config.Property(proptype=str, default=None)
     source_ra = config.Property(proptype=float, default=None)
     source_dec = config.Property(proptype=float, default=None)
     time_override = config.Property(proptype=float, default=None)
-
-    source = None
 
     def setup(self, catalog=None, observer=None):
         """Setup the HFBDopplerShift task.
@@ -1612,7 +1626,7 @@ class HFBDopplerShift(tasklib.base.ContainerTask):
         Parameters
         ----------
         catalog : HFBAbsorberCatalog, optional
-            Catalog with the position of each source, by object_id. Needed for stacks.
+            Catalog with the position of each source, by object_id. Used first if it has the source.
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
@@ -1621,141 +1635,106 @@ class HFBDopplerShift(tasklib.base.ContainerTask):
             from ch_ephem.observers import chime as observer
         self.observer = observer
 
-        # RA and dec (deg) of each source, by object_id
-        self._pos = (
-            {}
-            if catalog is None
-            else dict(
-                zip(
-                    map(str, catalog.index_map["object_id"]),
-                    zip(catalog["position"]["ra"][:], catalog["position"]["dec"][:]),
-                )
+        # RA and dec (deg) of each source in the absorber catalog, by object_id
+        self.catalog_pos = {}
+        if catalog is not None:
+            ids = map(str, catalog.index_map["object_id"])
+            radec = zip(catalog["position"]["ra"][:], catalog["position"]["dec"][:])
+            self.catalog_pos = dict(zip(ids, radec))
+
+        # Position given by the task's attributes, used for sources not in the catalog
+        if (self.source_ra is None) != (self.source_dec is None):
+            raise config.CaputConfigError(
+                "Give both source_ra and source_dec, or neither."
             )
-        )
+        if self.source_ra is not None:
+            self.given_pos = (self.source_ra, self.source_dec)
+        elif self.source_name is not None:
+            src = HFBCatalog[self.source_name]
+            self.given_pos = (src.ra, src.dec)
+        else:
+            self.given_pos = None
 
     def process(self, stream):
         """Doppler shift a container with high-resolution HFB data.
 
         Parameters
         ----------
-        stream : HFBHighResRingMapStack, HFBHighResBeamAvgRingMapStack, HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
-            Data with high-resolution frequency axis.
+        stream : HFBHighResRingMapStack, HFBHighResBeamAvgRingMapStack, HFBHighResRingMap,
+                 HFBHighResBeamAvgRingMap, HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Data with a high-resolution frequency axis.
 
         Returns
         -------
         out : same type as `stream`
             Doppler shifted data.
         """
-        if "csd" in stream.hfb.attrs["axis"]:
-            return self._process_stack(stream)
-        return self._process_single_day(stream)
-
-    def _process_single_day(self, stream):
-        """Shift a single to the reference frame."""
-        # On the first pass, obtain a skyfield Star object of the source. This can
-        # either be retrieved from the HFB catalog (using the source name from the
-        # container attributes, unless manually overridden via the task's source_name
-        # attribute) or generated from the task's source_ra / source_dec attributes.
-        if not self.source:
-            if not self.source_ra and not self.source_dec:
-                if not self.source_name:
-                    self.source_name = stream.attrs["source_name"]
-                self.source = HFBCatalog[self.source_name].skyfield
-            elif self.source_ra and self.source_dec:
-                self.source = Star(
-                    ra=Angle(degrees=self.source_ra), dec=Angle(degrees=self.source_dec)
-                )
-            else:
-                raise RuntimeError(
-                    "Requires either a source name or both an RA and a Dec. "
-                    f"Got source name {self.source_name}, RA {self.source_ra}, "
-                    f"Dec {self.source_dec}"
-                )
-
-        # Obtain time used to compute Doppler correction from container LSD and source RA,
-        # unless an override is provided.
-        if self.time_override is not None:
-            time = self.time_override
-        else:
-            if isinstance(stream.attrs["lsd"], list):
-                raise TypeError(
-                    f"Container includes multiple LSDs: {stream.attrs['lsd']} "
-                    "Use time_override to force Doppler correction."
-                )
-            lsd_float = stream.attrs["lsd"] + self.source.ra.hours / 24.0
-            time = self.observer.lsd_to_unix(lsd_float)
-
-        # Extract frequencies, data, and weights from input container.
-        freq_obs = stream.freq
-        data_obs = stream.hfb[:]
-        weight_obs = stream.weight[:]
-
-        # Obtain Doppler shifted frequencies.
-        freq_shifted = get_doppler_shifted_freq(
-            source=self.source,
-            date=time,
-            freq_rest=freq_obs,
-            obs=self.observer,
-        ).squeeze()
-
-        # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
-        # using linear interpolation and moving these to the observed frequencies.
-        # Reverse frequency dimension, because the interpolation function requires
-        # ascending x arrays. Zero out data points that need to be extrapolated.
-        data_shifted, weight_shifted = _interpolation_linear(
-            x=freq_obs[::-1],
-            y=data_obs[::-1, ...],
-            w=weight_obs[::-1, ...],
-            xeval=freq_shifted[::-1],
-            mode="zero",
-        )
-
-        # Reverse back frequency dimension.
-        data_shifted = data_shifted[::-1, ...]
-        weight_shifted = weight_shifted[::-1, ...]
-
-        # Create container to hold output.
-        out = empty_like(stream)
-
-        out.hfb[:] = data_shifted
-        out.weight[:] = weight_shifted
-
-        return out
-
-    def _process_stack(self, stream):
-        """Shift each day of a stack to the reference frame."""
         if "doppler_reference" in stream.attrs:
             raise RuntimeError(
                 "This stack is already Doppler shifted "
                 f"(reference {stream.attrs['doppler_reference']})."
             )
 
-        ra, dec = self._pos[stream.attrs.get("object_id", stream.attrs.get("tag"))]
-        csd = np.asarray(stream.index_map["csd"], dtype=float)
-        _, factor, _ = _transit_doppler(csd, ra, dec, self.observer)
+        # Source position: the absorber catalog, the task's attributes, or
+        # the container's 'source_name' attribute
+        key = str(stream.attrs.get("object_id", stream.attrs.get("tag")))
+        if key in self.catalog_pos:
+            ra, dec = self.catalog_pos[key]
+        elif self.given_pos is not None:
+            ra, dec = self.given_pos
+        elif "source_name" in stream.attrs:
+            src = HFBCatalog[stream.attrs["source_name"]]
+            ra, dec = src.ra, src.dec
+        else:
+            raise RuntimeError(
+                f"No position for source {key}: set source_ra and source_dec, or "
+                "source_name, or pass an absorber catalog that has it."
+            )
+        source = Star(ra=Angle(degrees=ra), dec=Angle(degrees=dec))
 
-        # Reference Doppler factor: barycentric (1), the mean of the days, or
-        # the day moving fastest toward ("pos") or away from ("neg") the
-        # source. A feature at f in the reference frame is observed at
-        # f * ratio on each day.
-        factor_ref = {
-            "barycentric": 1.0,
-            "mean": factor.mean(),
-            "pos": factor.max(),
-            "neg": factor.min(),
-        }[self.reference]
-        ratio = factor / factor_ref
-
-        stream.redistribute("csd")
-        out = empty_like(stream)
-        out.redistribute("csd")
-
-        # Views with axes (csd, freq, ...), for this rank's days
+        # Times of each day: the transit on each csd of a stack, or the
+        # container's day(s) at transit, or time_override
         axes = list(stream.hfb.attrs["axis"])
-        move = ([axes.index("csd"), axes.index("freq")], [0, 1])
+        if "csd" in axes:
+            csd = np.asarray(stream.index_map["csd"], dtype=float)
+            times = [
+                np.array([t]) for t in _transit_doppler(csd, ra, dec, self.observer)[0]
+            ]
+        elif self.time_override is not None:
+            times = [np.array([self.time_override])]
+        else:
+            lsd = np.atleast_1d(np.asarray(stream.attrs["lsd"], dtype=float))
+            times = [_transit_doppler(lsd, ra, dec, self.observer)[0]]
+
+        # Doppler factor (shifted / rest frequency) of the reference frame:
+        # barycentric (1), or the mean of the days
+        if self.reference == "mean":
+            factor_ref = np.mean(
+                [
+                    get_doppler_shifted_freq(source, list(t), 1.0, self.observer)[
+                        0
+                    ].mean()
+                    for t in times
+                ]
+            )
+        else:
+            factor_ref = 1.0
+
+        # Work one slice at a time along an axis other than freq: one day of a
+        # stack, or (for a single day) slices of el or another axis
+        if "csd" in axes:
+            dist_axis = "csd"
+        else:
+            dist_axis = "el" if "el" in axes else next(a for a in axes if a != "freq")
+        stream.redistribute(dist_axis)
+        out = empty_like(stream)
+        out.redistribute(dist_axis)
+
+        # Views with axes (dist_axis, freq, ...), for this rank's slices
+        move = ([axes.index(dist_axis), axes.index("freq")], [0, 1])
         data = stream.hfb[:]
-        c0 = (
-            data.local_offset[axes.index("csd")]
+        i0 = (
+            data.local_offset[axes.index(dist_axis)]
             if isinstance(data, mpiarray.MPIArray)
             else 0
         )
@@ -1770,11 +1749,28 @@ class HFBDopplerShift(tasklib.base.ContainerTask):
         inv = np.argsort(order)
 
         for i in range(d.shape[0]):
+            # Times of this day: one day of a stack, or the container's day(s)
+            day_times = times[i0 + i] if len(times) > 1 else times[0]
+
+            # Doppler shifted frequencies, averaged over the times of the day,
+            # relative to the reference frame
+            freq_shifted = (
+                get_doppler_shifted_freq(
+                    source=source,
+                    date=list(day_times),
+                    freq_rest=freq[order],
+                    obs=self.observer,
+                ).mean(axis=1)
+                / factor_ref
+            )
+
+            # Evaluate the data at the shifted frequencies and move them to the
+            # observed ones. Extrapolated points get zero weight.
             data_shifted, weight_shifted = _interpolation_linear(
                 x=freq[order],
                 y=d[i][order],
                 w=w[i][order],
-                xeval=freq[order] * ratio[c0 + i],
+                xeval=freq_shifted,
                 mode="zero",
             )
             data_out[i], weight_out[i] = data_shifted[inv], weight_shifted[inv]
