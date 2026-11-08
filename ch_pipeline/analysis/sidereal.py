@@ -308,7 +308,7 @@ class SiderealMean(tasklib.base.ContainerTask):
     mask_ra = config.Property(proptype=list, default=[])
     mask_sources = config.Property(proptype=bool, default=False)
     flux_threshold = config.Property(proptype=float, default=400.0)
-    dec_threshold = config.Property(proptype=bool, default=5.0)
+    dec_threshold = config.Property(proptype=float, default=5.0)
     nsigma = config.Property(proptype=float, default=2.0)
     missing_threshold = config.Property(proptype=float, default=0.0)
     use_default_range_for_quarter = config.Property(proptype=bool, default=False)
