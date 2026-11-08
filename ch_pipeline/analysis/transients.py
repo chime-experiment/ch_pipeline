@@ -16,6 +16,7 @@ from caput.algorithms import median
 from caput.pipeline import tasklib
 from draco.analysis.beamform import BeamFormExternalMixin
 from draco.analysis.ringmapmaker import find_grid_indices
+from draco.analysis.transform import MixTwoDatasets
 from draco.core import containers as draco_containers
 from draco.core import io
 from draco.util import interferometry, tools
@@ -2390,11 +2391,18 @@ class SubtractElevationMedian(tasklib.base.ContainerTask):
     in_place : bool
         Modify the input.  This is only safe if no other task uses the input.
         Default is False.
+    save_median : bool
+        Keep the median that was subtracted in the ``elevation_median`` dataset (zero
+        where nothing was subtracted), so that :class:`MixFilteredHybridVis` can
+        recover the visibilities before this task.  Requires an
+        :class:`ch_pipeline.core.containers.MFilteredHybridVisStream`.  Default is
+        False.
     """
 
     pol = config.list_type(str, default=None)
     ew_index = config.list_type(int, default=None)
     in_place = config.Property(proptype=bool, default=False)
+    save_median = config.Property(proptype=bool, default=False)
 
     def process(self, stream):
         """Subtract the median.
@@ -2425,6 +2433,19 @@ class SubtractElevationMedian(tasklib.base.ContainerTask):
         iew = list(range(new)) if self.ew_index is None else list(self.ew_index)
 
         vis = stream.vis[:].local_array  # pol, freq, ew, el, ra
+
+        saved = None
+        if self.save_median:
+            if "elevation_median" not in stream.dataset_spec:
+                raise ValueError(
+                    "save_median needs a container with an elevation_median dataset "
+                    f"(MFilteredHybridVisStream), not {type(stream).__name__}."
+                )
+            if "elevation_median" not in stream.datasets:
+                stream.add_dataset("elevation_median")
+            saved = stream.datasets["elevation_median"][:].local_array
+            saved[:] = 0.0
+
         for ff in range(vis.shape[1]):
             for pp in ipol:
                 for ee in iew:
@@ -2433,10 +2454,146 @@ class SubtractElevationMedian(tasklib.base.ContainerTask):
                     if np.iscomplexobj(v):
                         med = med + 1.0j * np.median(v.imag, axis=0)
                     v -= med[np.newaxis, :]
+                    if saved is not None:
+                        saved[pp, ff, ee] = med
 
         stream.attrs["elevation_median_subtracted"] = True
 
         return stream
+
+
+class MixFilteredHybridVis(MixTwoDatasets):
+    """Combine hybrid visibilities with their m-mode filtered version, in place.
+
+    For an m-mode filter ``y -> (I - P) y`` (:class:`LSQMFilterHybridVis`), the part
+    of the data the filter removes, ``P y`` (the static sky, and the low-pass part
+    of the noise), is ``y - (I - P) y``: this task with ``data_coeff = [1, -1]``.
+    It is the template of the sky term of :class:`TransientMatchedFilterSkyNoise`
+    and :class:`EstimateSkyNoise`.  Unlike the unfiltered ``y``, it does not
+    contain the transient itself (only the small part of it in the stop band), so
+    a bright pulse does not count its own flux as sky noise.  With
+    ``data_coeff = [1, 1]`` the filtered data are added back, which restores ``y``
+    (to rounding), for example before :class:`AddInjectedHybrid`.
+
+    This is :class:`draco.analysis.transform.MixTwoDatasets` with a few
+    differences: the result is written into the first input, to save the memory of
+    another copy of the stream; the inputs are a ``HybridVisStream`` and the
+    ``MFilteredHybridVisStream`` made from it; only the polarisations and
+    baselines in both are combined (the others are left as they are); the weights
+    of the first input are kept (``weight_coeff`` must be ``[1, 0]``); and if
+    :class:`SubtractElevationMedian` saved its median (``save_median``), it is added
+    back to the filtered data first, so that the filter output itself is used.
+    The filtered data must not be gain corrected (:class:`CorrectFilterGain`).
+    Both inputs are redistributed over frequency.
+
+    The attribute ``filtered_coeff`` of the output accumulates the coefficient of
+    the filtered data (-1 for ``P y``, 0 after restoring ``y``).
+
+    Attributes
+    ----------
+    data_coeff : list of float
+        Coefficients of the unfiltered and the filtered visibilities.  Default is
+        ``[1, -1]``, the complement of the filter.
+    weight_coeff : list of float
+        Must be ``[1, 0]`` (the default): the weights of the first input are kept.
+    add_median : bool
+        Add the saved ``elevation_median`` of the filtered data back before mixing.
+        Default is True.
+    """
+
+    data_coeff = config.list_type(type_=float, length=2, default=[1.0, -1.0])
+    weight_coeff = config.list_type(type_=float, length=2, default=[1.0, 0.0])
+    tag_coeff = config.list_type(type_=bool, length=2, default=[True, False])
+    add_median = config.Property(proptype=bool, default=True)
+
+    def setup(self):
+        """Check the configuration."""
+        super().setup()
+        if list(self.weight_coeff) != [1.0, 0.0]:
+            raise config.CaputConfigError(
+                "MixFilteredHybridVis keeps the weights of the first input: "
+                "weight_coeff must be [1, 0]."
+            )
+        if self.invert_weight or self.require_nonzero_weight or self.aux_coeff:
+            raise config.CaputConfigError(
+                "invert_weight, require_nonzero_weight and aux_coeff are not supported."
+            )
+
+    def process(self, stream, filtered):
+        """Mix the filtered visibilities into the stream.
+
+        Parameters
+        ----------
+        stream : draco.core.containers.HybridVisStream
+            Unfiltered hybrid visibilities.  Modified in place.
+        filtered : ch_pipeline.core.containers.MFilteredHybridVisStream
+            The output of :class:`LSQMFilterHybridVis` for ``stream`` (or for the
+            unfiltered data ``stream`` came from).
+
+        Returns
+        -------
+        stream : draco.core.containers.HybridVisStream
+            The input, ``c0 stream + c1 filtered``.
+        """
+        if filtered.attrs.get("filter_gain_corrected", False):
+            raise ValueError("The filtered data are gain corrected; mix the raw output.")
+        _check_same_grid(stream, filtered)
+
+        stream.redistribute("freq")
+        filtered.redistribute("freq")
+
+        spol = [str(p) for p in stream.index_map["pol"][:].astype(str)]
+        fpol = [str(p) for p in filtered.index_map["pol"][:].astype(str)]
+        sew = np.asarray(stream.index_map["ew"][:], dtype=float)
+        few = np.asarray(filtered.index_map["ew"][:], dtype=float)
+        pairs_pol = [(spol.index(p), ii) for ii, p in enumerate(fpol) if p in spol]
+        pairs_ew = []
+        for jj, b in enumerate(few):
+            m = np.flatnonzero(np.isclose(sew, b))
+            if m.size:
+                pairs_ew.append((int(m[0]), jj))
+        if not pairs_pol or not pairs_ew:
+            raise ValueError("The streams have no polarisation and baseline in common.")
+        left = (len(spol) - len(pairs_pol), sew.size - len(pairs_ew))
+        if any(left):
+            self.log.info(
+                f"{left[0]} polarisations and {left[1]} baselines of the stream are not "
+                "in the filtered data and are left as they are."
+            )
+
+        c0, c1 = (float(c) for c in self.data_coeff)
+        vs = stream.vis[:].local_array  # pol, freq, ew, el, ra
+        vf = filtered.vis[:].local_array
+        med = None
+        if self.add_median and "elevation_median" in filtered.datasets:
+            med = filtered.datasets["elevation_median"][:].local_array  # pol, freq, ew, ra
+
+        for ps, pf in pairs_pol:
+            for es, ef in pairs_ew:
+                for ff in range(vs.shape[1]):
+                    v = vs[ps, ff, es]
+                    if c0 != 1.0:
+                        v *= c0
+                    if c1 == 0.0:
+                        continue
+                    x = vf[pf, ff, ef]
+                    if med is not None:
+                        x = x + med[pf, ff, ef][np.newaxis, :]
+                    v += (c1 * x).astype(v.dtype, copy=False)
+
+        prev = float(stream.attrs.get("filtered_coeff", 0.0))
+        stream.attrs["filtered_coeff"] = c0 * prev + c1
+        self.log.info(
+            f"Mixed {c0:g} x unfiltered + {c1:g} x filtered"
+            f"{' (with its elevation median added back)' if med is not None else ''}: "
+            f"filtered_coeff {stream.attrs['filtered_coeff']:g}."
+        )
+
+        return stream
+
+    def process_finish(self):
+        """Nothing to return at the end."""
+        return
 
 
 class EstimateElevationNoiseScale(tasklib.base.ContainerTask):
@@ -3351,22 +3508,31 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     the lit pixels there, within ``line_dy`` and ``head_dt`` samples of the head,
     are flagged too, and grown like the tracks.
 
-    Flashes (with ``flash_nblock`` above zero): RFI that lights every row at once
-    for a sample, in a few bands (e.g. 419-431 MHz on 2418: 38 samples with 229
-    candidates spread over most of telescope-y), is often too patchy for the line
-    test, since a 6 MHz band reaches only a few sigma per row.  In each band the rows
-    are cut into blocks ``flash_block_dy`` long in telescope-y (about the extent of a
-    bright source in one band), and a block is lit at a sample if at least
-    ``flash_block_frac`` of its rows with data are lit.  Where ``flash_nblock`` or
-    more blocks are lit at the same sample, the band is flagged there in every row,
-    grown by ``flash_grow_dt`` samples.  A source lights its own block (and at most a
-    block at its north-south alias), so it can't do this; noise lights a block with
-    a probability of ~1e-3, so ``flash_nblock`` blocks at once essentially never.
-    The thresholds are not yet tuned on real data: with ``flash_apply`` False the
-    flashes are found and logged but not flagged, and with ``flash_output_name`` the
-    lit pixels, the pixels with data, the number of lit blocks and the flashes of
-    every band are written to that file (an :class:`RFIFlashDiagnostics`), so that
-    other thresholds can be tried offline.
+    Flashes (with ``flash_excess`` above zero): impulsive RFI that lights much of
+    telescope-y at once for one or a few samples, in one or a few bands (e.g.
+    419-431 MHz and many broadband columns near the Sun's transit on 2418), is often
+    too patchy for the line test, since a 6 MHz band reaches only a few sigma per
+    row.  In each band, at each sample with at least ``flash_valid_frac`` of its
+    rows with data, the lit fraction ``f`` (lit rows over rows with data) is
+    compared with its background ``bg``, the running median of ``f`` over the
+    samples with data within ``local_window``: the excess is ``e = f - bg``.  The
+    rows are also cut into sectors ``flash_sector_dy`` long in telescope-y (the last
+    one shorter), and ``nsec`` counts the sectors with at least half their rows with
+    data whose lit fraction is at least ``bg + flash_sector_excess``.  A band
+    flashes at a sample if ``e >= flash_excess`` and ``nsec >= flash_nsector``; where
+    ``flash_broad_nband`` or more bands flash at a sample, the bands with ``e >=
+    flash_broad_excess`` and ``nsec >= flash_nsector`` there flash too.  A flash is
+    flagged in every row of its band, grown by ``flash_grow_dt`` samples.  A source
+    or an aircraft lights a few rows (J1634 at S/N 272: e 0.03 and 3 sectors of
+    0.1), and the night-time scintillation raises ``f`` slowly over a range of y,
+    which the running background absorbs.  The thresholds are from the lit maps of
+    2418 and 3759 (``notes/rfi_flash_study_2026-11-09.md`` in the LPT project): with
+    ``flash_excess`` 0.3, ``flash_sector_dy`` 0.1 and the defaults below, 0.60% and
+    0.23% of the data, against 12% and 20% for a count of lit blocks of 0.033.
+    With ``flash_apply`` False the flashes are found and logged but not flagged, and
+    with ``flash_output_name`` the lit pixels, the pixels with data, ``e``, ``nsec``
+    and the flashes of every band are written to that file (an
+    :class:`RFIFlashDiagnostics`), so that other thresholds can be tried offline.
 
     The output is a mask with one entry per band (its frequency axis holds the
     centre and width of each band), shared by the polarisations and baselines.
@@ -3423,15 +3589,27 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         lit.  Zero turns the limit off.  Default is 3.
     nsample_chunk : int
         Approximate number of samples averaged at once.  Default is 65536.
-    flash_nblock : int
-        Least number of lit blocks at one sample for a flash.  Zero turns flashes
-        off.  Default is 0.
-    flash_block_dy : float
-        Length of the blocks in telescope-y.  Default is 0.033 (20 rows).
-    flash_block_frac : float
-        Least fraction of a block's rows with data that are lit.  Default is 0.25.
+    flash_excess : float
+        Least excess lit fraction of a band at a sample for a flash.  Zero turns
+        flashes off.  Default is 0.
+    flash_nsector : int
+        Least number of lit sectors of telescope-y for a flash.  Default is 5.
+    flash_sector_dy : float
+        Length of the sectors in telescope-y.  Default is 0.1 (60 rows).
+    flash_sector_excess : float
+        A sector is lit if its lit fraction is at least the background plus this.
+        Default is 0.15.
+    flash_broad_nband : int
+        Number of bands flashing at a sample above which the weaker threshold
+        ``flash_broad_excess`` applies to the other bands there.  Zero turns this
+        off.  Default is 10.
+    flash_broad_excess : float
+        Least excess lit fraction of a band at a sample with a broadband flash.
+        Default is 0.15.
+    flash_valid_frac : float
+        Least fraction of the rows with data at a sample.  Default is 0.5.
     flash_grow_dt : int
-        Samples flagged on either side of a flash.  Default is 1.
+        Samples flagged on either side of a flash.  Default is 0.
     flash_apply : bool
         Flag the flashes (else only find and record them).  Default is True.
     flash_output_name : str
@@ -3459,10 +3637,14 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     local_window = config.Property(proptype=int, default=30)
     sky_scale_max = config.Property(proptype=float, default=3.0)
     nsample_chunk = config.Property(proptype=int, default=65536)
-    flash_nblock = config.Property(proptype=int, default=0)
-    flash_block_dy = config.Property(proptype=float, default=0.033)
-    flash_block_frac = config.Property(proptype=float, default=0.25)
-    flash_grow_dt = config.Property(proptype=int, default=1)
+    flash_excess = config.Property(proptype=float, default=0.0)
+    flash_nsector = config.Property(proptype=int, default=5)
+    flash_sector_dy = config.Property(proptype=float, default=0.1)
+    flash_sector_excess = config.Property(proptype=float, default=0.15)
+    flash_broad_nband = config.Property(proptype=int, default=10)
+    flash_broad_excess = config.Property(proptype=float, default=0.15)
+    flash_valid_frac = config.Property(proptype=float, default=0.5)
+    flash_grow_dt = config.Property(proptype=int, default=0)
     flash_apply = config.Property(proptype=bool, default=True)
     flash_output_name = config.Property(
         proptype=lambda v: None if v is None else str(v), default=None
@@ -3527,10 +3709,11 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         )
         flag = np.zeros(Z.shape, dtype=bool)
         nflash = np.zeros(Z.shape[0], dtype=int)
-        flash_rows = max(1, round(self.flash_block_dy / dy))
+        sector_rows = max(1, round(self.flash_sector_dy / dy))
         diag = self.flash_output_name is not None
-        count_blocks = diag or self.flash_nblock > 0
-        nblock = np.zeros((Z.shape[0], Z.shape[2]), dtype=np.int16)
+        do_flash = self.flash_excess > 0
+        fl_excess = np.full((Z.shape[0], Z.shape[2]), np.nan, dtype=np.float32)
+        fl_nsec = np.zeros((Z.shape[0], Z.shape[2]), dtype=np.int16)
         flashes = np.zeros((Z.shape[0], Z.shape[2]), dtype=bool)
         if diag:
             lit_all = np.zeros(Z.shape, dtype=bool)
@@ -3554,20 +3737,40 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             flag[bb] = _line_mask(lit, valid, lines, self.lit_frac)
             if flag[bb].any():
                 flag[bb] = scipy.ndimage.binary_dilation(flag[bb], structure=grow)
-            if count_blocks:
-                nblock[bb] = _flash_block_counts(
-                    lit, valid, flash_rows, self.flash_block_frac
+            if do_flash or diag:
+                fl_excess[bb], fl_nsec[bb] = _flash_metrics(
+                    lit,
+                    valid,
+                    self.local_window,
+                    sector_rows,
+                    self.flash_sector_excess,
+                    self.flash_valid_frac,
+                    periodic,
                 )
-                if self.flash_nblock > 0:
-                    flashes[bb] = nblock[bb] >= self.flash_nblock
-                    nflash[bb] = flashes[bb].sum()
-                    if self.flash_apply and flashes[bb].any():
-                        grown = _grow_1d(flashes[bb], self.flash_grow_dt, periodic)
-                        flag[bb][:, grown] = True
-                if diag:
-                    lit_all[bb] = lit
+            if diag:
+                lit_all[bb] = lit
             Z[bb] = zs
         self.log.debug(f"Searched for tracks in {time.time() - t0:0.1f} seconds.")
+
+        if do_flash:
+            with np.errstate(invalid="ignore"):
+                strong = (fl_excess >= self.flash_excess) & (
+                    fl_nsec >= self.flash_nsector
+                )
+                weak = (fl_excess >= self.flash_broad_excess) & (
+                    fl_nsec >= self.flash_nsector
+                )
+            flashes[:] = strong
+            if self.flash_broad_nband > 0:
+                nstrong = self.comm.allreduce(strong.sum(axis=0))
+                broad = nstrong >= self.flash_broad_nband
+                flashes |= weak & broad[np.newaxis, :]
+            nflash[:] = flashes.sum(axis=1)
+            if self.flash_apply:
+                for bb in range(Z.shape[0]):
+                    if flashes[bb].any():
+                        grown = _grow_1d(flashes[bb], self.flash_grow_dt, periodic)
+                        flag[bb][:, grown] = True
 
         if self.head_snr > 0:
             t0 = time.time()
@@ -3603,33 +3806,42 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             )
             + "."
         )
-        if self.flash_nblock > 0:
+        if do_flash:
             nflash = np.concatenate(self.comm.allgather(nflash))
+            ncol = int(
+                self.comm.allreduce(flashes.any(axis=0).astype(np.int64)).astype(bool).sum()
+            )
             top = np.argsort(nflash)[::-1][:5]
             self.log.info(
                 f"Flashes ({'flagged' if self.flash_apply else 'recorded only'}): "
-                f"{nflash.sum()} band samples lit in {self.flash_nblock} or more "
-                "blocks of telescope-y; most in "
+                f"{nflash.sum()} band samples in {ncol} samples with an excess lit "
+                f"fraction of {self.flash_excess} (or {self.flash_broad_excess} with "
+                f"{self.flash_broad_nband} bands) in {self.flash_nsector} or more "
+                "sectors of telescope-y; most in "
                 + ", ".join(
                     f"{band_map['centre'][bb]:0.1f} MHz ({nflash[bb]})" for bb in top
                 )
                 + "."
             )
-            out.attrs["flash_nblock"] = self.flash_nblock
-            out.attrs["flash_block_dy"] = self.flash_block_dy
-            out.attrs["flash_block_frac"] = self.flash_block_frac
-            out.attrs["flash_grow_dt"] = self.flash_grow_dt
-            out.attrs["flash_apply"] = self.flash_apply
+            for key in self._flash_keys:
+                out.attrs[key] = getattr(self, key)
             out.attrs["flash_count"] = nflash
         if diag:
             self._write_flash_diagnostics(
-                out, band_map, ra, el, lit_all, valid_all, nblock, flashes, flash_rows
+                out, band_map, ra, el, lit_all, valid_all, fl_excess, fl_nsec, flashes,
+                sector_rows,
             )
 
         return out
 
+    _flash_keys = (
+        "flash_excess", "flash_nsector", "flash_sector_dy", "flash_sector_excess",
+        "flash_broad_nband", "flash_broad_excess", "flash_valid_frac", "flash_grow_dt",
+        "flash_apply",
+    )  # fmt: skip
+
     def _write_flash_diagnostics(
-        self, out, band_map, ra, el, lit, valid, nblock, flashes, flash_rows
+        self, out, band_map, ra, el, lit, valid, excess, nsec, flashes, sector_rows
     ):
         """Write the lit pixels and the flashes of every band (see the class)."""
         diag = containers.RFIFlashDiagnostics(
@@ -3640,12 +3852,12 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             raise RuntimeError("The diagnostics are not distributed like the bands.")
         loc.local_array[:] = lit
         diag.valid[:].local_array[:] = valid
-        diag.datasets["nblock"][:] = np.concatenate(self.comm.allgather(nblock))
+        diag.datasets["excess"][:] = np.concatenate(self.comm.allgather(excess))
+        diag.datasets["nsector"][:] = np.concatenate(self.comm.allgather(nsec))
         diag.datasets["flash"][:] = np.concatenate(self.comm.allgather(flashes))
-        for key in ("snr_lit", "rel", "sky_scale_max", "flash_nblock", "flash_block_dy",
-                    "flash_block_frac", "flash_grow_dt", "flash_apply"):  # fmt: skip
+        for key in ("snr_lit", "rel", "sky_scale_max", "local_window", *self._flash_keys):
             diag.attrs[key] = getattr(self, key)
-        diag.attrs["flash_block_rows"] = flash_rows
+        diag.attrs["flash_sector_rows"] = sector_rows
         # Compressed datasets need collective IO, which caput only uses when every rank
         # has part of the distributed axis; there are fewer bands than ranks, so write
         # them distributed over the longer of the sample and row axes.
@@ -3781,30 +3993,52 @@ def _grow_1d(mask, n, periodic):
     return out
 
 
-def _flash_block_counts(lit, valid, block_rows, block_frac):
-    """The number of blocks of rows lit at each sample.
+def _flash_metrics(lit, valid, window, sector_rows, sector_excess, valid_frac, periodic):
+    """The excess lit fraction of a band at each sample, and its lit sectors.
 
-    ``lit`` and ``valid`` are [row, sample].  The rows are cut into consecutive
-    blocks of ``block_rows`` (the last one shorter); a block is lit at a sample if
-    at least half of its rows have data and at least ``block_frac`` of those are
-    lit.
+    ``lit`` and ``valid`` are [row, sample].  At samples with at least ``valid_frac``
+    of the rows with data, ``f`` is the fraction of those rows that are lit, and its
+    background ``bg`` the running median of ``f`` over the samples with data within
+    ``window`` on either side (wrapped if ``periodic``; NaN with fewer than
+    ``window // 2`` of them).  The rows are cut into consecutive sectors of
+    ``sector_rows`` (the last one shorter); a sector is lit if at least half of its
+    rows have data and at least ``bg + sector_excess`` of those are lit.
 
     Returns
     -------
-    count : np.ndarray[sample] of int
+    excess : np.ndarray[sample] of float32
+        ``f - bg``, NaN where either is undefined.
+    nsec : np.ndarray[sample] of int16
+        Number of lit sectors (zero where ``f`` is undefined).
     """
-    nrow = lit.shape[0]
-    starts = np.arange(0, nrow, block_rows)
-    nlit = np.add.reduceat(lit.astype(np.int32), starts, axis=0)
-    nval = np.add.reduceat(valid.astype(np.int32), starts, axis=0)
+    nrow, nra = lit.shape
+    nv = valid.sum(axis=0)
+    ok = nv >= max(valid_frac * nrow, 1)
+    f = np.where(ok, lit.sum(axis=0) / np.maximum(nv, 1), 0.0)
+
+    w = ok.astype(np.float64)
+    r = f.astype(np.float64)
+    pad = window if periodic else 0
+    if pad:
+        r = np.concatenate([r[-pad:], r, r[:pad]])
+        w = np.concatenate([w[-pad:], w, w[:pad]])
+    bg = median.moving_weighted_median(
+        np.ascontiguousarray(r[np.newaxis]),
+        np.ascontiguousarray(w[np.newaxis]),
+        size=(1, 2 * window + 1),
+    )[0, pad : pad + nra]
+    count = np.convolve(w, np.ones(2 * window + 1), mode="same")[pad : pad + nra]
+    good = ok & (count >= max(window // 2, 1))
+    excess = np.where(good, f - bg, np.nan).astype(np.float32)
+
+    starts = np.arange(0, nrow, sector_rows)
+    slit = np.add.reduceat(lit.astype(np.int32), starts, axis=0)
+    sval = np.add.reduceat(valid.astype(np.int32), starts, axis=0)
     size = np.diff(np.append(starts, nrow))[:, np.newaxis]
-    on = (nval * 2 >= size) & (nval > 0) & (nlit >= block_frac * nval)
-    return on.sum(axis=0)
-
-
-def _flash_columns(lit, valid, block_rows, block_frac, nblock):
-    """The samples where ``nblock`` or more blocks of rows are lit at once."""
-    return _flash_block_counts(lit, valid, block_rows, block_frac) >= nblock
+    on = (sval * 2 >= size) & (sval > 0)
+    on &= slit >= (bg[np.newaxis, :] + sector_excess) * np.maximum(sval, 1)
+    nsec = np.where(good, on.sum(axis=0), 0).astype(np.int16)
+    return excess, nsec
 
 
 def _flag_pieces(mask, min_rows, nend=5):
@@ -4603,7 +4837,9 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
     all channels and both polarisations, and part is independent between channels
     (the self-noise of the source).  This task fits the model described in
     :class:`ch_pipeline.core.containers.HybridVisSkyNoise`, separately for each band
-    and east-west baseline, using the unfiltered visibilities as the sky term.
+    and east-west baseline, using the sky template as the sky term: the part of
+    the data the filter removes, ``P y`` (:class:`MixFilteredHybridVis`), which
+    unlike the unfiltered visibilities does not hold the transients themselves.
 
     Three statistics are fitted in turn, by maximum likelihood for exponentially
     distributed powers (iteratively reweighted least squares), leaving out samples
@@ -4741,6 +4977,7 @@ class EstimateSkyNoise(_BandMixin, tasklib.base.ContainerTask):
             freq, unfiltered.freq[:]
         ):
             raise ValueError("The frequency axes of the streams differ.")
+        _check_sky_template(self.log, unfiltered)
 
         fpol = list(stream.index_map["pol"])
         upol = list(unfiltered.index_map["pol"])
@@ -6292,6 +6529,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     :class:`TransientMatchedFilter`.  With ``kappa = 0`` the result is that of
     :class:`TransientMatchedFilter`.
 
+    ``S_k`` should be the part of the data the filter removes, ``P y``
+    (:class:`MixFilteredHybridVis`), rather than the unfiltered ``y``: ``y`` also
+    holds the transient, so a bright pulse would add ``kappa^2`` times its own
+    power to its variance, which matters where the sky in that product is faint
+    (in V, J1634's S/N fell from 275 to 149).  ``P y`` holds the static sky and
+    the low-pass part of the noise, and of a transient only the small part in the
+    filter's stop band.  A warning is logged if the input is not marked as ``P y``.
+
     For a duration of W samples the template follows the source along its track as
     in :class:`TransientMatchedFilter`.  The numerator, the diagonal of the response
     and the variance above are summed along the track, and the filter couples the
@@ -6540,7 +6785,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         hvis : ch_pipeline.core.containers.MFilteredHybridVisStream
             Output of :class:`LSQMFilterHybridVis`.
         unfiltered : draco.core.containers.HybridVisStream
-            The visibilities before filtering, on the same grid.
+            The sky template on the same grid: the part of the data the filter
+            removes (:class:`MixFilteredHybridVis`), or the visibilities before
+            filtering.
         sky : ch_pipeline.core.containers.HybridVisSkyNoise
             Output of :class:`EstimateSkyNoise` for the same data.
 
@@ -6572,6 +6819,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         alphas = np.array(self.spectral_indices, dtype=np.float64)
 
         _check_same_grid(hvis, unfiltered)
+        _check_sky_template(self.log, unfiltered)
 
         has_response = "ra_response" in hvis.datasets
         if has_response:
@@ -8217,6 +8465,7 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
         sky_coef = self._sky_coefficients(sky, band_map, ew[iew], ra, el)
 
         hvis.redistribute(["el", "freq"])
+        _check_sky_template(self.log, unfiltered)
         unfiltered.redistribute(["el", "freq"])
         el_slc = hvis.vis[:].local_bounds
         if unfiltered.vis[:].local_bounds != el_slc:
@@ -8576,6 +8825,17 @@ def _allreduce_nanmax(comm, a):
     b = np.where(np.isnan(a), -np.inf, a)
     comm.Allreduce(MPI.IN_PLACE, b, op=MPI.MAX)
     return np.where(np.isinf(b), np.nan, b)
+
+
+def _check_sky_template(log, unfiltered):
+    """Warn if the sky template is not the complement of the m-mode filter."""
+    c = unfiltered.attrs.get("filtered_coeff", None)
+    if c is None or abs(float(c) + 1.0) > 1e-6:
+        log.warning(
+            "The sky template is not the complement of the filter (MixFilteredHybridVis "
+            f"with data_coeff [1, -1]; filtered_coeff = {c}): it contains the transients "
+            "themselves, so a bright one adds its own flux to its sky noise."
+        )
 
 
 def _check_same_grid(a, b):

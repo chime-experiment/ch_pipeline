@@ -1009,7 +1009,10 @@ class MFilteredHybridVisStream(HybridVisStream):
 
     For a filter ``y -> (I - P) y`` along right ascension, this also holds the
     elements of the filter near the diagonal, ``P[t, t + lag]``, and the inverse
-    variance of the visibilities before filtering.
+    variance of the visibilities before filtering.  ``elevation_median`` is the
+    median over elevation that
+    :class:`ch_pipeline.analysis.transients.SubtractElevationMedian` subtracted (with
+    ``save_median``), so that the filter output before it can be recovered.
     """
 
     _axes = ("lag",)
@@ -1035,6 +1038,13 @@ class MFilteredHybridVisStream(HybridVisStream):
         "noise_scale": {
             "axes": ["pol", "freq", "ew", "el"],
             "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "elevation_median": {
+            "axes": ["pol", "freq", "ew", "ra"],
+            "dtype": np.complex64,
             "initialise": False,
             "distributed": True,
             "distributed_axis": "freq",
@@ -2827,11 +2837,12 @@ class RFIFlashDiagnostics(FreqContainer, SiderealContainer):
     row (``el``) and sample: ``lit``, the pixels lit by the band power (above the
     |S/N| threshold, the relative cut and the sky-scale limit of
     :class:`ch_pipeline.analysis.transients.FlagMovingRFI`), and ``valid``, those
-    with data.  For each band and sample: ``nblock``, the number of blocks of rows
-    lit, and ``flash``, whether that is a flash at the task's thresholds (applied
-    to the mask or only recorded, see its ``flash_apply``).  With ``lit`` and
-    ``valid``, other thresholds and block sizes can be tried offline.  Distributed
-    over bands.
+    with data.  For each band and sample: ``excess``, the excess lit fraction over
+    its running background (NaN without one), ``nsector``, the number of lit
+    sectors of telescope-y, and ``flash``, whether that is a flash at the task's
+    thresholds (applied to the mask or only recorded, see its ``flash_apply``).
+    With ``lit`` and ``valid``, other thresholds and sector sizes can be tried
+    offline.  Distributed over bands.
     """
 
     _axes = ("el",)
@@ -2857,7 +2868,13 @@ class RFIFlashDiagnostics(FreqContainer, SiderealContainer):
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
         },
-        "nblock": {
+        "excess": {
+            "axes": ["freq", "ra"],
+            "dtype": np.float32,
+            "initialise": True,
+            "distributed": False,
+        },
+        "nsector": {
             "axes": ["freq", "ra"],
             "dtype": np.int16,
             "initialise": True,
