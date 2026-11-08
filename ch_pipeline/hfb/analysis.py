@@ -5,16 +5,20 @@ import numpy as np
 from beam_model.composite import FutureMostAccurateCompositeBeamModel
 from caput import config, mpiarray
 from caput.algorithms import median
+from caput.astro.skyfield import unix_to_skyfield_time
 from caput.containers import copy_datasets_filter, empty_like
 from caput.memdata import MemDiskGroup
 from caput.pipeline import tasklib
 from caput.util import mpitools
 from caput.util.pfb import DeconvolvePFB
 from ch_ephem.coord import bmxy_to_hadec
+from ch_ephem.observers import chime
 from ch_util.hfbcat import HFBCatalog, get_doppler_shifted_freq
 from draco.core import io
 from draco.util import tools
 from mpi4py import MPI
+from scipy.constants import c as speed_of_light
+from skyfield.framelib import ecliptic_frame
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
 
@@ -22,37 +26,94 @@ from . import containers
 from .io import BeamSelectionMixin
 
 
+def _average_axis(data, weight, axis_index, weighting="inverse_variance"):
+    """Average data and weights along one axis.
+
+    Parameters
+    ----------
+    data, weight : np.ndarray
+        HFB data and weights.
+    axis_index : int
+        Index of the axis over which to average.
+    weighting : {"inverse_variance", "uniform"}
+        The weighting to use.
+
+    Returns
+    -------
+    avg_data, avg_weight : np.ndarray
+        Averaged data and weights, with that axis removed.
+    """
+    if weighting == "uniform":
+        # Binary weights for uniform weighting
+        binary_weight = np.zeros(weight.shape)
+        binary_weight[weight != 0] = 1
+
+        # Number of samples with non-zero weight in each bin
+        nsamples = np.sum(binary_weight, axis=axis_index)
+
+        # For uniform weighting, the variance of averaged data is
+        # sum( variance ) / nsamples**2,
+        # and the weight is the inverse of that
+        variance = tools.invert_no_zero(weight)
+        avg_weight = nsamples**2 * tools.invert_no_zero(
+            np.sum(variance, axis=axis_index)
+        )
+
+        # For uniform weighting, the averaged data is the average of all
+        # non-zero data
+        avg_data = np.sum(binary_weight * data, axis=axis_index) * tools.invert_no_zero(
+            nsamples
+        )
+
+    else:
+        # For inverse-variance weighting, the averaged weight turns out to
+        # be equal to the sum of the weights
+        avg_weight = np.sum(weight, axis=axis_index)
+
+        # For inverse-variance weighting, the averaged data is the weighted
+        # sum of the data, normalized by the sum of the weights
+        avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
+            avg_weight
+        )
+
+    return avg_data, avg_weight
+
+
 class HFBAverage(tasklib.base.ContainerTask):
     """Take average of HFB data over any axis.
 
     Used for making sub-frequency band shape template and general time averaging,
-    and for taking the average of HFB data over beam axis.
+    for taking the average of HFB data over beam axis, and for averaging all the
+    days of an absorber stack.
 
     Attributes
     ----------
     axis: str (default: "time")
         Axis over which to take average.
-        Options are `freq`, `subfreq`, `beam`, and `time`.
+        Options are `freq`, `subfreq`, `beam`, `beam_ew`, `time` and `csd`.
     weighting: str (default: "inverse_variance")
         The weighting to use in the stack.
         Either `uniform` or `inverse_variance`.
     """
 
-    axis = config.enum(["freq", "subfreq", "beam", "beam_ew", "time"], default="time")
+    axis = config.enum(
+        ["freq", "subfreq", "beam", "beam_ew", "time", "csd"], default="time"
+    )
     weighting = config.enum(["uniform", "inverse_variance"], default="inverse_variance")
 
     def process(self, stream):
-        """Take average over time axis.
+        """Take average over the chosen axis.
 
         Parameters
         ----------
-        stream : HFBData, HFBHighResData
+        stream : HFBData, HFBHighResData, HFBHighResTimeAverage,
+                 HFBHighResRingMap, or HFBHighResRingMapStack
             Container with HFB data and weights.
 
         Returns
         -------
-        out : HFBTimeAverage, HFBHighResTimeAverage
-            Average of stream over time axis.
+        out : container
+            Average of stream over the chosen axis.
         """
         contmap = {
             "freq": {},
@@ -62,10 +123,15 @@ class HFBAverage(tasklib.base.ContainerTask):
             },
             "beam_ew": {
                 containers.HFBHighResRingMap: containers.HFBHighResBeamAvgRingMap,
+                containers.HFBHighResRingMapStack: containers.HFBHighResBeamAvgRingMapStack,
             },
             "time": {
                 containers.HFBData: containers.HFBTimeAverage,
                 containers.HFBHighResData: containers.HFBHighResTimeAverage,
+            },
+            "csd": {
+                containers.HFBHighResRingMapStack: containers.HFBHighResRingMap,
+                containers.HFBHighResBeamAvgRingMapStack: containers.HFBHighResBeamAvgRingMap,
             },
         }
 
@@ -75,6 +141,13 @@ class HFBAverage(tasklib.base.ContainerTask):
                 f"Averaging {stream.__class__} over {self.axis} is not implemented."
             )
 
+        # For ringmaps and stacks, distribute over freq, so that the averaged
+        # axis (csd or beam_ew) is complete on every rank, and the input and
+        # output containers are distributed the same way
+        redistribute = self.axis in ("csd", "beam_ew")
+        if redistribute:
+            stream.redistribute("freq")
+
         # Find index of axis over which to average
         axis_index = stream._dataset_spec["hfb"]["axes"].index(self.axis)
 
@@ -83,44 +156,15 @@ class HFBAverage(tasklib.base.ContainerTask):
         weight = stream.weight[:]
 
         # Average the data and compute the weight of the averaged data
-        if self.weighting == "uniform":
-            # Binary weights for uniform weighting
-            binary_weight = np.zeros(weight.shape)
-            binary_weight[weight != 0] = 1
-
-            # Number of samples with non-zero weight in each time bin
-            nsamples = np.sum(binary_weight, axis=axis_index)
-
-            # For uniform weighting, the variance of averaged data is
-            # sum( variance ) / nsamples**2,
-            # and the weight is the inverse of that
-            variance = tools.invert_no_zero(weight)
-            avg_weight = nsamples**2 * tools.invert_no_zero(
-                np.sum(variance, axis=axis_index)
-            )
-
-            # For uniform weighting, the averaged data is the average of all
-            # non-zero data
-            avg_data = np.sum(
-                binary_weight * data, axis=axis_index
-            ) * tools.invert_no_zero(nsamples)
-
-        else:
-            # For inverse-variance weighting, the averaged weight turns out to
-            # be equal to the sum of the weights
-            avg_weight = np.sum(weight, axis=axis_index)
-
-            # For inverse-variance weighting, the averaged data is the weighted
-            # sum of the data, normalized by the sum of the weights
-            avg_data = np.sum(weight * data, axis=axis_index) * tools.invert_no_zero(
-                avg_weight
-            )
+        avg_data, avg_weight = _average_axis(data, weight, axis_index, self.weighting)
 
         # Get the output container
         out_cont_type = contmap[self.axis][stream.__class__]
 
         # Create container to hold output
         out = out_cont_type(axes_from=stream, attrs_from=stream)
+        if redistribute:
+            out.redistribute("freq")
 
         # Save data and weights to output container
         out.hfb[:] = avg_data
@@ -128,6 +172,231 @@ class HFBAverage(tasklib.base.ContainerTask):
 
         # Add index map of axis that was averaged over to attributes
         out.attrs[self.axis] = stream._data["index_map"][self.axis][:]
+
+        # For a stack of days, also record them as the LSDs of the average, so
+        # that HFBDopplerShift knows when the data were taken
+        if self.axis == "csd":
+            out.attrs["lsd"] = np.asarray(stream.index_map["csd"]).astype(float)
+
+        return out
+
+
+def _transit_doppler(csd, ra, dec, observer):
+    """Transit time, Doppler factor and orbital phase of a source on each CSD.
+
+    Parameters
+    ----------
+    csd : np.ndarray
+        CSD of each day.
+    ra, dec : float
+        Position of the source, in degrees.
+    observer : caput.astro.observer.Observer
+        The telescope.
+
+    Returns
+    -------
+    time : np.ndarray
+        Unix time of transit.
+    factor : np.ndarray
+        Observed / rest frequency at transit, from the Earth's motion and
+        rotation (> 1 when moving toward the source).
+    phase : np.ndarray
+        Ecliptic longitude of the Sun minus that of the source, in degrees in
+        [-180, 180). The velocity toward the source is largest at +90 and most
+        negative at -90.
+    """
+    time = observer.lsd_to_unix(np.floor(csd) + ra / 360.0)
+    source = Star(ra=Angle(degrees=ra), dec=Angle(degrees=dec))
+    factor = get_doppler_shifted_freq(source, list(time), 1.0, observer)[0]
+
+    eph = observer.skyfield.ephemeris
+    earth = eph["earth"].at(unix_to_skyfield_time(time))
+    lon_sun = earth.observe(eph["sun"]).frame_latlon(ecliptic_frame)[1].degrees
+    lon_src = earth.observe(source).frame_latlon(ecliptic_frame)[1].degrees
+    phase = (lon_sun - lon_src + 180.0) % 360.0 - 180.0
+
+    return time, factor, phase
+
+
+class HFBSelectDays(tasklib.base.ContainerTask):
+    """Keep a subset of the days in an absorber stack.
+
+    Days without data (all weights zero) are always dropped. The other days
+    are kept if they are inside `csd_range`, are in `csd_list`, are not in
+    `csd_exclude`, and transit at night if `night_only` (each only if given).
+
+    `doppler_side` then keeps days from one half of the orbit, e.g. to check
+    the Doppler correction. The orbital phase is the Sun's ecliptic longitude
+    minus the source's. The velocity toward the source is positive ("pos")
+    for phases 0 to 180 deg, largest at 90, and negative ("neg") for phases
+    -180 to 0 deg, most negative at -90. Within the chosen half, angles run
+    from 0 (velocity zero) through 90 (the end) to 180 (zero again), and the
+    days with angles in `doppler_range` [lo, hi] are kept. Days from
+    different years at the same phase have the same velocity, so they are
+    selected together.
+
+    Attributes
+    ----------
+    csd_range : list, optional
+        Keep days with start <= csd < end. Either one range, [start, end], or
+        several, [[start1, end1], [start2, end2], ...], in which case days
+        inside any of them are kept.
+    csd_list : list of int, optional
+        Keep only these CSDs (e.g. a list of good days).
+    csd_exclude : list of int, optional
+        Drop these CSDs.
+    night_only : bool
+        Keep only days on which the source transits between sunset and sunrise.
+        Default False.
+    doppler_side : {"pos", "neg"}, optional
+        Keep the days moving toward ("pos") or away from ("neg") the source.
+    doppler_range : list of float
+        [lo, hi]: angles (deg) within the half chosen by `doppler_side` to
+        keep, with 0 <= lo <= hi <= 180. That is the phase itself for "pos",
+        and the phase + 180 for "neg". [0, 180] is the whole half, [60, 120]
+        is 30 deg either side of the end. With days spread evenly over the
+        year, this keeps a fraction (hi - lo) / 360 of them. Default
+        [30, 60], about the best for comparing the two ends.
+    """
+
+    csd_range = config.Property(proptype=list, default=None)
+    csd_list = config.Property(proptype=list, default=None)
+    csd_exclude = config.Property(proptype=list, default=None)
+    night_only = config.Property(proptype=bool, default=False)
+    doppler_side = config.Property(proptype=str, default=None)
+    doppler_range = config.Property(proptype=list, default=[30, 60])
+
+    def setup(self, catalog=None):
+        """Take the catalog of sources, needed for `night_only` and `doppler_side`.
+
+        Parameters
+        ----------
+        catalog : HFBAbsorberCatalog, optional
+            Catalog with the position of each source, by object_id.
+        """
+        if self.doppler_side not in (None, "pos", "neg"):
+            raise config.CaputConfigError(
+                f"doppler_side must be 'pos' or 'neg', got {self.doppler_side}."
+            )
+        lo, hi = self.doppler_range
+        if not 0.0 <= lo <= hi <= 180.0:
+            raise config.CaputConfigError(
+                f"doppler_range must be [lo, hi] with 0 <= lo <= hi <= 180, "
+                f"got {self.doppler_range}."
+            )
+        if (self.night_only or self.doppler_side) and catalog is None:
+            raise config.CaputConfigError(
+                "night_only and doppler_side need the absorber catalog (requires)."
+            )
+
+        self.observer = chime
+        # RA and dec (deg) of each source, by object_id
+        self._pos = (
+            {}
+            if catalog is None
+            else dict(
+                zip(
+                    map(str, catalog.index_map["object_id"]),
+                    zip(catalog["position"]["ra"][:], catalog["position"]["dec"][:]),
+                )
+            )
+        )
+
+    def process(self, stream):
+        """Select days.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Absorber stack, with csd as the first axis.
+
+        Returns
+        -------
+        out : same type as `stream`
+            Same stack, restricted to the selected days.
+        """
+        # Distribute over freq, so that every rank holds all days
+        stream.redistribute("freq")
+
+        # Load data and weights
+        data = stream.hfb[:]
+        weight = stream.weight[:]
+
+        # Change data and weights to numpy arrays, so that they can be indexed
+        distributed = isinstance(data, mpiarray.MPIArray)
+        if distributed:
+            data = data.local_array
+            weight = weight.local_array
+
+        # Build a mask of the days to keep, applying each criterion in turn
+        csd = np.asarray(stream.index_map["csd"])
+
+        # Days with data, over the frequencies of all ranks
+        keep = np.any(weight > 0, axis=tuple(range(1, weight.ndim))).astype(int)
+        if distributed:
+            stream.comm.Allreduce(MPI.IN_PLACE, keep, op=MPI.MAX)
+        keep = keep.astype(bool)
+
+        if self.csd_range is not None:
+            # Accept a single [start, end] or a list of them
+            ranges = np.atleast_2d(np.asarray(self.csd_range, dtype=float))
+            if ranges.shape[1] != 2:
+                raise config.CaputConfigError(
+                    f"csd_range must be [start, end] or a list of them, got {self.csd_range}."
+                )
+            keep &= np.any([(csd >= s) & (csd < e) for s, e in ranges], axis=0)
+
+        if self.csd_list is not None:
+            keep &= np.isin(csd.astype(int), np.asarray(self.csd_list, dtype=int))
+
+        if self.csd_exclude is not None:
+            keep &= ~np.isin(csd.astype(int), np.asarray(self.csd_exclude, dtype=int))
+
+        if self.night_only:
+            ra, dec = self._pos[stream.attrs.get("object_id", stream.attrs.get("tag"))]
+            time, factor, phase = _transit_doppler(csd, ra, dec, self.observer)
+
+            # Day time is from each sunrise to the next sunset
+            rises = self.observer.solar_rising(time.min() - 86400.0, time.max())
+            sets = self.observer.solar_setting(
+                time.min() - 86400.0, time.max() + 86400.0
+            )
+            last_rise = rises[
+                np.maximum(np.searchsorted(rises, time, side="right") - 1, 0)
+            ]
+            next_set = sets[np.minimum(np.searchsorted(sets, last_rise), sets.size - 1)]
+            keep &= ~((time >= last_rise) & (time < next_set))
+
+        if self.doppler_side:
+            ra, dec = self._pos[stream.attrs.get("object_id", stream.attrs.get("tag"))]
+            time, factor, phase = _transit_doppler(csd, ra, dec, self.observer)
+
+            # Angle within the chosen half: 0 -> 90 (the end) -> 180; days
+            # in the other half get angles above 180 and are never kept
+            angle = (phase + (0.0 if self.doppler_side == "pos" else 180.0)) % 360.0
+            lo, hi = self.doppler_range
+            keep &= (angle >= lo) & (angle <= hi)
+            if keep.any():
+                v = (factor[keep] - 1.0) * speed_of_light / 1e3
+                self.log.info(
+                    f"Doppler {self.doppler_side}: {keep.sum()} days, velocity "
+                    f"toward the source {v.min():.1f} to {v.max():.1f} km/s."
+                )
+
+        if not keep.any():
+            raise RuntimeError("No days left after the selection.")
+
+        self.log.info(f"Kept {keep.sum()} of {csd.size} days.")
+
+        # Create output container of the same type as the input, with the selected days only
+        out = stream.__class__(
+            csd=stream.index_map["csd"][keep], axes_from=stream, attrs_from=stream
+        )
+        out.redistribute("freq")
+
+        # Copy over the selected days
+        out.hfb[:] = data[keep]
+        out.weight[:] = weight[keep]
 
         return out
 
@@ -314,7 +583,12 @@ class HFBDivideByTemplate(tasklib.base.ContainerTask):
 
 
 class HFBAlignEWBeams(tasklib.base.ContainerTask):
-    """Shift HFB ringmap data to true RA values in order to align EW beams."""
+    """Shift HFB ringmap data to true RA values in order to align EW beams.
+
+    The input is changed in place and returned, to avoid a second copy of a
+    large stack. The attribute 'ew_beams_aligned' is set, and a container
+    that already has it is rejected.
+    """
 
     def setup(self):
         """Load offsets and reference angles from CHIME/FRB beam model."""
@@ -332,16 +606,34 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
 
         Parameters
         ----------
-        stream : containers.HFBHighResRingMap
-            HFB ringmap container to align.
+        stream : containers.HFBHighResRingMap or HFBHighResRingMapStack
+            HFB ringmap or stack to align.
 
         Returns
         -------
-        out : containers.HFBHighResRingMap
-            HFB ringmap container with EW beams aligned in RA.
+        out : same type as `stream`
+            Data with EW beams aligned in RA.
         """
-        data = stream.hfb[:]
-        weight = stream.weight[:]
+        if stream.attrs.get("ew_beams_aligned", False):
+            raise RuntimeError("The EW beams of this container are already aligned.")
+
+        axes = list(stream.hfb.attrs["axis"])
+        if "csd" in axes:
+            stream.redistribute("csd")
+
+        # Views with axes (beam_ew, el, ra, ...) of the input's own arrays;
+        # interpolation is along ra
+        move = ([axes.index(a) for a in ("beam_ew", "el", "ra")], [0, 1, 2])
+        data, weight = (
+            np.moveaxis(getattr(x, "local_array", x), *move)
+            for x in (stream.hfb[:], stream.weight[:])
+        )
+
+        # A full day is cyclic in RA; a cutout is not, and may cross 0/360
+        ra = np.asarray(stream.ra, dtype=float)
+        full = ra.size * np.median(np.abs(np.diff(ra))) > 359.0
+        if not full:
+            ra = np.where(ra < ra[0], ra + 360.0, ra)
 
         # Find CHIME/FRB XY coordinates of beams
         x_beam_list = self.ew_beam_offset_deg[stream.beam_ew]
@@ -351,37 +643,27 @@ class HFBAlignEWBeams(tasklib.base.ContainerTask):
         x_beam_grid, y_beam_grid = np.meshgrid(x_beam_list, y_beam_list)
         ha_beam, _ = bmxy_to_hadec(x_beam_grid, y_beam_grid)
 
-        # Initialize arrays to hold data and weights
-        data_aligned = np.zeros_like(data)
-        weight_aligned = np.zeros_like(weight)
-
-        for insb, nsb in enumerate(stream.beam_ns):
-            for iewb, ewb in enumerate(stream.beam_ew):
+        for iewb in range(len(stream.beam_ew)):
+            for insb in range(len(stream.beam_ns)):
                 # Compute actual RA of samples per beam
-                ra_true = stream.ra - ha_beam[insb, ewb]
+                ra_true = ra - ha_beam[insb, iewb]
 
                 # Do alignment by evaluating the data and weight at the RAs
                 # given by the `ra` axis of the container. Do this using linear
                 # interpolation with cyclic wrapping in RA, taking into account
                 # uncertainties and flagged data.
-                (
-                    data_aligned[iewb, insb, :, :],
-                    weight_aligned[iewb, insb, :, :],
-                ) = _interpolation_linear(
+                data[iewb, insb], weight[iewb, insb] = _interpolation_linear(
                     x=ra_true,
-                    y=data[iewb, insb, :, :],
-                    w=weight[iewb, insb, :, :],
-                    xeval=stream.ra,
-                    mode="wrap",
-                    xperiod=360.0,
+                    y=data[iewb, insb],
+                    w=weight[iewb, insb],
+                    xeval=ra,
+                    mode="wrap" if full else "zero",
+                    xperiod=360.0 if full else None,
                 )
 
-        # Create output container; add data and weights
-        out = containers.HFBHighResRingMap(copy_from=stream)
-        out.data[:] = data_aligned
-        out.weight[:] = weight_aligned
+        stream.attrs["ew_beams_aligned"] = True
 
-        return out
+        return stream
 
 
 class HFBDifference(tasklib.base.ContainerTask):
@@ -1295,123 +1577,208 @@ class HFBDividePFB(tasklib.base.ContainerTask):
 class HFBDopplerShift(tasklib.base.ContainerTask):
     """Correct HFB data for Doppler shifts due to Earth's motion and rotation.
 
+    Each day is shifted with the Doppler shift at the source's transit on
+    that day, to the frame set by `reference`. A stack (with a csd axis) has
+    one shift per day; any other container counts as one day, at the transit
+    on the day in its 'lsd' attribute, or at `time_override`. If 'lsd' holds
+    several days (e.g. a stack averaged over csd), the mean of their shifts
+    is used.
+
+    The source position is taken from, in order:
+    1. the absorber catalog passed to `setup`, by the container's
+       'object_id' (or 'tag') attribute;
+    2. `source_ra` and `source_dec`;
+    3. `source_name` in `ch_util.hfbcat.HFBCatalog`;
+    4. the container's 'source_name' attribute in `ch_util.hfbcat.HFBCatalog`.
+
+    The attributes 'doppler_reference' and 'doppler_reference_velocity'
+    (km/s, positive toward the source) are set on the output, and a container
+    that already has them is rejected.
+
+
     Attributes
     ----------
-    source_name : str
-        Name of source, which should be in `ch_util.hfbcat.HFBCatalog`. If this is
-        not provided, the task will look for it in the input container attributes.
-    source_ra : float
-        Right ascension of the source in degrees, in case the source is not in
-        `ch_util.hfbcat.HFBCatalog`.
-    source_dec : float
-        Declination of the source in degrees, in case the source is not in
-        `ch_util.hfbcat.HFBCatalog`.
-    time_override : float
-        Unix time used to calculate Doppler shift, to override the time calculated
-    from the LSD and the RA of the source found in the container attributes.
+    reference : {"barycentric", "mean"}
+        Frame to shift to: the barycentric frame, or the mean Doppler shift
+        of the days (for checking the correction on days chosen with
+        HFBSelectDays' `doppler_side`). For a single day, "mean" leaves the
+        data unshifted. Default "barycentric".
+    source_name : str, optional
+        Name of the source in `ch_util.hfbcat.HFBCatalog`.
+    source_ra : float, optional
+        Right ascension of the source in degrees.
+    source_dec : float, optional
+        Declination of the source in degrees.
+    time_override : float, optional
+        Unix time used for the Doppler shift of a container without a csd
+        axis, instead of the transit on the day in its 'lsd' attribute.
     """
 
+    reference = config.enum(["barycentric", "mean"], default="barycentric")
     source_name = config.Property(proptype=str, default=None)
     source_ra = config.Property(proptype=float, default=None)
     source_dec = config.Property(proptype=float, default=None)
     time_override = config.Property(proptype=float, default=None)
 
-    source = None
-
-    def setup(self, observer=None):
+    def setup(self, catalog=None, observer=None):
         """Setup the HFBDopplerShift task.
 
         Parameters
         ----------
+        catalog : HFBAbsorberCatalog, optional
+            Catalog with the position of each source, by object_id. Used first if it has the source.
         observer : caput.time.Observer, optional
             Details of the observer, if not set default to CHIME.
         """
         # Set up the default Observer
         if observer is None:
             from ch_ephem.observers import chime as observer
-
         self.observer = observer
+
+        # RA and dec (deg) of each source in the absorber catalog, by object_id
+        self.catalog_pos = {}
+        if catalog is not None:
+            ids = map(str, catalog.index_map["object_id"])
+            radec = zip(catalog["position"]["ra"][:], catalog["position"]["dec"][:])
+            self.catalog_pos = dict(zip(ids, radec))
+
+        # Position given by the task's attributes, used for sources not in the catalog
+        if (self.source_ra is None) != (self.source_dec is None):
+            raise config.CaputConfigError(
+                "Give both source_ra and source_dec, or neither."
+            )
+        if self.source_ra is not None:
+            self.given_pos = (self.source_ra, self.source_dec)
+        elif self.source_name is not None:
+            src = HFBCatalog[self.source_name]
+            self.given_pos = (src.ra, src.dec)
+        else:
+            self.given_pos = None
 
     def process(self, stream):
         """Doppler shift a container with high-resolution HFB data.
 
         Parameters
         ----------
-        stream : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
-            Data with high-resolution frequency axis.
+        stream : HFBHighResRingMapStack, HFBHighResBeamAvgRingMapStack, HFBHighResRingMap,
+                 HFBHighResBeamAvgRingMap, HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+            Data with a high-resolution frequency axis.
 
         Returns
         -------
-        out : HFBHighResData, HFBHighResTimeAverage, HFBHighResSpectrum
+        out : same type as `stream`
             Doppler shifted data.
         """
-        # On the first pass, obtain a skyfield Star object of the source. This can
-        # either be retrieved from the HFB catalog (using the source name from the
-        # container attributes, unless manually overridden via the task's source_name
-        # attribute) or generated from the task's source_ra / source_dec attributes.
-        if not self.source:
-            if not self.source_ra and not self.source_dec:
-                if not self.source_name:
-                    self.source_name = stream.attrs["source_name"]
-                self.source = HFBCatalog[self.source_name].skyfield
-            elif self.source_ra and self.source_dec:
-                self.source = Star(
-                    ra=Angle(degrees=self.source_ra), dec=Angle(degrees=self.source_dec)
-                )
-            else:
-                raise RuntimeError(
-                    "Requires either a source name or both an RA and a Dec. "
-                    f"Got source name {self.source_name}, RA {self.source_ra}, "
-                    f"Dec {self.source_dec}"
-                )
+        if "doppler_reference" in stream.attrs:
+            raise RuntimeError(
+                "This stack is already Doppler shifted "
+                f"(reference {stream.attrs['doppler_reference']})."
+            )
 
-        # Obtain time used to compute Doppler correction from container LSD and source RA,
-        # unless an override is provided.
-        if self.time_override is not None:
-            time = self.time_override
+        # Source position: the absorber catalog, the task's attributes, or
+        # the container's 'source_name' attribute
+        key = str(stream.attrs.get("object_id", stream.attrs.get("tag")))
+        if key in self.catalog_pos:
+            ra, dec = self.catalog_pos[key]
+        elif self.given_pos is not None:
+            ra, dec = self.given_pos
+        elif "source_name" in stream.attrs:
+            src = HFBCatalog[stream.attrs["source_name"]]
+            ra, dec = src.ra, src.dec
         else:
-            if isinstance(stream.attrs["lsd"], list):
-                raise TypeError(
-                    f"Container includes multiple LSDs: {stream.attrs['lsd']} "
-                    "Use time_override to force Doppler correction."
-                )
-            lsd_float = stream.attrs["lsd"] + self.source.ra.hours / 24.0
-            time = self.observer.lsd_to_unix(lsd_float)
+            raise RuntimeError(
+                f"No position for source {key}: set source_ra and source_dec, or "
+                "source_name, or pass an absorber catalog that has it."
+            )
+        source = Star(ra=Angle(degrees=ra), dec=Angle(degrees=dec))
 
-        # Extract frequencies, data, and weights from input container.
-        freq_obs = stream.freq
-        data_obs = stream.hfb[:]
-        weight_obs = stream.weight[:]
+        # Times of each day: the transit on each csd of a stack, or the
+        # container's day(s) at transit, or time_override
+        axes = list(stream.hfb.attrs["axis"])
+        if "csd" in axes:
+            csd = np.asarray(stream.index_map["csd"], dtype=float)
+            times = [
+                np.array([t]) for t in _transit_doppler(csd, ra, dec, self.observer)[0]
+            ]
+        elif self.time_override is not None:
+            times = [np.array([self.time_override])]
+        else:
+            lsd = np.atleast_1d(np.asarray(stream.attrs["lsd"], dtype=float))
+            times = [_transit_doppler(lsd, ra, dec, self.observer)[0]]
 
-        # Obtain Doppler shifted frequencies.
-        freq_shifted = get_doppler_shifted_freq(
-            source=self.source,
-            date=time,
-            freq_rest=freq_obs,
-            obs=self.observer,
-        ).squeeze()
+        # Doppler factor (shifted / rest frequency) of the reference frame:
+        # barycentric (1), or the mean of the days
+        if self.reference == "mean":
+            factor_ref = np.mean(
+                [
+                    get_doppler_shifted_freq(source, list(t), 1.0, self.observer)[
+                        0
+                    ].mean()
+                    for t in times
+                ]
+            )
+        else:
+            factor_ref = 1.0
 
-        # Do Doppler shift by evaluating the data at the Doppler shifted frequencies
-        # using linear interpolation and moving these to the observed frequencies.
-        # Reverse frequency dimension, because the interpolation function requires
-        # ascending x arrays. Zero out data points that need to be extrapolated.
-        data_shifted, weight_shifted = _interpolation_linear(
-            x=freq_obs[::-1],
-            y=data_obs[::-1, ...],
-            w=weight_obs[::-1, ...],
-            xeval=freq_shifted[::-1],
-            mode="zero",
+        # Work one slice at a time along an axis other than freq: one day of a
+        # stack, or (for a single day) slices of el or another axis
+        if "csd" in axes:
+            dist_axis = "csd"
+        else:
+            dist_axis = "el" if "el" in axes else next(a for a in axes if a != "freq")
+        stream.redistribute(dist_axis)
+        out = empty_like(stream)
+        out.redistribute(dist_axis)
+
+        # Views with axes (dist_axis, freq, ...), for this rank's slices
+        move = ([axes.index(dist_axis), axes.index("freq")], [0, 1])
+        data = stream.hfb[:]
+        i0 = (
+            data.local_offset[axes.index(dist_axis)]
+            if isinstance(data, mpiarray.MPIArray)
+            else 0
+        )
+        d, w, data_out, weight_out = (
+            np.moveaxis(getattr(x, "local_array", x), *move)
+            for x in (data, stream.weight[:], out.hfb[:], out.weight[:])
         )
 
-        # Reverse back frequency dimension.
-        data_shifted = data_shifted[::-1, ...]
-        weight_shifted = weight_shifted[::-1, ...]
+        # The interpolation needs ascending frequencies
+        freq = np.asarray(stream.freq)
+        order = np.argsort(freq)
+        inv = np.argsort(order)
 
-        # Create container to hold output.
-        out = empty_like(stream)
+        for i in range(d.shape[0]):
+            # Times of this day: one day of a stack, or the container's day(s)
+            day_times = times[i0 + i] if len(times) > 1 else times[0]
 
-        out.hfb[:] = data_shifted
-        out.weight[:] = weight_shifted
+            # Doppler shifted frequencies, averaged over the times of the day,
+            # relative to the reference frame
+            freq_shifted = (
+                get_doppler_shifted_freq(
+                    source=source,
+                    date=list(day_times),
+                    freq_rest=freq[order],
+                    obs=self.observer,
+                ).mean(axis=1)
+                / factor_ref
+            )
+
+            # Evaluate the data at the shifted frequencies and move them to the
+            # observed ones. Extrapolated points get zero weight.
+            data_shifted, weight_shifted = _interpolation_linear(
+                x=freq[order],
+                y=d[i][order],
+                w=w[i][order],
+                xeval=freq_shifted,
+                mode="zero",
+            )
+            data_out[i], weight_out[i] = data_shifted[inv], weight_shifted[inv]
+
+        out.attrs["doppler_reference"] = self.reference
+        out.attrs["doppler_reference_velocity"] = (
+            (factor_ref - 1.0) * speed_of_light / 1e3
+        )
 
         return out
 
