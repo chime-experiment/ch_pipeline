@@ -3646,6 +3646,10 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
                     "flash_block_frac", "flash_grow_dt", "flash_apply"):  # fmt: skip
             diag.attrs[key] = getattr(self, key)
         diag.attrs["flash_block_rows"] = flash_rows
+        # Compressed datasets need collective IO, which caput only uses when every rank
+        # has part of the distributed axis; there are fewer bands than ranks, so write
+        # them distributed over the longer of the sample and row axes.
+        diag.redistribute("ra" if len(ra) >= len(el) else "el")
         name = self.flash_output_name.format(**self._interpolation_dict(out, 0))
         name = os.path.expandvars(os.path.expanduser(name))
         self.log.info(f"Writing the flash diagnostics to {name}.")
