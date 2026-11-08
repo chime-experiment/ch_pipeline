@@ -1927,6 +1927,22 @@ class TransientCandidateCutouts(FreqContainer):
             "initialise": True,
             "distributed": False,
         },
+        # Every band across telescope-x at the candidate's row and start (with
+        # ExtractCandidateCutouts x_slice); the x axis is added with them
+        "x_amplitude": {
+            "axes": ["candidate", "pol", "freq", "x"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
+        "x_weight": {
+            "axes": ["candidate", "pol", "freq", "x"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "candidate",
+        },
         "el_index": {
             "axes": ["candidate", "el_offset"],
             "dtype": np.int64,
@@ -2304,6 +2320,55 @@ class TransientCandidateTable(TableSpec):
                 ["win_fpos", np.float32],
                 ["win_t", np.float32],
                 ["win_top2", np.float32],
+                # The largest single sample in the window, and the smallest within
+                # nside samples before and after it over that peak
+                ["win_peak", np.float32],
+                ["win_dip_pre", np.float32],
+                ["win_dip_post", np.float32],
+                # The telescope-x index of the track at the peak sample (the centre of
+                # x_profile), and the shape of the single-sample image at the
+                # candidate's telescope-x: the most negative value of the profile in
+                # telescope-y at the peak sample over the peak, the share of the power
+                # of the window's image in its first singular vector, and the robust
+                # scatter of the row away from the window over the peak
+                ["win_peak_x", np.int16],
+                ["win_ns_wing", np.float32],
+                ["win_rank1", np.float32],
+                ["win_row_rms", np.float32],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "grouping": {
+            "columns": [
+                # Whether the old single box of GroupTransientCandidates
+                # (sidelobe_dy for the peak and the merge) would also have kept the
+                # candidate (the sifter's neighbour counts can use only those)
+                ["coarse_peak", bool],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "source": {
+            "columns": [
+                # The source of each candidate (SiftTransientCandidates with
+                # count_sources): candidates at one inferred sky position and
+                # telescope-y, the number of them, and the source it may be an
+                # east-west grating-lobe alias of (-1 if none)
+                ["source_id", np.int32],
+                ["source_nburst", np.int16],
+                ["source_alias", np.int32],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        "reference": {
+            "columns": [
+                # I (attrs ref_pol) at a polarised candidate's place, start and
+                # duration, the weighted mean over the bands, and its noise
+                # (AddCandidateSpectra with ref_pol)
+                ["ref_amp", np.float32],
+                ["ref_err", np.float32],
             ],
             "axis": "candidate",
             "initialise": False,
@@ -2325,6 +2390,14 @@ class TransientCandidateTable(TableSpec):
         },
         "spectrum_weight": {
             "axes": ["candidate", "freq"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": False,
+        },
+        # The single-sample S/N (bands combined) across telescope-x at the candidate's
+        # row and peak sample (AddWindowStats); the x axis is added with it
+        "x_profile": {
+            "axes": ["candidate", "x"],
             "dtype": np.float32,
             "initialise": False,
             "distributed": False,
@@ -2745,3 +2818,63 @@ def make_empty_corrdata(
     dset[:] = 0.0
 
     return data
+
+
+class RFIFlashDiagnostics(FreqContainer, SiderealContainer):
+    """The lit pixels of FlagMovingRFI and its flash test, band by band.
+
+    For each band (the frequency axis holds the centre and width of each band),
+    row (``el``) and sample: ``lit``, the pixels lit by the band power (above the
+    |S/N| threshold, the relative cut and the sky-scale limit of
+    :class:`ch_pipeline.analysis.transients.FlagMovingRFI`), and ``valid``, those
+    with data.  For each band and sample: ``nblock``, the number of blocks of rows
+    lit, and ``flash``, whether that is a flash at the task's thresholds (applied
+    to the mask or only recorded, see its ``flash_apply``).  With ``lit`` and
+    ``valid``, other thresholds and block sizes can be tried offline.  Distributed
+    over bands.
+    """
+
+    _axes = ("el",)
+
+    _dataset_spec: ClassVar = {
+        "lit": {
+            "axes": ["freq", "el", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 128, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "valid": {
+            "axes": ["freq", "el", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+            "chunks": (1, 128, 1024),
+            "compression": COMPRESSION,
+            "compression_opts": COMPRESSION_OPTS,
+        },
+        "nblock": {
+            "axes": ["freq", "ra"],
+            "dtype": np.int16,
+            "initialise": True,
+            "distributed": False,
+        },
+        "flash": {
+            "axes": ["freq", "ra"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": False,
+        },
+    }
+
+    @property
+    def lit(self):
+        return self.datasets["lit"]
+
+    @property
+    def valid(self):
+        return self.datasets["valid"]

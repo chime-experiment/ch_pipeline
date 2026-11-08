@@ -2,6 +2,7 @@
 
 import inspect
 import json
+import os
 import time
 from typing import ClassVar
 
@@ -3350,6 +3351,23 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     the lit pixels there, within ``line_dy`` and ``head_dt`` samples of the head,
     are flagged too, and grown like the tracks.
 
+    Flashes (with ``flash_nblock`` above zero): RFI that lights every row at once
+    for a sample, in a few bands (e.g. 419-431 MHz on 2418: 38 samples with 229
+    candidates spread over most of telescope-y), is often too patchy for the line
+    test, since a 6 MHz band reaches only a few sigma per row.  In each band the rows
+    are cut into blocks ``flash_block_dy`` long in telescope-y (about the extent of a
+    bright source in one band), and a block is lit at a sample if at least
+    ``flash_block_frac`` of its rows with data are lit.  Where ``flash_nblock`` or
+    more blocks are lit at the same sample, the band is flagged there in every row,
+    grown by ``flash_grow_dt`` samples.  A source lights its own block (and at most a
+    block at its north-south alias), so it can't do this; noise lights a block with
+    a probability of ~1e-3, so ``flash_nblock`` blocks at once essentially never.
+    The thresholds are not yet tuned on real data: with ``flash_apply`` False the
+    flashes are found and logged but not flagged, and with ``flash_output_name`` the
+    lit pixels, the pixels with data, the number of lit blocks and the flashes of
+    every band are written to that file (an :class:`RFIFlashDiagnostics`), so that
+    other thresholds can be tried offline.
+
     The output is a mask with one entry per band (its frequency axis holds the
     centre and width of each band), shared by the polarisations and baselines.
     :class:`EstimateSkyNoise` and :class:`TransientMatchedFilterSkyNoise` take it
@@ -3405,6 +3423,20 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
         lit.  Zero turns the limit off.  Default is 3.
     nsample_chunk : int
         Approximate number of samples averaged at once.  Default is 65536.
+    flash_nblock : int
+        Least number of lit blocks at one sample for a flash.  Zero turns flashes
+        off.  Default is 0.
+    flash_block_dy : float
+        Length of the blocks in telescope-y.  Default is 0.033 (20 rows).
+    flash_block_frac : float
+        Least fraction of a block's rows with data that are lit.  Default is 0.25.
+    flash_grow_dt : int
+        Samples flagged on either side of a flash.  Default is 1.
+    flash_apply : bool
+        Flag the flashes (else only find and record them).  Default is True.
+    flash_output_name : str
+        File for the flash diagnostics (formatted like ``output_name``, e.g. with
+        ``{tag}``).  Default is None (not written).
     """
 
     pol = config.list_type(str, default=["XX", "YY"])
@@ -3427,6 +3459,14 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
     local_window = config.Property(proptype=int, default=30)
     sky_scale_max = config.Property(proptype=float, default=3.0)
     nsample_chunk = config.Property(proptype=int, default=65536)
+    flash_nblock = config.Property(proptype=int, default=0)
+    flash_block_dy = config.Property(proptype=float, default=0.033)
+    flash_block_frac = config.Property(proptype=float, default=0.25)
+    flash_grow_dt = config.Property(proptype=int, default=1)
+    flash_apply = config.Property(proptype=bool, default=True)
+    flash_output_name = config.Property(
+        proptype=lambda v: None if v is None else str(v), default=None
+    )
 
     def process(self, stream):
         """Flag the moving RFI.
@@ -3486,6 +3526,15 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             (2 * round(self.grow_dy / dy) + 1, 2 * self.grow_dt + 1), dtype=bool
         )
         flag = np.zeros(Z.shape, dtype=bool)
+        nflash = np.zeros(Z.shape[0], dtype=int)
+        flash_rows = max(1, round(self.flash_block_dy / dy))
+        diag = self.flash_output_name is not None
+        count_blocks = diag or self.flash_nblock > 0
+        nblock = np.zeros((Z.shape[0], Z.shape[2]), dtype=np.int16)
+        flashes = np.zeros((Z.shape[0], Z.shape[2]), dtype=bool)
+        if diag:
+            lit_all = np.zeros(Z.shape, dtype=bool)
+            valid_all = nz > 0
         t0 = time.time()
         for bb in range(Z.shape[0]):
             valid = nz[bb] > 0
@@ -3505,6 +3554,18 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             flag[bb] = _line_mask(lit, valid, lines, self.lit_frac)
             if flag[bb].any():
                 flag[bb] = scipy.ndimage.binary_dilation(flag[bb], structure=grow)
+            if count_blocks:
+                nblock[bb] = _flash_block_counts(
+                    lit, valid, flash_rows, self.flash_block_frac
+                )
+                if self.flash_nblock > 0:
+                    flashes[bb] = nblock[bb] >= self.flash_nblock
+                    nflash[bb] = flashes[bb].sum()
+                    if self.flash_apply and flashes[bb].any():
+                        grown = _grow_1d(flashes[bb], self.flash_grow_dt, periodic)
+                        flag[bb][:, grown] = True
+                if diag:
+                    lit_all[bb] = lit
             Z[bb] = zs
         self.log.debug(f"Searched for tracks in {time.time() - t0:0.1f} seconds.")
 
@@ -3542,8 +3603,53 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             )
             + "."
         )
+        if self.flash_nblock > 0:
+            nflash = np.concatenate(self.comm.allgather(nflash))
+            top = np.argsort(nflash)[::-1][:5]
+            self.log.info(
+                f"Flashes ({'flagged' if self.flash_apply else 'recorded only'}): "
+                f"{nflash.sum()} band samples lit in {self.flash_nblock} or more "
+                "blocks of telescope-y; most in "
+                + ", ".join(
+                    f"{band_map['centre'][bb]:0.1f} MHz ({nflash[bb]})" for bb in top
+                )
+                + "."
+            )
+            out.attrs["flash_nblock"] = self.flash_nblock
+            out.attrs["flash_block_dy"] = self.flash_block_dy
+            out.attrs["flash_block_frac"] = self.flash_block_frac
+            out.attrs["flash_grow_dt"] = self.flash_grow_dt
+            out.attrs["flash_apply"] = self.flash_apply
+            out.attrs["flash_count"] = nflash
+        if diag:
+            self._write_flash_diagnostics(
+                out, band_map, ra, el, lit_all, valid_all, nblock, flashes, flash_rows
+            )
 
         return out
+
+    def _write_flash_diagnostics(
+        self, out, band_map, ra, el, lit, valid, nblock, flashes, flash_rows
+    ):
+        """Write the lit pixels and the flashes of every band (see the class)."""
+        diag = containers.RFIFlashDiagnostics(
+            freq=band_map, ra=ra, el=el, attrs_from=out, distributed=True, comm=self.comm
+        )
+        loc = diag.lit[:]
+        if loc.local_shape[0] != lit.shape[0]:
+            raise RuntimeError("The diagnostics are not distributed like the bands.")
+        loc.local_array[:] = lit
+        diag.valid[:].local_array[:] = valid
+        diag.datasets["nblock"][:] = np.concatenate(self.comm.allgather(nblock))
+        diag.datasets["flash"][:] = np.concatenate(self.comm.allgather(flashes))
+        for key in ("snr_lit", "rel", "sky_scale_max", "flash_nblock", "flash_block_dy",
+                    "flash_block_frac", "flash_grow_dt", "flash_apply"):  # fmt: skip
+            diag.attrs[key] = getattr(self, key)
+        diag.attrs["flash_block_rows"] = flash_rows
+        name = self.flash_output_name.format(**self._interpolation_dict(out, 0))
+        name = os.path.expandvars(os.path.expanduser(name))
+        self.log.info(f"Writing the flash diagnostics to {name}.")
+        self.write_output(name, diag, file_format=self.output_format)
 
     def _flag_heads(self, zs, nz, flag, L, grow, z_lit, z_band, dy):
         """Flags for the heads attached to the tracks.
@@ -3657,6 +3763,44 @@ class FlagMovingRFI(_BandMixin, tasklib.base.ContainerTask):
             if out[bb].any():
                 out[bb] = scipy.ndimage.binary_dilation(out[bb], structure=grow)
         return out
+
+
+def _grow_1d(mask, n, periodic):
+    """``mask`` grown by ``n`` entries either way (wrapping round if ``periodic``)."""
+    out = mask.copy()
+    for d in range(1, max(int(n), 0) + 1):
+        if periodic:
+            out |= np.roll(mask, d) | np.roll(mask, -d)
+        else:
+            out[d:] |= mask[:-d]
+            out[:-d] |= mask[d:]
+    return out
+
+
+def _flash_block_counts(lit, valid, block_rows, block_frac):
+    """The number of blocks of rows lit at each sample.
+
+    ``lit`` and ``valid`` are [row, sample].  The rows are cut into consecutive
+    blocks of ``block_rows`` (the last one shorter); a block is lit at a sample if
+    at least half of its rows have data and at least ``block_frac`` of those are
+    lit.
+
+    Returns
+    -------
+    count : np.ndarray[sample] of int
+    """
+    nrow = lit.shape[0]
+    starts = np.arange(0, nrow, block_rows)
+    nlit = np.add.reduceat(lit.astype(np.int32), starts, axis=0)
+    nval = np.add.reduceat(valid.astype(np.int32), starts, axis=0)
+    size = np.diff(np.append(starts, nrow))[:, np.newaxis]
+    on = (nval * 2 >= size) & (nval > 0) & (nlit >= block_frac * nval)
+    return on.sum(axis=0)
+
+
+def _flash_columns(lit, valid, block_rows, block_frac, nblock):
+    """The samples where ``nblock`` or more blocks of rows are lit at once."""
+    return _flash_block_counts(lit, valid, block_rows, block_frac) >= nblock
 
 
 def _flag_pieces(mask, min_rows, nend=5):
@@ -6291,9 +6435,23 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     ``YX ~ (U - iV) e^{-i phi}``, so ``e^{-i phi_b} (N_XY + conj N_YX)`` has U in
     its real and V in its imaginary part (YX is conjugated, which leaves the
     response and the coupling unchanged).
-    Q has the sky term of the polarisation difference; U and V have no sky term
-    (the unpolarised sky does not reach them except by leakage, which the in-band
-    scale measures).
+    Q has the sky term of the polarisation difference.  U and V see the sky only
+    through leakage, but near a bright source that leaked flux scintillates with
+    the source: their weights already include ``kappa_tot^2 |S_k|^2`` of the cross
+    products' own unfiltered visibilities, and their variance the incoherent term;
+    the coherent term is formed from the unfiltered XY and YX in the same way, with
+    the modulation ``a u`` common to the products (``a`` as for I).  For one band
+    the sky part of C is ``a e^{-i phi} (u A + conj(u) B)``, with ``A`` and ``B`` the
+    coherent numerators of XY and of conj YX; with ``u = (r1 + i r2) / sqrt 2`` it is
+    ``r1 P + r2 M``, ``P = a e^{-i phi} (A + B) / sqrt 2`` and ``M = i a e^{-i phi}
+    (A - B) / sqrt 2``, so U (the real part) has the coherent variance
+    ``(sum c Re P)^2 + (sum c Re M)^2`` and V the same with the imaginary parts.
+    These are carried as ``sqrt 2 (Re P + i Re M)`` and ``sqrt 2 (Im P + i Im M)``,
+    whose half squared modulus is that variance, so the band sums are those of I.
+    The term only changes the variance of U and V, not their numerators or
+    weights, so L, which takes Q and U's numerators with its own variance (Q's sky
+    term at each RM, none for U), is unchanged.  With ``rm_centre``, U is rotated
+    with Q and gets no coherent term.
 
     The trials then have the polarisations I, V and L:
 
@@ -6620,8 +6778,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             self.log.info(
                 f"Processing the elevations in {npass} passes of up to {el_pass}."
             )
-        # With stokes, only I and Q have a sky term
-        nsky = 2 if self.stokes else ngp
+        # With stokes, the coherent sky term of I, Q, and of C's real (U) and
+        # imaginary (V) parts; the term uncorrelated between XX and YY for I and Q
+        nsky = 4 if self.stokes else ngp
+        nsky_minus = 2 if self.stokes else ngp
         two_pol = self.stokes or any(len(g) == 2 for g in pgroups)
 
         pbeam *= visible[el_slc][np.newaxis, np.newaxis]
@@ -6661,11 +6821,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         if self.stokes:
             bsrc = [(0, 0), (1, 0), (2, 0), (2, 1)]  # I, Q, U, V
             # All bands: (output, group, swap the real and imaginary parts)
-            srcs = [(0, 0, False), (1, 2, True)]  # I, and V from C
+            srcs = [(0, 0, False, None), (1, 2, True, 3)]  # I, and V from C
             rtot = np.zeros(nband, dtype=np.float64)
         else:
             bsrc = [(gg, 0) for gg in range(ngp)]
-            srcs = [(gg, gg, False) for gg in range(ngp)]
+            srcs = [(gg, gg, False, None) for gg in range(ngp)]
         allb = np.arange(nband)
 
         def valid_w(W):
@@ -6710,9 +6870,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     im, _ = self._amp_weight(ni, rs, vr)
                     timag[op, iwd, ia, ee] = im.T
 
-        def combine(gg, le, sb):
+        def combine(gg, le, sb, sky_idx=None):
             return self._combine(
-                gg, le, allb, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus
+                gg, le, allb, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus,
+                sky_idx,
             )
 
         _log_memory(self, "matched filter, before the passes")
@@ -6731,7 +6892,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             resp = np.zeros(shp, dtype=np.float32)
             vinc = np.zeros(shp, dtype=np.float32)
             vplus = np.zeros((nsky, *shp[1:]), dtype=np.complex64)
-            vminus = np.zeros((nsky, *shp[1:]), dtype=np.complex64) if two_pol else None
+            vminus = (
+                np.zeros((nsky_minus, *shp[1:]), dtype=np.complex64) if two_pol else None
+            )
             vrot = None
             if self.stokes and self._rm_centre != 0.0:
                 vrot = np.zeros((4, *shp[1:]), dtype=np.complex64)
@@ -6953,10 +7116,18 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             for op, (gg, part) in enumerate(bsrc):
                 for bb in range(nband):
                     vs = None
-                    for vv in (vplus, vminus):
-                        if vv is not None and gg < vv.shape[0]:
-                            vs = 0.0 if vs is None else vs
-                            vs = vs + 0.5 * np.abs(vv[gg, bb]) ** 2
+                    if self.stokes and gg == 2:
+                        # C: the coherent term of its real (U) or imaginary (V) part
+                        terms = [vplus[2 + part, bb]]
+                    else:
+                        terms = [
+                            vv[gg, bb]
+                            for vv in (vplus, vminus)
+                            if vv is not None and gg < vv.shape[0]
+                        ]
+                    for tv in terms:
+                        vs = 0.0 if vs is None else vs
+                        vs = vs + 0.5 * np.abs(tv) ** 2
                     var = 0.5 * vinc[gg, bb] if vs is None else 0.5 * vinc[gg, bb] + vs
                     nm = numer[gg, bb] if part == 0 else numer_im[gg, bb]
                     amp, wgt = self._amp_weight(nm, resp[gg, bb], var)
@@ -6997,8 +7168,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 sb = scale[:, ia]
                 for le in range(npe):
                     ee = p0 + le
-                    for op, gg, swap in srcs:
-                        nm, rs, vr, ni, vs = combine(gg, le, sb)
+                    for op, gg, swap, sky_idx in srcs:
+                        nm, rs, vr, ni, vs = combine(gg, le, sb, sky_idx)
                         if swap:
                             nm, ni = ni, nm
                         write(
@@ -7016,7 +7187,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     _, rsq, vrq, _, _ = self._combine(
                         1, le, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
                     )
-                    _, rsc, vrc, _, _ = combine(2, le, sb)
+                    _, rsc, vrc, _, _ = self._combine(
+                        2, le, allb, sb, lam, qvec, numer, None, resp, vinc, None, None
+                    )
                     dq = per_duration(ia, ee, le, 1, None, rsq, vrq, None)
                     dc = per_duration(ia, ee, le, 2, None, rsc, vrc, None)
                     rv = [
@@ -7186,7 +7359,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             def kmat(a, p=pp):
                 return a[p].reshape(-1, *a.shape[3:]).transpose(1, 0, 2)  # el, k, ra
 
-            vp = np.matmul(tch, kmat(ws)) if name in ("XX", "YY") else None
+            vp = np.matmul(tch, kmat(ws))
             single[name] = (
                 np.matmul(tch, kmat(wd)),
                 np.matmul(g2, kmat(wr)),
@@ -7228,13 +7401,23 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         vplus[1, bb, esl] = (fx * px - fy * py) * a
         vminus[1, bb, esl] = (fx * px + fy * py) * b
 
-        nxy, rxy, vxy, _ = single["XY"]
-        nyx, ryx, vyx, _ = single["YX"]
-        n = np.exp(-1.0j * phi) * (nxy + nyx.conj())
+        nxy, rxy, vxy, pxy = single["XY"]
+        nyx, ryx, vyx, pyx = single["YX"]
+        ph = np.exp(-1.0j * phi)
+        n = ph * (nxy + nyx.conj())
         numer[2, bb, esl] = n.real
         numer_im[2, bb, esl] = n.imag
         resp[2, bb, esl] = rxy + ryx
         vinc[2, bb, esl] = vxy + vyx
+        # The coherent sky term of C (see the class docstring): U and V parts
+        if vplus.shape[0] > 3:
+            cb = pyx.conj()
+            pp_ = (a / np.sqrt(2.0)) * ph * (pxy + cb)
+            mm_ = (1.0j * a / np.sqrt(2.0)) * ph * (pxy - cb)
+            vplus[2, bb, esl] = (
+                0.0 if theta is not None else np.sqrt(2.0) * (pp_.real + 1.0j * mm_.real)
+            )
+            vplus[3, bb, esl] = np.sqrt(2.0) * (pp_.imag + 1.0j * mm_.imag)
 
         if theta is not None:
             # Q' = sum_k (Q_k cos + U_k sin), U' = sum_k (U_k cos - Q_k sin); the
@@ -7593,13 +7776,15 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
     @staticmethod
     def _combine(
-        gg, ee, idx, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus
+        gg, ee, idx, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus,
+        sky_idx=None,
     ):
         """Sum the bands ``idx`` with weights ``sb`` at one elevation.
 
         Returns the real and imaginary numerator, the response and the variance of
         the real part, each [x, ra], and the part of that variance from the coherent
-        sky term (None if ``gg`` has none).
+        sky term (None if ``gg`` has none).  With ``sky_idx``, the coherent term is
+        ``vplus[sky_idx]`` alone (C's parts in the Stokes search).
         """
         s = sb[idx].astype(np.float64)
         nm = np.tensordot(s, numer[gg, idx, ee], axes=1)
@@ -7612,10 +7797,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         var = np.tensordot(s**2, vinc[gg, idx, ee], axes=1)
         coeff = (s[:, np.newaxis] * qvec) * np.sqrt(lam)[np.newaxis, :]  # band, mode
         vsky = None
-        for vv in (vplus, vminus):
-            if vv is None or gg >= vv.shape[0]:
-                continue
-            y = np.tensordot(coeff.T.astype(np.complex64), vv[gg, idx, ee], axes=1)
+        if sky_idx is not None:
+            sources = [vplus[sky_idx]] if vplus is not None else []
+        else:
+            sources = [
+                vv[gg] for vv in (vplus, vminus) if vv is not None and gg < vv.shape[0]
+            ]
+        for vg in sources:
+            y = np.tensordot(coeff.T.astype(np.complex64), vg[idx, ee], axes=1)
             vsky = 0.0 if vsky is None else vsky
             vsky = vsky + np.sum(np.abs(y) ** 2, axis=0)
         if vsky is None:
@@ -8915,7 +9104,9 @@ class FitPolarisationCalibrators(tasklib.base.ContainerTask):
     min_bands : int
         Least number of bands for a fit.  Default is 8.
     rm_fit_max : float
-        Largest |RM| of the fit in rad/m^2.  Default is 200.
+        Largest |RM| of the fit in rad/m^2.  Default is 300, the range of the RM
+        search, which covers the default calibrators (B2111+46 is at -222).  A
+        calibrator whose catalogued |RM| is not below it is fitted with a warning.
     delay_max : float
         Largest |residual delay| in ns.  Default is 5.
     """
@@ -8925,7 +9116,7 @@ class FitPolarisationCalibrators(tasklib.base.ContainerTask):
     x_max = config.Property(proptype=float, default=0.02)
     frac_noise_max = config.Property(proptype=float, default=0.2)
     min_bands = config.Property(proptype=int, default=8)
-    rm_fit_max = config.Property(proptype=float, default=200.0)
+    rm_fit_max = config.Property(proptype=float, default=300.0)
     delay_max = config.Property(proptype=float, default=5.0)
 
     def process(self, bands):
@@ -8959,6 +9150,13 @@ class FitPolarisationCalibrators(tasklib.base.ContainerTask):
         else:
             raise ValueError(f"Need I, Q, U, V or the four products, not {pol}.")
         ip = [pol.index(p) for p in need]
+        for cal in self.calibrators:
+            if abs(float(cal["rm"])) >= self.rm_fit_max:
+                self.log.warning(
+                    f"{cal['name']}: catalogued RM {float(cal['rm']):+.1f} is outside the "
+                    f"fit (|RM| < rm_fit_max = {self.rm_fit_max:g}); its RM, offset and "
+                    "amplitude are unreliable."
+                )
         durations = list(bands.index_map["duration"][:])
         if 1 not in durations:
             raise ValueError("The per-band output must have single samples.")
@@ -10103,6 +10301,52 @@ def _local_peaks(img, nrow, ncol, threshold):
     return rows[order], cols[order]
 
 
+def _merge_sidelobes(rows, cols, dur, img, nrow, slack, frac, add):
+    """Drop the peaks that the sidelobes of a brighter overlapping peak explain.
+
+    A peak is dropped if, within +-``nrow`` rows, a brighter peak that is kept has a
+    trial [t, t + W), widened by ``slack`` samples each side, that overlaps its own,
+    and its S/N is at most ``frac`` times that peak's plus ``add``.
+
+    Parameters
+    ----------
+    rows, cols : np.ndarray[int]
+        Peaks, sorted by decreasing value.
+    dur : np.ndarray[int]
+        Duration in samples of the best trial at each pixel.
+    img : np.ndarray[float]
+        S/N map.
+    nrow, slack : int
+        Half-width in rows, and the extra samples either side.
+    frac, add : float
+        The sidelobe allowance.
+
+    Returns
+    -------
+    rows, cols : np.ndarray[int]
+        The peaks kept, in the same order.
+    """
+    if rows.size == 0:
+        return rows, cols
+    nr, nc = dur.shape
+    w = np.maximum(dur[rows, cols].astype(int), 1)
+    parent = np.full((nr, nc + 1), -np.inf, dtype=np.float64)  # brightest kept peak
+    keep = np.zeros(rows.size, dtype=bool)
+    for k in range(rows.size):
+        e, t = rows[k], cols[k]
+        snr = float(img[e, t])
+        best = parent[e, t : t + w[k]].max(initial=-np.inf)
+        if np.isfinite(best) and snr <= frac * best + add:
+            continue
+        keep[k] = True
+        reg = parent[
+            max(e - nrow, 0) : e + nrow + 1,
+            max(t - slack, 0) : min(t + w[k] + slack, nc),
+        ]
+        np.maximum(reg, snr, out=reg)
+    return rows[keep], cols[keep]
+
+
 def _merge_overlapping(rows, cols, dur, nrow, slack):
     """Drop the peaks whose trial overlaps that of a brighter peak.
 
@@ -10228,6 +10472,21 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     +-``peak_dy`` (a long pulse lights trials over a range of start times).  So a
     pulse and the sidelobes of the synthesized beam at the same time are one
     candidate, while pulses at different times stay separate.
+
+    With ``sidelobe_dy`` set (larger than ``peak_dy``), ``peak_dy`` is the core
+    (about the north-south beam) and a peak between ``peak_dy`` and ``sidelobe_dy``
+    of a brighter peak, with overlapping trials, is merged into it only if it is no
+    brighter than the beam's sidelobes allow: S/N at most ``sidelobe_frac`` times
+    the brighter peak's plus ``sidelobe_snr``.  Otherwise it is a candidate of its
+    own.  The north-south beam (triangular weighting) is below 0.028 of its peak
+    beyond 0.008 in telescope-y and below 0.008 beyond 0.02, band-averaged (0.047 at
+    the worst single frequency); the old single box of 0.02 merged separate events
+    at other telescope-x 0.01-0.02 away (~3% of the injected pulses on the f(W)
+    pilots, notes/grouping_review_2026-11-08.md).  The ``grouping`` table then
+    marks the candidates that the old single box (``sidelobe_dy`` for both the peak
+    and the merge) would also have kept, ``coarse_peak``: the sifter's neighbour
+    counts can use only those (see its ``coarse_neighbours``), since the finer
+    peaks make every region look more crowded than the thresholds were set for.
     For each candidate the output table has (columns of the ``candidate`` table):
 
     - Position and best trial: ``el_index``, ``ra_index``, ``x_index``, ``y``
@@ -10307,6 +10566,13 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     peak_dt : int
         Half-width in samples within which a candidate is the largest peak.
         Default is 3.
+    sidelobe_dy : float
+        Half-width in telescope-y of the merge of sidelobes into a brighter peak.
+        Default is None (``peak_dy`` alone, the old behaviour).
+    sidelobe_frac, sidelobe_snr : float
+        A peak within ``sidelobe_dy`` is merged if its S/N is at most
+        ``sidelobe_frac`` times that of the brighter peak plus ``sidelobe_snr``.
+        Defaults are 0.05 and 3.
     grow_snr : float
         Threshold of the island around a candidate.  Default is 5.
     box_dy, box_dra : float
@@ -10372,6 +10638,11 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
     seed_snr = config.Property(proptype=float, default=8.0)
     peak_dy = config.Property(proptype=float, default=0.02)
     peak_dt = config.Property(proptype=int, default=3)
+    sidelobe_dy = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    sidelobe_frac = config.Property(proptype=float, default=0.05)
+    sidelobe_snr = config.Property(proptype=float, default=3.0)
     grow_snr = config.Property(proptype=float, default=5.0)
     box_dy = config.Property(proptype=float, default=0.1)
     box_dra = config.Property(proptype=float, default=2.0)
@@ -10505,11 +10776,28 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         de = max(1, round(self.peak_dy / dy))
         pe, pt = _local_peaks(img, de, self.peak_dt, self.seed_snr)
         pe, pt = _merge_overlapping(pe, pt, dur, de, self.peak_dt)
+        coarse = None
+        if self.sidelobe_dy is not None and self.sidelobe_dy > self.peak_dy:
+            n0 = pe.size
+            dco = max(de, round(self.sidelobe_dy / dy))
+            pe, pt = _merge_sidelobes(
+                pe, pt, dur, img, dco, self.peak_dt, self.sidelobe_frac, self.sidelobe_snr
+            )
+            self.log.info(
+                f"Merged {n0 - pe.size} of {n0} peaks into brighter peaks within "
+                f"{self.sidelobe_dy} in telescope-y as sidelobes."
+            )
+            ce_, ct_ = _local_peaks(img, dco, self.peak_dt, self.seed_snr)
+            ce_, ct_ = _merge_overlapping(ce_, ct_, dur, dco, self.peak_dt)
+            cset = set(zip(ce_.tolist(), ct_.tolist()))
+            coarse = np.array([(a, b) in cset for a, b in zip(pe.tolist(), pt.tolist())])
         if pe.size > self.max_candidates:
             self.log.warning(
                 f"Keeping the brightest {self.max_candidates} of {pe.size} candidates."
             )
             pe, pt = pe[: self.max_candidates], pt[: self.max_candidates]
+            if coarse is not None:
+                coarse = coarse[: self.max_candidates]
         ncand = pe.size
         nfine = max(1, round(self.row_peak_dra / dra))
         fe, ft = _local_peaks(img, 1, nfine, self.row_snr)
@@ -10555,14 +10843,22 @@ class GroupTransientCandidates(tasklib.base.ContainerTask):
         rec["band_nsig"] = -1
         out.attrs["lsd"] = lsd
         out.attrs["pol"] = _decode_names(cand.index_map["pol"][:])[pp]
+        out.attrs["sidelobe_dy"] = "none" if self.sidelobe_dy is None else self.sidelobe_dy
         for key in (
-            "seed_snr", "peak_dy", "peak_dt", "grow_snr", "join_dy", "join_dt",
+            "seed_snr", "peak_dy", "peak_dt", "sidelobe_frac", "sidelobe_snr",
+            "grow_snr", "join_dy", "join_dt",
             "ext_frac", "row_snr", "row_ratio", "row_dy", "row_dra", "col_snr",
             "group_snr_min", "cat_ddec", "cat_dra",
         ):  # fmt: skip
             out.attrs[key] = getattr(self, key)
         if self.catalogue:
             out.attrs["catalogue"] = self.catalogue
+
+        if coarse is not None:
+            out.add_dataset("grouping")
+            gv = np.zeros(ncand, dtype=out.datasets["grouping"][:].dtype)
+            gv["coarse_peak"] = coarse
+            out.datasets["grouping"][:] = gv
 
         if ncand == 0:
             self.log.info("No candidates.")
@@ -10816,6 +11112,37 @@ def _candidate_positions(table, bands, match_duration=True, duration=1):
     return rec["el_index"].astype(int), tb, rec["x_index"].astype(int), wc
 
 
+def _band_x_slices(bands, pol, e, t):
+    """Amplitude and weight of each band across telescope-x, single samples.
+
+    For candidate k, row ``e[k]`` and sample ``t[k]`` of the duration-1 output, at
+    every telescope-x; zero where the row is on another rank or the sample is
+    outside the map (sum over ranks to complete them).
+
+    Returns
+    -------
+    amp, wgt : np.ndarray[ncand, freq, x]
+    """
+    durations = [int(d) for d in bands.index_map["duration"][:]]
+    idur = durations.index(1)
+    la, lw = bands.amplitude[:], bands.weight[:]
+    off, nloc = la.local_offset[3], la.local_shape[3]
+    nra = bands.index_map["ra"][:].size
+    periodic = _is_full_day(bands.index_map["ra"][:])
+    nf, nx = la.local_shape[2], la.local_shape[5]
+    amp = np.zeros((len(e), nf, nx), dtype=np.float64)
+    wgt = np.zeros_like(amp)
+    for k in range(len(e)):
+        if not off <= e[k] < off + nloc:
+            continue
+        tt = int(t[k]) % nra if periodic else int(t[k])
+        if not 0 <= tt < nra:
+            continue
+        amp[k] = la.local_array[pol, idur, :, e[k] - off, tt, :]
+        wgt[k] = lw.local_array[pol, idur, :, e[k] - off, tt, :]
+    return amp, wgt
+
+
 def _band_cutouts(bands, pol, e, tb, xi, wc, row_off, time_off):
     """Amplitude and weight of each band around candidates, from this rank's rows.
 
@@ -11054,6 +11381,13 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     projection; for a source at the right RM it is |P| in each band (less the
     depolarisation within the band).
 
+    With ``ref_pol`` (the index of I in the bands), the ``reference`` table gets the
+    flat-spectrum, inverse-variance weighted mean of that polarisation over the
+    bands at the same place, start and duration, ``ref_amp``, and its noise
+    ``ref_err`` = 1 / sqrt(sum w).  A source cannot be more than 100% polarised, so
+    a polarised candidate whose amplitude exceeds I by several times that noise is
+    not a source on the sky (the sifter's ``pol_excess`` test).
+
     Attributes
     ----------
     pol : int
@@ -11061,6 +11395,9 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
     lin_pol : list of int
         Indices of Q and U for the derotated spectrum of linear polarisation
         (``pol`` is then unused).  Default is None.
+    ref_pol : int
+        Index of the reference polarisation (I) for the ``reference`` table.
+        Default is None (no table).
     duration : int
         Duration of the trial (in samples) without ``match_duration``.  Default is 1.
     match_duration : bool
@@ -11075,6 +11412,9 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
 
     pol = config.Property(proptype=int, default=0)
     lin_pol = config.list_type(int, length=2, default=None)
+    ref_pol = config.Property(
+        proptype=lambda v: None if v is None else int(v), default=None
+    )
     duration = config.Property(proptype=int, default=1)
     match_duration = config.Property(proptype=bool, default=True)
     snr_min = config.Property(proptype=float, default=3.0)
@@ -11131,16 +11471,26 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
             use = (ex_w == wc[ex_k]) & (xi[ex_k] == exact.datasets["x_index"][:])
         bpol = _decode_names(bands.index_map["pol"][:])
         cuts = []
-        for pp in [self.pol] if self.lin_pol is None else self.lin_pol:
+        pps = [self.pol] if self.lin_pol is None else list(self.lin_pol)
+        if self.ref_pol is not None:
+            pps.append(self.ref_pol)
+        for pp in pps:
             amp, wgt = _band_cutouts(bands, pp, e, tb, xi, wc, [0], [0])
             amp, wgt = amp[:, :, 0, 0], wgt[:, :, 0, 0]
             bands.comm.Allreduce(MPI.IN_PLACE, amp, op=MPI.SUM)
             bands.comm.Allreduce(MPI.IN_PLACE, wgt, op=MPI.SUM)
-            if exact is not None:
+            if exact is not None and bpol[pp] in ex_pol:
                 ip = ex_pol.index(bpol[pp])
                 amp[ex_k[use]] = ex_amp[use, ip]
                 wgt[ex_k[use]] = ex_wgt[use, ip]
             cuts.append((amp, wgt))
+        if self.ref_pol is not None:
+            ramp, rwgt = cuts.pop()
+            rsw = rwgt.sum(axis=1)
+            ref = np.full((ncand, 2), np.nan)
+            pos = rsw > 0
+            ref[pos, 0] = (rwgt * ramp).sum(axis=1)[pos] / rsw[pos]
+            ref[pos, 1] = 1.0 / np.sqrt(rsw[pos])
         if self.lin_pol is None:
             amp, wgt = cuts[0]
         else:
@@ -11154,6 +11504,13 @@ class AddCandidateSpectra(tasklib.base.ContainerTask):
                 out.add_dataset(name)
         out.datasets["spectrum"][:] = amp
         out.datasets["spectrum_weight"][:] = wgt
+        if self.ref_pol is not None:
+            if "reference" not in out.datasets:
+                out.add_dataset("reference")
+            rv = np.zeros(ncand, dtype=out.datasets["reference"][:].dtype)
+            rv["ref_amp"], rv["ref_err"] = ref[:, 0], ref[:, 1]
+            out.datasets["reference"][:] = rv
+            out.attrs["ref_pol"] = bpol[self.ref_pol]
 
         alphas = np.array(self.alphas, dtype=np.float64)
         for k in range(ncand):
@@ -11392,7 +11749,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     ``max_cutouts`` of them: the amplitude and weight of every band over
     +-``nrow`` rows and +-``nra`` start times, at the candidate's telescope-x, for
     single samples, in the polarisation ``pol`` or each of ``pols``.  The result is
-    distributed over candidates.
+    distributed over candidates.  With ``x_slice`` (the default), ``x_amplitude``
+    and ``x_weight`` hold every band across all telescope-x at the candidate's row
+    and start, to compare how it lights the neighbouring x with the east-west beam.
 
     Attributes
     ----------
@@ -11410,6 +11769,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         Largest number of cutouts (the brightest).  Default is 1000.
     nrow, nra : int
         Half-widths of the window in rows and samples.  Defaults are 16 and 30.
+    x_slice : bool
+        Also extract every band across telescope-x at the candidate's row and start.
+        Default is True.
     """
 
     pol = config.Property(proptype=int, default=0)
@@ -11419,6 +11781,7 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     max_cutouts = config.Property(proptype=int, default=1000)
     nrow = config.Property(proptype=int, default=16)
     nra = config.Property(proptype=int, default=30)
+    x_slice = config.Property(proptype=bool, default=True)
 
     def process(self, table, bands):
         """Extract the cutouts.
@@ -11492,12 +11855,27 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
             tin = (ts >= 0) & (ts < ra_b.size)
         out.datasets["ra_index"][:] = np.where(tin, ts, -1)
         out.datasets["ra"][:] = _extend_axis(ra_b, ts)
+        if self.x_slice:
+            out.create_index_map("x", bands.index_map["x"][:])
+            out.add_dataset("x_amplitude")
+            out.add_dataset("x_weight")
 
         # Each rank's block of candidates, summed from the rows on every rank
         la = out.amplitude[:]
         offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
         for r, (o, nl) in enumerate(offs):
             k = slice(o, o + nl)
+            if self.x_slice:
+                xs = [_band_x_slices(bands, ip, e[k], tb[k]) for ip in ipol]
+                xa = np.stack([x[0] for x in xs], axis=1).astype(np.float32)
+                xw = np.stack([x[1] for x in xs], axis=1).astype(np.float32)
+                rxa = np.zeros_like(xa) if comm.rank == r else None
+                rxw = np.zeros_like(xw) if comm.rank == r else None
+                comm.Reduce(xa, rxa, op=MPI.SUM, root=r)
+                comm.Reduce(xw, rxw, op=MPI.SUM, root=r)
+                if comm.rank == r:
+                    out.datasets["x_amplitude"][:].local_array[:] = rxa
+                    out.datasets["x_weight"][:].local_array[:] = rxw
             aw = [
                 _band_cutouts(
                     bands, ip, e[k], tb[k], xi[k], np.ones(nl, int), roff, toff
@@ -12178,6 +12556,13 @@ def _fidelity_counts(rec, nrec, dy, dra, dur_ratio):
     return neg_n, pos_n, neg_max
 
 
+def _copy_extra_axes(src, dst):
+    """Copy the index maps of ``src`` that ``dst`` lacks (axes added at run time, x)."""
+    for ax in src.index_map:
+        if ax not in dst.index_map:
+            dst.create_index_map(ax, src.index_map[ax][:])
+
+
 def _table_copy(table, skip=()):
     """A new candidate table with the datasets of ``table`` (except ``skip``).
 
@@ -12188,13 +12573,36 @@ def _table_copy(table, skip=()):
     out = containers.TransientCandidateTable(
         candidate=rec.size, axes_from=table, attrs_from=table, comm=table.comm
     )
+    _copy_extra_axes(table, out)
     for name in table.datasets:
         if name in skip:
             continue
         if name not in out.datasets:
             out.add_dataset(name)
-        out.datasets[name][:] = table.datasets[name][:]
+        _assign_fields(out.datasets[name], table.datasets[name][:])
     return out
+
+
+def _assign_fields(dset, val):
+    """Write ``val`` into ``dset``, field by field if a table's columns differ.
+
+    A table saved before columns were added has fewer fields than the container now
+    defines; the missing ones are NaN (floats) or -1 (integers), others zero.
+    """
+    dt = dset[:].dtype
+    val = np.asarray(val)
+    if dt.names is None or val.dtype == dt:
+        dset[:] = val
+        return
+    full = np.zeros(val.shape, dtype=dt)
+    for n in dt.names:
+        if n in (val.dtype.names or ()):
+            full[n] = val[n]
+        elif dt[n].kind == "f":
+            full[n] = np.nan
+        elif dt[n].kind == "i":
+            full[n] = -1
+    dset[:] = full
 
 
 class CalibrateSignificance(tasklib.base.ContainerTask):
@@ -12515,16 +12923,73 @@ class AddWindowStats(tasklib.base.ContainerTask):
     otherwise NaN).  The matched filter's response makes a pulse's samples unequal
     near its edges, so a pulse is only approximately a plateau.
 
+    The track is also followed for ``nside`` samples on either side of the window:
+    ``win_peak`` is the largest single-sample S/N within it, and ``win_dip_pre`` and
+    ``win_dip_post`` the smallest within ``nside`` samples before and after it, over
+    ``win_peak`` (NaN where the peak is not positive or no sample there is valid).
+    The filter's response to a real single-sample pulse has lobes of -0.17 to -0.34
+    of the peak on both sides (the known LPTs); a compact source whose image jitters
+    or scintillates in one sample leaves a deeper dip on one side, as a positive and
+    a negative sample of similar size (the sifter's ``dip`` test).
+
+    At the peak sample, the single-sample S/N across every telescope-x on the
+    candidate's row goes into the ``x_profile`` dataset (``win_peak_x`` is the x index
+    of the track there): a point source lights the neighbouring x as the east-west
+    synthesized beam does, which the injected pulses show.
+
+    With ``shape`` (the default), the single-sample image at the candidate's
+    telescope-x (rows within ``shape_dy`` in telescope-y, samples ``shape_nra``
+    either side of the start; the image of the candidate cutouts) gives:
+
+    - ``win_ns_wing``: the smallest value of the profile in telescope-y at the peak
+      sample within ``shape_dy``, over the peak.  The synthesized beam's sidelobes
+      are a few percent; the night-time ionosphere leaves deep negative wings.
+    - ``win_rank1``: the share of the power of the image within ``rank_dy`` and
+      ``rank_pad`` samples of the window in its first singular vector.  A pulse is
+      its time profile times the beam in telescope-y, of rank 1 at any spectrum;
+      movers, arcs and streaks are not.
+    - ``win_row_rms``: 1.4826 times the median absolute deviation of the row more
+      than ``row_gap`` samples from the window, over the peak: a row that
+      oscillates as much as the candidate.
+
+    On the f(W) pilots (cutout images of 73 kept real and 180 kept injected I
+    candidates) win_ns_wing < -0.4, win_rank1 < 0.7 and win_row_rms > 0.2 remove 12,
+    8 and 4 real candidates and no injected pulse; the known LPTs are at -0.02 to
+    +0.01, >= 0.975 and <= 0.03.
+
     Attributes
     ----------
     pol : int
         Index of the polarisation of the band output.  Default is 0.
     min_samples : int
         Least number of samples for the statistics.  Default is 3.
+    nside : int
+        Samples on either side of the window for the dips.  Default is 2.
+    shape : bool
+        Measure the shape of the image.  Default is True.
+    shape_dy, rank_dy : float
+        Half-widths in telescope-y of the profile and of the rank-1 box.  Defaults
+        are 0.02 and 0.015.
+    shape_nra, rank_pad, row_gap : int
+        Samples either side of the start in the image, either side of the window in
+        the rank-1 box, and between the window and the samples of the row's scatter.
+        Defaults are 40, 3 and 6.
+    chunk : int
+        Candidates in each block of the image extraction (each rank holds the
+        amplitude and weight of every band for them, ~2.3 MB a candidate with 67
+        bands, 27 rows and 81 samples).  Default is 32.
     """
 
     pol = config.Property(proptype=int, default=0)
     min_samples = config.Property(proptype=int, default=3)
+    nside = config.Property(proptype=int, default=2)
+    shape = config.Property(proptype=bool, default=True)
+    shape_dy = config.Property(proptype=float, default=0.02)
+    rank_dy = config.Property(proptype=float, default=0.015)
+    shape_nra = config.Property(proptype=int, default=40)
+    rank_pad = config.Property(proptype=int, default=3)
+    row_gap = config.Property(proptype=int, default=6)
+    chunk = config.Property(proptype=int, default=32)
 
     def process(self, table, bands):
         """Add the window statistics.
@@ -12561,14 +13026,16 @@ class AddWindowStats(tasklib.base.ContainerTask):
         ha = np.radians(bands.datasets["ha"][:])
         dec = np.radians(bands.datasets["dec"][:])
 
-        stats = np.zeros((n, 4))
+        nside = max(int(self.nside), 0)
+        stats = np.zeros((n, 8))
         mine = np.zeros(n)
+        xprof = np.zeros((n, xg.size))
         for k in range(n):
             if not off <= e[k] < off + nloc:
                 continue
             mine[k] = 1.0
             W = int(wc[k])
-            j = np.arange(W)
+            j = np.arange(-nside, W + nside)
             xj = -np.cos(dec[e[k], xi[k]]) * np.sin(ha[e[k], xi[k]] + j * dra)
             ij = np.rint((xj - xg[0]) / dx).astype(int)
             tt = tb[k] + j
@@ -12576,18 +13043,42 @@ class AddWindowStats(tasklib.base.ContainerTask):
             if periodic:
                 tt = tt % nra
             else:
-                ok &= tt < nra
-            tt, ij = tt[ok], ij[ok]
+                ok &= (tt >= 0) & (tt < nra)
             A = la.local_array[self.pol, idur, :, e[k] - off]  # freq, ra, x
             Wt = lw.local_array[self.pol, idur, :, e[k] - off]
-            a, w = A[:, tt, ij], Wt[:, tt, ij]  # freq, sample
+            sall = np.full(j.size, np.nan)
+            a, w = A[:, tt[ok], ij[ok]], Wt[:, tt[ok], ij[ok]]  # freq, sample
             sw = w.sum(axis=0)
-            good = sw > 0
-            s = (w * a).sum(axis=0)[good] * tools.invert_no_zero(np.sqrt(sw[good]))
+            sall[ok] = np.where(
+                sw > 0, (w * a).sum(axis=0) * tools.invert_no_zero(np.sqrt(sw)), np.nan
+            )
+            inwin = (j >= 0) & (j < W)
+            s = sall[inwin]
+            s = s[np.isfinite(s)]
             ns = s.size
             stats[k, 0] = ns
+            # the dips on either side, relative to the peak within the window
+            peak = s.max() if ns else np.nan
+            stats[k, 4] = peak
+            # the x profile at the peak sample
+            jw = np.flatnonzero(inwin & np.isfinite(sall))
+            stats[k, 7] = -1
+            if jw.size:
+                jp = jw[np.argmax(sall[jw])]
+                stats[k, 7] = ij[jp]
+                ap, wp = A[:, tt[jp], :], Wt[:, tt[jp], :]  # freq, x
+                swp = wp.sum(axis=0)
+                xprof[k] = np.where(
+                    swp > 0, (wp * ap).sum(axis=0) * tools.invert_no_zero(np.sqrt(swp)), np.nan
+                )
+            else:
+                xprof[k] = np.nan
+            for col, side in ((5, j < 0), (6, j >= W)):
+                v = sall[side]
+                v = v[np.isfinite(v)]
+                stats[k, col] = v.min() / peak if v.size and peak > 0 else np.nan
             if ns < max(self.min_samples, 2):
-                stats[k, 1:] = np.nan
+                stats[k, 1:4] = np.nan
                 continue
             sd = np.std(s, ddof=1)
             tot = s.sum()
@@ -12599,18 +13090,110 @@ class AddWindowStats(tasklib.base.ContainerTask):
         stats = np.nan_to_num(stats, nan=-1e30)
         bands.comm.Allreduce(MPI.IN_PLACE, stats, op=MPI.SUM)
         stats[stats < -1e29] = np.nan
+        xprof = np.where(mine[:, np.newaxis] > 0, np.nan_to_num(xprof, nan=-1e30), 0.0)
+        bands.comm.Allreduce(MPI.IN_PLACE, xprof, op=MPI.SUM)
+        xprof[xprof < -1e29] = np.nan
 
-        out = _table_copy(table, skip=("window",))
+        shape = np.full((n, 3), np.nan)
+        if self.shape and n:
+            shape = self._shape(bands, e, tb, xi, wc)
+
+        out = _table_copy(table, skip=("window", "x_profile"))
+        if "x" not in out.index_map:
+            out.create_index_map("x", xg)
+        out.add_dataset("x_profile")
+        out.datasets["x_profile"][:] = xprof
         out.add_dataset("window")
         wv = np.zeros(n, dtype=out.datasets["window"][:].dtype)
         wv["win_n"] = stats[:, 0]
         wv["win_fpos"] = stats[:, 1]
         wv["win_t"] = stats[:, 2]
         wv["win_top2"] = stats[:, 3]
+        wv["win_peak"] = stats[:, 4]
+        wv["win_dip_pre"] = stats[:, 5]
+        wv["win_dip_post"] = stats[:, 6]
+        wv["win_peak_x"] = np.nan_to_num(stats[:, 7], nan=-1).astype(np.int16)
+        wv["win_ns_wing"] = shape[:, 0]
+        wv["win_rank1"] = shape[:, 1]
+        wv["win_row_rms"] = shape[:, 2]
         out.datasets["window"][:] = wv
         out.attrs["win_min_samples"] = self.min_samples
+        out.attrs["win_nside"] = nside
+        for key in ("shape", "shape_dy", "rank_dy", "shape_nra", "rank_pad", "row_gap"):
+            out.attrs[f"win_{key}"] = getattr(self, key)
         self.log.info(f"Window statistics of {n} candidates.")
         return out
+
+    def _shape(self, bands, e, tb, xi, wc):
+        """win_ns_wing, win_rank1 and win_row_rms of each candidate (see the class)."""
+        from mpi4py import MPI
+
+        el = np.asarray(bands.index_map["el"][:], dtype=np.float64)
+        dyrow = np.median(np.abs(np.diff(el))) if el.size > 1 else 1.0
+        nr = int(np.ceil(self.shape_dy / dyrow - 1e-9))
+        roff = np.arange(-nr, nr + 1)
+        nra = int(self.shape_nra)
+        toff = np.arange(-nra, nra + 1)
+        n = e.size
+        res = np.full((n, 3), np.nan)
+        for c0 in range(0, n, max(int(self.chunk), 1)):
+            k = slice(c0, min(c0 + int(self.chunk), n))
+            nk = k.stop - k.start
+            a, w = _band_cutouts(
+                bands, self.pol, e[k], tb[k], xi[k], np.ones(nk, int), roff, toff
+            )
+            num = (w * a).sum(axis=1)  # cand, row, time
+            den = w.sum(axis=1)
+            bands.comm.Allreduce(MPI.IN_PLACE, num, op=MPI.SUM)
+            bands.comm.Allreduce(MPI.IN_PLACE, den, op=MPI.SUM)
+            img = np.where(den > 0, num * tools.invert_no_zero(np.sqrt(den)), np.nan)
+            for i in range(nk):
+                kk = k.start + i
+                rows = e[kk] + roff
+                rin = (rows >= 0) & (rows < el.size)
+                dy = np.full(roff.size, np.inf)
+                dy[rin] = el[rows[rin]] - el[e[kk]]
+                res[kk] = _image_shape(
+                    img[i], dy, nr, nra, int(wc[kk]), self.rank_dy, self.shape_dy,
+                    self.rank_pad, self.row_gap,
+                )
+        return res
+
+
+def _image_shape(img, dy, ce, c0, W, rank_dy, wing_dy, pad, gap):
+    """ns_wing, rank1 and row_rms of a single-sample image (row ce, start c0; W samples).
+
+    ``img`` is [row, time] in S/N, ``dy`` the offset in telescope-y of each row (inf
+    outside the map).  See :class:`AddWindowStats`.
+    """
+    out = np.full(3, np.nan)
+    row = img[ce]
+    win = row[c0 : c0 + W]
+    if not np.isfinite(win).any():
+        return out
+    peak = np.nanmax(win)
+    if not peak > 0:
+        return out
+    tpk = c0 + int(np.nanargmax(win))
+    prof = img[:, tpk]
+    near = (np.abs(dy) <= wing_dy) & np.isfinite(prof)
+    if near.any():
+        out[0] = np.min(prof[near]) / peak
+    t0, t1 = max(c0 - pad, 0), min(c0 + W + pad, img.shape[1])
+    box = img[np.abs(dy) <= rank_dy, t0:t1]
+    box = np.where(np.isfinite(box), box, 0.0)
+    if box.size:
+        sv = np.linalg.svd(box, compute_uv=False)
+        tot = np.sum(sv**2)
+        if tot > 0:
+            out[1] = sv[0] ** 2 / tot
+    away = np.ones(row.size, dtype=bool)
+    away[max(c0 - gap, 0) : c0 + W + gap] = False
+    r = row[away]
+    r = r[np.isfinite(r)]
+    if r.size > 10:
+        out[2] = 1.4826 * np.median(np.abs(r - np.median(r))) / peak
+    return out
 
 
 class SiftTransientCandidates(tasklib.base.ContainerTask):
@@ -12707,6 +13290,57 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
       times the magnitude of the template of compact sources at the candidate
       (``tmpl_flux``, :class:`AddTemplateFlux`), so within the scintillation of
       the sources under it, in its east-west sidelobes or grating lobes.
+    - 23 ``dip`` (if ``dip_ratio_max`` is set and the table has the ``win_dip_*``
+      columns of :class:`AddWindowStats`): a candidate of at most ``dip_wmax``
+      samples with a single sample just before or after its window below
+      ``dip_ratio_max`` times its peak.  A real single-sample pulse leaves the
+      filter's lobes of -0.17 to -0.34 on both sides (the known LPTs); a positive
+      and a negative sample of similar size is the image of a compact source
+      jittering or scintillating.  On the f(W) pilots (2418, 3759), -0.45 removes
+      20 of 100 kept real I candidates and 2 of 202 kept injected pulses.
+    - 24 ``broadcast`` (if ``broadcast_frac_max`` is set): more than
+      ``broadcast_frac_max`` of the positive S/N^2 of the groups of bands (all but
+      "all") in ``broadcast_groups``, the television bands of 470-614 MHz.  Pilots:
+      0.8 removes 8 of 100 kept real I and no kept injected pulse; known LPTs <= 0.5.
+    - 25 ``subband`` (if ``subband_frac_max`` is set): more than
+      ``subband_frac_max`` of it in one group (``group_frac_max`` of the table).
+      Unlike ``narrowband`` this is used whether or not the spectra were added.
+      Pilots: 0.8 removes 6 of 100 kept real I and 2 of 202; known LPTs <= 0.41.
+    - 26 ``elongation`` (if ``sun_elong_min`` is set): within ``sun_elong_min``
+      degrees of the Sun on the sky, where interplanetary scintillation modulates
+      compact sources on ~1 s.  Pilots: 20 deg removes 4 of 100 kept real I, no
+      injected pulse; known LPTs >= 39 deg.  The Sun's position is the low
+      precision formula of the Astronomical Almanac (~0.01 deg, of date).
+    - 27 ``pol_excess`` (if ``pol_excess_nsigma`` is set and the table has the
+      ``reference`` table of :class:`AddCandidateSpectra`): a candidate of at most
+      ``pol_excess_wmax`` samples whose polarised amplitude exceeds I there by more
+      than ``pol_excess_nsigma`` times the noise of I, (|amp| - ref_amp) / ref_err.
+      No source is more than 100% polarised.  Pilots, L: 3 sigma at W <= 2 removes
+      34 of 101 kept real candidates and 1 of 119 kept injected pulses; J1634 and
+      J1832 are at -181 and -20 to -63 sigma.  Not for V: I at the long V trials of
+      J1832 is distorted (+16 to +52 sigma).
+    - 28 ``ns_wing``, 29 ``rank1``, 30 ``row_rms`` (if ``ns_wing_min``,
+      ``rank1_min``, ``row_rms_max`` are set and the table has the shape columns of
+      :class:`AddWindowStats`): the single-sample image at the candidate is not a
+      point source of its own, with a negative wing in telescope-y below
+      ``ns_wing_min`` of the peak, less than ``rank1_min`` of its power in one
+      time profile times one profile in telescope-y, or a row whose scatter is more
+      than ``row_rms_max`` of the peak.  Pilots (cutout images): -0.4, 0.7 and 0.2
+      remove 12, 8 and 4 of 73 kept real I candidates (20 together) and none of 180
+      kept injected pulses; the known LPTs are far inside.
+
+    With ``count_sources``, the candidates are first grouped into sources by their
+    inferred sky position (see :func:`_candidate_sources`; the ``source`` table),
+    and ``row_repeat`` and ``crowded`` count other sources, not candidates: bursts
+    of one source (or a long pulse found again a few samples later) count once, and
+    those of the candidate's own source not at all.  On the f(W) pilots 16-21% of
+    the injected pulses had a second candidate on their row 4-31 samples later, 75-85%
+    of them within 0.2 deg (notes/grouping_review_2026-11-08.md).
+
+    With ``coarse_neighbours`` and the ``grouping`` table of
+    :class:`GroupTransientCandidates` (``sidelobe_dy``), only the candidates marked
+    ``coarse_peak`` count as neighbours in ``row_repeat`` and ``crowded``, so the
+    finer grouping leaves the neighbour statistics their thresholds were set on.
 
     Attributes
     ----------
@@ -12739,6 +13373,14 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         "compact": 20,
         "pulsar": 21,
         "template": 22,
+        "dip": 23,
+        "broadcast": 24,
+        "subband": 25,
+        "elongation": 26,
+        "pol_excess": 27,
+        "ns_wing": 28,
+        "rank1": 29,
+        "row_rms": 30,
     }
     INFO: ClassVar = ("periodic",)
 
@@ -12796,6 +13438,41 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     tmpl_ratio = config.Property(
         proptype=lambda v: None if v is None else float(v), default=None
     )
+    dip_ratio_max = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    dip_wmax = config.Property(proptype=int, default=1)
+    broadcast_frac_max = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    broadcast_groups = config.list_type(str, default=["TV1", "TV2", "TV3"])
+    subband_frac_max = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    sun_elong_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    pol_excess_nsigma = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    pol_excess_wmax = config.Property(proptype=int, default=2)
+    ns_wing_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    rank1_min = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    row_rms_max = config.Property(
+        proptype=lambda v: None if v is None else float(v), default=None
+    )
+    count_sources = config.Property(proptype=bool, default=False)
+    coarse_neighbours = config.Property(proptype=bool, default=False)
+    source_dy = config.Property(proptype=float, default=0.004)
+    source_dra = config.Property(proptype=float, default=0.2)
+    source_dra_low = config.Property(proptype=float, default=0.6)
+    source_snr_low = config.Property(proptype=float, default=12.0)
+    alias_dx = config.list_type(float, default=[0.031, 0.044, 0.062])
+    alias_tol = config.Property(proptype=float, default=0.004)
     select = config.Property(proptype=bool, default=False)
 
     def process(self, table):
@@ -12817,9 +13494,21 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         def flag(name, cond):
             flags[np.asarray(cond, dtype=bool)] |= np.uint32(1 << self.FLAGS[name])
 
+        # Sources: the candidates at one inferred sky position
+        source = None
+        if self.count_sources:
+            source, nburst, alias = _candidate_sources(
+                rec, self.source_dy, self.source_dra, self.source_dra_low,
+                self.source_snr_low, list(self.alias_dx), self.alias_tol,
+            )
+
+        pool = None
+        if self.coarse_neighbours and "grouping" in table.datasets:
+            pool = table.datasets["grouping"][:]["coarse_peak"].astype(bool)
+
         # The other candidates along the row, and around, at other sky positions
         sky_sep = self.row_sky_sep if self.row_sky_sep and self.row_sky_sep > 0 else None
-        if sky_sep is not None:
+        if sky_sep is not None or source is not None or pool is not None:
             row_npeak, _ = _other_candidates(
                 rec,
                 float(table.attrs.get("row_dy", 0.01)),
@@ -12827,6 +13516,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                 sky_sep,
                 float(table.attrs.get("row_snr", 8.0)),
                 float(table.attrs.get("row_ratio", 1.0 / 3.0)),
+                source,
+                pool,
             )
         else:
             row_npeak = rec["row_npeak"].astype(int)
@@ -12834,7 +13525,8 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         crowd = np.zeros(rec.size)
         if self.crowd_ratio_max is not None:
             crowd_n, crowd = _other_candidates(
-                rec, self.crowd_dy, self.crowd_dra, sky_sep, 0.0, self.crowd_ratio_max
+                rec, self.crowd_dy, self.crowd_dra, sky_sep, 0.0, self.crowd_ratio_max,
+                source, pool,
             )
 
         with np.errstate(invalid="ignore"):
@@ -12917,9 +13609,72 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                     rec["cat_near_flux"] >= self.cat_near_ratio * np.abs(rec["amplitude"]),
                 )
             if self.reject_pulsars and "psr_name" in names:
-                flag("pulsar", rec["psr_name"] != b"")
+                # bytes in the pipeline, str when a table is read back from a file
+                flag("pulsar", np.char.str_len(rec["psr_name"].astype("S")) > 0)
             if self.tmpl_ratio is not None and "tmpl_flux" in names:
                 flag("template", np.abs(rec["amplitude"]) < self.tmpl_ratio * np.abs(rec["tmpl_flux"]))
+
+            # duration in samples
+            tsamp = float(table.attrs.get("duration_unit_seconds", 0.0)) or np.nan
+            nsamp = np.rint(rec["duration"] / tsamp)
+            if self.dip_ratio_max is not None:
+                win = table.datasets["window"][:] if "window" in table.datasets else None
+                if win is None or "win_dip_pre" not in win.dtype.names:
+                    self.log.warning("No single-sample dips (AddWindowStats): dip not tested.")
+                else:
+                    deep = np.fmin(win["win_dip_pre"], win["win_dip_post"])
+                    flag("dip", (nsamp <= self.dip_wmax) & (deep < self.dip_ratio_max))
+            if (
+                self.broadcast_frac_max is not None or self.subband_frac_max is not None
+            ) and "group_snr" in table.datasets:
+                gnames = _decode_names(table.index_map["group"][:])
+                sub = np.array([g != "all" for g in gnames])
+                pos = np.clip(table.datasets["group_snr"][:][:, sub], 0.0, None) ** 2
+                tot = pos.sum(axis=1)
+                if self.broadcast_frac_max is not None:
+                    tv = np.array([g in self.broadcast_groups for g in np.array(gnames)[sub]])
+                    if not tv.any():
+                        self.log.warning(
+                            f"None of {self.broadcast_groups} in the groups {gnames}."
+                        )
+                    share = pos[:, tv].sum(axis=1) * tools.invert_no_zero(tot)
+                    flag("broadcast", (tot > 0) & (share > self.broadcast_frac_max))
+                if self.subband_frac_max is not None:
+                    share = pos.max(axis=1, initial=0.0) * tools.invert_no_zero(tot)
+                    flag("subband", (tot > 0) & (share > self.subband_frac_max))
+            if self.sun_elong_min is not None:
+                sra, sdec = _sun_radec_approx(rec["unix"])
+                flag(
+                    "elongation",
+                    _sky_sep_deg(rec["ra_icrs"], rec["dec_icrs"], sra, sdec)
+                    < self.sun_elong_min,
+                )
+            shape_cuts = (
+                ("ns_wing", "win_ns_wing", self.ns_wing_min, -1),
+                ("rank1", "win_rank1", self.rank1_min, -1),
+                ("row_rms", "win_row_rms", self.row_rms_max, 1),
+            )
+            if any(c[2] is not None for c in shape_cuts):
+                win = table.datasets["window"][:] if "window" in table.datasets else None
+                for name, col, lim, sign in shape_cuts:
+                    if lim is None:
+                        continue
+                    if win is None or col not in win.dtype.names:
+                        self.log.warning(f"No {col} (AddWindowStats): {name} not tested.")
+                        continue
+                    v = win[col]
+                    flag(name, (v > lim) if sign > 0 else (v < lim))
+            if self.pol_excess_nsigma is not None and "reference" in table.datasets:
+                ref = table.datasets["reference"][:]
+                z = (np.abs(rec["amplitude"]) - ref["ref_amp"]) * tools.invert_no_zero(
+                    ref["ref_err"]
+                )
+                flag(
+                    "pol_excess",
+                    (nsamp <= self.pol_excess_wmax)
+                    & (ref["ref_err"] > 0)
+                    & (z > self.pol_excess_nsigma),
+                )
 
         reject = np.uint32(
             sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
@@ -12940,12 +13695,20 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             attrs_from=table,
             comm=table.comm,
         )
+        _copy_extra_axes(table, out)
         for name in table.datasets:
-            if name == "sift":  # replaced (and an older table may lack columns)
-                continue
+            if name == "sift" or (name == "source" and source is not None):
+                continue  # replaced (and an older table may lack columns)
             if name not in out.datasets:
                 out.add_dataset(name)
-            out.datasets[name][:] = table.datasets[name][:][rows]
+            _assign_fields(out.datasets[name], table.datasets[name][:][rows])
+        if source is not None:
+            out.add_dataset("source")
+            src = np.zeros(rows.size, dtype=out.datasets["source"][:].dtype)
+            src["source_id"] = source[rows]
+            src["source_nburst"] = nburst[rows]
+            src["source_alias"] = alias[rows]
+            out.datasets["source"][:] = src
         out.add_dataset("sift")
         sift = np.zeros(rows.size, dtype=out.datasets["sift"][:].dtype)
         sift["keep"] = keep[rows]
@@ -12965,19 +13728,166 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             "horizon_y_max",
             "smooth_chi2_max", "smooth_frac_min", "ns_dchi2_min", "ns_scale_max",
             "ns_scale_min", "fidelity_min", "snr_cal_min", "win_t_min", "win_wmin",
-            "cat_near_ratio", "reject_pulsars", "tmpl_ratio",
+            "cat_near_ratio", "reject_pulsars", "tmpl_ratio", "dip_ratio_max",
+            "dip_wmax", "broadcast_frac_max", "subband_frac_max", "sun_elong_min",
+            "pol_excess_nsigma", "pol_excess_wmax", "ns_wing_min", "rank1_min",
+            "row_rms_max", "count_sources", "coarse_neighbours", "source_dy", "source_dra", "source_dra_low",
+            "source_snr_low", "alias_tol",
         ):  # fmt: skip
             val = getattr(self, key)
             out.attrs[f"sift_{key}"] = "none" if val is None else val
+        out.attrs["sift_broadcast_groups"] = json.dumps(list(self.broadcast_groups))
+        out.attrs["sift_alias_dx"] = json.dumps(list(self.alias_dx))
         return out
 
 
-def _other_candidates(rec, dy, dra, sky_sep, snr_min, ratio):
+def _sun_radec_approx(unix):
+    """RA and Dec of the Sun (deg, of date) at unix times, to ~0.01 deg.
+
+    The low-precision formula of the Astronomical Almanac (section C), good to
+    ~0.01 deg over 1950-2050; the frame of date differs from ICRS by up to ~0.3 deg
+    in 2020, which is negligible for an elongation cut.
+    """
+    n = np.asarray(unix, dtype=np.float64) / 86400.0 + 2440587.5 - 2451545.0
+    mean_lon = (280.460 + 0.9856474 * n) % 360.0
+    g = np.radians((357.528 + 0.9856003 * n) % 360.0)
+    lam = np.radians(mean_lon + 1.915 * np.sin(g) + 0.020 * np.sin(2 * g))
+    eps = np.radians(23.439 - 4e-7 * n)
+    ra = np.degrees(np.arctan2(np.cos(eps) * np.sin(lam), np.cos(lam))) % 360.0
+    dec = np.degrees(np.arcsin(np.sin(eps) * np.sin(lam)))
+    return ra, dec
+
+
+def _sky_sep_deg(ra1, dec1, ra2, dec2):
+    """Angle (deg) between sky positions given in degrees."""
+    r1, d1, r2, d2 = (np.radians(np.asarray(v, dtype=np.float64)) for v in (ra1, dec1, ra2, dec2))
+    c = np.sin(d1) * np.sin(d2) + np.cos(d1) * np.cos(d2) * np.cos(r1 - r2)
+    return np.degrees(np.arccos(np.clip(c, -1.0, 1.0)))
+
+
+def _candidate_sources(rec, dy, dra, dra_low, snr_low, alias_dx, alias_tol):
+    """Group the candidates of a table into sources by their sky position.
+
+    Two candidates are the same source if they are within ``dy`` in telescope-y and
+    their inferred positions (``ra_icrs``, ``dec_icrs``, from the start, telescope-x
+    and telescope-y) are within ``dra`` degrees in RA x cos(dec); the groups are
+    joined transitively.  Then a candidate with S/N below ``snr_low`` that is still
+    alone (noise moves its best telescope-x) joins the source of its nearest
+    candidate within ``dy`` and ``dra_low``, without joining two sources together
+    (a faint candidate between two sources would otherwise chain them).  Two
+    sources are linked as possible aliases if they are
+    within ``dy`` in telescope-y and their offset in RA x cos(dec), in radians (the
+    offset in telescope-x it would take at the same time), is within ``alias_tol``
+    of one of ``alias_dx``: a source just outside the telescope-x grid is seen
+    through an east-west grating lobe, with its position offset by that much.
+
+    Returns
+    -------
+    source : np.ndarray[int]
+        Source of each candidate (0, 1, ...; the brightest source first).
+    nburst : np.ndarray[int]
+        Number of candidates of that source.
+    alias : np.ndarray[int]
+        The brightest source it is linked to as an alias, or -1.
+    """
+    n = rec.size
+    if n == 0:
+        z = np.zeros(0, dtype=int)
+        return z, z, z
+    y = rec["y"].astype(np.float64)
+    ra = rec["ra_icrs"].astype(np.float64)
+    dec = rec["dec_icrs"].astype(np.float64)
+    snr = rec["snr"].astype(np.float64)
+    parent = np.arange(n)
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    order = np.argsort(y, kind="stable")
+    ys = y[order]
+    hi = np.searchsorted(ys, ys + dy, side="right")
+    lo = np.searchsorted(ys, ys - dy, side="left")
+
+    def seps(a, js):
+        i = order[a]
+        cosd = np.cos(np.radians(0.5 * (dec[i] + dec[js])))
+        return np.abs(_wrap_deg(ra[js] - ra[i])) * cosd
+
+    for a in range(n):
+        if hi[a] <= a + 1:
+            continue
+        j = order[a + 1 : hi[a]]
+        for jj in j[seps(a, j) <= dra]:
+            ri, rj = find(order[a]), find(jj)
+            if ri != rj:
+                parent[max(ri, rj)] = min(ri, rj)
+    root = np.array([find(i) for i in range(n)])
+    # faint candidates still alone join their nearest candidate's source
+    if dra_low > dra:
+        alone = np.bincount(root, minlength=n)[root] == 1
+        new_root = root.copy()
+        pos = np.empty(n, dtype=int)
+        pos[order] = np.arange(n)
+        for i in np.flatnonzero(alone & (snr < snr_low)):
+            a = pos[i]
+            j = order[lo[a] : hi[a]]
+            j = j[j != i]
+            if j.size == 0:
+                continue
+            sp = seps(a, j)
+            if sp.min() <= dra_low:
+                new_root[i] = root[j[np.argmin(sp)]]
+        root = new_root
+    # number the sources by their brightest candidate, brightest first
+    uniq, inv = np.unique(root, return_inverse=True)
+    nsrc = uniq.size
+    peak = np.full(nsrc, -np.inf)
+    np.maximum.at(peak, inv, snr)
+    rank = np.empty(nsrc, dtype=int)
+    rank[np.argsort(-peak, kind="stable")] = np.arange(nsrc)
+    source = rank[inv]
+    nburst = np.bincount(source, minlength=nsrc)[source]
+
+    # aliases between sources, from their brightest candidates
+    alias = np.full(n, -1, dtype=int)
+    if alias_dx:
+        by = np.lexsort((-snr, source))  # by source, brightest first
+        first = np.ones(n, dtype=bool)
+        first[1:] = source[by][1:] != source[by][:-1]
+        best = np.empty(nsrc, dtype=int)
+        best[source[by][first]] = by[first]
+        sy, sra, sdec = y[best], ra[best], dec[best]
+        link = np.full(nsrc, -1, dtype=int)
+        for sid in range(nsrc):
+            near = np.flatnonzero(np.abs(sy - sy[sid]) <= dy)
+            near = near[near != sid]
+            if near.size == 0:
+                continue
+            cosd = np.cos(np.radians(0.5 * (sdec[sid] + sdec[near])))
+            off = np.radians(np.abs(_wrap_deg(sra[near] - sra[sid]))) * cosd
+            hit = np.zeros(near.size, dtype=bool)
+            for d in alias_dx:
+                hit |= np.abs(off - d) <= alias_tol
+            if hit.any():
+                link[sid] = near[hit].min()  # the brightest (lowest id)
+        alias = link[source]
+    return source, nburst, alias
+
+
+def _other_candidates(rec, dy, dra, sky_sep, snr_min, ratio, source=None, pool=None):
     """The other candidates around each candidate of a table.
 
     For candidate k, the others within +-``dy`` in telescope-y and +-``dra`` degrees
     of start RA, and (if ``sky_sep`` is not None) at least ``sky_sep`` degrees from
     its sky position (ICRS).
+
+    With ``source`` (the source of each candidate, see :func:`_candidate_sources`),
+    the candidates of candidate k's own source are left out too, and ``nstrong``
+    counts sources: the other sources with at least one candidate that bright.
+    With ``pool`` (bool per candidate), only those candidates count as others.
 
     Returns
     -------
@@ -13010,9 +13920,17 @@ def _other_candidates(rec, dy, dra, sky_sep, snr_min, ratio):
                 rec["dec_icrs"][idx] - rec["dec_icrs"][k],
             )
             idx = idx[~(dsky < sky_sep)]
+        if pool is not None and idx.size:
+            idx = idx[pool[idx]]
+        if source is not None and idx.size:
+            idx = idx[source[idx] != source[k]]
         if idx.size == 0 or not snr[k] > 0:
             continue
         s = snr[idx]
-        nstrong[k] = np.sum(s >= max(snr_min, ratio * snr[k]))
+        strong = s >= max(snr_min, ratio * snr[k])
+        if source is not None:
+            nstrong[k] = np.unique(source[idx[strong]]).size
+        else:
+            nstrong[k] = np.sum(strong)
         max_ratio[k] = s.max() / snr[k]
     return nstrong, max_ratio
