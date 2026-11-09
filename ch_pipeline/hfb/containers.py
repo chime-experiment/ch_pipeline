@@ -704,7 +704,6 @@ class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
 
         # If sigma_key is provided
         if sigma_key is not None:
-
             # Sort in increasing order
             sigma_sorted = sorted(float(sigma) for sigma in sigma_key)
 
