@@ -43,10 +43,8 @@ def _extract_diagonal(utmat, axis=1):
 
     # Check that this nside is correct
     if utmat.shape[axis] != (nside * (nside + 1) // 2):
-        msg = (
-            f"Array length ({utmat.shape[axis]:d}) of axis {axis:d} does not correspond upper triangle\
+        msg = f"Array length ({utmat.shape[axis]:d}) of axis {axis:d} does not correspond upper triangle\
                 of square matrix"
-        )
         raise RuntimeError(msg)
 
     # Find indices of the diagonal
