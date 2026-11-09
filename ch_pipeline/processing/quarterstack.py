@@ -372,7 +372,7 @@ class QuarterStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2026.05",
+        "modlist": "chime/python/2026.10",
         "partitions": 2,
         # Don't generate quarter stacks with less days than this
         "min_days": 5,
