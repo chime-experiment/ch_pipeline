@@ -377,7 +377,7 @@ class SiderealMean(tasklib.base.ContainerTask):
 
             ra = chime.unix_to_lsa(sstream.time)
             timestamp = {lsd: sstream.time}
-            flag_quiet = np.fix(chime.unix_to_lsd(sstream.time)) == lsd
+            flag_quiet = np.trunc(chime.unix_to_lsd(sstream.time)) == lsd
         else:
             raise RuntimeError("Format of `sstream` argument is unknown.")
 
