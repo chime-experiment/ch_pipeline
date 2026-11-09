@@ -196,7 +196,6 @@ class FindSpectralLines(tasklib.base.ContainerTask):
 
         # Loop over clusters
         for cc, cluster_id in enumerate(uniq_clusters):
-
             # Identify which outliers are in this cluster,
             # then identify which are held on this rank
             this_group = np.flatnonzero(cluster_ids == cluster_id)
@@ -207,7 +206,6 @@ class FindSpectralLines(tasklib.base.ContainerTask):
 
             # Check if we have cluster members on this rank
             if local_npix > 0:
-
                 # Need to convert back to local indices to extract map values
                 local_ind = tuple(
                     [ind[this_rank] - off for ind, off in zip(index, offset_local)]

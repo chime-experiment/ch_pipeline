@@ -185,9 +185,7 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
         sensitivities = sensitivity_metric(stream=stream, average_beams=False)
         sensitivities = sensitivities.reshape(
             nfreq, nsubfreq, nbeam_ew, nbeam_ns, ntime
-        )[
-            :, :, self.beam_ew_id, :, :
-        ]  # (nfreq, nsubfreq, nbeam_ns, ntime)
+        )[:, :, self.beam_ew_id, :, :]  # (nfreq, nsubfreq, nbeam_ns, ntime)
 
         # Create output container with the same axes
         out = HFBDirectionalRFIMaskBitmap(
@@ -200,7 +198,6 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
 
         # For each significance, compute RFI flags and store counts
         for i in range(len(self.sigma)):
-
             # RFI detection for individual E-W beams
             flags = sensitivities > 1.0 + self.std * self.sigma[i]
 
@@ -298,7 +295,6 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
 
         # Process each frequency separately since beam-to-el mapping varies with freq
         for i in range(sf, ef):
-
             # Extract mask for this std and threshold
             mask = rfimaskbitmap.get_mask(
                 self.sigma,
