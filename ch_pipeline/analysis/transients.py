@@ -6529,13 +6529,34 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     :class:`TransientMatchedFilter`.  With ``kappa = 0`` the result is that of
     :class:`TransientMatchedFilter`.
 
-    ``S_k`` should be the part of the data the filter removes, ``P y``
-    (:class:`MixFilteredHybridVis`), rather than the unfiltered ``y``: ``y`` also
-    holds the transient, so a bright pulse would add ``kappa^2`` times its own
-    power to its variance, which matters where the sky in that product is faint
-    (in V, J1634's S/N fell from 275 to 149).  ``P y`` holds the static sky and
-    the low-pass part of the noise, and of a transient only the small part in the
-    filter's stop band.  A warning is logged if the input is not marked as ``P y``.
+    The variance is that of the noise without a transient, so the coherent term
+    must not count the trial's own transient.  The template holds it (``y`` all
+    of it; ``P y`` its part in the filter's stop band, which is most of a pulse
+    longer than a few samples), and a bright pulse would add ``kappa^2`` times its
+    own power to its variance where the sky in that product is faint (in V,
+    J1634's S/N fell from 275 to 149 with ``y``).  With ``subtract_own_pulse``, the
+    coherent term of each trial is formed from ``y`` minus the trial's own model,
+    ``a s_b g`` at each sample of its track, where ``a`` is the trial's amplitude
+    (complex: the real and imaginary parts of the numerator over the response).
+    ``y`` is the template plus the filtered data if the template is ``P y`` (the
+    attribute ``filtered_coeff`` of :class:`MixFilteredHybridVis`, -1); the
+    filtered data are the elevation-median-subtracted ones, so ``y`` is short of
+    that median, which is common to all elevations.  For band ``b`` and product
+    ``p`` the model's part of ``V_b`` is ``a G_p``, with
+    ``G_p = sum_k kappa_coh |g_k|^2 W_k`` over the samples of the track, so
+
+        sum_j |V_j - a h_j|^2 = A - 2 Re(a^* B) + |a|^2 C
+
+    (for the real and imaginary parts of ``a`` separately where the model is not
+    linear in the complex ``a``, as for the parts of C), with ``A``, ``B`` and
+    ``C`` summed along the track like the coherent term itself, after the bands
+    are combined with the modes of ``rho_band`` and the spectral index of the
+    trial.  The subtraction is exact for the trial that matches a transient of
+    constant amplitude and spectrum along its track; others keep part of it.
+    Without a transient, ``a`` is noise and adds ``kappa^2 |a|^2 C``, of order
+    ``kappa^2`` of the thermal variance.  The weights ``W_k`` keep ``|S_k|^2`` of
+    the template as given.  The sky term of Q in the RM search (L) is not
+    corrected.
 
     For a duration of W samples the template follows the source along its track as
     in :class:`TransientMatchedFilter`.  The numerator, the diagonal of the response
@@ -6662,6 +6683,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         RM search is computed at each RM; the others are taken at their mean over
         RM.  Default is 3 (the leading mode holds ~88% of the trace on 2418 and
         3035).
+    subtract_own_pulse : bool
+        Leave the trial's own transient out of its coherent sky term (see above).
+        Default is True.  False gives the sky term of the template as it is.
 
     With ``stokes``, the products are combined in each band before the bands are
     combined.  I is formed as for the co-polar search (``combine_pol``, so its
@@ -6750,6 +6774,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     rm_ntrials_eff = config.Property(proptype=float, default=None)
     rm_chunk = config.Property(proptype=int, default=32)
     rm_sky_modes = config.Property(proptype=int, default=3)
+    subtract_own_pulse = config.Property(proptype=bool, default=True)
     # Centre of the RM trials, set only by TargetWindows (see its docstring)
     _rm_centre = 0.0
     el_pass = config.Property(
@@ -6787,7 +6812,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         unfiltered : draco.core.containers.HybridVisStream
             The sky template on the same grid: the part of the data the filter
             removes (:class:`MixFilteredHybridVis`), or the visibilities before
-            filtering.
+            filtering.  Either gives the same coherent sky term with
+            ``subtract_own_pulse`` (see the class docstring); the weights use the
+            template as given.
         sky : ch_pipeline.core.containers.HybridVisSkyNoise
             Output of :class:`EstimateSkyNoise` for the same data.
 
@@ -6819,7 +6846,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         alphas = np.array(self.spectral_indices, dtype=np.float64)
 
         _check_same_grid(hvis, unfiltered)
-        _check_sky_template(self.log, unfiltered)
+        # The template of the coherent term: y = template - filtered_coeff * data
+        tcoef = self._template_coeff(unfiltered)
 
         has_response = "ra_response" in hvis.datasets
         if has_response:
@@ -7083,33 +7111,50 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         def valid_w(W):
             return np.ones(nra, dtype=bool) if periodic else np.arange(nra) <= nra - W
 
-        def per_duration(ia, ee, le, gg, nm, rs, vr, ni, vs=None):
+        def per_duration(ia, ee, le, gg, nm, rs, vr, ni, sky=None, swap=False):
             """[numerator, response, variance, imaginary numerator, f] per duration.
 
-            ``ee`` is the local elevation and ``le`` its index in the pass.  ``vs`` is
-            the part of ``vr`` from the coherent sky term, and ``f`` the fraction of
-            such a term left by the filter (see the class docstring).
+            ``ee`` is the local elevation and ``le`` its index in the pass.  ``sky`` is
+            the coherent sky term from :meth:`_combine` (its part of ``vr`` and the
+            sums of :func:`_sky_parts`), and ``f`` the fraction of such a term left by
+            the filter (see the class docstring).  With ``swap``, ``nm`` and ``ni``
+            are the imaginary and real parts of the amplitude of the sky model.
             """
             out = [(nm, rs, vr, ni, 1.0)]
             if not long_w:
                 return out
             tr = track[:, ee : ee + 1]
-            parts = [rs, vr] + [a for a in (nm, ni, vs) if a is not None]
+            vr0 = vr if sky is None else vr - sky[0]
+            # Pairs of real arrays packed as complex (the track weights are real)
+            packed = [rs + 1.0j * vr0]
+            if nm is not None:
+                packed.append(nm + 1.0j * (ni if ni is not None else 0.0))
+            if sky is not None:
+                packed.extend(sky[1])
             sums = [
-                self._track_numerator(a[np.newaxis], tr, durations) for a in parts
+                self._track_numerator(a[np.newaxis], tr, durations) for a in packed
             ]
             for iw, W in enumerate(long_w):
                 iwd = durations.index(W)
                 rs_sum = sums[0][iwd][0].real
                 rs_w = rs_sum + cross_r[ia, iw, cmap[gg], le]
-                vr_w = sums[1][iwd][0].real + 0.5 * cross_v[ia, iw, cmap[gg], le]
+                vr_w = sums[0][iwd][0].imag + 0.5 * cross_v[ia, iw, cmap[gg], le]
                 rs_w = np.where(valid_w(W), rs_w, 0.0)
-                rest = [s[iwd][0].real for s in sums[2:]]
-                nm_w = rest.pop(0) if nm is not None else None
-                ni_w = rest.pop(0) if ni is not None else None
+                nm_w = ni_w = None
+                if nm is not None:
+                    nm_w = sums[1][iwd][0].real
+                    ni_w = sums[1][iwd][0].imag if ni is not None else None
                 fs = self._sky_fraction(rs_w, rs_sum)
-                if vs is not None:
-                    vr_w = vr_w - (1.0 - fs) * rest.pop(0)
+                if sky is not None:
+                    k0 = 2 if nm is not None else 1
+                    parts_w = [s[iwd][0] for s in sums[k0:]]
+                    ar = ai = 0.0
+                    if nm is not None:
+                        inv = tools.invert_no_zero(rs_w)
+                        ar, ai = nm_w * inv, (ni_w * inv if ni is not None else 0.0)
+                        if swap:
+                            ar, ai = ai, ar
+                    vr_w = vr_w + fs * 0.5 * _sky_eval(parts_w, ar, ai)
                 out.append((nm_w, rs_w, vr_w, ni_w, fs))
             return out
 
@@ -7125,7 +7170,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         def combine(gg, le, sb, sky_idx=None):
             return self._combine(
                 gg, le, allb, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus,
-                sky_idx,
+                sky_idx, hsky,
             )
 
         _log_memory(self, "matched filter, before the passes")
@@ -7136,9 +7181,10 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             npe = p1 - p0
             shp = (ngp, nband, npe, nx, nra)
             numer = np.zeros(shp, dtype=np.float32)
+            # The imaginary part is also the amplitude of the trial's own pulse
             numer_im = (
                 np.zeros(shp, dtype=np.float32)
-                if self.save_imag or self.stokes
+                if self.save_imag or self.stokes or self.subtract_own_pulse
                 else None
             )
             resp = np.zeros(shp, dtype=np.float32)
@@ -7150,6 +7196,21 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             vrot = None
             if self.stokes and self._rm_centre != 0.0:
                 vrot = np.zeros((4, *shp[1:]), dtype=np.complex64)
+            # The coherent term of a pulse of unit amplitude in each band (see
+            # _sky_sources): real, in the layout of vplus and vminus
+            hsky = None
+            if self.subtract_own_pulse:
+                hsky = {
+                    "plus": np.zeros(vplus.shape, dtype=np.float32),
+                    "minus": (
+                        np.zeros(vminus.shape, dtype=np.float32)
+                        if vminus is not None
+                        else None
+                    ),
+                    "stokes": self.stokes,
+                    # U's coherent term is in vrot instead with an RM centre
+                    "u_model": vrot is None,
+                }
             if long_w:
                 cshp = (alphas.size, len(long_w), len(pgroups), npe, nx, nra)
                 cross_r = np.zeros(cshp, dtype=np.float32)
@@ -7235,6 +7296,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     wr = (wt * omp).astype(np.float32)
                     wv = (wt**2 * (var_th * omp + ki * s2)).astype(np.float32)
                     ws = (wt * kc * sky_v).astype(np.complex64)
+                    # The coherent term from y (template plus the filtered data), from
+                    # which the trial's own pulse is subtracted, and the pulse's own
+                    # term per unit amplitude: sum_k kappa |g_k|^2 W_k
+                    wsy, wk = ws, None
+                    if hsky is not None:
+                        if tcoef != 0.0:
+                            wsy = (wt * kc * (sky_v - tcoef * data)).astype(np.complex64)
+                        wk = (wt * kc).astype(np.float32)
 
                     if self.stokes:
                         theta = None
@@ -7265,6 +7334,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                             vminus,
                             theta,
                             vrot,
+                            wsy=wsy,
+                            wk=wk,
+                            hsky=hsky,
                         )
                         for ci, grp in enumerate(pgroups):
                             if not long_w:
@@ -7345,74 +7417,102 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                                 bcross_r[bb, ib, gg, psl] = cr[long_w.index(W)]
                                 bcross_v[bb, ib, gg, psl] = cv[long_w.index(W)]
 
-                        vp = []
+                        vp, gp = [], []
                         for pp in grp:
                             tp = template[pp].reshape(-1, *template.shape[3:])
+                            tph = tp.transpose(1, 2, 0).conj()
                             vp.append(
                                 np.matmul(
-                                    tp.transpose(1, 2, 0).conj(),
-                                    ws[pp].reshape(-1, *ws.shape[3:]).transpose(1, 0, 2),
+                                    tph,
+                                    wsy[pp].reshape(-1, *wsy.shape[3:]).transpose(1, 0, 2),
                                 )
                             )
+                            if wk is not None:
+                                gp.append(
+                                    np.matmul(
+                                        np.abs(tph) ** 2,
+                                        wk[pp].reshape(-1, *wk.shape[3:]).transpose(1, 0, 2),
+                                    )
+                                )
                         if len(vp) == 2:
                             r = rho_pol[bb]
-                            vplus[gg, bb, psl] = (vp[0] + vp[1]) * np.sqrt(0.5 * (1 + r))
-                            vminus[gg, bb, psl] = (vp[0] - vp[1]) * np.sqrt(
-                                0.5 * (1 - r)
-                            )
+                            ap, am = np.sqrt(0.5 * (1 + r)), np.sqrt(0.5 * (1 - r))
+                            vplus[gg, bb, psl] = (vp[0] + vp[1]) * ap
+                            vminus[gg, bb, psl] = (vp[0] - vp[1]) * am
+                            if gp:
+                                hsky["plus"][gg, bb, psl] = (gp[0] + gp[1]) * ap
+                                hsky["minus"][gg, bb, psl] = (gp[0] - gp[1]) * am
                         else:
                             vplus[gg, bb, psl] = vp[0]
+                            if gp:
+                                hsky["plus"][gg, bb, psl] = gp[0]
             t_bands = time.time() - t_pass
 
             # Each band on its own
             for op, (gg, part) in enumerate(bsrc):
+                srcb = _sky_sources(
+                    gg, vplus, vminus, hsky, 2 + part if self.stokes and gg == 2 else None
+                )
                 for bb in range(nband):
-                    vs = None
-                    if self.stokes and gg == 2:
-                        # C: the coherent term of its real (U) or imaginary (V) part
-                        terms = [vplus[2 + part, bb]]
-                    else:
-                        terms = [
-                            vv[gg, bb]
-                            for vv in (vplus, vminus)
-                            if vv is not None and gg < vv.shape[0]
-                        ]
-                    for tv in terms:
-                        vs = 0.0 if vs is None else vs
-                        vs = vs + 0.5 * np.abs(tv) ** 2
-                    var = 0.5 * vinc[gg, bb] if vs is None else 0.5 * vinc[gg, bb] + vs
-                    nm = numer[gg, bb] if part == 0 else numer_im[gg, bb]
+                    terms = []
+                    for vg, model in srcb:
+                        if model is None:
+                            terms.append((vg[bb][np.newaxis], None, None, None))
+                            continue
+                        bases, cr, ci = model(bb)
+                        terms.append(
+                            (vg[bb][np.newaxis], [b[np.newaxis] for b in bases], cr, ci)
+                        )
+                    parts = _sky_parts(terms)
+                    nre = numer[gg, bb]
+                    nim = numer_im[gg, bb] if numer_im is not None else None
+                    var = 0.5 * vinc[gg, bb]
+                    if parts is not None:
+                        # The band's own amplitude, (N_re + i N_im) / R
+                        inv = tools.invert_no_zero(resp[gg, bb])
+                        ai = nim * inv if nim is not None else 0.0
+                        var = var + 0.5 * _sky_eval(parts, nre * inv, ai)
+                    nm = nre if part == 0 else nim
                     amp, wgt = self._amp_weight(nm, resp[gg, bb], var)
                     bamp[op, 0, bb, p0:p1] = amp.transpose(0, 2, 1)
                     bwgt[op, 0, bb, p0:p1] = wgt.transpose(0, 2, 1)
                     if bimag is not None:
-                        im, _ = self._amp_weight(numer_im[gg, bb], resp[gg, bb], var)
+                        im, _ = self._amp_weight(nim, resp[gg, bb], var)
                         bimag[op, 0, bb, p0:p1] = im.transpose(0, 2, 1)
                     if not blong:
                         continue
                     # Longer durations: the sums along the track, with the band's own
-                    # coupling of the samples (that of its pair of products, cmap)
+                    # coupling of the samples (that of its pair of products, cmap);
+                    # pairs of real arrays packed as complex (the track weights are real)
                     tr = track[:, p0:p1]
-                    parts = [resp[gg, bb], var, nm]
-                    if bimag is not None:
-                        parts.append(numer_im[gg, bb])
-                    if vs is not None:
-                        parts.append(vs)
-                    sums = [self._track_numerator(a, tr, blong) for a in parts]
+                    packed = [
+                        resp[gg, bb] + 0.5j * vinc[gg, bb],
+                        nre + 1.0j * (nim if nim is not None else 0.0),
+                    ]
+                    if parts is not None:
+                        packed.extend(parts)
+                    sums = [self._track_numerator(a, tr, blong) for a in packed]
                     for ib, W in enumerate(blong):
                         rs_sum = sums[0][ib].real
                         rs_w = rs_sum + bcross_r[bb, ib, cmap[gg]]
-                        vr_w = sums[1][ib].real + 0.5 * bcross_v[bb, ib, cmap[gg]]
+                        vr_w = sums[0][ib].imag + 0.5 * bcross_v[bb, ib, cmap[gg]]
                         rs_w = np.where(valid_w(W), rs_w, 0.0)
-                        if vs is not None:
+                        nre_w, nim_w = sums[1][ib].real, sums[1][ib].imag
+                        if parts is not None:
                             fs = self._sky_fraction(rs_w, rs_sum)
-                            vr_w = vr_w - (1.0 - fs) * sums[-1][ib].real
+                            inv = tools.invert_no_zero(rs_w)
+                            ai = nim_w * inv if nim is not None else 0.0
+                            vr_w = vr_w + fs * 0.5 * _sky_eval(
+                                [sm[ib] for sm in sums[2:]], nre_w * inv, ai
+                            )
                         iwb = band_durations.index(W)
-                        amp, wgt = self._amp_weight(sums[2][ib].real, rs_w, vr_w)
+                        amp, wgt = self._amp_weight(
+                            nre_w if part == 0 else nim_w, rs_w, vr_w
+                        )
                         bamp[op, iwb, bb, p0:p1] = amp.transpose(0, 2, 1)
                         bwgt[op, iwb, bb, p0:p1] = wgt.transpose(0, 2, 1)
                         if bimag is not None:
-                            im, _ = self._amp_weight(sums[3][ib].real, rs_w, vr_w)
+                            im, _ = self._amp_weight(nim_w, rs_w, vr_w)
                             bimag[op, iwb, bb, p0:p1] = im.transpose(0, 2, 1)
 
             # All bands, for each spectral index
@@ -7421,11 +7521,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 for le in range(npe):
                     ee = p0 + le
                     for op, gg, swap, sky_idx in srcs:
-                        nm, rs, vr, ni, vs = combine(gg, le, sb, sky_idx)
+                        nm, rs, vr, ni, sky_c = combine(gg, le, sb, sky_idx)
                         if swap:
                             nm, ni = ni, nm
                         write(
-                            op, ia, ee, per_duration(ia, ee, le, gg, nm, rs, vr, ni, vs)
+                            op,
+                            ia,
+                            ee,
+                            per_duration(ia, ee, le, gg, nm, rs, vr, ni, sky_c, swap),
                         )
                     if not self.stokes:
                         continue
@@ -7482,11 +7585,23 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             self._group_maps_fill(
                 groups,
                 numer[gsl],
+                numer_im[gsl] if numer_im is not None else None,
                 resp[gsl],
                 vinc[gsl],
                 vplus[gsl],
                 vminus[gsl] if vminus is not None else None,
                 p0,
+                hsky=(
+                    None
+                    if hsky is None
+                    else {
+                        **hsky,
+                        "plus": hsky["plus"][gsl],
+                        "minus": (
+                            hsky["minus"][gsl] if hsky["minus"] is not None else None
+                        ),
+                    }
+                ),
             )
             _log_memory(
                 self,
@@ -7494,7 +7609,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 f"the band loop, {time.time() - t_pass:.0f} s in all)",
             )
             # Free the arrays of the pass (the closures above refer to them by name)
-            numer = numer_im = resp = vinc = vplus = vminus = None
+            numer = numer_im = resp = vinc = vplus = vminus = hsky = None
             cross_r = cross_v = bcross_r = bcross_v = None
 
         # No view of the shared memory may outlive it (the per-band arrays are copies)
@@ -7587,6 +7702,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         vminus,
         theta=None,
         vrot=None,
+        wsy=None,
+        wk=None,
+        hsky=None,
     ):
         """Sums of one band for the groups I, Q and C (see the class docstring).
 
@@ -7595,6 +7713,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         sky term of that sum: ``A_b`` and ``B_b`` with ``sum_k Re(v_k) e^{-i theta_k}``
         and ``sum_k Im(v_k) e^{-i theta_k}``, for vplus and vminus.  V is unchanged.
 
+        ``wsy`` is ``ws`` from ``y`` (default ``ws``), for the coherent terms of I, U
+        and V, from which the trial's own pulse is subtracted; Q (and L) keep the
+        template as given, ``ws``, uncorrected.  With ``hsky`` (see
+        :func:`_sky_sources`), ``wk`` [pol, freq, ew, el, ra] is ``kappa_coh W`` and
+        ``hsky`` gets the coherent terms of a pulse of unit amplitude.
+
         Returns
         -------
         qa : np.ndarray[2, el, x]
@@ -7602,8 +7726,11 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         qb : np.ndarray[2, el, ra]
             The factors of the weights of XX and YY in Q.
         """
+        if wsy is None:
+            wsy = ws
         single = {}
         rot = {}
+        own = {}  # the products' coherent terms from y, and of a unit pulse
         for name, pp in sidx.items():
             tch = template[pp].reshape(-1, *template.shape[3:]).transpose(1, 2, 0).conj()
             g2 = np.abs(tch) ** 2
@@ -7611,12 +7738,18 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             def kmat(a, p=pp):
                 return a[p].reshape(-1, *a.shape[3:]).transpose(1, 0, 2)  # el, k, ra
 
-            vp = np.matmul(tch, kmat(ws))
+            copol = name in ("XX", "YY")
+            # Q keeps the template as given; I, U and V use y
+            vp = np.matmul(tch, kmat(ws if copol else wsy))
             single[name] = (
                 np.matmul(tch, kmat(wd)),
                 np.matmul(g2, kmat(wr)),
                 np.matmul(g2, kmat(wv)),
                 vp,
+            )
+            own[name] = (
+                np.matmul(tch, kmat(wsy)) if copol and wsy is not ws else vp,
+                np.matmul(g2, kmat(wk)) if wk is not None else None,
             )
             if theta is not None:
                 tc = tch * np.cos(theta)
@@ -7639,8 +7772,12 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         numer_im[0, bb, esl] = n.imag
         resp[0, bb, esl] = r
         vinc[0, bb, esl] = vx + vy
-        vplus[0, bb, esl] = (px + py) * a
-        vminus[0, bb, esl] = (px - py) * b
+        (pxo, gx), (pyo, gy) = own["XX"], own["YY"]
+        vplus[0, bb, esl] = (pxo + pyo) * a
+        vminus[0, bb, esl] = (pxo - pyo) * b
+        if hsky is not None:
+            hsky["plus"][0, bb, esl] = (gx + gy) * a
+            hsky["minus"][0, bb, esl] = (gx - gy) * b
 
         qa, qb = _q_factors(rx, ry)
         fx = qa[0][..., np.newaxis] * qb[0][:, np.newaxis]
@@ -7661,7 +7798,13 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         numer_im[2, bb, esl] = n.imag
         resp[2, bb, esl] = rxy + ryx
         vinc[2, bb, esl] = vxy + vyx
-        # The coherent sky term of C (see the class docstring): U and V parts
+        # The coherent sky term of C (see the class docstring): U and V parts.  A
+        # pulse of complex amplitude c in C adds a (c_r G+ - i c_i G-) to U's and
+        # a (c_i G+ + i c_r G-) to V's, with G+- = G_XY +- G_YX
+        if hsky is not None and vplus.shape[0] > 3:
+            gxy, gyx = own["XY"][1], own["YX"][1]
+            hsky["plus"][2, bb, esl] = a * (gxy + gyx)
+            hsky["plus"][3, bb, esl] = a * (gxy - gyx)
         if vplus.shape[0] > 3:
             cb = pyx.conj()
             pp_ = (a / np.sqrt(2.0)) * ph * (pxy + cb)
@@ -8001,6 +8144,22 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
 
         return resp_cross, var_cross
 
+    def _template_coeff(self, unfiltered):
+        """``c`` of the template, ``y + c (I - P) y`` (0 for ``y``, -1 for ``P y``).
+
+        With ``subtract_own_pulse`` the coherent term is formed from ``y``, the
+        template minus ``c`` times the filtered data, and either template will do.
+        """
+        c = float(unfiltered.attrs.get("filtered_coeff", 0.0))
+        if not self.subtract_own_pulse:
+            _check_sky_template(self.log, unfiltered)
+            return c
+        self.log.info(
+            f"Coherent sky term from y (template filtered_coeff {c:g}), without the "
+            "trial's own pulse."
+        )
+        return c
+
     @staticmethod
     def _sky_fraction(resp_w, resp_sum):
         """Fraction of the sky variance summed along a track left by the filter.
@@ -8029,14 +8188,19 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
     @staticmethod
     def _combine(
         gg, ee, idx, sb, lam, qvec, numer, numer_im, resp, vinc, vplus, vminus,
-        sky_idx=None,
+        sky_idx=None, hsky=None,
     ):
         """Sum the bands ``idx`` with weights ``sb`` at one elevation.
 
         Returns the real and imaginary numerator, the response and the variance of
-        the real part, each [x, ra], and the part of that variance from the coherent
-        sky term (None if ``gg`` has none).  With ``sky_idx``, the coherent term is
-        ``vplus[sky_idx]`` alone (C's parts in the Stokes search).
+        the real part, each [x, ra], and the coherent sky term: None if ``gg`` has
+        none, else ``(vs, parts)`` with ``vs`` its part of the variance and
+        ``parts`` from :func:`_sky_parts`, after the bands are combined with the
+        modes of their correlation.  With ``hsky`` (see :func:`_sky_sources`) the
+        trial's own pulse, of amplitude ``(nm + i ni) / rs`` in the bands with the
+        weights ``sb``, is subtracted from the coherent term.  With ``sky_idx``,
+        the coherent term is ``vplus[sky_idx]`` alone (C's parts in the Stokes
+        search).
         """
         s = sb[idx].astype(np.float64)
         nm = np.tensordot(s, numer[gg, idx, ee], axes=1)
@@ -8048,20 +8212,24 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         rs = np.tensordot(s**2, resp[gg, idx, ee], axes=1)
         var = np.tensordot(s**2, vinc[gg, idx, ee], axes=1)
         coeff = (s[:, np.newaxis] * qvec) * np.sqrt(lam)[np.newaxis, :]  # band, mode
-        vsky = None
-        if sky_idx is not None:
-            sources = [vplus[sky_idx]] if vplus is not None else []
-        else:
-            sources = [
-                vv[gg] for vv in (vplus, vminus) if vv is not None and gg < vv.shape[0]
-            ]
-        for vg in sources:
+        cs = (coeff * s[:, np.newaxis]).T.astype(np.float32)  # the model's: s_b more
+        terms = []
+        for vg, model in _sky_sources(gg, vplus, vminus, hsky, sky_idx):
             y = np.tensordot(coeff.T.astype(np.complex64), vg[idx, ee], axes=1)
-            vsky = 0.0 if vsky is None else vsky
-            vsky = vsky + np.sum(np.abs(y) ** 2, axis=0)
-        if vsky is None:
+            if model is None:
+                terms.append((y, None, None, None))
+                continue
+            bases, cr, ci = model((idx, ee))
+            hb = [np.tensordot(cs, b, axes=1) for b in bases]  # mode, x, ra
+            terms.append((y, hb, cr, ci))
+        parts = _sky_parts(terms)
+        if parts is None:
             return nm, rs, 0.5 * var, ni, None
-        return nm, rs, 0.5 * (var + vsky), ni, 0.5 * vsky
+        inv = tools.invert_no_zero(rs)
+        ar = nm * inv
+        ai = ni * inv if ni is not None else 0.0
+        vs = 0.5 * _sky_eval(parts, ar, ai)
+        return nm, rs, 0.5 * var + vs, ni, (vs, parts)
 
     def _group_maps_setup(self, hvis, band_map, x, opol, ha, dec, rho_band):
         """Containers of the group maps, one for each entry of group_x_reduce.
@@ -8130,8 +8298,14 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             modes.append((idx, lam, qvec, sg))
         return outs, fixed, names, modes
 
-    def _group_maps_fill(self, groups, numer, resp, vinc, vplus, vminus, e0):
-        """S/N of the group maps for the elevations of one pass (from local ``e0``)."""
+    def _group_maps_fill(
+        self, groups, numer, numer_im, resp, vinc, vplus, vminus, e0, hsky=None
+    ):
+        """S/N of the group maps for the elevations of one pass (from local ``e0``).
+
+        ``numer_im`` (or None) is used only for the amplitude of the trial's own pulse
+        in the coherent sky term (see :meth:`_combine`).
+        """
         if groups is None:
             return
         outs, fixed, _, modes = groups
@@ -8141,7 +8315,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                 for le in range(npe):
                     ee = e0 + le
                     nm, rs, vr, _, _ = self._combine(
-                        gg, le, idx, sg, lam, qvec, numer, None, resp, vinc, vplus, vminus
+                        gg, le, idx, sg, lam, qvec, numer, numer_im, resp, vinc, vplus,
+                        vminus, hsky=hsky,
                     )
                     snr = np.where(
                         (rs > 0) & (vr > 0), nm * tools.invert_no_zero(np.sqrt(vr)), 0.0
@@ -8465,7 +8640,7 @@ class CandidateBandSpectra(TransientMatchedFilterSkyNoise):
         sky_coef = self._sky_coefficients(sky, band_map, ew[iew], ra, el)
 
         hvis.redistribute(["el", "freq"])
-        _check_sky_template(self.log, unfiltered)
+        self._template_coeff(unfiltered)
         unfiltered.redistribute(["el", "freq"])
         el_slc = hvis.vis[:].local_bounds
         if unfiltered.vis[:].local_bounds != el_slc:
@@ -8825,6 +9000,105 @@ def _allreduce_nanmax(comm, a):
     b = np.where(np.isnan(a), -np.inf, a)
     comm.Allreduce(MPI.IN_PLACE, b, op=MPI.MAX)
     return np.where(np.isinf(b), np.nan, b)
+
+
+def _sky_sources(gg, vplus, vminus, hsky, sky_idx=None):
+    """The coherent sky terms of group ``gg``, each with the model of a pulse in it.
+
+    For :class:`TransientMatchedFilterSkyNoise`.  Returns a list of ``(v, model)``:
+    ``v`` [band, el, x, ra] complex, and ``model`` None or a function of an index
+    into the leading axes of ``v`` giving ``(bases, cr, ci)``: real arrays, and the
+    coefficients of each in the term of a pulse of unit real (``cr``) and unit
+    imaginary (``ci``) amplitude.  ``hsky`` holds the bases in the layout of
+    ``vplus`` and ``vminus`` (None: no model).  In the Stokes search Q has no model
+    (it keeps the template as given, for L), and the parts of C (U: ``sky_idx`` 2,
+    V: 3) are not linear in its complex amplitude (see ``_stokes_band``).
+    """
+    if vplus is None:
+        return []
+    stokes = hsky is not None and hsky["stokes"]
+    hp = hsky["plus"] if hsky is not None else None
+    hm = hsky["minus"] if hsky is not None else None
+
+    def lin(h):
+        return lambda sel: ([h[sel]], [1.0], [1.0j])
+
+    if sky_idx is None and not (stokes and gg == 2):
+        corrected = hp is not None and not (stokes and gg == 1)
+        out = [(vplus[gg], lin(hp[gg]) if corrected else None)]
+        if vminus is not None and gg < vminus.shape[0]:
+            out.append((vminus[gg], lin(hm[gg]) if corrected else None))
+        return out
+    idx = 2 if sky_idx is None else sky_idx
+    model = None
+    if hp is not None:
+        gpl, gmi = hp[2], hp[3]
+        if idx == 2 and hsky["u_model"]:
+            model = lambda sel: ([gpl[sel], gmi[sel]], [1.0, 0.0], [0.0, -1.0j])  # noqa: E731
+        elif idx == 3:
+            model = lambda sel: ([gpl[sel], gmi[sel]], [0.0, 1.0j], [1.0, 0.0])  # noqa: E731
+    return [(vplus[idx], model)]
+
+
+def _sky_parts(terms):
+    """Sums over the leading axis of the coherent sky terms and their pulse models.
+
+    ``terms`` is a list of ``(y, bases, cr, ci)``: the coherent term ``y`` [m, ...]
+    complex, and the model as real arrays ``bases`` like ``y`` (None without a model)
+    with the coefficients of each in the terms ``h_r`` and ``h_i`` of a pulse of unit
+    real and unit imaginary amplitude.  Returns None without terms, ``[A]`` without a
+    model, else ``[A + i C_rr, B_r + i B_i, C_ii + i C_ri]`` (complex128), with
+    ``A = sum |y|^2``, ``B_r = Re sum y^* h_r``, ``C_ri = Re sum h_r^* h_i`` and so on,
+    so that ``sum |y - a_r h_r - a_i h_i|^2`` is :func:`_sky_eval`.  Each is linear
+    in the products of the terms, so it can be summed along a track.
+    """
+    if not terms:
+        return None
+    a = br = bi = crr = cii = cri = 0.0
+    model = False
+    for y, bases, cr, ci in terms:
+        yc = y.conj()
+        a = a + np.einsum("m...,m...->...", yc, y).real.astype(np.float64)
+        if bases is None:
+            continue
+        model = True
+        yk = [np.einsum("m...,m...->...", yc, b).astype(np.complex128) for b in bases]
+        del yc
+        br = br + sum((c * v).real for c, v in zip(cr, yk) if c != 0)
+        bi = bi + sum((c * v).real for c, v in zip(ci, yk) if c != 0)
+        for k, bk in enumerate(bases):
+            for m in range(k, len(bases)):
+                fr = np.conj(cr[k]) * cr[m]
+                fi = np.conj(ci[k]) * ci[m]
+                fx = np.conj(cr[k]) * ci[m]
+                if m != k:
+                    # H_km = H_mk is real: the pair (k, m) and (m, k) together
+                    fr, fi = fr + np.conj(cr[m]) * cr[k], fi + np.conj(ci[m]) * ci[k]
+                    fx = fx + np.conj(cr[m]) * ci[k]
+                if fr == 0 and fi == 0 and fx == 0:
+                    continue
+                hkl = np.einsum("m...,m...->...", bk, bases[m]).astype(np.float64)
+                crr = crr + fr.real * hkl
+                cii = cii + fi.real * hkl
+                cri = cri + fx.real * hkl
+    if not model:
+        return [np.asarray(a, dtype=np.complex128)]
+    return [a + 1.0j * crr, br + 1.0j * bi, cii + 1.0j * cri]
+
+
+def _sky_eval(parts, ar, ai):
+    """``sum |y - a_r h_r - a_i h_i|^2`` from :func:`_sky_parts` (or its track sums)."""
+    if len(parts) == 1:
+        return parts[0].real
+    p1, p2, p3 = parts
+    v = (
+        p1.real
+        - 2.0 * (ar * p2.real + ai * p2.imag)
+        + ar**2 * p1.imag
+        + 2.0 * ar * ai * p3.imag
+        + ai**2 * p3.real
+    )
+    return np.maximum(v, 0.0)
 
 
 def _check_sky_template(log, unfiltered):
