@@ -185,7 +185,9 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
         sensitivities = sensitivity_metric(stream=stream, average_beams=False)
         sensitivities = sensitivities.reshape(
             nfreq, nsubfreq, nbeam_ew, nbeam_ns, ntime
-        )[:, :, self.beam_ew_id, :, :]  # (nfreq, nsubfreq, nbeam_ns, ntime)
+        )[
+            :, :, self.beam_ew_id, :, :
+        ]  # (nfreq, nsubfreq, nbeam_ns, ntime)
 
         # Create output container with the same axes
         out = HFBDirectionalRFIMaskBitmap(

@@ -1165,9 +1165,9 @@ class NanToNum(tasklib.base.ContainerTask):
             flag = ~np.isfinite(timestream.vis[fi])
             if np.any(flag):
                 timestream.vis[fi][flag] = 0.0
-                timestream.weight[fi][flag] = (
-                    0.0  # Also set weights to zero so we don't trust values
-                )
+                timestream.weight[fi][
+                    flag
+                ] = 0.0  # Also set weights to zero so we don't trust values
                 self.log.info(
                     f"{np.sum(flag):d} visibilities are non finite for "
                     f"frequency={fi:d} ({100 * np.sum(flag) / flag.size:0.2f}%)"
