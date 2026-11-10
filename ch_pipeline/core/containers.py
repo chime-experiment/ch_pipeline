@@ -1767,7 +1767,14 @@ class LPTCatalog(SourceCatalog):
     (s); ``spectral_index`` and ``spectral_curvature``; ``frac_lin``, ``frac_circ``
     and ``pol_angle`` (degrees, from the X feed at transit); ``rm`` (rad / m^2);
     the scintillation (``scint_index``, ``scint_bw`` in MHz); ``distance`` (kpc, or
-    NaN) and the random ``seed`` of the source's pulses.  Where each pulse appears on
+    NaN) and the random ``seed`` of the source's pulses; and the sub-pulse model
+    (``subpulse_rate``, the mean number of sub-pulses per minute of the envelope's
+    FWHM, 0 for a smooth pulse; their FWHM ``subpulse_width`` in s; the smooth ``subpulse_floor``; the
+    spacing ``subpulse_period`` in s of quasi-periodic ones, 0 for random times, and
+    its ``subpulse_jitter`` in periods; see
+    :data:`ch_pipeline.synthesis.lpt_population.SUBPULSE_DEFAULTS`).  For a pulse
+    with sub-pulses, ``duration`` is the FWHM of its Gaussian envelope.  Catalogues
+    written before these columns read as smooth pulses.  Where each pulse appears on
     a given day is in the :class:`LPTInjectionLog` of that day.
     """
 
@@ -1791,6 +1798,11 @@ class LPTCatalog(SourceCatalog):
                 ["scint_bw", np.float64],
                 ["distance", np.float64],
                 ["seed", np.int64],
+                ["subpulse_rate", np.float64],
+                ["subpulse_width", np.float64],
+                ["subpulse_floor", np.float64],
+                ["subpulse_period", np.float64],
+                ["subpulse_jitter", np.float64],
             ],
             "axis": "object_id",
         }
@@ -1822,6 +1834,8 @@ _LPT_PULSE_COLUMNS = [
     ["ra_start", np.float64],
     ["beam_mean", np.float64],
     ["scint_seed", np.int64],
+    ["n_subpulse", np.int32],
+    ["support", np.float64],
 ]
 
 
@@ -1837,8 +1851,11 @@ class LPTInjectionLog(TableSpec):
     the pulse-to-pulse scatter), duration, spectral index, polarisation
     fractions, angle (degrees, from the X feed at transit and lambda = 0) and RM, the ICRS and CIRS position, telescope-y at the centre, telescope-x
     and meridian RA (degrees) at the start of the pulse, the XX primary beam
-    averaged over the pulse and the band (``beam_mean``), and the seed of its
-    scintillation.
+    averaged over the pulse and the band (``beam_mean``), the seed of its
+    scintillation, the number of sub-pulses it was given (``n_subpulse``, 0 for a
+    smooth pulse) and ``support``, the length of time (s) it occupies: its duration,
+    or twice the FWHM of the envelope for a pulse with sub-pulses (the "start" is
+    then the start of that span).
     """
 
     _table_spec: ClassVar = {"pulse": {"columns": _LPT_PULSE_COLUMNS, "axis": "pulse"}}

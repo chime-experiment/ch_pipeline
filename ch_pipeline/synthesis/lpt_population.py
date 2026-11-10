@@ -268,7 +268,31 @@ DEFAULT_POPULATION = {
     "scint_index": 0.0,
     "scint_bw": {"distribution": "loguniform", "lower": 0.5, "upper": 20.0},
     "t_offset_beam": {"distribution": "uniform", "lower": -1.0, "upper": 1.0},
+    # Pulses made of sub-pulses (see SUBPULSE_DEFAULTS); none by default
+    "subpulse": None,
 }
+
+#: The sub-pulse model, for a ``fraction`` of the sources (see :func:`draw_population`).
+#: Each such pulse is a Gaussian envelope of FWHM ``duration`` (s; drawn from
+#: ``duration`` here, replacing the population's, then limited to half the period) with
+#: sub-pulses in it: ``rate`` per minute of the FWHM (a Poisson mean), each a Gaussian
+#: of FWHM about ``width`` (s), placed at random under the envelope without overlapping,
+#: or, for a ``periodic_fraction`` of the sources, every ``period`` s with a jitter of
+#: ``jitter`` periods; a smooth part of the envelope, ``floor``, lies under them.  The
+#: defaults follow ASKAP J1839-0756 on CHIME (LSD 3749: ~6 features of 1-2 samples
+#: over ~10 min, so ~1 a minute of FWHM) and GPM J1839-10 (30-300 s pulses with quasi-periodic substructure).
+SUBPULSE_DEFAULTS = {
+    "fraction": 0.0,
+    "duration": {"distribution": "loguniform", "lower": 60.0, "upper": 1200.0},
+    "rate": {"distribution": "loguniform", "lower": 0.2, "upper": 2.0},
+    "width": {"distribution": "loguniform", "lower": 10.0, "upper": 30.0},
+    "floor": {"distribution": "uniform", "lower": 0.0, "upper": 0.5},
+    "periodic_fraction": 0.0,
+    "period": {"distribution": "loguniform", "lower": 20.0, "upper": 120.0},
+    "jitter": {"distribution": "uniform", "lower": 0.0, "upper": 0.3},
+}
+
+SUBPULSE_COLUMNS = ("subpulse_rate", "subpulse_width", "subpulse_floor", "subpulse_period", "subpulse_jitter")
 
 
 def merge_population(spec=None):
@@ -278,6 +302,13 @@ def merge_population(spec=None):
         if k not in out:
             raise ValueError(f"Unknown population property {k!r}; have {sorted(out)}.")
         out[k] = copy.deepcopy(v)
+    if out["subpulse"] is not None:
+        sub = copy.deepcopy(SUBPULSE_DEFAULTS)
+        for k, v in out["subpulse"].items():
+            if k not in sub:
+                raise ValueError(f"Unknown sub-pulse property {k!r}; have {sorted(sub)}.")
+            sub[k] = copy.deepcopy(v)
+        out["subpulse"] = sub
     return out
 
 
@@ -287,7 +318,13 @@ def draw_population(rng, number, spec=None):
     Returns a dict of arrays: ra, dec (ICRS degrees), distance (kpc or NaN), flux,
     period (s; 0 for one pulse a day), duration (s; at most half the period),
     spectral_index, spectral_curvature, rm, frac_lin, frac_circ, pol_angle,
-    flux_scatter, null_fraction, scint_index, scint_bw and t_offset_beam.
+    flux_scatter, null_fraction, scint_index, scint_bw and t_offset_beam, and the
+    sub-pulse model (``SUBPULSE_COLUMNS``, all 0 for a smooth pulse; see
+    :data:`SUBPULSE_DEFAULTS`): the rate of sub-pulses per minute of FWHM (0: none), their FWHM
+    (s), the smooth floor, the spacing of quasi-periodic ones (s; 0: at random) and
+    its jitter (periods).  The sub-pulse draws come after all the others and are
+    made only with a ``fraction`` above 0, so a population without them is drawn as
+    before for a seed.
     """
     pop = merge_population(spec)
     out = {}
@@ -309,4 +346,26 @@ def draw_population(rng, number, spec=None):
     pol = pop["polarisation"] or {}
     out["frac_lin"], out["frac_circ"], out["pol_angle"] = Poincare(**pol).draw(rng, number)
     out["null_fraction"] = np.clip(out["null_fraction"], 0.0, 1.0)
+    for key in SUBPULSE_COLUMNS:
+        out[key] = np.zeros(number)
+    sub = pop["subpulse"]
+    # drawn last, and only if used, so that a population without sub-pulses draws as before
+    if sub is not None and float(sub["fraction"]) > 0.0:
+        structured = rng.uniform(size=number) < float(sub["fraction"])
+        dur = Distribution.from_spec(sub["duration"]).draw(rng, number)
+        out["duration"] = np.where(structured, dur, out["duration"])
+        out["duration"] = np.where(
+            out["period"] > 0, np.minimum(out["duration"], 0.5 * out["period"]), out["duration"]
+        )
+        rate = Distribution.from_spec(sub["rate"]).draw(rng, number)
+        width = Distribution.from_spec(sub["width"]).draw(rng, number)
+        floor = np.clip(Distribution.from_spec(sub["floor"]).draw(rng, number), 0.0, 1.0)
+        periodic = rng.uniform(size=number) < float(sub["periodic_fraction"])
+        sub_period = Distribution.from_spec(sub["period"]).draw(rng, number)
+        jitter = Distribution.from_spec(sub["jitter"]).draw(rng, number)
+        out["subpulse_rate"] = np.where(structured, rate, 0.0)
+        out["subpulse_width"] = np.where(structured, width, 0.0)
+        out["subpulse_floor"] = np.where(structured, floor, 0.0)
+        out["subpulse_period"] = np.where(structured & periodic, sub_period, 0.0)
+        out["subpulse_jitter"] = np.where(structured & periodic, jitter, 0.0)
     return out
