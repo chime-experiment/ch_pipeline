@@ -320,6 +320,96 @@ class DispersionMeasure:
             self._psr = (_radec_vectors(tab["ra"][ok], tab["dec"][ok]), np.asarray(tab["dm"][ok], dtype=float))
         return self._psr
 
+    def _integrate(self, gl, gb, dist):
+        """DMs of the electron-density model to ``dist`` (kpc) at Galactic ``gl``, ``gb`` (deg)."""
+        n = gl.size
+        dm = np.empty(n)
+        if self.model == "ymw16":
+            try:
+                import pygedm
+            except ImportError as exc:
+                raise ImportError("The ymw16 DM model needs the pygedm package.") from exc
+            for i in range(n):
+                val, _ = pygedm.dist_to_dm(gl[i], gb[i], dist[i] * 1e3, method="ymw16")
+                dm[i] = getattr(val, "value", val)
+            return dm
+        import contextlib
+        import io
+
+        nemod = self._import_mwprop()
+        # mwprop reads the parameters of whichever of its two models is imported
+        # first in a process, and the other then silently evaluates the same one
+        import mwprop.nemod.config_nemod as nemod_config
+
+        flag = "eval_NE2025" if self.model == "ne2025" else "eval_NE2001"
+        if not getattr(nemod_config, flag, False):
+            raise RuntimeError(
+                f"mwprop is set up for its other model in this process; {self.model} "
+                "needs a process in which it is the first mwprop model imported."
+            )
+        for i in range(n):
+            # distance (kpc) to DM (ndir < 0); the model prints its warnings
+            with contextlib.redirect_stdout(io.StringIO()):
+                values = nemod(float(gl[i]), float(gb[i]), float(dist[i]), -1, classic=False,
+                               dmd_only=True, do_analysis=False, plotting=False, verbose=False)[1]  # fmt: skip
+            dm[i] = float(values["DM"])
+        return dm
+
+    def _import_mwprop(self, attempts=5):
+        """The model function of mwprop, importing it again if the import fails.
+
+        mwprop writes its choice of model to a file in its package directory at import
+        and reads it back, so another process importing it at the same moment (another
+        job starting) can leave the file empty for an instant; the import then fails.
+        """
+        import importlib
+        import sys
+        import time
+
+        name = "NE2025" if self.model == "ne2025" else "NE2001"
+        for attempt in range(attempts):
+            try:
+                module = importlib.import_module(f"mwprop.nemod.{name}")
+                return getattr(module, name.lower())
+            except ModuleNotFoundError as exc:
+                raise ImportError(f"The {self.model} DM model needs the mwprop package (and mpmath).") from exc
+            except Exception:
+                if attempt == attempts - 1:
+                    raise
+                for key in [k for k in sys.modules if k == "mwprop" or k.startswith("mwprop.")]:
+                    del sys.modules[key]
+                time.sleep(1.0 + 2.0 * attempt)
+
+    @staticmethod
+    def _on_root(func):
+        """The result of ``func()`` evaluated on MPI rank 0 only and sent to the others.
+
+        The model packages must not be imported by every rank at once: mwprop writes
+        its choice of model to a file in its own package directory when it is imported
+        and reads it back, so ranks starting together read each other's half-written
+        file.  (It is also ~1 min of work that every rank would repeat.)  ``draw`` is
+        therefore collective: every rank must call it with the same sources.  An error
+        on rank 0 is raised on every rank.
+        """
+        try:
+            from mpi4py import MPI
+
+            comm = MPI.COMM_WORLD
+        except ImportError:
+            comm = None
+        if comm is None or comm.size == 1:
+            return func()
+        out = None
+        if comm.rank == 0:
+            try:
+                out = func()
+            except Exception as exc:  # noqa: BLE001
+                out = exc
+        out = comm.bcast(out, root=0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
     def draw(self, rng, ra, dec, distance=None):
         """DMs for sources at ``ra``, ``dec`` (ICRS degrees) and ``distance`` (kpc or NaN)."""
         ra, dec = np.atleast_1d(ra).astype(float), np.atleast_1d(dec).astype(float)
@@ -340,42 +430,7 @@ class DispersionMeasure:
                 dist = np.minimum(dist, float(self.distance_max))
             gal = SkyCoord(ra=ra * u.deg, dec=dec * u.deg).galactic
             gl, gb = gal.l.deg, gal.b.deg
-            dm = np.empty(n)
-            if self.model == "ymw16":
-                try:
-                    import pygedm
-                except ImportError as exc:
-                    raise ImportError("The ymw16 DM model needs the pygedm package.") from exc
-                for i in range(n):
-                    val, _ = pygedm.dist_to_dm(gl[i], gb[i], dist[i] * 1e3, method="ymw16")
-                    dm[i] = getattr(val, "value", val)
-            else:
-                import contextlib
-                import io
-
-                try:
-                    if self.model == "ne2025":
-                        from mwprop.nemod.NE2025 import ne2025 as nemod
-                    else:
-                        from mwprop.nemod.NE2001 import ne2001 as nemod
-                except ImportError as exc:
-                    raise ImportError(f"The {self.model} DM model needs the mwprop package.") from exc
-                # mwprop reads the parameters of whichever of its two models is imported
-                # first in a process, and the other then silently evaluates the same one
-                import mwprop.nemod.config_nemod as nemod_config
-
-                flag = "eval_NE2025" if self.model == "ne2025" else "eval_NE2001"
-                if not getattr(nemod_config, flag, False):
-                    raise RuntimeError(
-                        f"mwprop is set up for its other model in this process; {self.model} "
-                        "needs a process in which it is the first mwprop model imported."
-                    )
-                for i in range(n):
-                    # distance (kpc) to DM (ndir < 0); the model prints its warnings
-                    with contextlib.redirect_stdout(io.StringIO()):
-                        values = nemod(float(gl[i]), float(gb[i]), float(dist[i]), -1, classic=False,
-                                       dmd_only=True, do_analysis=False, plotting=False, verbose=False)[1]  # fmt: skip
-                    dm[i] = float(values["DM"])
+            dm = self._on_root(lambda: self._integrate(gl, gb, dist))
         dm = self.scale * dm
         if self.dm_max is not None:
             dm = np.minimum(dm, float(self.dm_max))
