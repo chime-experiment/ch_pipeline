@@ -1773,8 +1773,9 @@ class LPTCatalog(SourceCatalog):
     spacing ``subpulse_period`` in s of quasi-periodic ones, 0 for random times, and
     its ``subpulse_jitter`` in periods; see
     :data:`ch_pipeline.synthesis.lpt_population.SUBPULSE_DEFAULTS`).  For a pulse
-    with sub-pulses, ``duration`` is the FWHM of its Gaussian envelope.  Catalogues
-    written before these columns read as smooth pulses.  Where each pulse appears on
+    with sub-pulses, ``duration`` is the FWHM of its Gaussian envelope.  ``dm`` is the
+    dispersion measure (pc cm^-3; the pulse times are those at ``reference_freq``).  Catalogues
+    written before these columns read as smooth pulses without dispersion.  Where each pulse appears on
     a given day is in the :class:`LPTInjectionLog` of that day.
     """
 
@@ -1803,6 +1804,7 @@ class LPTCatalog(SourceCatalog):
                 ["subpulse_floor", np.float64],
                 ["subpulse_period", np.float64],
                 ["subpulse_jitter", np.float64],
+                ["dm", np.float64],
             ],
             "axis": "object_id",
         }
@@ -1836,6 +1838,7 @@ _LPT_PULSE_COLUMNS = [
     ["scint_seed", np.int64],
     ["n_subpulse", np.int32],
     ["support", np.float64],
+    ["dm", np.float64],
 ]
 
 

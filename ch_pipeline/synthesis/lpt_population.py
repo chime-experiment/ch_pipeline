@@ -11,11 +11,14 @@ F(P) ~ P^alpha, is ``index = alpha - 1``), ``Normal(mean, sigma)``,
 ``TruncatedNormal(mean, sigma, lower, upper)`` (absolute bounds),
 ``LogNormal(median, sigma)`` (sigma of ln x) and ``Choice(values, weights)``.
 
-Sky models: ``Isotropic`` (uniform on the sphere) and ``GalacticDisk`` (an
+Sky models: ``Isotropic`` (uniform on the sphere), ``GalacticDisk`` (an
 exponential disk, as used for Galactic compact binaries by Korol et al. 2022 and
 for LPTs by Suvorov et al. 2026: surface density ~ exp(-R / scale_length), density
 ~ exp(-|z| / scale_height), the Sun at r_sun from the centre), both limited to a
-range of declination.
+range of declination, and ``Mixture`` (each source from one of several models).
+
+Dispersion measures: ``DispersionMeasure``, from the DMs of the known pulsars near
+each line of sight or from an electron-density model (NE2025, NE2001, YMW16) and a distance.
 
 Polarisation: a point on the Poincare sphere, isotropic in direction (optionally
 squashed towards the equator, i.e. towards linear polarisation, by
@@ -207,7 +210,40 @@ class GalacticDisk:
                 np.concatenate(dist)[:number])  # fmt: skip
 
 
-SKY_MODELS = {"isotropic": Isotropic, "galacticdisk": GalacticDisk, "galactic_disk": GalacticDisk}
+class Mixture:
+    """A mixture of sky models: each source is drawn from one of ``components``.
+
+    ``components`` is a list of sky specs (each a dict with ``model``), ``weights``
+    their probabilities (equal by default).  A ``dec_range`` given here is the
+    default of the components that have none.
+    """
+
+    def __init__(self, components, weights=None, dec_range=None):
+        if not components:
+            raise ValueError("Mixture needs at least one component.")
+        specs = [dict(c) for c in components]
+        if dec_range is not None:
+            for c in specs:
+                c.setdefault("dec_range", dec_range)
+        self.components = [sky_from_spec(c) for c in specs]
+        w = np.ones(len(specs)) if weights is None else np.asarray(weights, dtype=float)
+        if w.size != len(specs) or np.any(w < 0) or w.sum() <= 0:
+            raise ValueError("Mixture weights must be non-negative, one per component.")
+        self.weights = w / w.sum()
+
+    def draw(self, rng, number):
+        """Returns ra, dec (degrees, ICRS) and distance (kpc, NaN where a component has none)."""
+        which = rng.choice(len(self.components), size=number, p=self.weights)
+        ra, dec, dist = np.empty(number), np.empty(number), np.full(number, np.nan)
+        for i, comp in enumerate(self.components):
+            m = which == i
+            if m.any():
+                ra[m], dec[m], dist[m] = comp.draw(rng, int(m.sum()))
+        return ra, dec, dist
+
+
+SKY_MODELS = {"isotropic": Isotropic, "galacticdisk": GalacticDisk, "galactic_disk": GalacticDisk,
+              "mixture": Mixture}  # fmt: skip
 
 
 def sky_from_spec(spec):
@@ -216,6 +252,139 @@ def sky_from_spec(spec):
     if name not in SKY_MODELS:
         raise ValueError(f"Unknown sky model {name!r}; have {sorted(SKY_MODELS)}.")
     return SKY_MODELS[name](**kw)
+
+
+# ---- dispersion measure ---------------------------------------------------------
+
+#: Dispersion constant: the delay at frequency nu (MHz) is K_DM x DM / nu^2 seconds
+K_DM = 4.148808e3
+
+
+def dispersion_delay(dm, freq, reference_freq):
+    """Delay (s) at ``freq`` (MHz) relative to ``reference_freq`` for a DM (pc cm^-3)."""
+    return K_DM * dm * (np.asarray(freq, dtype=np.float64) ** -2 - float(reference_freq) ** -2)
+
+
+class DispersionMeasure:
+    """Dispersion measures (pc cm^-3) of sources from their positions.
+
+    ``model``:
+
+    - ``"pulsars"``: the DM of a known pulsar near the line of sight, one of the
+      ``n_neighbour`` nearest on the sky in ``catalogue`` (an HDF5 file with a
+      ``pulsar`` table of ``ra``, ``dec`` in degrees and ``dm``, as
+      scripts/sift/make_pulsar_catalog.py writes from the ATNF catalogue), picked
+      at random.  This samples the measured DMs along each direction, with the
+      spread in distance of the pulsars there, and needs no distance.
+    - ``"ne2025"`` or ``"ne2001"``: the electron-density model of Ocker & Cordes
+      (2026) or Cordes & Lazio (2002) integrated to the source's distance, with the
+      pure-Python ``mwprop`` package (about 0.15 s per source).  ``"ymw16"``: the
+      model of Yao, Manchester & Wang (2017), with the ``pygedm`` package (compiled;
+      needs libf2c).  Sources without a distance (NaN, e.g. from the isotropic sky
+      model) get one drawn from ``distance`` (a distribution spec in kpc; default
+      log-uniform 0.2-5).
+
+    ``distance_max`` (kpc) limits the distance the model is integrated to (a sky
+    model whose distances are not tied to the fluxes, such as a flattened disc, puts
+    sources further than a detectable one would be).  ``scale`` multiplies the
+    result; ``dm_max`` clips it.
+    """
+
+    def __init__(self, model="pulsars", catalogue=None, n_neighbour=10, distance=None,
+                 distance_max=None, scale=1.0, dm_max=None):  # fmt: skip
+        self.model = str(model).lower()
+        if self.model not in ("pulsars", "ne2025", "ne2001", "ymw16"):
+            raise ValueError(f"Unknown DM model {model!r}; have pulsars, ne2025, ne2001, ymw16.")
+        if self.model == "pulsars" and catalogue is None:
+            raise ValueError("The pulsars DM model needs a catalogue file.")
+        self.catalogue = catalogue
+        self.n_neighbour = int(n_neighbour)
+        self.distance = Distribution.from_spec(
+            distance if distance is not None else {"distribution": "loguniform", "lower": 0.2, "upper": 5.0}
+        )
+        self.distance_max = distance_max
+        self.scale = float(scale)
+        self.dm_max = dm_max
+        self._psr = None
+
+    def _pulsars(self):
+        """Unit vectors and DMs of the catalogue's pulsars with a DM."""
+        if self._psr is None:
+            import h5py
+
+            with h5py.File(self.catalogue, "r") as f:
+                tab = f["pulsar"][:]
+            ok = np.isfinite(tab["dm"]) & (tab["dm"] > 0) & np.isfinite(tab["ra"]) & np.isfinite(tab["dec"])
+            if ok.sum() < self.n_neighbour:
+                raise ValueError(f"Only {int(ok.sum())} pulsars with a DM in {self.catalogue}.")
+            self._psr = (_radec_vectors(tab["ra"][ok], tab["dec"][ok]), np.asarray(tab["dm"][ok], dtype=float))
+        return self._psr
+
+    def draw(self, rng, ra, dec, distance=None):
+        """DMs for sources at ``ra``, ``dec`` (ICRS degrees) and ``distance`` (kpc or NaN)."""
+        ra, dec = np.atleast_1d(ra).astype(float), np.atleast_1d(dec).astype(float)
+        n = ra.size
+        if self.model == "pulsars":
+            vec, dms = self._pulsars()
+            cosd = _radec_vectors(ra, dec) @ vec.T  # source, pulsar
+            near = np.argpartition(-cosd, self.n_neighbour - 1, axis=1)[:, : self.n_neighbour]
+            dm = dms[near[np.arange(n), rng.integers(0, self.n_neighbour, n)]]
+        else:
+            import astropy.units as u
+            from astropy.coordinates import SkyCoord
+
+            dist = np.full(n, np.nan) if distance is None else np.atleast_1d(distance).astype(float).copy()
+            drawn = self.distance.draw(rng, n)
+            dist = np.where(np.isfinite(dist) & (dist > 0), dist, drawn)
+            if self.distance_max is not None:
+                dist = np.minimum(dist, float(self.distance_max))
+            gal = SkyCoord(ra=ra * u.deg, dec=dec * u.deg).galactic
+            gl, gb = gal.l.deg, gal.b.deg
+            dm = np.empty(n)
+            if self.model == "ymw16":
+                try:
+                    import pygedm
+                except ImportError as exc:
+                    raise ImportError("The ymw16 DM model needs the pygedm package.") from exc
+                for i in range(n):
+                    val, _ = pygedm.dist_to_dm(gl[i], gb[i], dist[i] * 1e3, method="ymw16")
+                    dm[i] = getattr(val, "value", val)
+            else:
+                import contextlib
+                import io
+
+                try:
+                    if self.model == "ne2025":
+                        from mwprop.nemod.NE2025 import ne2025 as nemod
+                    else:
+                        from mwprop.nemod.NE2001 import ne2001 as nemod
+                except ImportError as exc:
+                    raise ImportError(f"The {self.model} DM model needs the mwprop package.") from exc
+                # mwprop reads the parameters of whichever of its two models is imported
+                # first in a process, and the other then silently evaluates the same one
+                import mwprop.nemod.config_nemod as nemod_config
+
+                flag = "eval_NE2025" if self.model == "ne2025" else "eval_NE2001"
+                if not getattr(nemod_config, flag, False):
+                    raise RuntimeError(
+                        f"mwprop is set up for its other model in this process; {self.model} "
+                        "needs a process in which it is the first mwprop model imported."
+                    )
+                for i in range(n):
+                    # distance (kpc) to DM (ndir < 0); the model prints its warnings
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        values = nemod(float(gl[i]), float(gb[i]), float(dist[i]), -1, classic=False,
+                                       dmd_only=True, do_analysis=False, plotting=False, verbose=False)[1]  # fmt: skip
+                    dm[i] = float(values["DM"])
+        dm = self.scale * dm
+        if self.dm_max is not None:
+            dm = np.minimum(dm, float(self.dm_max))
+        return dm
+
+
+def _radec_vectors(ra, dec):
+    ra, dec = np.radians(ra), np.radians(dec)
+    return np.stack([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)], axis=-1)
 
 
 # ---- polarisation -------------------------------------------------------------
@@ -270,6 +439,8 @@ DEFAULT_POPULATION = {
     "t_offset_beam": {"distribution": "uniform", "lower": -1.0, "upper": 1.0},
     # Pulses made of sub-pulses (see SUBPULSE_DEFAULTS); none by default
     "subpulse": None,
+    # Dispersion measure: None (no dispersion) or the arguments of DispersionMeasure
+    "dm": None,
 }
 
 #: The sub-pulse model, for a ``fraction`` of the sources (see :func:`draw_population`).
@@ -322,7 +493,8 @@ def draw_population(rng, number, spec=None):
     sub-pulse model (``SUBPULSE_COLUMNS``, all 0 for a smooth pulse; see
     :data:`SUBPULSE_DEFAULTS`): the rate of sub-pulses per minute of FWHM (0: none), their FWHM
     (s), the smooth floor, the spacing of quasi-periodic ones (s; 0: at random) and
-    its jitter (periods).  The sub-pulse draws come after all the others and are
+    its jitter (periods), and the dispersion measure ``dm`` (pc cm^-3; 0 without a
+    ``dm`` model, see :class:`DispersionMeasure`).  The sub-pulse draws come after all the others and are
     made only with a ``fraction`` above 0, so a population without them is drawn as
     before for a seed.
     """
@@ -368,4 +540,8 @@ def draw_population(rng, number, spec=None):
         out["subpulse_floor"] = np.where(structured, floor, 0.0)
         out["subpulse_period"] = np.where(structured & periodic, sub_period, 0.0)
         out["subpulse_jitter"] = np.where(structured & periodic, jitter, 0.0)
+    # after everything else, and only if used, so that a population without it draws as before
+    out["dm"] = np.zeros(number)
+    if pop["dm"] is not None:
+        out["dm"] = DispersionMeasure(**pop["dm"]).draw(rng, out["ra"], out["dec"], out["distance"])
     return out

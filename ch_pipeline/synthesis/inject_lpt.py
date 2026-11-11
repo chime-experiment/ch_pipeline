@@ -54,7 +54,7 @@ from scipy.special import erf
 
 from ..core import containers
 from .inject import SIGMA, BaseInject, BeamExternal, _get_baseline_info
-from .lpt_population import SUBPULSE_COLUMNS, draw_population, merge_population
+from .lpt_population import SUBPULSE_COLUMNS, dispersion_delay, draw_population, merge_population
 
 # Angular speed of the sky in rad / s
 _OMEGA = 2.0 * np.pi / 86164.0905
@@ -228,7 +228,7 @@ def _make_catalog(pop, seed_rng, epoch_ref, attrs):
     epoch = np.where(period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan)
     for name in ("flux", "flux_scatter", "null_fraction", "period", "t_offset_beam", "duration",
                  "spectral_index", "spectral_curvature", "frac_lin", "frac_circ", "pol_angle", "rm",
-                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS):  # fmt: skip
+                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm"):  # fmt: skip
         tab[name][:] = pop[name]
     tab["epoch"][:] = epoch
     tab["seed"][:] = seed_rng.integers(0, 2**62, n)
@@ -372,7 +372,9 @@ class InjectLPT(BeamExternal):
     pulse gets its own random draws (seeded by the source and the pulse number, so
     the same on any day whose data contain it): nulled with probability
     ``null_fraction``, a flux scattered by exp(``flux_scatter`` N(0, 1)), and the
-    seed of its scintillation.  The input of a day extends beyond 0-360 degrees of
+    seed of its scintillation.  A source with a dispersion measure (``dm`` in the
+    catalogue) has each frequency's profile delayed by K DM (nu^-2 - nu_ref^-2), so
+    the times of the pulses are those at the reference frequency.  The input of a day extends beyond 0-360 degrees of
     RA, so a pulse near the ends can be in the data of two days; it is the same
     pulse in both (``in_day`` marks the day whose candidate maps contain it).
 
@@ -548,6 +550,11 @@ class InjectLPT(BeamExternal):
         # Samples touched by each pulse, on the full RA axis
         prof = np.zeros((npulse, ra_deg.size))
         nsub = _subpulse_column(tab, "subpulse_rate")
+        dm_src = _subpulse_column(tab, "dm")
+        subs = [None] * npulse
+        # the largest delays across the band, earlier (high frequencies) and later (low)
+        freq_band = np.asarray(data.index_map["freq"]["centre"][:], dtype=np.float64)
+        unit_delay = dispersion_delay(1.0, np.array([freq_band.max(), freq_band.min()]), self.reference_freq)
         n_drawn = np.zeros(npulse, dtype=np.int32)
         support = np.zeros(npulse)
         for p in range(npulse):
@@ -562,12 +569,32 @@ class InjectLPT(BeamExternal):
                 prof[p] = _subpulse_profile(
                     t_all, dt, sched["unix_center"][p], dur, _subpulse_column(tab, "subpulse_floor")[s], sub
                 )
+                subs[p] = sub
                 n_drawn[p] = sub[0].size
                 support[p] = 2.0 * dur
             else:
                 prof[p] = _pulse_profile(t_all, dt, sched["unix_center"][p], dur, self.profile)
                 support[p] = dur
-        use = (prof > self.min_profile) & covered[src] & ~sched["nulled"].astype(bool)[:, None]
+        touched = prof > self.min_profile
+        for p in np.flatnonzero(dm_src[src] > 0) if npulse else []:
+            # a dispersed pulse also touches the samples its band edges are delayed into
+            before = int(np.ceil(max(-unit_delay[0], 0.0) * dm_src[src[p]] / dt))
+            after = int(np.ceil(max(unit_delay[1], 0.0) * dm_src[src[p]] / dt))
+            on = np.flatnonzero(touched[p])
+            for i in on:
+                touched[p, max(i - before, 0) : i + after + 1] = True
+        use = touched & covered[src] & ~sched["nulled"].astype(bool)[:, None]
+
+        def profile_at(p, t, shift):
+            """The profile of pulse p on the samples at t, its centre delayed by shift (s)."""
+            s_ = src[p]
+            tc = sched["unix_center"][p] + shift
+            if subs[p] is not None:
+                return _subpulse_profile(
+                    t, dt, tc, tab["duration"][s_], _subpulse_column(tab, "subpulse_floor")[s_], subs[p]
+                )
+            return _pulse_profile(t, dt, tc, tab["duration"][s_], self.profile)
+
         injected = use.any(axis=1)
         isel = np.flatnonzero(use.any(axis=0))
         if isel.size == 0:
@@ -617,7 +644,13 @@ class InjectLPT(BeamExternal):
             s = src[p]
             sdec = self.sdec[s]
             cols = np.flatnonzero(use[p, isel])
-            w = prof[p, isel][cols]
+            if dm_src[s] > 0:
+                # each frequency's profile, delayed from the reference frequency
+                t_cols = t_all[isel][cols]
+                delay = dispersion_delay(dm_src[s], nu, self.reference_freq)
+                w = np.stack([profile_at(p, t_cols, d) for d in delay])  # freq, time
+            else:
+                w = prof[p, isel][cols][np.newaxis]  # 1, time
             sha = ha_src[s, isel][cols]
             spec = (
                 sched["flux"][p]
@@ -627,7 +660,7 @@ class InjectLPT(BeamExternal):
             spec = spec * _scintillation(
                 freq_all, tab["scint_index"][s], tab["scint_bw"][s], int(sched["scint_seed"][p])
             )[lo : lo + nf]
-            stokes_i = spec[:, np.newaxis] * w[np.newaxis]  # freq, time
+            stokes_i = spec[:, np.newaxis] * w  # freq, time
             psi = np.radians(tab["pol_angle"][s]) + tab["rm"][s] * lam[:, np.newaxis] ** 2
             if self.parallactic:
                 psi = psi + _parallactic_angle(sha, self.latitude, sdec)[np.newaxis]
@@ -637,8 +670,8 @@ class InjectLPT(BeamExternal):
             bxx = self._beamfunc(nu, "XX", sdec, sha)
             byy = self._beamfunc(nu, "YY", sdec, sha)
             bxy = np.sqrt(np.abs(bxx * byy))
-            bsum[p] = np.sum(bxx * w[np.newaxis])
-            wsum[p] = nf * np.sum(w)
+            bsum[p] = np.sum(bxx * w)
+            wsum[p] = np.sum(w) * (nf // w.shape[0])
             amp = {
                 "XX": (stokes_i + q) * bxx,
                 "YY": (stokes_i - q) * byy,
@@ -698,6 +731,7 @@ class InjectLPT(BeamExternal):
             rec["scint_seed"] = sched["scint_seed"]
             rec["n_subpulse"] = n_drawn
             rec["support"] = support
+            rec["dm"] = dm_src[src]
         log.pulse[:] = rec
         log.attrs["lsd"] = lsd
         log.attrs["tag"] = f"lsd_{lsd}"

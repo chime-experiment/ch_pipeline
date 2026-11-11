@@ -12279,6 +12279,39 @@ def _extend_axis(axis, idx):
     return np.where(idx < 0, lo, np.where(idx >= n, hi, inside))
 
 
+def _cutout_selection(table, snr_min, keep_only, max_cutouts, rank_flags=False):
+    """Rows of the candidates that get cutouts, in the order they are extracted.
+
+    The candidates with S/N of at least ``snr_min`` (only those the sift kept if
+    ``keep_only`` and the table has been sifted), at most ``max_cutouts`` of them:
+    the brightest, or with ``rank_flags`` those with the fewest rejecting flags of
+    the sift (information flags do not count), the brightest first among equals.
+    With a sift whose ``soft_flags`` do not reject, the candidates the full sift
+    keeps (no flag) then come first, then those one test away from it, and so on,
+    so a cap on a crowded day drops the candidates furthest from being kept.
+    """
+    rec = table.candidate[:]
+    sel = rec["snr"] >= snr_min
+    sifted = "sift" in table.datasets
+    if keep_only and sifted:
+        sel &= table.datasets["sift"][:]["keep"]
+    idx = np.flatnonzero(sel)
+    snr = rec["snr"][idx]
+    if rank_flags and sifted:
+        names = json.loads(table.attrs.get("sift_flags", "{}")) or dict(
+            SiftTransientCandidates.FLAGS
+        )
+        reject = sum(
+            1 << b for n, b in names.items() if n not in SiftTransientCandidates.INFO
+        )
+        fl = table.datasets["sift"][:]["flags"][idx].astype(np.uint32) & np.uint32(reject)
+        nflag = np.array([bin(int(f)).count("1") for f in fl], dtype=np.int64)
+        order = np.lexsort((-snr, nflag))
+    else:
+        order = np.argsort(snr, kind="stable")[::-1]
+    return idx[order][:max_cutouts]
+
+
 class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     """Windows of the per-band matched filter around candidates.
 
@@ -12317,6 +12350,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     snr_min = config.Property(proptype=float, default=10.0)
     keep_only = config.Property(proptype=bool, default=False)
     max_cutouts = config.Property(proptype=int, default=1000)
+    # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
+    # first by the number of rejecting flags of the sift (see _cutout_selection)
+    rank_flags = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=16)
     nra = config.Property(proptype=int, default=30)
     x_slice = config.Property(proptype=bool, default=True)
@@ -12351,11 +12387,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
             ipol = [bpol.index(p) for p in self.pols]
         pnames = [bpol[ip] for ip in ipol]
         rec = table.candidate[:]
-        sel = rec["snr"] >= self.snr_min
-        if self.keep_only and "sift" in table.datasets:
-            sel &= table.datasets["sift"][:]["keep"]
-        idx = np.flatnonzero(sel)
-        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        idx = _cutout_selection(
+            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+        )
         ncut = idx.size
 
         e, tb, xi, _ = _candidate_positions(table, bands, False, 1)
@@ -12466,6 +12500,9 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
     snr_min = config.Property(proptype=float, default=10.0)
     keep_only = config.Property(proptype=bool, default=False)
     max_cutouts = config.Property(proptype=int, default=1000)
+    # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
+    # first by the number of rejecting flags of the sift (see _cutout_selection)
+    rank_flags = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=24)
     nra = config.Property(proptype=int, default=40)
 
@@ -12488,11 +12525,9 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
         trials.redistribute("el")
         comm = trials.comm
         rec = table.candidate[:]
-        sel = rec["snr"] >= self.snr_min
-        if self.keep_only and "sift" in table.datasets:
-            sel &= table.datasets["sift"][:]["keep"]
-        idx = np.flatnonzero(sel)
-        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        idx = _cutout_selection(
+            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+        )
         ncut = idx.size
 
         el = trials.index_map["el"][:]
@@ -12619,6 +12654,9 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
     snr_min = config.Property(proptype=float, default=10.0)
     keep_only = config.Property(proptype=bool, default=False)
     max_cutouts = config.Property(proptype=int, default=1000)
+    # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
+    # first by the number of rejecting flags of the sift (see _cutout_selection)
+    rank_flags = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=40)
     nra = config.Property(proptype=int, default=180)
     freq_edges = config.list_type(type_=float, default=[400.0, 500.0, 600.0, 700.0, 800.0])
@@ -12642,11 +12680,9 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
 
         comm = stream.comm
         rec = table.candidate[:]
-        sel = rec["snr"] >= self.snr_min
-        if self.keep_only and "sift" in table.datasets:
-            sel &= table.datasets["sift"][:]["keep"]
-        idx = np.flatnonzero(sel)
-        idx = idx[np.argsort(rec["snr"][idx], kind="stable")[::-1]][: self.max_cutouts]
+        idx = _cutout_selection(
+            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+        )
         ncut = idx.size
 
         el = stream.index_map["el"][:]
@@ -14005,6 +14041,9 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     )
     count_sources = config.Property(proptype=bool, default=False)
     coarse_neighbours = config.Property(proptype=bool, default=False)
+    # Flags that are set but do not reject (``keep`` ignores them): for a looser
+    # selection that still records every test, e.g. the candidates that get cutouts
+    soft_flags = config.list_type(type_=str, default=None)
     source_dy = config.Property(proptype=float, default=0.004)
     source_dra = config.Property(proptype=float, default=0.2)
     source_dra_low = config.Property(proptype=float, default=0.6)
@@ -14214,8 +14253,16 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
                     & (z > self.pol_excess_nsigma),
                 )
 
+        soft = list(self.soft_flags or [])
+        unknown = [n for n in soft if n not in self.FLAGS]
+        if unknown:
+            raise ValueError(f"Unknown soft_flags {unknown}; have {sorted(self.FLAGS)}.")
         reject = np.uint32(
-            sum(1 << b for n, b in self.FLAGS.items() if n not in self.INFO)
+            sum(
+                1 << b
+                for n, b in self.FLAGS.items()
+                if n not in self.INFO and n not in soft
+            )
         )
         keep = (flags & reject) == 0
 
@@ -14256,6 +14303,7 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
         sift["crowd_n"] = crowd_n[rows]
         out.datasets["sift"][:] = sift
         out.attrs["sift_flags"] = json.dumps(self.FLAGS)
+        out.attrs["sift_soft_flags"] = json.dumps(soft)
         for key in (
             "snr_min", "sun_ha_max", "track_dy_max", "lobe_ha_max", "col_nrows_max",
             "row_npeak_max", "row_sky_sep", "periodic_npeak_min", "periodic_cv_max",
