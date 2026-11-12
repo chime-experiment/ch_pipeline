@@ -200,7 +200,6 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
 
         # For each significance, compute RFI flags and store counts
         for i in range(len(self.sigma)):
-
             # RFI detection for individual E-W beams
             flags = sensitivities > 1.0 + self.std * self.sigma[i]
 
@@ -298,7 +297,6 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
 
         # Process each frequency separately since beam-to-el mapping varies with freq
         for i in range(sf, ef):
-
             # Extract mask for this std and threshold
             mask = rfimaskbitmap.get_mask(
                 self.sigma,

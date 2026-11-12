@@ -352,7 +352,7 @@ class HFBDailyProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.10",
+        "modlist": "chime/python/2026.10",
         # RFI detection significance params
         "sigma_list": [4, 5, 6, 7],
         # JSON target lists defining the absorbers to extract

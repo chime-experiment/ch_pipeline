@@ -140,7 +140,7 @@ class SiderealReprocessing(base.ProcessingType):
         },
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2026.05",
+        "modlist": "chime/python/2026.10",
         "nfreq_delay": 1025,
         # Frequencies to load
         "freq": [0, 1024],

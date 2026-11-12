@@ -192,7 +192,6 @@ class BaseInject(tasklib.base.ContainerTask):
 
         # Loop over sources
         for ss, (sra, sdec) in enumerate(zip(self.sra, self.sdec)):
-
             # Print message indicating how far along we are
             if ss % 1000 == 0:
                 self.log.info(f"Adding source {ss} of {self.nsource}.")
@@ -210,7 +209,6 @@ class BaseInject(tasklib.base.ContainerTask):
             groups = self._get_ha_slice(ha, min_freq, sdec)
 
             for slc in groups:
-
                 sha = ha[slc]
 
                 phase = (
@@ -225,7 +223,6 @@ class BaseInject(tasklib.base.ContainerTask):
 
                 # Modulate by the beam
                 if self.apply_beam:
-
                     for pstr, ipol in pol_index.items():
                         phase[:, ipol, :] *= self._beamfunc(
                             freq["centre"][fslc], pstr, sdec, sha
@@ -297,7 +294,6 @@ class BaseInject(tasklib.base.ContainerTask):
 
         # Loop over the podal and anti-podal transit
         for hac in self.transits:
-
             dha = tools.correct_phase_wrap(ha - hac)
 
             if self.nsigma > 0.0:
@@ -686,7 +682,6 @@ class Beam(BaseInject):
         primary_beam = np.zeros((freq.size, ha.size), dtype=np.float64)
 
         for ff, freq in enumerate(index_freq):
-
             bii = self.telescope.beam(self.map_pol_feed[pol[0]], freq, angpos)
 
             if pol[0] != pol[1]:

@@ -244,7 +244,7 @@ class FullStackProcessing(base.ProcessingType):
         "product_path": "/project/rpp-chime/chime/bt_empty/chime_4cyl_allfreq/",
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.10",
+        "modlist": "chime/python/2026.10",
         # Job params
         "time": 30,  # Time in minutes
         "nodes": 3,  # Number of nodes to use
