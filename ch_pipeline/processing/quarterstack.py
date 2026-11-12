@@ -134,7 +134,6 @@ pipeline:
       out: datastream_mask4
       params:
         flag_type:
-          - acjump_sd
           - srs/bad_ringmap_broadband
           - bad_calibration_gains
           - bad_calibration_fpga_restart
