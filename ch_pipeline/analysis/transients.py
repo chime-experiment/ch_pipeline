@@ -14666,8 +14666,9 @@ class ScoreTransientCandidates(tasklib.base.ContainerTask):
     flags gets no score.
 
     The ``score`` table of the output holds the score, ``valid`` (no validity flag)
-    and ``keep`` (valid and score at least ``score_min``).  The ``sift`` table is
-    left as it is, so both selections can be compared.
+    and ``keep`` (valid, score at least ``score_min`` and not below the sifter's S/N
+    limit, its ``snr`` flag).  The ``sift`` table is left as it is, so both
+    selections can be compared.
 
     Attributes
     ----------
@@ -14800,7 +14801,8 @@ def _add_score(table, model, score_min, snr_min, log=None, labels=None):
     model : _TreeScore
         The model.
     score_min : float
-        Keep the valid candidates with at least this score.
+        Keep the valid candidates with at least this score that the sifter did not
+        flag ``snr``.
     snr_min : float
         Candidates below this S/N get no score.
     log : logging.Logger, optional
@@ -14854,7 +14856,10 @@ def _add_score(table, model, score_min, snr_min, log=None, labels=None):
         psr, alias = labels(rec["ra_icrs"][valid], rec["dec_icrs"][valid])
         res["pulsar"][valid] = psr
         res["alias"][valid] = alias
-    res["keep"] = valid & (score >= score_min)
+    # Fainter candidates are scored (for searches across days) but not kept: the
+    # threshold is set on the candidates above the sifter's S/N limit
+    bright = (sift["flags"] >> names["snr"] & 1) == 0 if "snr" in names else True
+    res["keep"] = valid & (score >= score_min) & bright
     out.datasets["score"][:] = res
     out.attrs["score_model"] = os.path.basename(model.filename)
     out.attrs["score_min"] = score_min
