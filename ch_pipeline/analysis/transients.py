@@ -7877,43 +7877,68 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         best_s = np.zeros((ndur, nx, nra), dtype=np.float32)
         best_k = np.zeros((ndur, nx, nra), dtype=np.int32)
         var_th = [v.astype(np.float32) for _, v in rv]
+        fsky = None
+        if sky is not None and sky_f is not None:
+            fsky = [np.asarray(f, dtype=np.float32) for f in sky_f]
 
         def update(iwd, s, vs, k0):
-            if vs is None:
-                v = var_th[iwd]
-            elif sky_f is None:
-                v = var_th[iwd] + vs
+            # s and vs are [x, ra, rm]: one telescope-x at a time, so that the
+            # arrays of each step [ra, rm] stay in the cache, with the RM trials
+            # last for the maximum over them
+            for ix in range(nx):
+                v = var_th[iwd][ix][:, np.newaxis]
+                if vs is not None:
+                    if fsky is None:
+                        v = v + vs[ix]
+                    else:
+                        f = fsky[iwd]
+                        v = v + (f[ix][:, np.newaxis] if f.ndim else f) * vs[ix]
+                sx = s[ix]
+                t = (sx.real**2 + sx.imag**2) * tools.invert_no_zero(v)  # ra, rm
+                k = np.argmax(t, axis=1)
+                tk = np.take_along_axis(t, k[:, np.newaxis], 1)[:, 0]
+                better = tk > best_t[iwd, ix]
+                best_t[iwd, ix] = np.where(better, tk, best_t[iwd, ix])
+                sk = np.abs(np.take_along_axis(sx, k[:, np.newaxis], 1)[:, 0])
+                best_s[iwd, ix] = np.where(better, sk, best_s[iwd, ix])
+                best_k[iwd, ix] = np.where(better, k + k0, best_k[iwd, ix])
+
+        def shift_add(acc, m, j):
+            # acc += roll(m, -j) along RA (the second axis)
+            if j == 0:
+                acc += m
             else:
-                v = var_th[iwd] + np.asarray(sky_f[iwd], dtype=np.float32) * vs
-            t = (s.real**2 + s.imag**2) * tools.invert_no_zero(v)  # rm, x, ra
-            k = np.argmax(t, axis=0)
-            tk = np.take_along_axis(t, k[np.newaxis], 0)[0]
-            better = tk > best_t[iwd]
-            best_t[iwd] = np.where(better, tk, best_t[iwd])
-            sk = np.abs(np.take_along_axis(s, k[np.newaxis], 0)[0])
-            best_s[iwd] = np.where(better, sk, best_s[iwd])
-            best_k[iwd] = np.where(better, k + k0, best_k[iwd])
+                acc[:, : nra - j] += m[:, j:]
+                acc[:, nra - j :] += m[:, :j]
+
+        # The interpolation to the source's position at each step of the track, as
+        # a matrix over telescope-x: one matrix product per step for all the RM
+        # trials and samples
+        mats = None if track is None else self._track_matrices(track, wmax)
 
         for k0 in range(0, rm.size, self.rm_chunk):
             ks = slice(k0, min(k0 + self.rm_chunk, rm.size))
-            s1 = (coef[:, ks].T.astype(np.complex64) @ z).reshape(-1, nx, nra)
+            nr = ks.stop - ks.start
+            s1 = (coef[:, ks].T.astype(np.complex64) @ z).reshape(nr, nx, nra)
             v1 = None if sky is None else self._rm_sky_var(coef[:, ks], sky, nx, nra)
+            # Telescope-x first and the RM trials last: [x, ra, rm]
+            s1 = np.ascontiguousarray(s1.transpose(1, 2, 0))
+            if v1 is not None:
+                v1 = np.ascontiguousarray(v1.transpose(1, 2, 0))
             update(0, s1, v1, k0)
             if track is None:
                 continue
+            # The weights of the track are real: the real and imaginary parts of s
+            # as a real array [x, (ra, rm, re/im)]
+            sf = s1.view(np.float32).reshape(nx, -1)
+            vf = None if v1 is None else v1.reshape(nx, -1)
             acc = np.zeros_like(s1)
             accv = None if v1 is None else np.zeros_like(v1)
             for jj in range(wmax):
-                sj = np.zeros_like(s1)
-                vj = None if accv is None else np.zeros_like(v1)
-                for ii, wt in track.taps(jj):
-                    w3 = wt[np.newaxis, :, np.newaxis]
-                    sj += w3 * s1[:, ii]
-                    if vj is not None:
-                        vj += w3 * v1[:, ii]
-                acc += np.roll(sj, -jj, axis=-1)
+                sj = (mats[jj] @ sf).view(np.complex64).reshape(nx, nra, nr)
+                shift_add(acc, sj, jj)
                 if accv is not None:
-                    accv += np.roll(vj, -jj, axis=-1)
+                    shift_add(accv, (mats[jj] @ vf).reshape(nx, nra, nr), jj)
                 if jj > 0 and jj + 1 in durations:
                     update(durations.index(jj + 1), acc, accv, k0)
 
@@ -7928,6 +7953,33 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
             return tmax, pol_amp, rm[best_k].astype(np.float32)
         amp, wgt = self._rm_gaussian(tmax, pol_amp, ntrials)
         return amp, wgt, rm[best_k].astype(np.float32)
+
+    @staticmethod
+    def _track_matrices(track, wmax):
+        """The interpolation along the tracks of one elevation, as matrices.
+
+        ``mats[j] @ a`` is ``a`` [x, ...] at the position, ``j`` samples after the
+        start, of the source that started at each telescope-x: the sum over the
+        taps of :class:`_Track` of the weight times ``a`` at the tap's grid point.
+
+        Parameters
+        ----------
+        track : _Track
+            Taps ``[step, x, tap]``.
+        wmax : int
+            Number of steps.
+
+        Returns
+        -------
+        mats : np.ndarray[wmax, x, x] of float32
+        """
+        nx = track.index.shape[1]
+        rows = np.arange(nx)
+        mats = np.zeros((wmax, nx, nx), dtype=np.float32)
+        for jj in range(wmax):
+            for idx, wt in track.taps(jj):
+                np.add.at(mats[jj], (rows, idx), wt)
+        return mats
 
     @staticmethod
     def _rm_gaussian(tmax, pol_amp, ntrials):
@@ -12279,7 +12331,39 @@ def _extend_axis(axis, idx):
     return np.where(idx < 0, lo, np.where(idx >= n, hi, inside))
 
 
-def _cutout_selection(table, snr_min, keep_only, max_cutouts, rank_flags=False):
+def _send_to_owners(comm, pieces, offs):
+    """Send each rank's pieces of the candidates to the ranks that hold them.
+
+    The cutouts of a candidate are read from the rows of a few ranks and stored on
+    one.  Only those pieces are sent, in one exchange: a reduction over all the
+    ranks of the dense cutouts of each block of candidates has every rank send
+    arrays of zeros (with ~400 ranks, a few GB for each candidate).
+
+    Parameters
+    ----------
+    comm : MPI.Comm
+    pieces : dict
+        This rank's part of each candidate, by the index of the candidate.
+    offs : list of (int, int)
+        Offset and number of the candidates held by each rank.
+
+    Returns
+    -------
+    received : list of (int, object)
+        The parts of the candidates this rank holds, from every rank.
+    """
+    owner = np.repeat(np.arange(len(offs)), [nl for _, nl in offs])
+    sends = [[] for _ in offs]
+    for k in sorted(pieces):
+        sends[owner[k]].append((k, pieces[k]))
+    if comm is None or comm.size == 1:
+        return sends[0]
+    return [item for part in comm.alltoall(sends) for item in part]
+
+
+def _cutout_selection(
+    table, snr_min, keep_only, max_cutouts, rank_flags=False, rank_score=False
+):
     """Rows of the candidates that get cutouts, in the order they are extracted.
 
     The candidates with S/N of at least ``snr_min`` (only those the sift kept if
@@ -12289,15 +12373,26 @@ def _cutout_selection(table, snr_min, keep_only, max_cutouts, rank_flags=False):
     With a sift whose ``soft_flags`` do not reject, the candidates the full sift
     keeps (no flag) then come first, then those one test away from it, and so on,
     so a cap on a crowded day drops the candidates furthest from being kept.
+
+    With ``rank_score`` and a table that has the ``score`` table of the learned
+    score, the candidates the score could keep (its ``valid``) are selected as well
+    as those of the sift, since the model may have fewer validity flags than the
+    sift.  The order is then: the candidates kept by the rules (no rejecting flag)
+    or by the score, the highest score first; the other scored candidates, the
+    highest score first; and the rest as with ``rank_flags``.
     """
     rec = table.candidate[:]
     sel = rec["snr"] >= snr_min
     sifted = "sift" in table.datasets
+    scored = rank_score and sifted and "score" in table.datasets
     if keep_only and sifted:
-        sel &= table.datasets["sift"][:]["keep"]
+        keep = table.datasets["sift"][:]["keep"]
+        if scored:
+            keep = keep | table.datasets["score"][:]["valid"]
+        sel &= keep
     idx = np.flatnonzero(sel)
     snr = rec["snr"][idx]
-    if rank_flags and sifted:
+    if (rank_flags or scored) and sifted:
         names = json.loads(table.attrs.get("sift_flags", "{}")) or dict(
             SiftTransientCandidates.FLAGS
         )
@@ -12306,7 +12401,14 @@ def _cutout_selection(table, snr_min, keep_only, max_cutouts, rank_flags=False):
         )
         fl = table.datasets["sift"][:]["flags"][idx].astype(np.uint32) & np.uint32(reject)
         nflag = np.array([bin(int(f)).count("1") for f in fl], dtype=np.int64)
-        order = np.lexsort((-snr, nflag))
+        if scored:
+            sc = table.datasets["score"][:][idx]
+            tier = np.where((nflag == 0) | sc["keep"], 0, np.where(sc["valid"], 1, 2))
+            score = np.where(sc["valid"], sc["score"], -np.inf)
+            # within the last tier (no score) the number of flags decides
+            order = np.lexsort((-snr, np.where(tier == 2, nflag, 0), -score, tier))
+        else:
+            order = np.lexsort((-snr, nflag))
     else:
         order = np.argsort(snr, kind="stable")[::-1]
     return idx[order][:max_cutouts]
@@ -12353,6 +12455,9 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
     # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
     # first by the number of rejecting flags of the sift (see _cutout_selection)
     rank_flags = config.Property(proptype=bool, default=False)
+    # With the score table of the learned score: the candidates kept by the rules or
+    # the score first, then by score (see _cutout_selection)
+    rank_score = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=16)
     nra = config.Property(proptype=int, default=30)
     x_slice = config.Property(proptype=bool, default=True)
@@ -12388,7 +12493,12 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
         pnames = [bpol[ip] for ip in ipol]
         rec = table.candidate[:]
         idx = _cutout_selection(
-            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+            table,
+            self.snr_min,
+            self.keep_only,
+            self.max_cutouts,
+            self.rank_flags,
+            self.rank_score,
         )
         ncut = idx.size
 
@@ -12432,40 +12542,55 @@ class ExtractCandidateCutouts(tasklib.base.ContainerTask):
             out.add_dataset("x_amplitude")
             out.add_dataset("x_weight")
 
-        # Each rank's block of candidates, summed from the rows on every rank
-        la = out.amplitude[:]
-        offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
-        for r, (o, nl) in enumerate(offs):
-            k = slice(o, o + nl)
-            if self.x_slice:
-                xs = [_band_x_slices(bands, ip, e[k], tb[k]) for ip in ipol]
-                xa = np.stack([x[0] for x in xs], axis=1).astype(np.float32)
-                xw = np.stack([x[1] for x in xs], axis=1).astype(np.float32)
-                rxa = np.zeros_like(xa) if comm.rank == r else None
-                rxw = np.zeros_like(xw) if comm.rank == r else None
-                comm.Reduce(xa, rxa, op=MPI.SUM, root=r)
-                comm.Reduce(xw, rxw, op=MPI.SUM, root=r)
-                if comm.rank == r:
-                    out.datasets["x_amplitude"][:].local_array[:] = rxa
-                    out.datasets["x_weight"][:].local_array[:] = rxw
+        # Each rank cuts out the rows it holds of every candidate (all ranks at
+        # once) and sends them to the rank that holds the candidate
+        t0 = time.time()
+        off, nloc = bands.amplitude[:].local_offset[3], bands.amplitude[:].local_shape[3]
+        one = np.ones(1, dtype=int)
+        pieces = {}
+        for k in range(ncut):
+            local = rin[k] & (rows[k] >= off) & (rows[k] < off + nloc)
+            if not local.any():
+                continue
+            ks = slice(k, k + 1)
             aw = [
-                _band_cutouts(
-                    bands, ip, e[k], tb[k], xi[k], np.ones(nl, int), roff, toff
-                )
+                _band_cutouts(bands, ip, e[ks], tb[ks], xi[ks], one, roff, toff)
                 for ip in ipol
             ]
-            # cand, pol, freq, row, time
-            a = np.stack([x[0] for x in aw], axis=1).astype(np.float32)
-            w = np.stack([x[1] for x in aw], axis=1).astype(np.float32)
-            ra_ = np.zeros_like(a) if comm.rank == r else None
-            rw_ = np.zeros_like(w) if comm.rank == r else None
-            comm.Reduce(a, ra_, op=MPI.SUM, root=r)
-            comm.Reduce(w, rw_, op=MPI.SUM, root=r)
-            if comm.rank == r:
-                out.amplitude[:].local_array[:] = ra_
-                out.weight[:].local_array[:] = rw_
+            # pol, freq, local row, ra
+            a = np.stack([x[0][0][:, local] for x in aw]).astype(np.float32)
+            w = np.stack([x[1][0][:, local] for x in aw]).astype(np.float32)
+            xs = None
+            if self.x_slice and off <= e[k] < off + nloc:
+                xsl = [_band_x_slices(bands, ip, e[ks], tb[ks]) for ip in ipol]
+                xs = (
+                    np.stack([x[0][0] for x in xsl]).astype(np.float32),
+                    np.stack([x[1][0] for x in xsl]).astype(np.float32),
+                )
+            pieces[k] = (local, a, w, xs)
+        t_local = comm.allreduce(time.time() - t0, op=MPI.MAX)
+
+        la = out.amplitude[:]
+        offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
+        o = la.local_offset[0]
+        amp_l, wgt_l = la.local_array, out.weight[:].local_array
+        amp_l[:] = 0.0
+        wgt_l[:] = 0.0
+        if self.x_slice:
+            xa_l = out.datasets["x_amplitude"][:].local_array
+            xw_l = out.datasets["x_weight"][:].local_array
+            xa_l[:] = 0.0
+            xw_l[:] = 0.0
+        for k, (local, a, w, xs) in _send_to_owners(comm, pieces, offs):
+            amp_l[k - o][:, :, local] += a
+            wgt_l[k - o][:, :, local] += w
+            if xs is not None:
+                xa_l[k - o] += xs[0]
+                xw_l[k - o] += xs[1]
         self.log.info(
-            f"Extracted the cutouts of {ncut} candidates in {', '.join(pnames)}."
+            f"Extracted the cutouts of {ncut} candidates in {', '.join(pnames)} (up "
+            f"to {t_local:.0f} s on a rank for its own rows, {time.time() - t0:.0f} s "
+            "in all)."
         )
         return out
 
@@ -12503,6 +12628,9 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
     # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
     # first by the number of rejecting flags of the sift (see _cutout_selection)
     rank_flags = config.Property(proptype=bool, default=False)
+    # With the score table of the learned score: the candidates kept by the rules or
+    # the score first, then by score (see _cutout_selection)
+    rank_score = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=24)
     nra = config.Property(proptype=int, default=40)
 
@@ -12526,7 +12654,12 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
         comm = trials.comm
         rec = table.candidate[:]
         idx = _cutout_selection(
-            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+            table,
+            self.snr_min,
+            self.keep_only,
+            self.max_cutouts,
+            self.rank_flags,
+            self.rank_score,
         )
         ncut = idx.size
 
@@ -12588,33 +12721,44 @@ class ExtractTrialCutouts(tasklib.base.ContainerTask):
         out.datasets["ra_index"][:] = np.where(tin, ts, -1)
         out.datasets["ra"][:] = _extend_axis(ra, ts)
 
-        # Each rank's block of candidates, summed from the rows on every rank
+        # Each rank cuts out the rows it holds of every candidate (all ranks at
+        # once) and sends them to the rank that holds the candidate
+        t0 = time.time()
         names = ["amplitude", "weight"] + (["amplitude_imag"] if has_imag else [])
         src = [trials.datasets[n][:] for n in names]
         off, nloc = src[0].local_offset[3], src[0].local_shape[3]
+        tsafe = np.where(tin, ts, 0)
+        pieces = {}
+        for k in range(ncut):
+            local = rin[k] & (rows[k] >= off) & (rows[k] < off + nloc)
+            if not local.any():
+                continue
+            lrows = rows[k][local]
+            # dataset, pol, duration, local row, ra
+            shape = (len(names), len(pol), durations.size, lrows.size, toff.size)
+            buf = np.zeros(shape, dtype=np.float32)
+            for il, er in enumerate(lrows):
+                for pp in range(len(pol)):
+                    for n, sd in enumerate(src):
+                        v = sd.local_array[pp, :, ia[k, pp], er - off]  # dur, ra, x
+                        v = v[:, tsafe[k], xi[k]]
+                        buf[n, pp, :, il] = np.where(tin[k], v, 0.0)
+            pieces[k] = (local, buf)
+        t_local = comm.allreduce(time.time() - t0, op=MPI.MAX)
+
         la = out.amplitude[:]
         blocks = comm.allgather((la.local_offset[0], la.local_shape[0]))
-        tsafe = np.where(tin, ts, 0)
-        for r, (o, nl) in enumerate(blocks):
-            shape = (len(names), nl, len(pol), durations.size, roff.size, toff.size)
-            buf = np.zeros(shape, dtype=np.float32)
-            for j in range(nl):
-                k = o + j
-                for ir in range(roff.size):
-                    er = rows[k, ir]
-                    if not rin[k, ir] or er < off or er >= off + nloc:
-                        continue
-                    for pp in range(len(pol)):
-                        for n, s in enumerate(src):
-                            v = s.local_array[pp, :, ia[k, pp], er - off]  # dur, ra, x
-                            v = v[:, tsafe[k], xi[k]]
-                            buf[n, j, pp, :, ir] = np.where(tin[k], v, 0.0)
-            red = np.zeros_like(buf) if comm.rank == r else None
-            comm.Reduce(buf, red, op=MPI.SUM, root=r)
-            if comm.rank == r:
-                for n, name in enumerate(names):
-                    out.datasets[name][:].local_array[:] = red[n]
-        self.log.info(f"Extracted the trial cutouts of {ncut} candidates.")
+        o = la.local_offset[0]
+        dest = [out.datasets[name][:].local_array for name in names]
+        for d in dest:
+            d[:] = 0.0
+        for k, (local, buf) in _send_to_owners(comm, pieces, blocks):
+            for n, d in enumerate(dest):
+                d[k - o][:, :, local] += buf[n]
+        self.log.info(
+            f"Extracted the trial cutouts of {ncut} candidates (up to {t_local:.0f} s "
+            f"on a rank for its own rows, {time.time() - t0:.0f} s in all)."
+        )
         return out
 
 
@@ -12657,6 +12801,9 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
     # Order of the cutouts when there are more than max_cutouts: by S/N (False), or
     # first by the number of rejecting flags of the sift (see _cutout_selection)
     rank_flags = config.Property(proptype=bool, default=False)
+    # With the score table of the learned score: the candidates kept by the rules or
+    # the score first, then by score (see _cutout_selection)
+    rank_score = config.Property(proptype=bool, default=False)
     nrow = config.Property(proptype=int, default=40)
     nra = config.Property(proptype=int, default=180)
     freq_edges = config.list_type(type_=float, default=[400.0, 500.0, 600.0, 700.0, 800.0])
@@ -12681,7 +12828,12 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
         comm = stream.comm
         rec = table.candidate[:]
         idx = _cutout_selection(
-            table, self.snr_min, self.keep_only, self.max_cutouts, self.rank_flags
+            table,
+            self.snr_min,
+            self.keep_only,
+            self.max_cutouts,
+            self.rank_flags,
+            self.rank_score,
         )
         ncut = idx.size
 
@@ -12746,47 +12898,68 @@ class ExtractForegroundCutouts(tasklib.base.ContainerTask):
         lmbda = scipy.constants.c / (freq * 1e6)
         ngroup = edges.size - 1
 
-        def block(k):
-            """This rank's sums over its rows for the candidates ``k``."""
-            num = np.zeros((k.size, ngroup, roff.size, toff.size), dtype=np.float64)
-            den = np.zeros_like(num)
-            for jj, kk in enumerate(k):
-                rr = rows[kk]
-                local = rin[kk] & (rr >= el_slc.start) & (rr < el_slc.stop)
-                if not local.any():
-                    continue
-                # The rows are contiguous: cut out the window before selecting anything
-                lr = rr[local] - el_slc.start
-                tt = np.where(tin[kk], ts[kk], 0)
-                vw = np.take(uvis[:, :, :, lr[0] : lr[-1] + 1], tt, axis=-1)[ico]  # pol, freq, ew, row, ra
-                ww = np.moveaxis(np.take(wall, tt, axis=-1)[:, ico], 0, 1)  # pol, freq, ew, ra
-                ww = np.where(tin[kk], ww, 0.0)
-                ph = np.exp(-2.0j * np.pi * ew[np.newaxis, :] * xc[kk] / lmbda[:, np.newaxis])  # freq, ew
-                for gg in range(ngroup):
-                    ff = np.flatnonzero(gidx == gg)
-                    if ff.size == 0:
-                        continue
-                    re = (vw[:, ff] * ph[ff][np.newaxis, :, :, np.newaxis, np.newaxis]).real
-                    w = ww[:, ff]
-                    num[jj, gg, local] = np.einsum("pfbrt,pfbt->rt", re, w)
-                    den[jj, gg, local] = np.sum(w, axis=(0, 1, 2))[np.newaxis]
-            return num, den
+        def piece(kk):
+            """This rank's rows of candidate ``kk``.
 
-        # Each rank's block of candidates, summed from the rows on every rank
+            The rows of the cutout that this rank holds [row] (bool), their
+            numerator [group, local row, ra] and the weight [group, ra]; None if
+            it holds none of them.
+            """
+            rr = rows[kk]
+            local = rin[kk] & (rr >= el_slc.start) & (rr < el_slc.stop)
+            if not local.any():
+                return None
+            # The rows are contiguous: cut out the window before selecting anything
+            lr = rr[local] - el_slc.start
+            tt = np.where(tin[kk], ts[kk], 0)
+            rsl = slice(lr[0], lr[-1] + 1)
+            # pol, freq, ew, row, ra
+            vw = np.stack([np.take(uvis[p, :, :, rsl], tt, axis=-1) for p in ico])
+            ww = np.moveaxis(np.take(wall, tt, axis=-1)[:, ico], 0, 1)  # pol, freq, ew, ra
+            ww = np.where(tin[kk], ww, 0.0)
+            ph = np.exp(
+                -2.0j * np.pi * ew[np.newaxis, :] * xc[kk] / lmbda[:, np.newaxis]
+            )  # freq, ew
+            num = np.zeros((ngroup, int(local.sum()), toff.size), dtype=np.float64)
+            den = np.zeros((ngroup, toff.size), dtype=np.float64)
+            for gg in range(ngroup):
+                ff = np.flatnonzero(gidx == gg)
+                if ff.size == 0:
+                    continue
+                re = (vw[:, ff] * ph[ff][np.newaxis, :, :, np.newaxis, np.newaxis]).real
+                w = ww[:, ff]
+                num[gg] = np.einsum("pfbrt,pfbt->rt", re, w)
+                den[gg] = np.sum(w, axis=(0, 1, 2))
+            return local, num, den
+
+        # Each rank first works through the candidates that have rows of its own,
+        # all ranks at once: this is where the time goes (reading ~360 samples of
+        # every channel), and a candidate's cutout is on only ~(2 nrow + 1) / (rows
+        # per rank) of the ranks.
+        t0 = time.time()
+        pieces = {}
+        for kk in range(ncut):
+            pk = piece(kk)
+            if pk is not None:
+                pieces[kk] = pk
+        t_local = comm.allreduce(time.time() - t0, op=MPI.MAX)
+
+        # The pieces go to the rank that holds each candidate
         la = out.amplitude[:]
         offs = comm.allgather((la.local_offset[0], la.local_shape[0]))
-        for r, (o, nl) in enumerate(offs):
-            num, den = block(np.arange(o, o + nl))
-            rnum = np.zeros_like(num) if comm.rank == r else None
-            rden = np.zeros_like(den) if comm.rank == r else None
-            comm.Reduce(num, rnum, op=MPI.SUM, root=r)
-            comm.Reduce(den, rden, op=MPI.SUM, root=r)
-            if comm.rank == r:
-                out.amplitude[:].local_array[:, 0] = (rnum * tools.invert_no_zero(rden)).astype(np.float32)
-                out.weight[:].local_array[:, 0] = rden.astype(np.float32)
+        o, nl = la.local_offset[0], la.local_shape[0]
+        num = np.zeros((nl, ngroup, roff.size, toff.size), dtype=np.float64)
+        den = np.zeros_like(num)
+        for kk, (local, pn, pd) in _send_to_owners(comm, pieces, offs):
+            num[kk - o][:, local] += pn
+            den[kk - o][:, local] += pd[:, np.newaxis]
+        out.amplitude[:].local_array[:, 0] = (num * tools.invert_no_zero(den)).astype(np.float32)
+        out.weight[:].local_array[:, 0] = den.astype(np.float32)
         wshared.free()
         self.log.info(
-            f"Extracted the foreground cutouts of {ncut} candidates in {ngroup} bands."
+            f"Extracted the foreground cutouts of {ncut} candidates in {ngroup} bands "
+            f"(up to {t_local:.0f} s on a rank for its own rows, "
+            f"{time.time() - t0:.0f} s in all)."
         )
         return out
 
@@ -14051,6 +14224,28 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
     alias_dx = config.list_type(float, default=[0.031, 0.044, 0.062])
     alias_tol = config.Property(proptype=float, default=0.004)
     select = config.Property(proptype=bool, default=False)
+    # The learned score (see ScoreTransientCandidates): with a model file, the
+    # output also gets the ``score`` table.  The ``sift`` table does not change.
+    score_model = config.Property(proptype=str, default=None)
+    score_min = config.Property(proptype=float, default=None)
+    score_snr_min = config.Property(proptype=float, default=8.0)
+    # Pulsar catalogue for the ``pulsar`` and ``alias`` labels of the score table
+    # (_ScoreLabels); none by default
+    score_pulsar_catalogue = config.Property(proptype=str, default=None)
+    score_psr_sep = config.Property(proptype=float, default=0.5)
+
+    def setup(self):
+        """Read the model of the learned score, if one is given.
+
+        Done here so that a missing file stops the job when it starts, not when the
+        tables are ready.
+        """
+        self._score = None if self.score_model is None else _TreeScore(self.score_model)
+        self._score_labels = (
+            None
+            if self.score_model is None or self.score_pulsar_catalogue is None
+            else _ScoreLabels(self.score_pulsar_catalogue, self.score_psr_sep)
+        )
 
     def process(self, table):
         """Sift the candidates.
@@ -14324,7 +14519,363 @@ class SiftTransientCandidates(tasklib.base.ContainerTask):
             out.attrs[f"sift_{key}"] = "none" if val is None else val
         out.attrs["sift_broadcast_groups"] = json.dumps(list(self.broadcast_groups))
         out.attrs["sift_alias_dx"] = json.dumps(list(self.alias_dx))
+        if getattr(self, "_score", None) is not None:
+            out = _add_score(
+                out,
+                self._score,
+                self._score.threshold if self.score_min is None else self.score_min,
+                self.score_snr_min,
+                log=self.log,
+                labels=self._score_labels,
+            )
         return out
+
+
+
+# Columns of the candidate table used as features of the learned score
+_SCORE_COLUMNS = [
+    "snr", "duration", "spectral_index", "npix", "fwhm_y", "fwhm_t", "x_spread",
+    "island_npix", "island_dy", "island_dt", "island_slope", "island_corr",
+    "ext_npix", "ext_dy", "ext_dt", "group_nsig", "group_frac_max", "band_nsig",
+    "band_frac_max", "band_best_freq", "band_alpha", "band_chi2", "band_fit_frac",
+    "ns_nband", "ns_dof", "ns_snr", "ns_dy", "ns_chi2", "ns_scale", "ns_dchi2",
+    "weight_ratio", "cat_nmatch", "cat_near_sep", "psr_sep",
+]  # fmt: skip
+
+
+def _score_features(table, sift=None):
+    """Features of every candidate for the learned score.
+
+    The features leave out the position (telescope-y and x, hour angle, the Sun) and
+    the row and column counts of the grouping, which depend on the day and on the
+    other candidates rather than on the candidate itself.
+
+    Parameters
+    ----------
+    table : containers.TransientCandidateTable
+        Candidates with the ``sift`` table.
+    sift : np.ndarray, optional
+        Use this ``sift`` table rather than the one of ``table``.
+
+    Returns
+    -------
+    features : dict
+        Name to array[candidate] (float32).  Non-finite values are NaN.
+    """
+    rec = table.candidate[:]
+    sift = table.datasets["sift"][:] if sift is None else sift
+    amp = np.abs(rec["amplitude"]).astype(np.float64)
+    out = {}
+    for name in _SCORE_COLUMNS:
+        out[name] = np.abs(rec[name]) if name == "snr" else rec[name]
+    with np.errstate(all="ignore"):
+        out["cat_flux_ratio"] = rec["cat_flux"] / amp
+        out["cat_near_ratio"] = rec["cat_near_flux"] / amp
+        out["tmpl_ratio"] = np.abs(rec["tmpl_flux"]) / amp
+        out["tmpl_flux_abs"] = np.abs(rec["tmpl_flux"])
+        out["imag_ratio"] = rec["amplitude_imag"] / rec["amplitude"]
+    for name in ("row_npeak", "crowd_ratio", "crowd_n"):
+        out["sift_" + name] = sift[name]
+    for dset in ("significance", "window", "fidelity"):
+        if dset in table.datasets:
+            d = table.datasets[dset][:]
+            for name in d.dtype.names:
+                out[name] = d[name]
+    if "group_snr" in table.datasets:
+        with np.errstate(all="ignore"):
+            g = table.datasets["group_snr"][:] / np.abs(rec["snr"])[:, np.newaxis]
+        for i in range(g.shape[1]):
+            out[f"group_snr_{i}"] = g[:, i]
+    for name, val in out.items():
+        val = np.asarray(val, dtype=np.float32)
+        out[name] = np.where(np.isfinite(val), val, np.nan)
+    return out
+
+
+class _TreeScore:
+    """A gradient-boosted tree classifier read from an HDF5 file, evaluated in numpy.
+
+    The file is written by ``scripts/sift_train/export_model.py`` from a scikit-learn
+    ``HistGradientBoostingClassifier``, so the search needs neither scikit-learn nor
+    a pickle that depends on its version.  Datasets, with all trees concatenated:
+    ``feature`` (index into the ``features`` attribute), ``threshold``, ``left``,
+    ``right`` (node index within the tree), ``missing_left``, ``is_leaf``, ``value``
+    and ``tree_start`` (first node of each tree, with the total at the end).
+    Attributes: ``features`` (JSON list of names), ``baseline``, ``threshold`` (the
+    score above which a candidate is kept) and ``valid_flags`` (JSON list of the
+    sifter flags that stay hard cuts).
+
+    Parameters
+    ----------
+    filename : str
+        The model file.
+    """
+
+    def __init__(self, filename):
+        import h5py
+
+        self.filename = filename
+        with h5py.File(filename, "r") as fh:
+            self.features = json.loads(fh.attrs["features"])
+            self.baseline = float(fh.attrs["baseline"])
+            self.threshold = float(fh.attrs["threshold"])
+            self.valid_flags = json.loads(fh.attrs["valid_flags"])
+            self.nodes = {
+                key: fh[key][:]
+                for key in (
+                    "feature", "threshold", "left", "right", "missing_left",
+                    "is_leaf", "value", "tree_start",
+                )
+            }  # fmt: skip
+
+    def predict(self, x):
+        """Score of each row of ``x`` [row, feature], between 0 and 1.
+
+        A node sends a row left if its feature is at most the threshold, or, if the
+        feature is NaN, in the direction learned for missing values.
+        """
+        x = np.asarray(x, dtype=np.float64)
+        nd = self.nodes
+        raw = np.full(x.shape[0], self.baseline)
+        rows = np.arange(x.shape[0])
+        for start in nd["tree_start"][:-1]:
+            node = np.full(x.shape[0], start, dtype=np.int64)
+            active = ~nd["is_leaf"][node]
+            while active.any():
+                k = node[active]
+                val = x[rows[active], nd["feature"][k]]
+                left = np.where(
+                    np.isnan(val), nd["missing_left"][k], val <= nd["threshold"][k]
+                )
+                node[active] = start + np.where(left, nd["left"][k], nd["right"][k])
+                active = ~nd["is_leaf"][node]
+            raw += nd["value"][node]
+        return 1.0 / (1.0 + np.exp(-raw))
+
+
+class ScoreTransientCandidates(tasklib.base.ContainerTask):
+    """Add a learned score to the sifted candidates.
+
+    The sifter's rules reject on one test at a time.  The score combines the same
+    table columns in a gradient-boosted tree model trained on injected pulses
+    (positives) against the candidates of the search without injections (the
+    background), so a candidate that narrowly fails one rule but looks like a pulse
+    in every other respect can be kept.  The tests that say the data are not usable
+    (``valid_flags`` of the model file, e.g. the Sun, the horizon, tracks and lobes
+    of bright sources, low weight) stay hard cuts: a candidate with one of those
+    flags gets no score.
+
+    The ``score`` table of the output holds the score, ``valid`` (no validity flag)
+    and ``keep`` (valid and score at least ``score_min``).  The ``sift`` table is
+    left as it is, so both selections can be compared.
+
+    Attributes
+    ----------
+    model : str
+        The model file (see :class:`_TreeScore`).
+    score_min : float, optional
+        Keep the valid candidates with at least this score.  Default is the
+        threshold stored in the model file.
+    snr_min : float
+        Candidates below this S/N get no score.  Default is 8.
+    pulsar_catalogue : str, optional
+        Pulsar catalogue for the ``pulsar`` and ``alias`` labels of the score table
+        (see :class:`_ScoreLabels`).  Without it the labels are False.
+    psr_sep : float
+        Radius of the ``pulsar`` label in degrees.  Default is 0.5.
+    """
+
+    model = config.Property(proptype=str)
+    score_min = config.Property(proptype=float, default=None)
+    snr_min = config.Property(proptype=float, default=8.0)
+    pulsar_catalogue = config.Property(proptype=str, default=None)
+    psr_sep = config.Property(proptype=float, default=0.5)
+
+    def setup(self):
+        """Read the model."""
+        self._model = _TreeScore(self.model)
+        self._labels = (
+            None
+            if self.pulsar_catalogue is None
+            else _ScoreLabels(self.pulsar_catalogue, self.psr_sep)
+        )
+        self._score_min = (
+            self._model.threshold if self.score_min is None else self.score_min
+        )
+
+    def process(self, table):
+        """Score the candidates.
+
+        Parameters
+        ----------
+        table : containers.TransientCandidateTable
+            Candidates with the ``sift`` table, from
+            :class:`SiftTransientCandidates` (not with ``select``).
+
+        Returns
+        -------
+        out : containers.TransientCandidateTable
+            A copy with the ``score`` table added.
+        """
+        return _add_score(
+            table,
+            self._model,
+            self._score_min,
+            self.snr_min,
+            log=self.log,
+            labels=self._labels,
+        )
+
+
+class _ScoreLabels:
+    """Labels of the scored candidates that a catalogue explains.
+
+    The learned score keeps real, variable point sources, and many of those are
+    known pulsars below the flux of the sifter's ``pulsar`` flag or the east-west
+    aliases of bright pulsars.  Two labels mark them, without changing ``keep``:
+
+    - ``pulsar``: a catalogued pulsar of any flux within ``psr_sep`` degrees.
+    - ``alias``: within ``alias_ddec`` degrees in declination of one of the
+      ``alias_nbright`` brightest pulsars (at 600 MHz) and between ``alias_dra[0]``
+      and ``alias_dra[1]`` degrees from it on the sky in right ascension, where the
+      first and second east-west aliases of the band fall.
+
+    Parameters
+    ----------
+    filename : str
+        The pulsar catalogue of :class:`GroupTransientCandidates`
+        (``pulsar_catalogue``).
+    psr_sep, alias_ddec : float
+        Radii in degrees.
+    alias_nbright : int
+        Number of pulsars whose aliases are marked.
+    alias_dra : (float, float)
+        Range in degrees.
+    """
+
+    def __init__(
+        self, filename, psr_sep=0.5, alias_nbright=150, alias_ddec=0.4, alias_dra=(0.9, 4.2)
+    ):
+        import h5py
+
+        with h5py.File(filename, "r") as f:
+            p = f["pulsar"][:]
+        self.filename = filename
+        self.ra, self.dec = p["ra"].astype(float), p["dec"].astype(float)
+        flux = np.nan_to_num(p["s600"].astype(float), nan=0.0)
+        bright = np.argsort(flux)[::-1][: int(alias_nbright)]
+        self.bright = bright[flux[bright] > 0]
+        self.psr_sep, self.alias_ddec = float(psr_sep), float(alias_ddec)
+        self.alias_dra = (float(alias_dra[0]), float(alias_dra[1]))
+
+    def __call__(self, ra, dec):
+        """The ``pulsar`` and ``alias`` labels of positions in degrees."""
+        ra, dec = np.asarray(ra, dtype=float), np.asarray(dec, dtype=float)
+        psr = np.zeros(ra.size, dtype=bool)
+        alias = np.zeros(ra.size, dtype=bool)
+        bra, bdec = self.ra[self.bright], self.dec[self.bright]
+        for k in range(ra.size):
+            near = np.abs(self.dec - dec[k]) < self.psr_sep
+            if near.any():
+                psr[k] = np.any(
+                    _sky_sep_deg(ra[k], dec[k], self.ra[near], self.dec[near])
+                    < self.psr_sep
+                )
+            dra = np.abs(_wrap_deg(bra - ra[k])) * np.cos(np.radians(dec[k]))
+            alias[k] = np.any(
+                (np.abs(bdec - dec[k]) < self.alias_ddec)
+                & (dra > self.alias_dra[0])
+                & (dra < self.alias_dra[1])
+            )
+        return psr, alias
+
+
+def _add_score(table, model, score_min, snr_min, log=None, labels=None):
+    """A copy of a sifted candidate table with the ``score`` table of ``model``.
+
+    Parameters
+    ----------
+    table : containers.TransientCandidateTable
+        Candidates with the ``sift`` table.
+    model : _TreeScore
+        The model.
+    score_min : float
+        Keep the valid candidates with at least this score.
+    snr_min : float
+        Candidates below this S/N get no score.
+    log : logging.Logger, optional
+        Where to report the counts.
+    labels : _ScoreLabels, optional
+        Sets the ``pulsar`` and ``alias`` columns of the scored candidates.
+
+    Returns
+    -------
+    out : containers.TransientCandidateTable
+        A copy with the ``score`` table.
+    """
+    if "sift" not in table.datasets:
+        raise ValueError("The table has no sift table; run the sifter first.")
+    rec = table.candidate[:]
+    sift = table.datasets["sift"][:]
+    names = json.loads(table.attrs["sift_flags"])
+    missing = [n for n in model.valid_flags if n not in names]
+    if missing:
+        raise ValueError(f"The sifter did not set the validity flags {missing}.")
+    # the S/N cut is applied here, so that fainter candidates can be scored
+    bits = np.uint32(sum(1 << names[n] for n in model.valid_flags if n != "snr"))
+    valid = ((sift["flags"] & bits) == 0) & (np.abs(rec["snr"]) >= snr_min)
+
+    feat = _score_features(table)
+    absent = [n for n in model.features if n not in feat]
+    if absent:
+        raise ValueError(f"The table lacks the features {absent} of the model.")
+    score = np.full(rec.size, np.nan, dtype=np.float32)
+    if valid.any():
+        x = np.stack([feat[n][valid] for n in model.features], axis=1)
+        score[valid] = model.predict(x)
+
+    # A new container, as in the sifter: a table read from a file does not know
+    # the tables it did not have
+    out = containers.TransientCandidateTable(
+        candidate=rec.size, axes_from=table, attrs_from=table, comm=table.comm
+    )
+    _copy_extra_axes(table, out)
+    for name in table.datasets:
+        if name == "score":
+            continue
+        if name not in out.datasets:
+            out.add_dataset(name)
+        _assign_fields(out.datasets[name], table.datasets[name][:])
+    out.add_dataset("score")
+    res = np.zeros(rec.size, dtype=out.datasets["score"][:].dtype)
+    res["score"] = score
+    res["valid"] = valid
+    if labels is not None and valid.any():
+        psr, alias = labels(rec["ra_icrs"][valid], rec["dec_icrs"][valid])
+        res["pulsar"][valid] = psr
+        res["alias"][valid] = alias
+    res["keep"] = valid & (score >= score_min)
+    out.datasets["score"][:] = res
+    out.attrs["score_model"] = os.path.basename(model.filename)
+    out.attrs["score_min"] = score_min
+    out.attrs["score_valid_flags"] = json.dumps(model.valid_flags)
+    if labels is not None:
+        out.attrs["score_pulsar_catalogue"] = os.path.basename(labels.filename)
+        out.attrs["score_psr_sep"] = labels.psr_sep
+    if log is not None:
+        msg = (
+            f"Scored {valid.sum()} of {rec.size} candidates; {res['keep'].sum()} at "
+            f"or above {score_min:.3f} (the rules keep {sift['keep'].sum()})."
+        )
+        if labels is not None:
+            k = res["keep"]
+            msg += (
+                f"  Of those, {(k & res['pulsar']).sum()} are near a catalogued "
+                f"pulsar and {(k & res['alias'] & ~res['pulsar']).sum()} more on "
+                "the alias of a bright one."
+            )
+        log.info(msg)
+    return out
 
 
 def _sun_radec_approx(unix):

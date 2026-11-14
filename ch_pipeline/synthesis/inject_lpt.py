@@ -54,7 +54,13 @@ from scipy.special import erf
 
 from ..core import containers
 from .inject import SIGMA, BaseInject, BeamExternal, _get_baseline_info
-from .lpt_population import SUBPULSE_COLUMNS, dispersion_delay, draw_population, merge_population
+from .lpt_population import (
+    SUBPULSE_COLUMNS,
+    VARIABILITY_COLUMNS,
+    dispersion_delay,
+    draw_population,
+    merge_population,
+)
 
 # Angular speed of the sky in rad / s
 _OMEGA = 2.0 * np.pi / 86164.0905
@@ -228,7 +234,7 @@ def _make_catalog(pop, seed_rng, epoch_ref, attrs):
     epoch = np.where(period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan)
     for name in ("flux", "flux_scatter", "null_fraction", "period", "t_offset_beam", "duration",
                  "spectral_index", "spectral_curvature", "frac_lin", "frac_circ", "pol_angle", "rm",
-                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm"):  # fmt: skip
+                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm", *VARIABILITY_COLUMNS):  # fmt: skip
         tab[name][:] = pop[name]
     tab["epoch"][:] = epoch
     tab["seed"][:] = seed_rng.integers(0, 2**62, n)
@@ -372,7 +378,12 @@ class InjectLPT(BeamExternal):
     pulse gets its own random draws (seeded by the source and the pulse number, so
     the same on any day whose data contain it): nulled with probability
     ``null_fraction``, a flux scattered by exp(``flux_scatter`` N(0, 1)), and the
-    seed of its scintillation.  A source with a dispersion measure (``dm`` in the
+    seed of its scintillation.  The variability columns of the catalogue
+    (:data:`ch_pipeline.synthesis.lpt_population.VARIABILITY_DEFAULTS`) give each
+    pulse its own arrival time, duration, spectral index and polarisation mode, an
+    angle that turns or jumps across it, an interpulse, and windows of activity; a
+    pulse outside a window is logged as nulled with ``active`` False.  The log
+    holds the values of each pulse.  A source with a dispersion measure (``dm`` in the
     catalogue) has each frequency's profile delayed by K DM (nu^-2 - nu_ref^-2), so
     the times of the pulses are those at the reference frequency.  The input of a day extends beyond 0-360 degrees of
     RA, so a pulse near the ends can be in the data of two days; it is the same
@@ -462,46 +473,90 @@ class InjectLPT(BeamExternal):
         dt = np.median(np.diff(t_all))
         rows = []
         nsub = _subpulse_column(tab, "subpulse_rate")
+        var = {k: _subpulse_column(tab, k) for k in VARIABILITY_COLUMNS}
+        per_pulse = ("phase_jitter", "duration_scatter", "spectral_index_scatter", "opm_fraction", "mode_fraction")
         for s in range(tab.size):
             cov = covered[s]
             if not cov.any():
                 continue
             dur, per = tab["duration"][s], tab["period"][s]
+            varies = any(var[k][s] != 0.0 for k in per_pulse)
             # half the span of a pulse: a top hat's half width, or 2.35 sigma of an
             # envelope of sub-pulses (they are placed within 2 sigma)
-            half = dur if nsub[s] > 0 else 0.5 * dur
+            span = 1.0 if nsub[s] > 0 else 0.5
+            # the widest pulse and the largest shift its own draws can give
+            reach = span * dur * np.exp(3.0 * var["duration_scatter"][s]) + 3.0 * var["phase_jitter"][s] * per
             if per > 0 and not np.isfinite(tab["epoch"][s]):
                 # a train through the transit of the day, at the Earth
                 ep = t_tr[s] + tab["t_offset_beam"][s] * sig_t[s]
-                t0 = t_all[cov].min() - half - dt
-                t1 = t_all[cov].max() + half + dt
+                t0 = t_all[cov].min() - reach - dt
+                t1 = t_all[cov].max() + reach + dt
                 k = np.arange(np.ceil((t0 - ep) / per), np.floor((t1 - ep) / per) + 1)
-                pulses = list(zip(k.astype(np.int64), ep + k * per))
+                pulses = [(int(kk), tk, False) for kk, tk in zip(k, ep + k * per)]
             elif per > 0:
                 ep = tab["epoch"][s]
-                t0 = t_all[cov].min() - half - dt
-                t1 = t_all[cov].max() + half + dt
+                t0 = t_all[cov].min() - reach - dt
+                t1 = t_all[cov].max() + reach + dt
                 pad = 600.0 if self.barycentric else 0.0  # > the largest Roemer delay
                 k = np.arange(np.ceil((t0 - pad - ep) / per), np.floor((t1 + pad - ep) / per) + 1)
                 tc = ep + k * per
                 if self.barycentric and tc.size:
                     # arrival at the Earth: the delay at the (approximate) arrival time
                     tc = tc - _roemer_delay(tc - _roemer_delay(tc, ra_i[s], dec_i[s]), ra_i[s], dec_i[s])
-                pulses = list(zip(k.astype(np.int64), tc))
+                pulses = [(int(kk), tk, False) for kk, tk in zip(k, tc)]
             else:
-                pulses = [(int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s])]
-            for kk, tc in pulses:
+                pulses = [(int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s], False)]
+            if per > 0 and var["interpulse"][s] > 0:
+                # half a period after each pulse (and before the first one in the data)
+                pulses = pulses + [(kk, tk + 0.5 * per, True) for kk, tk, _ in pulses]
+                if pulses:
+                    pulses.append((pulses[0][0] - 1, pulses[0][1] - 0.5 * per, True))
+            for kk, tc, inter in pulses:
+                # The pulse's own shape and polarisation.  A separate generator, so
+                # the draws below (null, flux, seeds) are as before for a source
+                # without variability.
+                dur_p, alpha_p = dur, tab["spectral_index"][s]
+                f_lin, f_circ, f_scale = tab["frac_lin"][s], tab["frac_circ"][s], 1.0
+                mode, opm_t = False, np.nan
+                if varies:
+                    rv = np.random.default_rng([int(tab["seed"][s]), int(kk) + 2**40, 99 + int(inter)])
+                    g, u = rv.standard_normal(3), rv.uniform(size=3)
+                    tc = tc + var["phase_jitter"][s] * per * g[0]
+                    dur_p = dur * np.exp(var["duration_scatter"][s] * g[1])
+                    if per > 0:
+                        dur_p = min(dur_p, 0.5 * per)
+                    alpha_p = alpha_p + var["spectral_index_scatter"][s] * g[2]
+                    mode = bool(u[0] < var["mode_fraction"][s])
+                    if mode:
+                        f_lin, f_circ = var["mode_frac_lin"][s], var["mode_frac_circ"][s]
+                        f_scale = var["mode_flux"][s]
+                    if u[1] < var["opm_fraction"][s]:
+                        opm_t = (u[2] - 0.5) * 0.6 * dur_p  # within the central 60%
+                half = span * dur_p
                 on = np.abs(t_all - tc) <= half + 0.5 * dt
                 if not (on & cov).any():
                     continue
-                rng = np.random.default_rng([int(tab["seed"][s]), int(kk) + 2**40])
+                key = [int(tab["seed"][s]), int(kk) + 2**40] + ([1] if inter else [])
+                rng = np.random.default_rng(key)
                 nulled = rng.uniform() < tab["null_fraction"][s]
-                flux = tab["flux"][s] * np.exp(tab["flux_scatter"][s] * rng.standard_normal())
+                flux = tab["flux"][s] * np.exp(tab["flux_scatter"][s] * rng.standard_normal()) * f_scale
+                if inter:
+                    flux = flux * var["interpulse"][s]
                 scint_seed = int(rng.integers(0, 2**31 - 1))
                 # drawn after the others, so a smooth pulse's draws are as before
                 sub_seed = int(rng.integers(0, 2**31 - 1)) if nsub[s] > 0 else 0
-                rows.append((s, kk, nulled, tc, flux, scint_seed, sub_seed))
-        names = ("source", "pulse", "nulled", "unix_center", "flux", "scint_seed", "sub_seed")
+                # activity windows: blocks of active_timescale days, each on with
+                # probability active_fraction (the same on every day for a seed)
+                active = True
+                if 0.0 < var["active_fraction"][s] < 1.0:
+                    block = int(np.floor(tc / (max(var["active_timescale"][s], 0.01) * 86400.0)))
+                    active = bool(
+                        np.random.default_rng([int(tab["seed"][s]), block, 7]).uniform() < var["active_fraction"][s]
+                    )
+                rows.append((s, kk, nulled or not active, tc, flux, scint_seed, sub_seed, dur_p, alpha_p,
+                             f_lin, f_circ, var["pa_swing"][s], opm_t, mode, inter, active))  # fmt: skip
+        names = ("source", "pulse", "nulled", "unix_center", "flux", "scint_seed", "sub_seed", "duration",
+                 "spectral_index", "frac_lin", "frac_circ", "pa_swing", "opm_t", "mode", "interpulse", "active")  # fmt: skip
         out = {name: np.array([r[i] for r in rows]) for i, name in enumerate(names)}
         if not rows:
             out = {k: np.zeros(0) for k in names}
@@ -559,7 +614,7 @@ class InjectLPT(BeamExternal):
         support = np.zeros(npulse)
         for p in range(npulse):
             s = src[p]
-            dur = tab["duration"][s]
+            dur = sched["duration"][p]
             if nsub[s] > 0:
                 sub = _subpulses(
                     np.random.default_rng(int(sched["sub_seed"][p])), dur, nsub[s],
@@ -591,9 +646,9 @@ class InjectLPT(BeamExternal):
             tc = sched["unix_center"][p] + shift
             if subs[p] is not None:
                 return _subpulse_profile(
-                    t, dt, tc, tab["duration"][s_], _subpulse_column(tab, "subpulse_floor")[s_], subs[p]
+                    t, dt, tc, sched["duration"][p], _subpulse_column(tab, "subpulse_floor")[s_], subs[p]
                 )
-            return _pulse_profile(t, dt, tc, tab["duration"][s_], self.profile)
+            return _pulse_profile(t, dt, tc, sched["duration"][p], self.profile)
 
         injected = use.any(axis=1)
         isel = np.flatnonzero(use.any(axis=0))
@@ -644,9 +699,10 @@ class InjectLPT(BeamExternal):
             s = src[p]
             sdec = self.sdec[s]
             cols = np.flatnonzero(use[p, isel])
+            t_cols = t_all[isel][cols]
+            delay = np.zeros(nu.size)
             if dm_src[s] > 0:
                 # each frequency's profile, delayed from the reference frequency
-                t_cols = t_all[isel][cols]
                 delay = dispersion_delay(dm_src[s], nu, self.reference_freq)
                 w = np.stack([profile_at(p, t_cols, d) for d in delay])  # freq, time
             else:
@@ -654,7 +710,7 @@ class InjectLPT(BeamExternal):
             sha = ha_src[s, isel][cols]
             spec = (
                 sched["flux"][p]
-                * x_nu ** tab["spectral_index"][s]
+                * x_nu ** sched["spectral_index"][p]
                 * np.exp(tab["spectral_curvature"][s] * np.log(x_nu) ** 2)
             )
             spec = spec * _scintillation(
@@ -664,9 +720,15 @@ class InjectLPT(BeamExternal):
             psi = np.radians(tab["pol_angle"][s]) + tab["rm"][s] * lam[:, np.newaxis] ** 2
             if self.parallactic:
                 psi = psi + _parallactic_angle(sha, self.latitude, sdec)[np.newaxis]
-            lin = tab["frac_lin"][s] * stokes_i
+            if sched["pa_swing"][p] != 0.0 or np.isfinite(sched["opm_t"][p]):
+                # the angle turns across the pulse, and may jump by 90 degrees
+                trel = t_cols[np.newaxis, :] - sched["unix_center"][p] - delay[:, np.newaxis]
+                psi = psi + np.radians(sched["pa_swing"][p]) * np.clip(trel / sched["duration"][p], -1.5, 1.5)
+                if np.isfinite(sched["opm_t"][p]):
+                    psi = psi + 0.5 * np.pi * (trel > sched["opm_t"][p])
+            lin = sched["frac_lin"][p] * stokes_i
             q, u = lin * np.cos(2 * psi), lin * np.sin(2 * psi)
-            v = tab["frac_circ"][s] * stokes_i
+            v = sched["frac_circ"][p] * stokes_i
             bxx = self._beamfunc(nu, "XX", sdec, sha)
             byy = self._beamfunc(nu, "YY", sdec, sha)
             bxy = np.sqrt(np.abs(bxx * byy))
@@ -714,10 +776,15 @@ class InjectLPT(BeamExternal):
             rec["t_offset"] = tc - t_up
             rec["ha_center"] = np.degrees(ha_c)
             rec["flux"] = sched["flux"]
-            rec["duration"] = tab["duration"][src]
-            rec["spectral_index"] = tab["spectral_index"][src]
-            rec["frac_lin"] = tab["frac_lin"][src]
-            rec["frac_circ"] = tab["frac_circ"][src]
+            rec["duration"] = sched["duration"]
+            rec["spectral_index"] = sched["spectral_index"]
+            rec["frac_lin"] = sched["frac_lin"]
+            rec["frac_circ"] = sched["frac_circ"]
+            rec["interpulse"] = sched["interpulse"].astype(bool)
+            rec["mode"] = sched["mode"].astype(bool)
+            rec["opm"] = np.isfinite(sched["opm_t"])
+            rec["pa_swing"] = sched["pa_swing"]
+            rec["active"] = sched["active"].astype(bool)
             rec["pol_angle"] = tab["pol_angle"][src]
             rec["rm"] = tab["rm"][src]
             rec["ra"] = self.catalog["position"]["ra"][:][src]

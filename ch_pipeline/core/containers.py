@@ -1774,8 +1774,10 @@ class LPTCatalog(SourceCatalog):
     its ``subpulse_jitter`` in periods; see
     :data:`ch_pipeline.synthesis.lpt_population.SUBPULSE_DEFAULTS`).  For a pulse
     with sub-pulses, ``duration`` is the FWHM of its Gaussian envelope.  ``dm`` is the
-    dispersion measure (pc cm^-3; the pulse times are those at ``reference_freq``).  Catalogues
-    written before these columns read as smooth pulses without dispersion.  Where each pulse appears on
+    dispersion measure (pc cm^-3; the pulse times are those at ``reference_freq``).  The
+    variability columns (``phase_jitter`` to ``active_timescale``) are described in
+    :data:`ch_pipeline.synthesis.lpt_population.VARIABILITY_DEFAULTS`.  Catalogues
+    written before these columns read as smooth, steady pulses without dispersion.  Where each pulse appears on
     a given day is in the :class:`LPTInjectionLog` of that day.
     """
 
@@ -1805,6 +1807,20 @@ class LPTCatalog(SourceCatalog):
                 ["subpulse_period", np.float64],
                 ["subpulse_jitter", np.float64],
                 ["dm", np.float64],
+                # Pulse-to-pulse and long-term variability (VARIABILITY_COLUMNS of
+                # ch_pipeline.synthesis.lpt_population); all 0 in older catalogues
+                ["phase_jitter", np.float64],
+                ["duration_scatter", np.float64],
+                ["spectral_index_scatter", np.float64],
+                ["pa_swing", np.float64],
+                ["opm_fraction", np.float64],
+                ["mode_fraction", np.float64],
+                ["mode_frac_lin", np.float64],
+                ["mode_frac_circ", np.float64],
+                ["mode_flux", np.float64],
+                ["interpulse", np.float64],
+                ["active_fraction", np.float64],
+                ["active_timescale", np.float64],
             ],
             "axis": "object_id",
         }
@@ -1839,6 +1855,14 @@ _LPT_PULSE_COLUMNS = [
     ["n_subpulse", np.int32],
     ["support", np.float64],
     ["dm", np.float64],
+    # The pulse's own draws (see InjectLPT): an interpulse, a pulse in the second
+    # polarisation mode, one with an orthogonal jump of the angle, the swing of
+    # the angle across it (degrees) and whether the source was active
+    ["interpulse", bool],
+    ["mode", bool],
+    ["opm", bool],
+    ["pa_swing", np.float64],
+    ["active", bool],
 ]
 
 
@@ -2306,6 +2330,22 @@ class TransientCandidateTable(TableSpec):
                 ["row_npeak", np.int16],
                 ["crowd_ratio", np.float32],
                 ["crowd_n", np.int16],
+            ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        # The learned score (ScoreTransientCandidates): the probability-like score
+        # (NaN where a validity flag is set), whether the validity flags pass, and
+        # whether the candidate is kept (valid and score >= the threshold)
+        "score": {
+            "columns": [
+                ["score", np.float32],
+                ["valid", bool],
+                ["keep", bool],
+                # Labels of the scored candidates (not part of keep): a catalogued
+                # pulsar nearby, and the east-west alias of a bright pulsar
+                ["pulsar", bool],
+                ["alias", bool],
             ],
             "axis": "candidate",
             "initialise": False,

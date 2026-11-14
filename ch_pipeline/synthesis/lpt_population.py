@@ -496,7 +496,65 @@ DEFAULT_POPULATION = {
     "subpulse": None,
     # Dispersion measure: None (no dispersion) or the arguments of DispersionMeasure
     "dm": None,
+    # Pulse-to-pulse and long-term variability (see VARIABILITY_DEFAULTS); none by default
+    "variability": None,
 }
+
+#: Variability of the pulses of a source, as the known LPTs show it.  Each entry is a
+#: distribution spec, optionally with ``fraction``: only that fraction of the sources
+#: get a draw, the others 0 (the property is off).  With ``variability: {}`` in a
+#: population these defaults apply; an entry replaces its default.
+#:
+#: - ``phase_jitter``: scatter (sigma) of the arrival time of a pulse, in periods.
+#:   The pulses of GPM J1839-10 arrive anywhere in a window of ~0.3 of its period.
+#: - ``duration_scatter``: scatter (sigma of ln) of the duration from pulse to pulse
+#:   (GPM J1839-10: 30-300 s).
+#: - ``spectral_index_scatter``: scatter (sigma) of the spectral index from pulse to pulse.
+#: - ``pa_swing``: rotation of the polarisation angle across the duration (degrees,
+#:   linear in time), which lowers the linear polarisation summed over the pulse
+#:   (ASKAP J1839-0756 follows a rotating-vector curve).
+#: - ``opm_fraction``: probability that a pulse has a jump of 90 degrees in angle
+#:   part-way through (orthogonal modes, as in GPM J1839-10).
+#: - ``mode_fraction``: probability that a pulse is in a second emission mode, with
+#:   the polarisation of ``mode_polarisation`` (a Poincare spec; default mostly
+#:   circular) and ``mode_flux`` times the flux (ASKAP J1935+2148: bright, linearly
+#:   polarised pulses and weak, circularly polarised ones; CHIME J1634+44 switches
+#:   between linear and circular).
+#: - ``interpulse``: flux of a second pulse half a period later, relative to the
+#:   main pulse (ASKAP J1839-0756).
+#: - ``active_fraction``, ``active_timescale``: the source is on for this fraction of
+#:   the time, in windows of about ``active_timescale`` days (GLEAM-X J1627-52 was
+#:   seen for three months, ASKAP J1832-0911 faded over months); 0 means always on.
+VARIABILITY_DEFAULTS = {
+    "phase_jitter": {"distribution": "uniform", "lower": 0.0, "upper": 0.05},
+    "duration_scatter": {"distribution": "uniform", "lower": 0.0, "upper": 0.5},
+    "spectral_index_scatter": {"distribution": "uniform", "lower": 0.0, "upper": 0.5},
+    "pa_swing": {"fraction": 0.5, "distribution": "uniform", "lower": -120.0, "upper": 120.0},
+    "opm_fraction": {"fraction": 0.3, "distribution": "uniform", "lower": 0.1, "upper": 0.5},
+    "mode_fraction": {"fraction": 0.3, "distribution": "uniform", "lower": 0.1, "upper": 0.5},
+    "mode_polarisation": {"degree": {"distribution": "uniform", "lower": 0.3, "upper": 1.0}, "circular_scale": 4.0},
+    "mode_flux": {"distribution": "loguniform", "lower": 0.05, "upper": 1.0},
+    "interpulse": {"fraction": 0.15, "distribution": "loguniform", "lower": 0.1, "upper": 1.0},
+    "active_fraction": {"fraction": 0.5, "distribution": "uniform", "lower": 0.1, "upper": 0.8},
+    "active_timescale": {"distribution": "loguniform", "lower": 3.0, "upper": 300.0},
+}
+
+#: The variability columns of the catalogue (0: the property is off)
+VARIABILITY_COLUMNS = (
+    "phase_jitter", "duration_scatter", "spectral_index_scatter", "pa_swing", "opm_fraction",
+    "mode_fraction", "mode_frac_lin", "mode_frac_circ", "mode_flux", "interpulse",
+    "active_fraction", "active_timescale",
+)  # fmt: skip
+
+
+def _draw_fraction(rng, spec, number):
+    """Draw from a spec that may have ``fraction``: the other sources get 0."""
+    if isinstance(spec, dict) and "fraction" in spec:
+        spec = dict(spec)
+        frac = float(spec.pop("fraction"))
+        on = rng.uniform(size=number) < frac
+        return np.where(on, Distribution.from_spec(spec).draw(rng, number), 0.0)
+    return Distribution.from_spec(spec).draw(rng, number)
 
 #: The sub-pulse model, for a ``fraction`` of the sources (see :func:`draw_population`).
 #: Each such pulse is a Gaussian envelope of FWHM ``duration`` (s; drawn from
@@ -535,6 +593,11 @@ def merge_population(spec=None):
                 raise ValueError(f"Unknown sub-pulse property {k!r}; have {sorted(sub)}.")
             sub[k] = copy.deepcopy(v)
         out["subpulse"] = sub
+    if out["variability"] is not None:
+        unknown = [k for k in out["variability"] if k not in VARIABILITY_DEFAULTS]
+        if unknown:
+            raise ValueError(f"Unknown variability properties {unknown}; have {sorted(VARIABILITY_DEFAULTS)}.")
+        out["variability"] = {**copy.deepcopy(VARIABILITY_DEFAULTS), **out["variability"]}
     return out
 
 
@@ -599,4 +662,21 @@ def draw_population(rng, number, spec=None):
     out["dm"] = np.zeros(number)
     if pop["dm"] is not None:
         out["dm"] = DispersionMeasure(**pop["dm"]).draw(rng, out["ra"], out["dec"], out["distance"])
+    # last of all, and only if used, so that a population without it draws as before
+    for key in VARIABILITY_COLUMNS:
+        out[key] = np.zeros(number)
+    var = pop.get("variability")
+    if var is not None:
+        var = {**VARIABILITY_DEFAULTS, **var}
+        for key in ("phase_jitter", "duration_scatter", "spectral_index_scatter", "pa_swing",
+                    "opm_fraction", "mode_fraction", "mode_flux", "interpulse",
+                    "active_fraction", "active_timescale"):  # fmt: skip
+            out[key] = _draw_fraction(rng, var[key], number)
+        lin, circ, _ = Poincare(**(var["mode_polarisation"] or {})).draw(rng, number)
+        out["mode_frac_lin"], out["mode_frac_circ"] = lin, circ
+        for key in ("opm_fraction", "mode_fraction", "active_fraction"):
+            out[key] = np.clip(out[key], 0.0, 1.0)
+        # a single pulse a day has no period to jitter in or to put an interpulse in
+        for key in ("phase_jitter", "interpulse"):
+            out[key] = np.where(out["period"] > 0, out[key], 0.0)
     return out
