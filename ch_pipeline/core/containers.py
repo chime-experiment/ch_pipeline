@@ -1776,7 +1776,9 @@ class LPTCatalog(SourceCatalog):
     with sub-pulses, ``duration`` is the FWHM of its Gaussian envelope.  ``dm`` is the
     dispersion measure (pc cm^-3; the pulse times are those at ``reference_freq``).  The
     variability columns (``phase_jitter`` to ``active_timescale``) are described in
-    :data:`ch_pipeline.synthesis.lpt_population.VARIABILITY_DEFAULTS`.  Catalogues
+    :data:`ch_pipeline.synthesis.lpt_population.VARIABILITY_DEFAULTS`.  ``shape`` is 1
+    for a source whose pulses have the measured shapes (``duration`` is then the time
+    that holds 90% of the fluence of a pulse) and 0 for the catalogue's profile.  Catalogues
     written before these columns read as smooth, steady pulses without dispersion.  Where each pulse appears on
     a given day is in the :class:`LPTInjectionLog` of that day.
     """
@@ -1821,6 +1823,9 @@ class LPTCatalog(SourceCatalog):
                 ["interpulse", np.float64],
                 ["active_fraction", np.float64],
                 ["active_timescale", np.float64],
+                # 1: the pulses have the measured shapes (SHAPE_DEFAULTS of
+                # ch_pipeline.synthesis.lpt_population); 0 in older catalogues
+                ["shape", np.float64],
             ],
             "axis": "object_id",
         }
@@ -1863,6 +1868,8 @@ _LPT_PULSE_COLUMNS = [
     ["opm", bool],
     ["pa_swing", np.float64],
     ["active", bool],
+    # Number of components of a pulse of the measured shapes (0: the catalogue's profile)
+    ["n_component", np.int32],
 ]
 
 

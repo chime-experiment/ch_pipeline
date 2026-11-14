@@ -498,6 +498,8 @@ DEFAULT_POPULATION = {
     "dm": None,
     # Pulse-to-pulse and long-term variability (see VARIABILITY_DEFAULTS); none by default
     "variability": None,
+    # Pulse shapes measured on the known LPTs (see SHAPE_DEFAULTS); none by default
+    "shape": None,
 }
 
 #: Variability of the pulses of a source, as the known LPTs show it.  Each entry is a
@@ -576,6 +578,14 @@ SUBPULSE_DEFAULTS = {
     "jitter": {"distribution": "uniform", "lower": 0.0, "upper": 0.3},
 }
 
+#: The measured pulse shapes, for a ``fraction`` of the sources: each pulse of such a
+#: source is a sum of 1-4 components with their own rise and decay, drawn for that pulse
+#: (:func:`ch_pipeline.synthesis.inject_lpt._shape_components`), and ``duration`` is the
+#: time that holds 90% of its fluence.  The other sources keep the catalogue's profile
+#: (a top hat or a Gaussian).  For a source with sub-pulses the shape is the envelope
+#: under them, instead of a Gaussian.
+SHAPE_DEFAULTS = {"fraction": 0.0}
+
 SUBPULSE_COLUMNS = ("subpulse_rate", "subpulse_width", "subpulse_floor", "subpulse_period", "subpulse_jitter")
 
 
@@ -598,6 +608,11 @@ def merge_population(spec=None):
         if unknown:
             raise ValueError(f"Unknown variability properties {unknown}; have {sorted(VARIABILITY_DEFAULTS)}.")
         out["variability"] = {**copy.deepcopy(VARIABILITY_DEFAULTS), **out["variability"]}
+    if out["shape"] is not None:
+        unknown = [k for k in out["shape"] if k not in SHAPE_DEFAULTS]
+        if unknown:
+            raise ValueError(f"Unknown shape properties {unknown}; have {sorted(SHAPE_DEFAULTS)}.")
+        out["shape"] = {**SHAPE_DEFAULTS, **out["shape"]}
     return out
 
 
@@ -679,4 +694,8 @@ def draw_population(rng, number, spec=None):
         # a single pulse a day has no period to jitter in or to put an interpulse in
         for key in ("phase_jitter", "interpulse"):
             out[key] = np.where(out["period"] > 0, out[key], 0.0)
+    # after the variability, and only if used, so that a population without it draws as before
+    out["shape"] = np.zeros(number)
+    if pop["shape"] is not None and float(pop["shape"]["fraction"]) > 0.0:
+        out["shape"] = (rng.uniform(size=number) < float(pop["shape"]["fraction"])).astype(np.float64)
     return out

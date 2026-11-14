@@ -83,13 +83,90 @@ def _pulse_profile(t, dt, t0, width, profile):
     raise ValueError(f"Unknown profile {profile}.")
 
 
+# The pulse shapes measured on public light curves of GPM J1839-10, GLEAM-X J1627-52 and
+# ASKAP J1839-0756: a pulse is the sum of 1-4 components, each a Gaussian with its own
+# rise and decay width.  Probabilities of 1, 2, 3, 4 components for short pulses (most
+# are a single peak) and for long ones (a core on broad shoulders), with the change
+# between the two durations (s) of _SHAPE_LONG
+_SHAPE_NUMBER = ((0.15, 0.35, 0.30, 0.20), (0.08, 0.17, 0.35, 0.40))
+_SHAPE_LONG = (100.0, 400.0)
+# Range of the FWHM of a component over the length of the pulse (log-uniform): the
+# lower limit for short pulses (narrow components, separate peaks) and for long ones
+# (broad components that merge into one peak), and the upper limit
+_SHAPE_WIDTH = (0.05, 0.20, 0.50)
+# Rise over decay width of a component: median and sigma of ln, and its limits
+_SHAPE_ASYMMETRY = (1.0, 1.2, 0.05, 20.0)
+# Shares of the fluence: Dirichlet with this parameter (the largest of 2, 3, 4 holds
+# about 0.65, 0.5, 0.42)
+_SHAPE_SHARE = 2.0
+
+
+def _shape_components(rng, duration):
+    """Components of one pulse of the measured shape family.
+
+    Returns the centres (s from the centre of the pulse), rise and decay sigmas (s)
+    and amplitudes of 1-4 two-sided Gaussians, drawn as described at ``_SHAPE_NUMBER``
+    and scaled so that 90% of the fluence lies within ``duration`` (5% before
+    -``duration``/2, 5% after +``duration``/2) and the peak of the sum is 1.
+    """
+    x = float(np.clip(np.log(duration / _SHAPE_LONG[0]) / np.log(_SHAPE_LONG[1] / _SHAPE_LONG[0]), 0.0, 1.0))
+    prob = (1.0 - x) * np.array(_SHAPE_NUMBER[0]) + x * np.array(_SHAPE_NUMBER[1])
+    k = 1 + int(rng.choice(prob.size, p=prob / prob.sum()))
+    lo = (1.0 - x) * _SHAPE_WIDTH[0] + x * _SHAPE_WIDTH[1]
+    # in units of a provisional length of 1
+    f = np.exp(rng.uniform(np.log(lo), np.log(_SHAPE_WIDTH[2]), k))
+    c = rng.uniform(-0.5, 0.5, k) * (1.0 - f)
+    med, sig, rmin, rmax = _SHAPE_ASYMMETRY
+    r = np.clip(med * np.exp(sig * rng.standard_normal(k)), rmin, rmax)
+    share = rng.dirichlet(np.full(k, _SHAPE_SHARE))
+    to_sig = 1.0 / np.sqrt(2.0 * np.log(2.0))  # half width at half maximum to sigma
+    sr, sd = f * r / (1.0 + r) * to_sig, f / (1.0 + r) * to_sig
+    a = share / (np.sqrt(0.5 * np.pi) * (sr + sd))
+    comp = (c, sr, sd, a)
+    grid = np.linspace(-3.5, 3.5, 28001)
+    val = _component_value(grid, comp)
+    cum = np.cumsum(val)
+    cum /= cum[-1]
+    t05, t95 = np.interp([0.05, 0.95], cum, grid)
+    scale = duration / (t95 - t05)
+    return (c - 0.5 * (t05 + t95)) * scale, sr * scale, sd * scale, a / val.max()
+
+
+def _component_value(x, comp):
+    """The sum of the two-sided Gaussians ``comp`` at the times ``x`` (s from the centre)."""
+    x = np.asarray(x, dtype=np.float64)
+    out = np.zeros(x.shape)
+    for ck, rk, dk, ak in zip(*comp):
+        d = x - ck
+        out += ak * np.exp(-0.5 * (d / np.where(d < 0, rk, dk)) ** 2)
+    return out
+
+
+def _component_profile(t, dt, t0, comp):
+    """Mean over samples (centred at ``t``, length ``dt``) of the pulse ``comp`` centred at ``t0``."""
+    rel = np.asarray(t, dtype=np.float64) - t0  # relative times keep the precision
+    lo, hi = rel - 0.5 * dt, rel + 0.5 * dt
+    out = np.zeros(rel.shape)
+    s2 = np.sqrt(2.0)
+    for ck, rk, dk, ak in zip(*comp):
+        rise = rk * (erf((np.minimum(hi, ck) - ck) / (s2 * rk)) - erf((np.minimum(lo, ck) - ck) / (s2 * rk)))
+        decay = dk * (erf((np.maximum(hi, ck) - ck) / (s2 * dk)) - erf((np.maximum(lo, ck) - ck) / (s2 * dk)))
+        out += ak * np.sqrt(0.5 * np.pi) * (rise + decay)
+    return out / dt
+
+
 # Scatter of ln(width) and ln(amplitude) of the sub-pulses of a pulse
 _SUB_WIDTH_SIGMA = 0.3
 _SUB_AMP_SIGMA = 0.5
 
 
-def _subpulses(rng, duration, rate, width, period, jitter):
+def _subpulses(rng, duration, rate, width, period, jitter, envelope=None):
     """Times (s from the centre), FWHMs (s) and amplitudes of the sub-pulses of one pulse.
+
+    With ``envelope`` (the components of :func:`_shape_components`, whose 90% width is
+    ``duration``) the sub-pulses lie under that envelope instead of the Gaussian
+    described below: random ones are drawn from it as a distribution of times,
+    quasi-periodic ones cover 1.4 ``duration``, and the amplitudes follow it.
 
     The envelope is a Gaussian of FWHM ``duration``.  With ``period`` 0 there are
     Poisson(``rate`` x ``duration`` / 60) sub-pulses (``rate`` per minute of FWHM; at
@@ -100,6 +177,11 @@ def _subpulses(rng, duration, rate, width, period, jitter):
     exp(0.5 N).
     """
     sig = duration / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    if envelope is not None:
+        sig = 0.35 * duration  # quasi-periodic sub-pulses then cover 1.4 x duration
+        grid = np.linspace(-1.5 * duration, 1.5 * duration, 6001)
+        cdf = np.cumsum(_component_value(grid, envelope))
+        cdf /= cdf[-1]
     if period > 0:
         t = -2.0 * sig + rng.uniform(0.0, period) + period * np.arange(int(4.0 * sig / period) + 1)
         t = t[t <= 2.0 * sig]
@@ -114,20 +196,24 @@ def _subpulses(rng, duration, rate, width, period, jitter):
         for _ in range(50 * n):
             if len(t) == n:
                 break
-            tk = rng.normal(0.0, sig)
+            tk = rng.normal(0.0, sig) if envelope is None else float(np.interp(rng.uniform(), cdf, grid))
             wk = width * np.exp(_SUB_WIDTH_SIGMA * rng.standard_normal())
-            if abs(tk) > 2.0 * sig:
+            if envelope is None and abs(tk) > 2.0 * sig:
                 continue
             if all(abs(tk - tj) >= 1.5 * max(wk, wj) for tj, wj in zip(t, w)):
                 t.append(tk)
                 w.append(wk)
         t, w = np.array(t), np.array(w)
-    a = np.exp(-0.5 * (t / sig) ** 2) * np.exp(_SUB_AMP_SIGMA * rng.standard_normal(t.size))
+    env = np.exp(-0.5 * (t / sig) ** 2) if envelope is None else _component_value(t, envelope)
+    a = env * np.exp(_SUB_AMP_SIGMA * rng.standard_normal(t.size))
     return t, w, a
 
 
-def _subpulse_profile(t, dt, t0, duration, floor, sub):
+def _subpulse_profile(t, dt, t0, duration, floor, sub, envelope=None):
     """Mean over samples (centred at ``t``, length ``dt``) of a pulse with sub-pulses.
+
+    With ``envelope`` (components, see :func:`_shape_components`) the smooth part is
+    that envelope instead of the Gaussian.
 
     ``floor`` x the Gaussian envelope (FWHM ``duration``, centre ``t0``) plus
     ``1 - floor`` x the sum of the Gaussian sub-pulses ``sub`` (times from the
@@ -138,7 +224,10 @@ def _subpulse_profile(t, dt, t0, duration, floor, sub):
     rel = np.asarray(t, dtype=np.float64) - t0  # relative times keep the precision
 
     def mean_sum(x, step):
-        out = floor * _pulse_profile(x, step, 0.0, duration, "gaussian")
+        if envelope is None:
+            out = floor * _pulse_profile(x, step, 0.0, duration, "gaussian")
+        else:
+            out = floor * _component_profile(x, step, 0.0, envelope)
         if a.size:
             s = sum(ak * _pulse_profile(x, step, tk, wk, "gaussian") for tk, wk, ak in zip(ts, ws, a))
             out = out + (1.0 - floor) * s / sub_peak
@@ -147,12 +236,16 @@ def _subpulse_profile(t, dt, t0, duration, floor, sub):
     # the peak of the sum of the sub-pulses alone, then of the whole profile
     fine = np.arange(-1.5 * duration, 1.5 * duration, max(min(ws.min() if ws.size else duration, duration) / 20.0, 0.05))
     sub_peak = 1.0
+    if envelope is None:
+        smooth = np.exp(-4.0 * np.log(2.0) * (fine / duration) ** 2)
+    else:
+        smooth = _component_value(fine, envelope)
     if a.size:
         g = sum(ak * np.exp(-4.0 * np.log(2.0) * ((fine - tk) / wk) ** 2) for tk, wk, ak in zip(ts, ws, a))
         sub_peak = float(g.max()) or 1.0
-        inst = floor * np.exp(-4.0 * np.log(2.0) * (fine / duration) ** 2) + (1.0 - floor) * g / sub_peak
+        inst = floor * smooth + (1.0 - floor) * g / sub_peak
     else:
-        inst = floor * np.exp(-4.0 * np.log(2.0) * (fine / duration) ** 2)
+        inst = floor * smooth
     peak = float(inst.max()) or 1.0
     return mean_sum(rel, dt) / peak
 
@@ -234,7 +327,7 @@ def _make_catalog(pop, seed_rng, epoch_ref, attrs):
     epoch = np.where(period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan)
     for name in ("flux", "flux_scatter", "null_fraction", "period", "t_offset_beam", "duration",
                  "spectral_index", "spectral_curvature", "frac_lin", "frac_circ", "pol_angle", "rm",
-                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm", *VARIABILITY_COLUMNS):  # fmt: skip
+                 "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm", *VARIABILITY_COLUMNS, "shape"):  # fmt: skip
         tab[name][:] = pop[name]
     tab["epoch"][:] = epoch
     tab["seed"][:] = seed_rng.integers(0, 2**62, n)
@@ -473,6 +566,7 @@ class InjectLPT(BeamExternal):
         dt = np.median(np.diff(t_all))
         rows = []
         nsub = _subpulse_column(tab, "subpulse_rate")
+        shape = _subpulse_column(tab, "shape")
         var = {k: _subpulse_column(tab, k) for k in VARIABILITY_COLUMNS}
         per_pulse = ("phase_jitter", "duration_scatter", "spectral_index_scatter", "opm_fraction", "mode_fraction")
         for s in range(tab.size):
@@ -482,8 +576,9 @@ class InjectLPT(BeamExternal):
             dur, per = tab["duration"][s], tab["period"][s]
             varies = any(var[k][s] != 0.0 for k in per_pulse)
             # half the span of a pulse: a top hat's half width, or 2.35 sigma of an
-            # envelope of sub-pulses (they are placed within 2 sigma)
-            span = 1.0 if nsub[s] > 0 else 0.5
+            # envelope of sub-pulses (they are placed within 2 sigma); a pulse of the
+            # measured shapes has 90% of its fluence within half of this
+            span = 1.0 if nsub[s] > 0 or shape[s] > 0 else 0.5
             # the widest pulse and the largest shift its own draws can give
             reach = span * dur * np.exp(3.0 * var["duration_scatter"][s]) + 3.0 * var["phase_jitter"][s] * per
             if per > 0 and not np.isfinite(tab["epoch"][s]):
@@ -545,6 +640,7 @@ class InjectLPT(BeamExternal):
                 scint_seed = int(rng.integers(0, 2**31 - 1))
                 # drawn after the others, so a smooth pulse's draws are as before
                 sub_seed = int(rng.integers(0, 2**31 - 1)) if nsub[s] > 0 else 0
+                shape_seed = int(rng.integers(0, 2**31 - 1)) if shape[s] > 0 else 0
                 # activity windows: blocks of active_timescale days, each on with
                 # probability active_fraction (the same on every day for a seed)
                 active = True
@@ -554,9 +650,10 @@ class InjectLPT(BeamExternal):
                         np.random.default_rng([int(tab["seed"][s]), block, 7]).uniform() < var["active_fraction"][s]
                     )
                 rows.append((s, kk, nulled or not active, tc, flux, scint_seed, sub_seed, dur_p, alpha_p,
-                             f_lin, f_circ, var["pa_swing"][s], opm_t, mode, inter, active))  # fmt: skip
+                             f_lin, f_circ, var["pa_swing"][s], opm_t, mode, inter, active, shape_seed))  # fmt: skip
         names = ("source", "pulse", "nulled", "unix_center", "flux", "scint_seed", "sub_seed", "duration",
-                 "spectral_index", "frac_lin", "frac_circ", "pa_swing", "opm_t", "mode", "interpulse", "active")  # fmt: skip
+                 "spectral_index", "frac_lin", "frac_circ", "pa_swing", "opm_t", "mode", "interpulse", "active",
+                 "shape_seed")  # fmt: skip
         out = {name: np.array([r[i] for r in rows]) for i, name in enumerate(names)}
         if not rows:
             out = {k: np.zeros(0) for k in names}
@@ -606,7 +703,10 @@ class InjectLPT(BeamExternal):
         prof = np.zeros((npulse, ra_deg.size))
         nsub = _subpulse_column(tab, "subpulse_rate")
         dm_src = _subpulse_column(tab, "dm")
+        shape = _subpulse_column(tab, "shape")
         subs = [None] * npulse
+        comps = [None] * npulse
+        n_comp = np.zeros(npulse, dtype=np.int32)
         # the largest delays across the band, earlier (high frequencies) and later (low)
         freq_band = np.asarray(data.index_map["freq"]["centre"][:], dtype=np.float64)
         unit_delay = dispersion_delay(1.0, np.array([freq_band.max(), freq_band.min()]), self.reference_freq)
@@ -615,18 +715,26 @@ class InjectLPT(BeamExternal):
         for p in range(npulse):
             s = src[p]
             dur = sched["duration"][p]
+            if shape[s] > 0:
+                # one of the measured shapes, alone or as the envelope of the sub-pulses
+                comps[p] = _shape_components(np.random.default_rng(int(sched["shape_seed"][p])), dur)
+                n_comp[p] = comps[p][0].size
             if nsub[s] > 0:
                 sub = _subpulses(
                     np.random.default_rng(int(sched["sub_seed"][p])), dur, nsub[s],
                     _subpulse_column(tab, "subpulse_width")[s], _subpulse_column(tab, "subpulse_period")[s],
-                    _subpulse_column(tab, "subpulse_jitter")[s],
+                    _subpulse_column(tab, "subpulse_jitter")[s], comps[p],
                 )  # fmt: skip
                 prof[p] = _subpulse_profile(
-                    t_all, dt, sched["unix_center"][p], dur, _subpulse_column(tab, "subpulse_floor")[s], sub
+                    t_all, dt, sched["unix_center"][p], dur, _subpulse_column(tab, "subpulse_floor")[s], sub,
+                    comps[p],
                 )
                 subs[p] = sub
                 n_drawn[p] = sub[0].size
                 support[p] = 2.0 * dur
+            elif comps[p] is not None:
+                prof[p] = _component_profile(t_all, dt, sched["unix_center"][p], comps[p])
+                support[p] = dur
             else:
                 prof[p] = _pulse_profile(t_all, dt, sched["unix_center"][p], dur, self.profile)
                 support[p] = dur
@@ -646,8 +754,11 @@ class InjectLPT(BeamExternal):
             tc = sched["unix_center"][p] + shift
             if subs[p] is not None:
                 return _subpulse_profile(
-                    t, dt, tc, sched["duration"][p], _subpulse_column(tab, "subpulse_floor")[s_], subs[p]
+                    t, dt, tc, sched["duration"][p], _subpulse_column(tab, "subpulse_floor")[s_], subs[p],
+                    comps[p],
                 )
+            if comps[p] is not None:
+                return _component_profile(t, dt, tc, comps[p])
             return _pulse_profile(t, dt, tc, sched["duration"][p], self.profile)
 
         injected = use.any(axis=1)
@@ -797,6 +908,7 @@ class InjectLPT(BeamExternal):
             rec["beam_mean"] = bsum * tools.invert_no_zero(wsum)
             rec["scint_seed"] = sched["scint_seed"]
             rec["n_subpulse"] = n_drawn
+            rec["n_component"] = n_comp
             rec["support"] = support
             rec["dm"] = dm_src[src]
         log.pulse[:] = rec
