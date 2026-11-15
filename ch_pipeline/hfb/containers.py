@@ -9,7 +9,8 @@ Containers
 - :py:class:`HFBData`
 - :py:class:`HFBReader`
 - :py:class:`HFBRFIMask`
-- :py:class:`SiderealRFIMaskStack`
+- :py:class:`CosmologyRFIMaskStack`
+- :py:class:`HFBRingMapRFIMaskStack`
 - :py:class:`HFBTimeAverage`
 - :py:class:`HFBHighResContainer`
 - :py:class:`HFBHighResData`
@@ -316,8 +317,11 @@ class HFBRFIMask(TODContainer, FreqContainer):
         return self.datasets["sens"]
 
 
-class SiderealRFIMaskStack(FreqContainer, SiderealContainer):
-    """RFI masks of several sidereal days."""
+class CosmologyRFIMaskStack(FreqContainer, SiderealContainer):
+    """RFI masks of several sidereal days from the cosmology data.
+
+    The masks are on the CHIME coarse freq channels and the full RA range.
+    """
 
     _axes = ("csd",)
 
@@ -335,6 +339,42 @@ class SiderealRFIMaskStack(FreqContainer, SiderealContainer):
     def csd(self):
         """The csd indices of the csd axis."""
         return self.index_map["csd"]
+
+    @property
+    def mask(self):
+        """Get the mask dataset."""
+        return self.datasets["mask"]
+
+
+class HFBRingMapRFIMaskStack(FreqContainer, SiderealContainer):
+    """RFI masks of several sidereal days, for each EW beam and el."""
+
+    _axes = ("csd", "beam_ew", "el")
+
+    _dataset_spec: ClassVar = {
+        "mask": {
+            "axes": ["csd", "beam_ew", "el", "ra", "freq"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "csd",
+        }
+    }
+
+    @property
+    def csd(self):
+        """The csd indices of the csd axis."""
+        return self.index_map["csd"]
+
+    @property
+    def beam_ew(self):
+        """The EW beam indices of the beam_ew axis."""
+        return self.index_map["beam_ew"]
+
+    @property
+    def el(self):
+        """The el indices of the el axis."""
+        return self.index_map["el"]
 
     @property
     def mask(self):

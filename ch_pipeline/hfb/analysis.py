@@ -18,6 +18,7 @@ from draco.core import io
 from draco.util import tools
 from mpi4py import MPI
 from scipy.constants import c as speed_of_light
+from scipy.ndimage import convolve1d
 from skyfield.framelib import ecliptic_frame
 from skyfield.positionlib import Angle
 from skyfield.starlib import Star
@@ -1964,6 +1965,89 @@ class HFBMedianSubtraction(tasklib.base.ContainerTask):
         out.hfb[:] = diff
         out.weight[:] = weight
 
+        return out
+
+
+class HFBSmoothFreq(tasklib.base.ContainerTask):
+    """Smooth HFB data along frequency with a Gaussian kernel.
+
+    Each channel is the weighted mean of its neighbours, with Gaussian kernel k:
+
+        data = sum(k * w * data) / sum(k * w)
+        weight = sum(k * w)**2 / sum(k**2 * w)
+
+    Channels with zero weight are not used and stay flagged. The attribute
+    'freq_smoothing_fwhm' is set on the output, and a container that already
+    has it is rejected.
+
+    Attributes
+    ----------
+    fwhm : float
+        FWHM of the Gaussian kernel, in channels. Default 3.
+    """
+
+    fwhm = config.Property(proptype=float, default=3.0)
+
+    def process(self, stream):
+        """Smooth the data and weights along frequency.
+
+        Parameters
+        ----------
+        stream : HFB container with a freq axis
+            Data and weights with a high-resolution frequency axis.
+
+        Returns
+        -------
+        out : same type as `stream`
+            The smoothed data and their weights.
+        """
+        if "freq_smoothing_fwhm" in stream.attrs:
+            raise RuntimeError("This container is already smoothed in frequency.")
+
+        # Gaussian sigma from the FWHM, in channels
+        sigma = self.fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+        # Half-length of the kernel: out to 4 sigma
+        half = int(np.ceil(4.0 * sigma))
+        # Gaussian kernel (not normalised; the weighted mean below normalises it)
+        kernel = np.exp(-0.5 * (np.arange(-half, half + 1) / sigma) ** 2)
+
+        axes = list(stream.hfb.attrs["axis"])
+        others = [a for a in axes if a != "freq"]
+        out = empty_like(stream)
+        if others:
+            stream.redistribute(others[0])
+            out.redistribute(others[0])
+
+        # Local parts of input and output data and weights, with freq last (views)
+        d, w, d_out, w_out = (
+            np.moveaxis(getattr(x, "local_array", x), axes.index("freq"), -1)
+            for x in (stream.hfb[:], stream.weight[:], out.hfb[:], out.weight[:])
+        )
+
+        # Samples with data; flagged samples may hold NaN, so they count as zero
+        good = w > 0
+        # Weights with zero for flagged samples, in double precision for the sums
+        wf = np.where(good, w, 0.0).astype(np.float64)
+        # sum(k * w) around each channel
+        sum_w = convolve1d(wf, kernel, axis=-1, mode="constant")
+        # sum(k * w * data) around each channel
+        sum_wd = convolve1d(
+            wf * np.where(good, d, 0.0), kernel, axis=-1, mode="constant"
+        )
+        # sum(k**2 * w) around each channel, for the weight of the smoothed data
+        sum_w2 = convolve1d(wf, kernel**2, axis=-1, mode="constant")
+
+        # Keep flagged channels flagged, and channels with no data around them
+        good &= sum_w > 0
+        # Smoothed data: the weighted mean, zero where flagged
+        d_out[:] = np.where(good, sum_wd / np.where(good, sum_w, 1.0), 0.0)
+        # Inverse variance of the weighted mean, zero where flagged
+        w_out[:] = np.where(good, sum_w**2 / np.where(good, sum_w2, 1.0), 0.0)
+
+        # Record the smoothing on the output
+        out.attrs["freq_smoothing_fwhm"] = self.fwhm
+
+        # Return the smoothed container
         return out
 
 
