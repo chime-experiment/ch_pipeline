@@ -1,15 +1,20 @@
 """HFB Tasks for flagging data."""
 
+import os
+
 import beam_model.formed as fm
 import numpy as np
+import scipy.sparse as ss
 from caput import config, mpiarray
 from caput.algorithms import invert_no_zero
-from caput.pipeline import tasklib
+from caput.pipeline import exceptions, tasklib
 from draco.analysis.sidereal import _search_nearest
 from draco.core.containers import LocalizedRFIMask, RFIMask
+from draco.core.io import get_telescope
+from draco.util import regrid
 from scipy.spatial.distance import cdist
 
-from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
+from ch_pipeline.hfb import containers
 
 
 class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
@@ -51,7 +56,7 @@ class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
         mask = sensitivities > self.threshold
 
         # Create container to hold output
-        out = HFBRFIMask(axes_from=stream, attrs_from=stream)
+        out = containers.HFBRFIMask(axes_from=stream, attrs_from=stream)
 
         if self.keep_sens:
             out.add_dataset("sens")
@@ -190,7 +195,7 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
         ]  # (nfreq, nsubfreq, nbeam_ns, ntime)
 
         # Create output container with the same axes
-        out = HFBDirectionalRFIMaskBitmap(
+        out = containers.HFBDirectionalRFIMaskBitmap(
             sigma_key=self.sigma,
             freq=stream.freq[:],
             beam_ns=stream.beam_ns[:],
@@ -488,3 +493,372 @@ def sensitivity_metric(stream, average_beams):
 
     # Compute and return the sensitivity metric
     return 2.0 * invert_no_zero(radiometer * weight)
+
+
+class HFBCosmologyRFIFlagging(tasklib.base.ContainerTask):
+    """Make a stack of the daily intensity-mapping RFI masks.
+
+    The output is on the CHIME coarse freq channels and the full RA range.
+    For each CSD the selected masks are combined (OR), then rebinned from
+    time to RA once, as in SiderealRebinner. An RA pixel is flagged if any
+    time sample in it is flagged. Missing mask files are skipped.
+
+    Attributes
+    ----------
+    csd_range : list
+        Days to include, start <= csd < end. Either one range, [start, end],
+        or several, [[start1, end1], [start2, end2], ...].
+    nra : int
+        Number of RA pixels over the full range, as in the ringmaps. Default is 4280.
+    root : str
+        Directory holding <csd>/rfi_mask_<name>_lsd_<csd>.h5.
+    masks_to_include : list of str
+        Masks to combine, from `all_masks`. Default: all.
+    """
+
+    all_masks = ("freq", "sensitivity", "transient", "static", "chisq")
+
+    csd_range = config.Property(proptype=list)
+    nra = config.Property(proptype=int, default=4280)
+    root = config.Property(
+        proptype=str, default="~/projects/rpp-chime/chime/chime_processed/daily/rev_09"
+    )
+    masks_to_include = config.Property(proptype=list, default=list(all_masks))
+
+    def setup(self, manager):
+        """Set up the observer.
+
+        Parameters
+        ----------
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object holding the geographic location of the telescope.
+        """
+        self.observer = get_telescope(manager)
+        self._done = False
+
+    def process(self):
+        """Make the mask stack.
+
+        Returns
+        -------
+        out : containers.CosmologyRFIMaskStack
+            Combined mask of each day, on coarse freq and the full RA range.
+        """
+        if self._done:
+            raise exceptions.PipelineStopIteration
+        self._done = True
+
+        unknown = set(self.masks_to_include) - set(self.all_masks)
+        if unknown:
+            raise config.CaputConfigError(
+                f"Unknown masks {unknown}, use {self.all_masks}."
+            )
+
+        if self.csd_range is None:
+            raise config.CaputConfigError("csd_range must be given.")
+
+        # Days in any of the ranges
+        ranges = np.atleast_2d(np.asarray(self.csd_range, dtype=float))
+        csds = np.unique(
+            np.concatenate([np.arange(np.ceil(s), np.ceil(e)) for s, e in ranges])
+        ).astype(int)
+
+        # CHIME coarse channel centres
+        cfreq = np.linspace(
+            self.observer.freq_start,
+            self.observer.freq_end,
+            self.observer.num_freq,
+            endpoint=False,
+        )
+
+        out = containers.CosmologyRFIMaskStack(csd=csds, freq=cfreq, ra=self.nra)
+        out.redistribute("csd")
+
+        # Days held by this rank
+        mask = out.mask[:]
+        local = mask.local_array
+        c0 = mask.local_offset[0]
+
+        for ic, csd in enumerate(csds[c0 : c0 + local.shape[0]]):
+            local[ic] = self._day_mask(csd, out.ra)
+
+        return out
+
+    def _day_mask(self, csd, ra):
+        """Combined mask of one day on the (coarse freq, full RA) grid."""
+        # Combine the masks that exist.
+        mask, time = False, None
+        for name in self.masks_to_include:
+            path = os.path.join(
+                os.path.expanduser(self.root), str(csd), f"rfi_mask_{name}_lsd_{csd}.h5"
+            )
+            if not os.path.exists(path):
+                self.log.warning(f"CSD {csd}: {path} not found, skipping.")
+                continue
+            cont = RFIMask.from_file(path)
+            mask = mask | cont.mask[:]
+            time = cont.time
+
+        if time is None:
+            return False
+
+        # Rebin from time to RA, as in SiderealRebinner. R[ra, time] is the
+        # fraction of each time sample in each RA pixel.
+        lsd = self.observer.unix_to_lsd(time)
+        R = regrid.rebin_matrix(lsd, csd + ra / 360.0, width_t=np.median(np.diff(lsd)))
+
+        # Return mask @ R.T > 0 which is where a flagged time sample falls in the pixel.
+        return (mask @ ss.csr_array(R.T)) > 0
+
+
+class HFBRollingMedianRFIFlagging(tasklib.base.ContainerTask):
+    """Flag RFI from the deviation from a rolling median along CSD.
+
+    For every day i and every pixel (beam_ew, el, ra, freq), take the days j
+    with |csd_j - csd_i| <= window / 2, and only those with weight > 0. The
+    deviations are in units of each day's noise, sigma_j = 1 / sqrt(w_j):
+
+        med = median(data_j)
+        r_j = (data_j - med) * sqrt(w_j)
+        mad = median(|r_j|)
+        mask_i = |r_i| > threshold * mad
+
+    A pixel with fewer than `min_days` valid days in its window is not
+    flagged (no estimate). Days with weight = 0 are not flagged either: the
+    mask holds only the new RFI flags.
+
+    Attributes
+    ----------
+    window : float
+        Full width of the window, in CSD. Default 30.
+    threshold : float
+        Flag deviations larger than this many MADs. Default 6.
+    min_days : int
+        Minimum number of valid days in the window. Default 7.
+    """
+
+    window = config.Property(proptype=float, default=30.0)
+    threshold = config.Property(proptype=float, default=6.0)
+    min_days = config.Property(proptype=int, default=7)
+
+    def process(self, stream):
+        """Make the RFI mask.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMapStack
+            Stack with axes (csd, beam_ew, el, ra, freq).
+
+        Returns
+        -------
+        out : containers.HFBRingMapRFIMaskStack
+            Mask with the same axes. True means RFI.
+        """
+        import warnings
+
+        stream.redistribute("freq")
+        out = containers.HFBRingMapRFIMaskStack(axes_from=stream, attrs_from=stream)
+        out.redistribute("freq")
+
+        # Names of the axes of the data
+        axes = list(stream.hfb.attrs["axis"])
+        # Position of the csd axis
+        icsd = axes.index("csd")
+        # Local parts of data, weight and mask, with csd moved to the front (views)
+        d, w, m = (
+            np.moveaxis(getattr(x, "local_array", x), icsd, 0)
+            for x in (stream.hfb[:], stream.weight[:], out.mask[:])
+        )
+        # s = sqrt(w) = 1 / sigma of each sample; NaN where there are no data
+        s = np.sqrt(np.where(w > 0, w, np.nan)).astype(np.float32)
+        # Data with NaN where there are no data, so the medians ignore them
+        d = np.where(w > 0, d, np.nan).astype(np.float32)
+        # CSD of each day of the stack
+        csd = np.asarray(stream.index_map["csd"], dtype=float)
+
+        for i in range(len(csd)):
+            # Days within half a window of day i (gaps in the data are not bridged)
+            sel = np.abs(csd - csd[i]) <= self.window / 2
+            dw = d[sel]
+
+            # Pixels without any data in the window give NaN (and a warning)
+            with warnings.catch_warnings():
+                # Do not print the "All-NaN slice" warning
+                warnings.simplefilter("ignore", RuntimeWarning)
+
+                # Median over the days of the window, for every pixel
+                med = np.nanmedian(dw, axis=0)
+                # Robust scatter of the deviations in units of each day's noise
+                mad = np.nanmedian(np.abs(dw - med) * s[sel], axis=0)
+
+            # Number of days with data in the window, for every pixel
+            nvalid = np.sum(np.isfinite(dw), axis=0)
+            # Deviation of day i from the median, in units of its noise
+            dev = np.abs(d[i] - med) * s[i]
+            # Flag where there are enough days and the deviation is too large
+            m[i] = (nvalid >= self.min_days) & (mad > 0) & (dev > self.threshold * mad)
+
+        # Report the fraction of flagged samples on this rank
+        self.log.info(
+            f"Rolling median RFI mask: {m.mean() * 100:.2f}% of samples flagged "
+            f"on this rank."
+        )
+
+        # Return the mask
+        return out
+
+
+class HFBApplyRFIMaskStack(tasklib.base.ContainerTask):
+    """Apply an RFI mask stack to an HFB stack, in place.
+
+    The mask can be
+
+    - a CosmologyRFIMaskStack (csd, freq, ra), on coarse freq: each pixel of
+      the stack takes the mask of its coarse channel and RA pixel, the same for
+      every el and beam_ew.
+    - an HFBRingMapRFIMaskStack (csd, beam_ew, el, ra, freq), on the same
+      grid as the stack (e.g. from HFBRollingMedianRFIMask).
+
+    The axes are matched by name. The RA pixels, and any el and beam_ew, must
+    lie on the grid of the mask. The mask need not cover the whole stack. An error
+    is raised if no pixel of the stack is in the mask along an axis.
+    """
+
+    def process(self, stream, mask):
+        """Apply the mask.
+
+        Parameters
+        ----------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Stack to mask.
+        mask : CosmologyRFIMaskStack or HFBRingMapRFIMaskStack
+            Mask with a csd axis. Its other axes must be axes of the stack.
+
+        Returns
+        -------
+        stream : containers.HFBHighResRingMapStack or HFBHighResBeamAvgRingMapStack
+            Same as input, with flagged samples at zero weight.
+        """
+        # Distribute the stack over days, so each rank masks its own days
+        stream.redistribute("csd")
+        # Distribute the mask over days too
+        mask.redistribute("csd")
+
+        # Names of the axes of the stack
+        axes = list(stream.weight.attrs["axis"])
+        # Names of the axes of the mask
+        maxes = list(mask.mask.attrs["axis"])
+        if not set(maxes) <= set(axes):
+            raise ValueError(f"Mask axes {maxes} are not all axes of the stack {axes}.")
+
+        # The mask dataset
+        m = mask.mask[:]
+        # The days of the mask held by this rank
+        local = m.local_array if isinstance(m, mpiarray.MPIArray) else m
+        # Cut the mask to the pixels of the stack, one axis at a time
+        for ax in maxes:
+            # Days are matched later, by CSD
+            if ax == "csd":
+                continue
+            # Coordinates of the stack along this axis (freq centres for freq)
+            sv = np.asarray(
+                stream.freq if ax == "freq" else stream.index_map[ax], dtype=float
+            )
+            # Coordinates of the mask along this axis
+            mv = np.asarray(
+                mask.freq if ax == "freq" else mask.index_map[ax], dtype=float
+            )
+            # Distance from every mask pixel (rows) to every stack pixel (columns)
+            dist = mv[:, np.newaxis] - sv
+            # For RA, take the shorter way round the circle (e.g. 359.9 to 0.1)
+            if ax == "ra":
+                dist = (dist + 180.0) % 360.0 - 180.0
+            # Nearest mask pixel for each stack pixel
+            ind = np.abs(dist).argmin(axis=0)
+
+            # Pixel size of the mask along this axis
+            step = np.median(np.abs(np.diff(mv))) if mv.size > 1 else np.inf
+            # Within half a channel for freq (so coarse channels work), on the grid
+            # of the mask for the other axes
+            tol = 0.5 * step if ax == "freq" else 1e-3 * step
+            # Stack pixels that are covered by the mask
+            inside = np.abs(dist[ind, np.arange(sv.size)]) <= tol
+            # None covered: the grids do not match
+            if not inside.any():
+                raise ValueError(f"No {ax} pixel of the stack is on the mask grid.")
+            # Some not covered: report how many (they will not be flagged)
+            if not inside.all():
+                self.log.info(
+                    f"{(~inside).sum()} of {sv.size} {ax} pixels are not in the mask."
+                )
+
+            # Position of this axis in the mask
+            k = maxes.index(ax)
+            # Shape to broadcast `inside` along this axis of the mask
+            shape = [1] * local.ndim
+            # Length of `inside` goes on this axis
+            shape[k] = -1
+            # Mask on the pixels of the stack; pixels not covered are not flagged
+            local = np.take(local, ind, axis=k) & inside.reshape(shape)
+
+        # Axes of the mask, in the order they appear in the stack
+        order = [a for a in axes if a in maxes]
+        # Put the axes of the mask in that order
+        cut = np.transpose(local, [maxes.index(a) for a in order])
+        # Add length-1 axes for the axes the mask does not have, so it broadcasts
+        # against the weight of the stack
+        cut = cut.reshape(
+            [cut.shape[order.index(a)] if a in maxes else 1 for a in axes]
+        )
+
+        # Position of the csd axis in the stack
+        icsd = axes.index("csd")
+        # CSDs of the mask
+        mcsd = np.asarray(mask.index_map["csd"], dtype=float)
+        # CSDs of the stack
+        scsd = np.asarray(stream.index_map["csd"], dtype=float)
+        # CSD of each day of the cut
+        if not isinstance(m, mpiarray.MPIArray):
+            # Not distributed: the cut holds all days of the mask
+            cut_csd = mcsd
+        elif np.array_equal(mcsd, scsd):
+            # Same days: each rank holds the same days of the stack and the mask,
+            # so the local cut is enough (no need to gather a large mask)
+            c0 = m.local_offset[maxes.index("csd")]
+            # CSDs of the days of the mask held by this rank
+            cut_csd = mcsd[c0 : c0 + cut.shape[icsd]]
+        else:
+            # Different days: all ranks share their (small) cuts
+            cut = np.concatenate(mask.comm.allgather(cut), axis=icsd)
+            # The gathered cut holds all days of the mask
+            cut_csd = mcsd
+
+        # Weight of the stack. Its local part is a view, so changing it in place
+        # changes the stack
+        weight = stream.weight[:]
+        if isinstance(weight, mpiarray.MPIArray):
+            # First day held by this rank, and the local part of the weight
+            c0, weight = weight.local_offset[icsd], weight.local_array
+        else:
+            # Not distributed: all days
+            c0 = 0
+        # CSDs of the days of the stack held by this rank
+        csd = scsd[c0 : c0 + weight.shape[icsd]]
+
+        # Position of each CSD in the cut
+        pos = {c: i for i, c in enumerate(cut_csd)}
+        # Days of the stack that are in the mask (others are left as they are)
+        has = np.array([c in pos for c in csd], dtype=bool)
+        # Report the days that are not in the mask
+        if not has.all():
+            self.log.info(f"CSDs {csd[~has].astype(int).tolist()} are not in the mask.")
+
+        # Select all pixels of the days that are in the mask
+        sel = [slice(None)] * len(axes)
+        # Only those days along csd
+        sel[icsd] = np.flatnonzero(has)
+        # Zero the weight where the mask of the same day is True
+        weight[tuple(sel)] *= ~np.take(cut, [pos[c] for c in csd[has]], axis=icsd)
+
+        # Return the stack, masked in place
+        return stream
