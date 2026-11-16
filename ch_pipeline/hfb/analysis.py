@@ -2004,8 +2004,11 @@ class HFBSmoothFreq(tasklib.base.ContainerTask):
         if "freq_smoothing_fwhm" in stream.attrs:
             raise RuntimeError("This container is already smoothed in frequency.")
 
-        # Gaussian sigma from the FWHM, in channels
-        sigma = self.fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+if self.fwhm <= 0:
+    raise config.CaputConfigError("fwhm must be positive.")
+
+# Gaussian sigma from the FWHM, in channels
+sigma = self.fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
         # Half-length of the kernel: out to 4 sigma
         half = int(np.ceil(4.0 * sigma))
         # Gaussian kernel (not normalised; the weighted mean below normalises it)
