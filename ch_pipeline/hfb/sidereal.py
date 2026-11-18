@@ -1,7 +1,7 @@
 """Regrid the data to sidereal time."""
 
+import cfbm
 import numpy as np
-from beam_model.formed import FFTFormedActualBeamModel
 from caput import mpiarray
 from draco.analysis.sidereal import SiderealRegridderLinear
 
@@ -26,7 +26,7 @@ class HFBSiderealRegridder(SiderealRegridderLinear):
         self.observer = observer
 
         # Load beam model to look up reference zenith angles and hour angles of EW beams
-        self.beam_mdl = FFTFormedActualBeamModel()
+        self.beam_mdl = cfbm.formed.FFTFormedActualBeamModel()
 
     def process(self, data: HFBData) -> HFBRingMap:
         """Regrid HFB timestream data onto the sidereal day.
