@@ -16,6 +16,7 @@ from caput.pipeline.tasklib import base, io
 from caput.util import mpitools
 from ch_ephem.coord import bmxy_to_hadec
 from ch_ephem.observers import chime
+from ch_util import rfi as ch_rfi
 from ch_util.hfbcat import HFBCatalog
 from cora import foreground
 from draco.core.io import get_telescope
@@ -470,13 +471,24 @@ class MakeAbsorberCatalog(base.ContainerTask):
     absorber (so the same window is extracted downstream), and name
     "<ra><+/-dec>_<cal_src>", e.g. "144+83_3C_220.3".
 
+    Optionally, absorbers whose coarse channel overlaps a known static RFI band
+    are dropped from the catalog.
+
     Attributes
     ----------
     json_files : list of str
         Paths of the JSON target list files.
+    exclude_rfi_bands : bool
+        If True, drop absorbers whose coarse channel overlaps a known bad band
+        (ch_util.rfi.BAD_FREQUENCIES). Default is False.
+    rfi_csd : float, optional
+        CSD used for time-dependent bad bands, evaluated at the middle of the day.
+        If None, every band is applied regardless of its start/end time.
     """
 
     json_files = config.Property(proptype=list)
+    exclude_rfi_bands = config.Property(proptype=bool, default=False)
+    rfi_csd = config.Property(proptype=float, default=None)
 
     _done = False
 
@@ -490,6 +502,21 @@ class MakeAbsorberCatalog(base.ContainerTask):
         """
         self.observer = get_telescope(manager)
 
+    def _rfi_masked(self, channels, cfreq):
+        """True where the absorber's coarse channel overlaps a bad band."""
+        cwidth = (
+            np.abs(self.observer.freq_end - self.observer.freq_start)
+            / self.observer.num_freq
+        )
+        timestamp = (
+            None
+            if self.rfi_csd is None
+            else self.observer.lsd_to_unix(self.rfi_csd + 0.5)
+        )
+        return ch_rfi.frequency_mask(
+            cfreq[np.asarray(channels)], freq_width=cwidth, timestamp=timestamp
+        )
+
     def _load_combinedps(self):
         """Load {name: (ra, dec)} from the combined point-source table.
 
@@ -497,11 +524,11 @@ class MakeAbsorberCatalog(base.ContainerTask):
         package rather than configured, which keeps the path correct
         whatever environment the pipeline runs in.
         """
-        combinedps_file = os.path.join(
+        self.combinedps_file = os.path.join(
             os.path.dirname(foreground.__file__), "data", "combinedps.dat"
         )
 
-        with open(combinedps_file) as f:
+        with open(self.combinedps_file) as f:
             header = f.readline().split()
             rows = [line.split() for line in f if line.strip()]
 
@@ -589,16 +616,25 @@ class MakeAbsorberCatalog(base.ContainerTask):
         entry_list = list(entries.values())
         seen = {e["name"] for e in entry_list}
 
+        # Optionally drop absorbers whose coarse channel is in a known bad band.
+        # This is done before building calibrator entries, so no calibrator is
+        # made for a dropped absorber.
+        nrfi = 0
+        if self.exclude_rfi_bands and entry_list:
+            bad = self._rfi_masked([e["channel"] for e in entry_list], cfreq)
+            nrfi = int(bad.sum())
+            for e in (e for e, b in zip(entry_list, bad) if b):
+                self.log.info(
+                    f"Dropping {e['name']} ({e['freq']:.3f} MHz): "
+                    f"coarse channel in an RFI band."
+                )
+            entry_list = [e for e, b in zip(entry_list, bad) if not b]
+
         # Build one calibrator entry per unique (cal_src, coarse channel) pair,
         # at the calibrator's own position but the absorber's frequency, so the same window
         # is extracted downstream.
         cal_entries = []
         if any(e["cal_src"] for e in entry_list):
-            if not self.combinedps_file:
-                raise config.CaputConfigError(
-                    "Entries have 'cal_src' but no 'combinedps_file' was "
-                    "given to look up calibrator positions."
-                )
             positions = self._load_combinedps()
 
             cal_seen = set()
@@ -647,6 +683,7 @@ class MakeAbsorberCatalog(base.ContainerTask):
 
         self.log.info(
             f"Read {len(files)} files and merged {nmerged} as duplicates; "
+            f"dropped {nrfi} in RFI bands; "
             f"{len(entry_list)} unique absorbers and {len(cal_entries)} calibrator entries, "
             f"totaling {len(names)}."
         )

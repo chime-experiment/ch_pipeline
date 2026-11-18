@@ -1347,7 +1347,7 @@ class BadNodeFlagger(tasklib.base.ContainerTask):
         if this_acq in self.nodes_by_acq:
             # Grab list of nodes from input dictionary
             nodes_to_flag = self.nodes_by_acq[this_acq]
-            if not hasattr(nodes_to_flag, "__iter__"):
+            if not isinstance(nodes_to_flag, list | tuple):
                 nodes_to_flag = [nodes_to_flag]
 
             # Loop over nodes and perform flagging
@@ -1496,11 +1496,18 @@ class MaskDay(tasklib.base.ContainerTask):
     outer_taper : bool, optional
         If outer_taper is True, then the taper occurs in the unmasked region.
         If outer_taper is False, then the taper occurs in the masked region.
+    csd : list, optional
+        Override `csd` or `lsd` attribute of input container, using this
+        list of CSDs instead. Must be specified if input container does
+        not have one of these attributes. Warning will be generated if
+        input container has attribute that disagrees with provided list.
+        Default: None.
     """
 
     zero_data = config.Property(proptype=bool, default=False)
     taper_width = config.Property(proptype=float, default=0.0)
     outer_taper = config.Property(proptype=bool, default=True)
+    csd = config.Property(proptype=list, default=None)
 
     def process(self, dstream):
         """Set the weight to zero during day time.
@@ -1526,14 +1533,45 @@ class MaskDay(tasklib.base.ContainerTask):
             flag = self._flag(time)
 
         else:
-            # Fetch either the LSD or CSD attribute.  In the case of a SidrealStack,
-            # there will be multiple LSDs and the flag will be the logical OR of the
-            # flag from each individual LSD.
-            csd = (
-                dstream.attrs["lsd"] if "lsd" in dstream.attrs else dstream.attrs["csd"]
-            )
-            if not hasattr(csd, "__iter__"):
+            # Attempt to fetch attribute from container. In the case of a
+            # SiderealStack, there will be multiple LSDs and the flag will
+            # be the logical OR of the flag from each individual LSD.
+            try:
+                csd = (
+                    dstream.attrs["lsd"]
+                    if "lsd" in dstream.attrs
+                    else dstream.attrs["csd"]
+                )
+            except KeyError:
+                csd = None
+
+            if self.csd is None:
+                # If task property isn't provided and input container
+                # lacks attribute, raise error. (If input container has
+                # attribute, silently accept it.)
+                if csd is None:
+                    raise KeyError(
+                        "Must specify csd in masking task if input container "
+                        "has no csd or lsd attribute"
+                    )
+            else:
+                # If task property is provided and input container has
+                # attribute, log a warning if they disagree.
+                # Regardless of warning, accept task property.
+                if csd is not None and not np.all(self.csd == csd):
+                    self.log.warning(
+                        f"Overriding csd/lsd attribute of input container ({csd}) "
+                        f"with config property ({self.csd})"
+                    )
+
+                csd = self.csd
+
+            # If single CSD is specified, convert to a list
+            if not isinstance(csd, list | tuple):
                 csd = [csd]
+
+            # Log the CSD(s) we'll use
+            self.log.info(f"Applying mask using CSD {csd}")
 
             ra = dstream.ra[:]
             ntaper = int(
@@ -1546,7 +1584,7 @@ class MaskDay(tasklib.base.ContainerTask):
                 time = chime.lsd_to_unix(cc + ra / 360.0)
                 flag |= self._flag(time)
 
-        # Log how much data were masking
+        # Log how much data we're masking
         self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
 
         # Apply the mask
@@ -1682,7 +1720,7 @@ class MaskRA(tasklib.base.ContainerTask):
     remove_average = config.Property(proptype=bool, default=True)
 
     def process(self, sstream):
-        """Apply a day time mask.
+        """Apply an RA mask.
 
         Parameters
         ----------
@@ -1702,14 +1740,14 @@ class MaskRA(tasklib.base.ContainerTask):
         # Crudely mask the on and off regions
         mask_bool = ra_shift > end_shift
 
-        # Put in the transition at the start of the day
+        # Put in the transition at the start of the RA range
         mask = np.where(
             ra_shift < self.width,
             0.5 * (1 + np.cos(np.pi * (ra_shift / self.width))),
             mask_bool,
         )
 
-        # Put the transition at the end of the day
+        # Put in the transition at the end of the RA range
         mask = np.where(
             np.logical_and(ra_shift > end_shift - self.width, ra_shift <= end_shift),
             0.5 * (1 + np.cos(np.pi * ((ra_shift - end_shift) / self.width))),
