@@ -20,8 +20,7 @@ import caput.astro.time as ctime
 import numpy as np
 from caput import config
 from caput.algorithms.median import weighted_median
-from caput.containers import copy_datasets_filter
-from caput.containers import tod
+from caput.containers import copy_datasets_filter, tod
 from caput.pipeline import exceptions, tasklib
 from ch_ephem import sources
 from ch_ephem.observers import chime
@@ -571,6 +570,7 @@ class ChangeSiderealMean(tasklib.base.ContainerTask):
 
 
 class SelectSiderealDay(tasklib.base.ContainerTask):
+    """Keep the samples of a stream that fall within its nominal sidereal day."""
 
     def setup(self, observer=None):
         """Set up the observer.
@@ -595,9 +595,7 @@ class SelectSiderealDay(tasklib.base.ContainerTask):
             arr_lsd = self.observer.unix_to_lsd(data.time)
             axis = "time"
 
-        index = np.flatnonzero(
-            (arr_lsd >= lsd) & (arr_lsd < lsd + 1)
-        )
+        index = np.flatnonzero((arr_lsd >= lsd) & (arr_lsd < lsd + 1))
         selection = slice(index[0], index[-1] + 1)
 
         out = data.__class__(

@@ -1064,54 +1064,6 @@ class MFilteredHybridVisStream(HybridVisStream):
         return self.datasets["noise_scale"]
 
 
-class HybridVisScintillationFit(SiderealContainer):
-    """Fit of the scintillation of the foregrounds in m-mode filtered visibilities.
-
-    At each polarisation, east-west baseline, elevation and time, the filtered
-    visibilities were fit with ``sum_j a_j phi_j(freq) f(freq)``, where ``f`` is the
-    leave-one-out estimate of the foreground and ``phi_j`` are spectral basis
-    functions (the ``param`` axis; see the attributes).  ``amplitude`` holds the
-    ``a_j`` and ``template_power`` the weighted power of the first template,
-    ``sum w |phi_0 f|^2``.  ``prior_sigma`` (if present) is the width of the prior on
-    the first amplitude at each sample, so that ``prior_sigma**2 * template_power``
-    is the scintillation power of the foreground relative to the noise.
-    """
-
-    _axes = ("pol", "ew", "el", "param")
-
-    _dataset_spec: ClassVar = {
-        "amplitude": {
-            "axes": ["pol", "ew", "el", "ra", "param"],
-            "dtype": np.complex64,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "el",
-        },
-        "template_power": {
-            "axes": ["pol", "ew", "el", "ra"],
-            "dtype": np.float32,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "el",
-        },
-        "prior_sigma": {
-            "axes": ["pol", "ew", "el", "ra"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "el",
-        },
-    }
-
-    @property
-    def amplitude(self):
-        return self.datasets["amplitude"]
-
-    @property
-    def template_power(self):
-        return self.datasets["template_power"]
-
-
 class HybridVisNoiseScale(FreqContainer):
     """Ratio of the measured to the expected noise variance of hybrid visibilities.
 
@@ -1810,7 +1762,7 @@ class LPTCatalog(SourceCatalog):
                 ["subpulse_jitter", np.float64],
                 ["dm", np.float64],
                 # Pulse-to-pulse and long-term variability (VARIABILITY_COLUMNS of
-                # ch_pipeline.synthesis.lpt_population); all 0 in older catalogues
+                # ch_pipeline.synthesis.lpt_population); all 0 without variability
                 ["phase_jitter", np.float64],
                 ["duration_scatter", np.float64],
                 ["spectral_index_scatter", np.float64],
@@ -1824,7 +1776,7 @@ class LPTCatalog(SourceCatalog):
                 ["active_fraction", np.float64],
                 ["active_timescale", np.float64],
                 # 1: the pulses have the measured shapes (SHAPE_DEFAULTS of
-                # ch_pipeline.synthesis.lpt_population); 0 in older catalogues
+                # ch_pipeline.synthesis.lpt_population); 0 without a shape
                 ["shape", np.float64],
             ],
             "axis": "object_id",
@@ -1912,8 +1864,8 @@ class LPTInjectionResults(TableSpec):
 
     _table_spec: ClassVar = {
         "injection": {
-            "columns": _LPT_PULSE_COLUMNS
-            + [
+            "columns": [
+                *_LPT_PULSE_COLUMNS,
                 ["found", bool],
                 ["candidate", np.int32],
                 ["n_match", np.int16],
@@ -2039,7 +1991,6 @@ class TransientCandidateCutouts(FreqContainer):
         return self.datasets["weight"]
 
 
-
 class TransientCandidateTrialCutouts(ContainerPrototype):
     """The calibrated trials of the matched filter in windows around candidates.
 
@@ -2131,6 +2082,7 @@ class TransientCandidateTrialCutouts(ContainerPrototype):
     def weight(self):
         return self.datasets["weight"]
 
+
 class TransientTargetWindows(FreqContainer):
     """The matched filter in windows around targets, with no maximum over trials.
 
@@ -2144,7 +2096,15 @@ class TransientTargetWindows(FreqContainer):
     ``el_index`` and ``ra_index`` are -1 outside the data.  Distributed over targets.
     """
 
-    _axes = ("target", "pol", "trial_pol", "duration", "spectral_index", "el_offset", "ra_offset")
+    _axes = (
+        "target",
+        "pol",
+        "trial_pol",
+        "duration",
+        "spectral_index",
+        "el_offset",
+        "ra_offset",
+    )
 
     _dataset_spec: ClassVar = {
         **{
@@ -2159,7 +2119,14 @@ class TransientTargetWindows(FreqContainer):
         },
         **{
             name: {
-                "axes": ["target", "trial_pol", "duration", "spectral_index", "el_offset", "ra_offset"],
+                "axes": [
+                    "target",
+                    "trial_pol",
+                    "duration",
+                    "spectral_index",
+                    "el_offset",
+                    "ra_offset",
+                ],
                 "dtype": np.float32,
                 "initialise": True,
                 "distributed": True,
@@ -2184,7 +2151,10 @@ class TransientTargetWindows(FreqContainer):
                 "distributed": False,
             }
             for name, dtype in (
-                ("el_index", np.int64), ("el", np.float64), ("dec", np.float64), ("ha", np.float64)
+                ("el_index", np.int64),
+                ("el", np.float64),
+                ("dec", np.float64),
+                ("ha", np.float64),
             )
         },
         **{
@@ -2418,8 +2388,8 @@ class TransientCandidateTable(TableSpec):
         },
         "grouping": {
             "columns": [
-                # Whether the old single box of GroupTransientCandidates
-                # (sidelobe_dy for the peak and the merge) would also have kept the
+                # Whether a single box of GroupTransientCandidates (sidelobe_dy
+                # for the peak and the merge) would also keep the
                 # candidate (the sifter's neighbour counts can use only those)
                 ["coarse_peak", bool],
             ],
@@ -2488,7 +2458,6 @@ class TransientCandidateTable(TableSpec):
     @property
     def group(self):
         return self.index_map["group"]
-
 
 
 class PolarisationCalibration(TableSpec):
@@ -2577,6 +2546,7 @@ class PolarisationCalibration(TableSpec):
     @property
     def calibrator(self):
         return self.datasets["calibrator"]
+
 
 class RawContainer(TODContainer):
     """Base class for using raw CHIME data via the draco containers API.

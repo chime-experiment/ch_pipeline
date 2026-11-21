@@ -26,9 +26,12 @@ from datetime import datetime, timezone
 import h5py
 import numpy as np
 import scipy.ndimage
+import scipy.stats
 from caput import config
 from caput.pipeline import tasklib
+from ch_ephem.observers import chime
 from draco.core import containers as draco_containers
+from skyfield.api import EarthSatellite, load, wgs84
 
 from .transients import (
     _band_power,
@@ -157,9 +160,6 @@ def satellite_tracks(tles, unix, norad_ids=None, max_epoch_offset=3.0):
         {norad_id: (x, y, alt, element_set)}, with ``x``, ``y`` and the altitude
         ``alt`` (degrees) at each time.
     """
-    from ch_ephem.observers import chime
-    from skyfield.api import EarthSatellite, load, wgs84
-
     ts = load.timescale()
     site = wgs84.latlon(chime.latitude, chime.longitude, elevation_m=chime.altitude)
     unix = np.atleast_1d(np.asarray(unix, dtype=np.float64))
@@ -299,9 +299,6 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
         mask : draco.core.containers.LocalizedSiderealRFIMask
             True for the flagged bands, elevations and samples.
         """
-        from ch_ephem.observers import chime
-        from scipy.stats import gamma
-
         if "elevation_vis_weight" in stream.datasets:
             raise ValueError("Elevation-dependent weights are not supported.")
 
@@ -331,7 +328,7 @@ class FlagSatellites(_BandMixin, tasklib.base.ContainerTask):
                 stream, terms, chans, self.nsample_chunk, self.log
             )
             z_med = np.concatenate(
-                [[1.0], gamma(np.arange(1, len(terms) + 1)).median()]
+                [[1.0], scipy.stats.gamma(np.arange(1, len(terms) + 1)).median()]
             )
         else:
             stream.redistribute(["el", "freq"])

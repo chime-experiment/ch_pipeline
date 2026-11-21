@@ -5,11 +5,9 @@ drawn from a distribution given by a spec, either a number (fixed) or a dict
 ``{"distribution": name, **parameters}``, and only random draws are supported.
 
 Distributions: ``Fixed(value)``, ``Uniform(lower, upper)``,
-``LogUniform(lower, upper)``, ``PowerLaw(index, lower, upper)`` (pdf proportional
+``LogUniform(lower, upper)`` and ``PowerLaw(index, lower, upper)`` (pdf proportional
 to x^index on [lower, upper]; the CDF of LPT periods of Suvorov et al. 2026,
-F(P) ~ P^alpha, is ``index = alpha - 1``), ``Normal(mean, sigma)``,
-``TruncatedNormal(mean, sigma, lower, upper)`` (absolute bounds),
-``LogNormal(median, sigma)`` (sigma of ln x) and ``Choice(values, weights)``.
+F(P) ~ P^alpha, is ``index = alpha - 1``).
 
 Sky models: ``Isotropic`` (uniform on the sphere), ``GalacticDisk`` (an
 exponential disk, as used for Galactic compact binaries by Korol et al. 2022 and
@@ -17,8 +15,8 @@ for LPTs by Suvorov et al. 2026: surface density ~ exp(-R / scale_length), densi
 ~ exp(-|z| / scale_height), the Sun at r_sun from the centre), both limited to a
 range of declination, and ``Mixture`` (each source from one of several models).
 
-Dispersion measures: ``DispersionMeasure``, from the DMs of the known pulsars near
-each line of sight or from an electron-density model (NE2025, NE2001, YMW16) and a distance.
+Dispersion measures: ``DispersionMeasure``, from the NE2025 electron-density model
+and a distance.
 
 Polarisation: a point on the Poincare sphere, isotropic in direction (optionally
 squashed towards the equator, i.e. towards linear polarisation, by
@@ -26,10 +24,14 @@ squashed towards the equator, i.e. towards linear polarisation, by
 gives the linear and circular fractions and the angle together.
 """
 
+import contextlib
 import copy
+import importlib
+import io
+import sys
+import time
 
 import numpy as np
-import scipy.special
 
 
 class Distribution:
@@ -53,32 +55,42 @@ class Distribution:
         return classes[key](**kw)
 
     def draw(self, rng, number):
+        """Draw ``number`` values with the generator ``rng``."""
         raise NotImplementedError
 
 
 class Fixed(Distribution):
+    """A single value."""
+
     def __init__(self, value):
         self.value = value
 
     def draw(self, rng, number):
+        """Draw ``number`` values with the generator ``rng``."""
         return np.full(number, self.value, dtype=float)
 
 
 class Uniform(Distribution):
+    """Uniform on [lower, upper]."""
+
     def __init__(self, lower, upper):
         self.lower, self.upper = float(lower), float(upper)
 
     def draw(self, rng, number):
+        """Draw ``number`` values with the generator ``rng``."""
         return rng.uniform(self.lower, self.upper, number)
 
 
 class LogUniform(Distribution):
+    """Uniform in the logarithm on [lower, upper]."""
+
     def __init__(self, lower, upper):
         if lower <= 0 or upper <= 0:
             raise ValueError("LogUniform needs positive bounds.")
         self.lower, self.upper = float(lower), float(upper)
 
     def draw(self, rng, number):
+        """Draw ``number`` values with the generator ``rng``."""
         return np.exp(rng.uniform(np.log(self.lower), np.log(self.upper), number))
 
 
@@ -89,48 +101,12 @@ class PowerLaw(Distribution):
         self.index, self.lower, self.upper = float(index), float(lower), float(upper)
 
     def draw(self, rng, number):
+        """Draw ``number`` values with the generator ``rng``."""
         u = rng.uniform(size=number)
         a = self.index + 1.0
         if abs(a) < 1e-12:
             return self.lower * (self.upper / self.lower) ** u
         return (self.lower**a + u * (self.upper**a - self.lower**a)) ** (1.0 / a)
-
-
-class Normal(Distribution):
-    def __init__(self, mean, sigma):
-        self.mean, self.sigma = float(mean), float(sigma)
-
-    def draw(self, rng, number):
-        return self.mean + self.sigma * rng.standard_normal(number)
-
-
-class TruncatedNormal(Distribution):
-    def __init__(self, mean, sigma, lower, upper):
-        self.mean, self.sigma = float(mean), float(sigma)
-        self.lo = scipy.special.ndtr((lower - mean) / sigma)
-        self.hi = scipy.special.ndtr((upper - mean) / sigma)
-
-    def draw(self, rng, number):
-        q = rng.uniform(self.lo, self.hi, number)
-        return self.mean + self.sigma * scipy.special.ndtri(q)
-
-
-class LogNormal(Distribution):
-    def __init__(self, median, sigma):
-        self.median, self.sigma = float(median), float(sigma)
-
-    def draw(self, rng, number):
-        return self.median * np.exp(self.sigma * rng.standard_normal(number))
-
-
-class Choice(Distribution):
-    def __init__(self, values, weights=None):
-        self.values = np.asarray(values, dtype=float)
-        w = np.ones(self.values.size) if weights is None else np.asarray(weights, dtype=float)
-        self.weights = w / w.sum()
-
-    def draw(self, rng, number):
-        return rng.choice(self.values, size=number, p=self.weights)
 
 
 def _subclasses(cls):
@@ -205,7 +181,9 @@ class GalacticDisk:
             if need <= 0:
                 break
         else:
-            raise RuntimeError("Could not draw enough positions in the declination range.")
+            raise RuntimeError(
+                "Could not draw enough positions in the declination range."
+            )
         return (np.concatenate(ra)[:number], np.concatenate(dec)[:number],
                 np.concatenate(dist)[:number])  # fmt: skip
 
@@ -247,6 +225,7 @@ SKY_MODELS = {"isotropic": Isotropic, "galacticdisk": GalacticDisk, "galactic_di
 
 
 def sky_from_spec(spec):
+    """Return the sky model of a spec ``{"model": name, **parameters}``."""
     kw = dict(spec)
     name = str(kw.pop("model", "isotropic")).lower()
     if name not in SKY_MODELS:
@@ -262,89 +241,54 @@ K_DM = 4.148808e3
 
 def dispersion_delay(dm, freq, reference_freq):
     """Delay (s) at ``freq`` (MHz) relative to ``reference_freq`` for a DM (pc cm^-3)."""
-    return K_DM * dm * (np.asarray(freq, dtype=np.float64) ** -2 - float(reference_freq) ** -2)
+    return (
+        K_DM
+        * dm
+        * (np.asarray(freq, dtype=np.float64) ** -2 - float(reference_freq) ** -2)
+    )
 
 
 class DispersionMeasure:
-    """Dispersion measures (pc cm^-3) of sources from their positions.
+    """Dispersion measures (pc cm^-3) of sources from their positions and distances.
 
-    ``model``:
-
-    - ``"pulsars"``: the DM of a known pulsar near the line of sight, one of the
-      ``n_neighbour`` nearest on the sky in ``catalogue`` (an HDF5 file with a
-      ``pulsar`` table of ``ra``, ``dec`` in degrees and ``dm``, as
-      scripts/sift/make_pulsar_catalog.py writes from the ATNF catalogue), picked
-      at random.  This samples the measured DMs along each direction, with the
-      spread in distance of the pulsars there, and needs no distance.
-    - ``"ne2025"`` or ``"ne2001"``: the electron-density model of Ocker & Cordes
-      (2026) or Cordes & Lazio (2002) integrated to the source's distance, with the
-      pure-Python ``mwprop`` package (about 0.15 s per source).  ``"ymw16"``: the
-      model of Yao, Manchester & Wang (2017), with the ``pygedm`` package (compiled;
-      needs libf2c).  Sources without a distance (NaN, e.g. from the isotropic sky
-      model) get one drawn from ``distance`` (a distribution spec in kpc; default
-      log-uniform 0.2-5).
+    The NE2025 electron-density model (Ocker & Cordes 2026) is integrated to the
+    distance of each source with the pure-Python ``mwprop`` package (about 0.15 s
+    per source).  Sources without a distance (NaN, e.g. from the isotropic sky
+    model) get one drawn from ``distance`` (a distribution spec in kpc; default
+    log-uniform 0.2-5).
 
     ``distance_max`` (kpc) limits the distance the model is integrated to (a sky
     model whose distances are not tied to the fluxes, such as a flattened disc, puts
     sources further than a detectable one would be).  ``scale`` multiplies the
-    result; ``dm_max`` clips it.
+    result; ``dm_max`` clips it.  ``model`` must be ``"ne2025"``.
     """
 
-    def __init__(self, model="pulsars", catalogue=None, n_neighbour=10, distance=None,
-                 distance_max=None, scale=1.0, dm_max=None):  # fmt: skip
+    def __init__(self, model="ne2025", distance=None, distance_max=None, scale=1.0,
+                 dm_max=None):  # fmt: skip
         self.model = str(model).lower()
-        if self.model not in ("pulsars", "ne2025", "ne2001", "ymw16"):
-            raise ValueError(f"Unknown DM model {model!r}; have pulsars, ne2025, ne2001, ymw16.")
-        if self.model == "pulsars" and catalogue is None:
-            raise ValueError("The pulsars DM model needs a catalogue file.")
-        self.catalogue = catalogue
-        self.n_neighbour = int(n_neighbour)
+        if self.model != "ne2025":
+            raise ValueError(f"Unknown DM model {model!r}; have ne2025.")
         self.distance = Distribution.from_spec(
-            distance if distance is not None else {"distribution": "loguniform", "lower": 0.2, "upper": 5.0}
+            distance
+            if distance is not None
+            else {"distribution": "loguniform", "lower": 0.2, "upper": 5.0}
         )
         self.distance_max = distance_max
         self.scale = float(scale)
         self.dm_max = dm_max
-        self._psr = None
-
-    def _pulsars(self):
-        """Unit vectors and DMs of the catalogue's pulsars with a DM."""
-        if self._psr is None:
-            import h5py
-
-            with h5py.File(self.catalogue, "r") as f:
-                tab = f["pulsar"][:]
-            ok = np.isfinite(tab["dm"]) & (tab["dm"] > 0) & np.isfinite(tab["ra"]) & np.isfinite(tab["dec"])
-            if ok.sum() < self.n_neighbour:
-                raise ValueError(f"Only {int(ok.sum())} pulsars with a DM in {self.catalogue}.")
-            self._psr = (_radec_vectors(tab["ra"][ok], tab["dec"][ok]), np.asarray(tab["dm"][ok], dtype=float))
-        return self._psr
 
     def _integrate(self, gl, gb, dist):
         """DMs of the electron-density model to ``dist`` (kpc) at Galactic ``gl``, ``gb`` (deg)."""
         n = gl.size
         dm = np.empty(n)
-        if self.model == "ymw16":
-            try:
-                import pygedm
-            except ImportError as exc:
-                raise ImportError("The ymw16 DM model needs the pygedm package.") from exc
-            for i in range(n):
-                val, _ = pygedm.dist_to_dm(gl[i], gb[i], dist[i] * 1e3, method="ymw16")
-                dm[i] = getattr(val, "value", val)
-            return dm
-        import contextlib
-        import io
-
         nemod = self._import_mwprop()
         # mwprop reads the parameters of whichever of its two models is imported
         # first in a process, and the other then silently evaluates the same one
         import mwprop.nemod.config_nemod as nemod_config
 
-        flag = "eval_NE2025" if self.model == "ne2025" else "eval_NE2001"
-        if not getattr(nemod_config, flag, False):
+        if not getattr(nemod_config, "eval_NE2025", False):
             raise RuntimeError(
-                f"mwprop is set up for its other model in this process; {self.model} "
+                "mwprop is set up for its other model in this process; ne2025 "
                 "needs a process in which it is the first mwprop model imported."
             )
         for i in range(n):
@@ -362,23 +306,22 @@ class DispersionMeasure:
         and reads it back, so another process importing it at the same moment (another
         job starting) can leave the file empty for an instant; the import then fails.
         """
-        import importlib
-        import sys
-        import time
-
-        name = "NE2025" if self.model == "ne2025" else "NE2001"
         for attempt in range(attempts):
             try:
-                module = importlib.import_module(f"mwprop.nemod.{name}")
-                return getattr(module, name.lower())
+                return importlib.import_module("mwprop.nemod.NE2025").ne2025
             except ModuleNotFoundError as exc:
-                raise ImportError(f"The {self.model} DM model needs the mwprop package (and mpmath).") from exc
+                raise ImportError(
+                    "The ne2025 DM model needs the mwprop package (and mpmath)."
+                ) from exc
             except Exception:
                 if attempt == attempts - 1:
                     raise
-                for key in [k for k in sys.modules if k == "mwprop" or k.startswith("mwprop.")]:
+                for key in [
+                    k for k in sys.modules if k == "mwprop" or k.startswith("mwprop.")
+                ]:
                     del sys.modules[key]
                 time.sleep(1.0 + 2.0 * attempt)
+        return None
 
     @staticmethod
     def _on_root(func):
@@ -412,34 +355,26 @@ class DispersionMeasure:
 
     def draw(self, rng, ra, dec, distance=None):
         """DMs for sources at ``ra``, ``dec`` (ICRS degrees) and ``distance`` (kpc or NaN)."""
+        import astropy.units as u
+        from astropy.coordinates import SkyCoord
+
         ra, dec = np.atleast_1d(ra).astype(float), np.atleast_1d(dec).astype(float)
         n = ra.size
-        if self.model == "pulsars":
-            vec, dms = self._pulsars()
-            cosd = _radec_vectors(ra, dec) @ vec.T  # source, pulsar
-            near = np.argpartition(-cosd, self.n_neighbour - 1, axis=1)[:, : self.n_neighbour]
-            dm = dms[near[np.arange(n), rng.integers(0, self.n_neighbour, n)]]
-        else:
-            import astropy.units as u
-            from astropy.coordinates import SkyCoord
-
-            dist = np.full(n, np.nan) if distance is None else np.atleast_1d(distance).astype(float).copy()
-            drawn = self.distance.draw(rng, n)
-            dist = np.where(np.isfinite(dist) & (dist > 0), dist, drawn)
-            if self.distance_max is not None:
-                dist = np.minimum(dist, float(self.distance_max))
-            gal = SkyCoord(ra=ra * u.deg, dec=dec * u.deg).galactic
-            gl, gb = gal.l.deg, gal.b.deg
-            dm = self._on_root(lambda: self._integrate(gl, gb, dist))
-        dm = self.scale * dm
+        dist = (
+            np.full(n, np.nan)
+            if distance is None
+            else np.atleast_1d(distance).astype(float).copy()
+        )
+        drawn = self.distance.draw(rng, n)
+        dist = np.where(np.isfinite(dist) & (dist > 0), dist, drawn)
+        if self.distance_max is not None:
+            dist = np.minimum(dist, float(self.distance_max))
+        gal = SkyCoord(ra=ra * u.deg, dec=dec * u.deg).galactic
+        gl, gb = gal.l.deg, gal.b.deg
+        dm = self.scale * self._on_root(lambda: self._integrate(gl, gb, dist))
         if self.dm_max is not None:
             dm = np.minimum(dm, float(self.dm_max))
         return dm
-
-
-def _radec_vectors(ra, dec):
-    ra, dec = np.radians(ra), np.radians(dec)
-    return np.stack([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)], axis=-1)
 
 
 # ---- polarisation -------------------------------------------------------------
@@ -455,7 +390,9 @@ class Poincare:
 
     def __init__(self, degree=None, circular_scale=1.0):
         self.degree = Distribution.from_spec(
-            degree if degree is not None else {"distribution": "uniform", "lower": 0.0, "upper": 1.0}
+            degree
+            if degree is not None
+            else {"distribution": "uniform", "lower": 0.0, "upper": 1.0}
         )
         self.circular_scale = float(circular_scale)
 
@@ -480,13 +417,21 @@ class Poincare:
 DEFAULT_POPULATION = {
     "sky": {"model": "isotropic", "dec_range": [-11.0, 90.0]},
     "flux": {"distribution": "loguniform", "lower": 0.003, "upper": 0.3},
-    "period": {"distribution": "powerlaw", "index": -0.5, "lower": 420.0, "upper": 14400.0},
+    "period": {
+        "distribution": "powerlaw",
+        "index": -0.5,
+        "lower": 420.0,
+        "upper": 14400.0,
+    },
     "duration": {"distribution": "loguniform", "lower": 10.0, "upper": 300.0},
     "duty_cycle": None,
     "spectral_index": {"distribution": "uniform", "lower": -3.0, "upper": 1.0},
     "spectral_curvature": 0.0,
     "rm": {"distribution": "uniform", "lower": -300.0, "upper": 300.0},
-    "polarisation": {"degree": {"distribution": "uniform", "lower": 0.0, "upper": 1.0}, "circular_scale": 1.0},
+    "polarisation": {
+        "degree": {"distribution": "uniform", "lower": 0.0, "upper": 1.0},
+        "circular_scale": 1.0,
+    },
     "flux_scatter": 0.0,
     "null_fraction": 0.0,
     "scint_index": 0.0,
@@ -531,13 +476,41 @@ VARIABILITY_DEFAULTS = {
     "phase_jitter": {"distribution": "uniform", "lower": 0.0, "upper": 0.05},
     "duration_scatter": {"distribution": "uniform", "lower": 0.0, "upper": 0.5},
     "spectral_index_scatter": {"distribution": "uniform", "lower": 0.0, "upper": 0.5},
-    "pa_swing": {"fraction": 0.5, "distribution": "uniform", "lower": -120.0, "upper": 120.0},
-    "opm_fraction": {"fraction": 0.3, "distribution": "uniform", "lower": 0.1, "upper": 0.5},
-    "mode_fraction": {"fraction": 0.3, "distribution": "uniform", "lower": 0.1, "upper": 0.5},
-    "mode_polarisation": {"degree": {"distribution": "uniform", "lower": 0.3, "upper": 1.0}, "circular_scale": 4.0},
+    "pa_swing": {
+        "fraction": 0.5,
+        "distribution": "uniform",
+        "lower": -120.0,
+        "upper": 120.0,
+    },
+    "opm_fraction": {
+        "fraction": 0.3,
+        "distribution": "uniform",
+        "lower": 0.1,
+        "upper": 0.5,
+    },
+    "mode_fraction": {
+        "fraction": 0.3,
+        "distribution": "uniform",
+        "lower": 0.1,
+        "upper": 0.5,
+    },
+    "mode_polarisation": {
+        "degree": {"distribution": "uniform", "lower": 0.3, "upper": 1.0},
+        "circular_scale": 4.0,
+    },
     "mode_flux": {"distribution": "loguniform", "lower": 0.05, "upper": 1.0},
-    "interpulse": {"fraction": 0.15, "distribution": "loguniform", "lower": 0.1, "upper": 1.0},
-    "active_fraction": {"fraction": 0.5, "distribution": "uniform", "lower": 0.1, "upper": 0.8},
+    "interpulse": {
+        "fraction": 0.15,
+        "distribution": "loguniform",
+        "lower": 0.1,
+        "upper": 1.0,
+    },
+    "active_fraction": {
+        "fraction": 0.5,
+        "distribution": "uniform",
+        "lower": 0.1,
+        "upper": 0.8,
+    },
     "active_timescale": {"distribution": "loguniform", "lower": 3.0, "upper": 300.0},
 }
 
@@ -557,6 +530,7 @@ def _draw_fraction(rng, spec, number):
         on = rng.uniform(size=number) < frac
         return np.where(on, Distribution.from_spec(spec).draw(rng, number), 0.0)
     return Distribution.from_spec(spec).draw(rng, number)
+
 
 #: The sub-pulse model, for a ``fraction`` of the sources (see :func:`draw_population`).
 #: Each such pulse is a Gaussian envelope of FWHM ``duration`` (s; drawn from
@@ -586,7 +560,13 @@ SUBPULSE_DEFAULTS = {
 #: under them, instead of a Gaussian.
 SHAPE_DEFAULTS = {"fraction": 0.0}
 
-SUBPULSE_COLUMNS = ("subpulse_rate", "subpulse_width", "subpulse_floor", "subpulse_period", "subpulse_jitter")
+SUBPULSE_COLUMNS = (
+    "subpulse_rate",
+    "subpulse_width",
+    "subpulse_floor",
+    "subpulse_period",
+    "subpulse_jitter",
+)
 
 
 def merge_population(spec=None):
@@ -600,18 +580,27 @@ def merge_population(spec=None):
         sub = copy.deepcopy(SUBPULSE_DEFAULTS)
         for k, v in out["subpulse"].items():
             if k not in sub:
-                raise ValueError(f"Unknown sub-pulse property {k!r}; have {sorted(sub)}.")
+                raise ValueError(
+                    f"Unknown sub-pulse property {k!r}; have {sorted(sub)}."
+                )
             sub[k] = copy.deepcopy(v)
         out["subpulse"] = sub
     if out["variability"] is not None:
         unknown = [k for k in out["variability"] if k not in VARIABILITY_DEFAULTS]
         if unknown:
-            raise ValueError(f"Unknown variability properties {unknown}; have {sorted(VARIABILITY_DEFAULTS)}.")
-        out["variability"] = {**copy.deepcopy(VARIABILITY_DEFAULTS), **out["variability"]}
+            raise ValueError(
+                f"Unknown variability properties {unknown}; have {sorted(VARIABILITY_DEFAULTS)}."
+            )
+        out["variability"] = {
+            **copy.deepcopy(VARIABILITY_DEFAULTS),
+            **out["variability"],
+        }
     if out["shape"] is not None:
         unknown = [k for k in out["shape"] if k not in SHAPE_DEFAULTS]
         if unknown:
-            raise ValueError(f"Unknown shape properties {unknown}; have {sorted(SHAPE_DEFAULTS)}.")
+            raise ValueError(
+                f"Unknown shape properties {unknown}; have {sorted(SHAPE_DEFAULTS)}."
+            )
         out["shape"] = {**SHAPE_DEFAULTS, **out["shape"]}
     return out
 
@@ -646,10 +635,14 @@ def draw_population(rng, number, spec=None):
     else:
         out["duration"] = Distribution.from_spec(pop["duration"]).draw(rng, number)
     out["duration"] = np.where(
-        out["period"] > 0, np.minimum(out["duration"], 0.5 * out["period"]), out["duration"]
+        out["period"] > 0,
+        np.minimum(out["duration"], 0.5 * out["period"]),
+        out["duration"],
     )
     pol = pop["polarisation"] or {}
-    out["frac_lin"], out["frac_circ"], out["pol_angle"] = Poincare(**pol).draw(rng, number)
+    out["frac_lin"], out["frac_circ"], out["pol_angle"] = Poincare(**pol).draw(
+        rng, number
+    )
     out["null_fraction"] = np.clip(out["null_fraction"], 0.0, 1.0)
     for key in SUBPULSE_COLUMNS:
         out[key] = np.zeros(number)
@@ -660,11 +653,15 @@ def draw_population(rng, number, spec=None):
         dur = Distribution.from_spec(sub["duration"]).draw(rng, number)
         out["duration"] = np.where(structured, dur, out["duration"])
         out["duration"] = np.where(
-            out["period"] > 0, np.minimum(out["duration"], 0.5 * out["period"]), out["duration"]
+            out["period"] > 0,
+            np.minimum(out["duration"], 0.5 * out["period"]),
+            out["duration"],
         )
         rate = Distribution.from_spec(sub["rate"]).draw(rng, number)
         width = Distribution.from_spec(sub["width"]).draw(rng, number)
-        floor = np.clip(Distribution.from_spec(sub["floor"]).draw(rng, number), 0.0, 1.0)
+        floor = np.clip(
+            Distribution.from_spec(sub["floor"]).draw(rng, number), 0.0, 1.0
+        )
         periodic = rng.uniform(size=number) < float(sub["periodic_fraction"])
         sub_period = Distribution.from_spec(sub["period"]).draw(rng, number)
         jitter = Distribution.from_spec(sub["jitter"]).draw(rng, number)
@@ -676,7 +673,9 @@ def draw_population(rng, number, spec=None):
     # after everything else, and only if used, so that a population without it draws as before
     out["dm"] = np.zeros(number)
     if pop["dm"] is not None:
-        out["dm"] = DispersionMeasure(**pop["dm"]).draw(rng, out["ra"], out["dec"], out["distance"])
+        out["dm"] = DispersionMeasure(**pop["dm"]).draw(
+            rng, out["ra"], out["dec"], out["distance"]
+        )
     # last of all, and only if used, so that a population without it draws as before
     for key in VARIABILITY_COLUMNS:
         out[key] = np.zeros(number)
@@ -697,5 +696,7 @@ def draw_population(rng, number, spec=None):
     # after the variability, and only if used, so that a population without it draws as before
     out["shape"] = np.zeros(number)
     if pop["shape"] is not None and float(pop["shape"]["fraction"]) > 0.0:
-        out["shape"] = (rng.uniform(size=number) < float(pop["shape"]["fraction"])).astype(np.float64)
+        out["shape"] = (
+            rng.uniform(size=number) < float(pop["shape"]["fraction"])
+        ).astype(np.float64)
     return out

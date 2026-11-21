@@ -5,7 +5,6 @@ from pydoc import locate
 
 import numpy as np
 import scipy.interpolate
-from scipy.special import erf
 from caput import config
 from caput.astro import constants
 from caput.astro import skyfield as skf
@@ -14,9 +13,10 @@ from caput.astro.coordinates import spherical
 from caput.pipeline import exceptions, tasklib
 from caput.util import mpitools
 from ch_util import fluxcat
-from draco.core import io, containers
+from draco.core import containers, io
 from draco.util import interferometry, tools
 from mpi4py import MPI
+from scipy.special import erf
 
 # Constants
 NU21 = constants.nu21
@@ -63,15 +63,17 @@ class BaseInject(tasklib.base.ContainerTask):
         ----------
         manager : ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
+        catalog : SourceCatalog or FluxModelCatalog
+            Sources to inject.
         """
         # Get the TransitTelescope object
         self.telescope = io.get_telescope(manager)
         self.latitude = np.deg2rad(self.telescope.latitude)
 
-        self.transits = [0.0, np.pi] if self.anti_podal and not self.full_track else [0.0]
-        self.log.info(
-            "Injecting at the following hour angles:  %s" % str(self.transits)
+        self.transits = (
+            [0.0, np.pi] if self.anti_podal and not self.full_track else [0.0]
         )
+        self.log.info(f"Injecting at the following hour angles:  {self.transits}")
 
         # Polarizations.
         if self.polarization == "full":
@@ -80,7 +82,7 @@ class BaseInject(tasklib.base.ContainerTask):
             self.process_pol = ["XX", "YY"]
         else:
             self.process_pol = ["XX"]
-            
+
         # Save the catalog as attribute
         self.catalog = catalog
         self.catalog_tag = self.catalog.attrs.get("tag", None)
@@ -111,7 +113,9 @@ class BaseInject(tasklib.base.ContainerTask):
             # Determine the epoch in order to convert to CIRS coordinates
             if "lsd" not in data.attrs:
                 self.epoch = None
-                self.log.warning("LSD attribute not available.  Using ICRS coordinates.")
+                self.log.warning(
+                    "LSD attribute not available.  Using ICRS coordinates."
+                )
             else:
                 lsd = np.mean(data.attrs["lsd"])
                 self.epoch = self.telescope.lsd_to_unix(lsd)
@@ -139,10 +143,12 @@ class BaseInject(tasklib.base.ContainerTask):
 
         else:
             self.log.info("Creating new container to inject signal.")
-            out = data.__class__(axes_from=data,
-                                 attrs_from=data,
-                                 distributed=data.distributed,
-                                 comm=data.comm)
+            out = data.__class__(
+                axes_from=data,
+                attrs_from=data,
+                distributed=data.distributed,
+                comm=data.comm,
+            )
             out.redistribute("freq")
 
             out.vis[:] = 0.0
@@ -194,14 +200,12 @@ class BaseInject(tasklib.base.ContainerTask):
 
         # Print some info
         self.log.info(
-            "Evaluating %d sources in frequency range [%0.2f MHz, %0.2f MHz]."
-            % (self.nsource, min_freq, max_freq)
+            f"Evaluating {self.nsource} sources in frequency range "
+            f"[{min_freq:0.2f} MHz, {max_freq:0.2f} MHz]."
         )
 
-        self.log.info(
-            "Processing %s baselines."
-            % str({key: len(val) for key, val in pol_index.items()})
-        )
+        baseline_count = {key: len(val) for key, val in pol_index.items()}
+        self.log.info(f"Processing {baseline_count} baselines.")
 
         # Create array to hold sky model
         vis = np.zeros((nfreq, nbaseline, nra), dtype=np.complex128)
@@ -211,7 +215,7 @@ class BaseInject(tasklib.base.ContainerTask):
 
             # Print message indicating how far along we are
             if ss % 100 == 0:
-                self.log.info("Adding source %d of %d." % (ss, self.nsource))
+                self.log.info(f"Adding source {ss} of {self.nsource}.")
 
             # Determine the frequencies that have to be processed
             fslc = self._get_freq_slice(ss)
@@ -263,16 +267,17 @@ class BaseInject(tasklib.base.ContainerTask):
         It also converts from ICRS to CIRS coordinates.  For this reason, the
         epoch attribute must be defined before calling this method.
         """
-
         self.sources = self.catalog.index_map["object_id"][:]
         self.nsource = len(self.sources)
-        
+
         sra = self.catalog["position"]["ra"][:]
         sdec = self.catalog["position"]["dec"][:]
 
         coordinate_system = self.catalog["position"].attrs.get("coords", "icrs")
         if self.epoch is None:
-            self.log.info(f"Epoch not available.  Using {coordinate_system} coordinates.")
+            self.log.info(
+                f"Epoch not available.  Using {coordinate_system} coordinates."
+            )
 
         elif coordinate_system == "icrs":
             date_string = ctime.unix_to_datetime(self.epoch).strftime("%Y%m%dT%H%M%SZ")
@@ -283,8 +288,10 @@ class BaseInject(tasklib.base.ContainerTask):
             self.log.info("Using the CIRS coordinates provided with the catalog.")
 
         else:
-            raise RuntimeError(f"Do not recognize coordinate system {coordinate_system}."
-                                "Options are ICRS and CIRS.")
+            raise RuntimeError(
+                f"Do not recognize coordinate system {coordinate_system}."
+                "Options are ICRS and CIRS."
+            )
 
         self.sra = np.deg2rad(sra)
         self.sdec = np.deg2rad(sdec)
@@ -304,7 +311,6 @@ class BaseInject(tasklib.base.ContainerTask):
         amp : np.ndarray[nfreq,]
             Amplitude of the source at the requested frequencies.
         """
-
         return np.ones(freq.size, dtype=np.float32)
 
     @property
@@ -337,14 +343,15 @@ class BaseInject(tasklib.base.ContainerTask):
         group : list of slices
             List of slices into the RA/time axis.
         """
-
-        sin_alt = np.sin(dec) * np.sin(self.latitude) + np.cos(dec) * np.cos(self.latitude) * np.cos(ha)
+        sin_alt = np.sin(dec) * np.sin(self.latitude) + np.cos(dec) * np.cos(
+            self.latitude
+        ) * np.cos(ha)
         alt = np.arcsin(np.minimum(np.maximum(sin_alt, -1.0), 1.0))
         above_horizon = alt > 0.0
 
         if self.full_track:
             groups = tools.find_contiguous_slices(np.flatnonzero(above_horizon))
-            
+
         else:
             # The RAs near the podal and anti-podal transit.  Take their union, since
             # near the pole the two windows overlap and the RAs in both must be
@@ -364,7 +371,9 @@ class BaseInject(tasklib.base.ContainerTask):
                     nearby[np.argmin(np.abs(dha))] = True
 
             # Split the ra axis into contiguous groups
-            groups = tools.find_contiguous_slices(np.flatnonzero(above_horizon & nearby))
+            groups = tools.find_contiguous_slices(
+                np.flatnonzero(above_horizon & nearby)
+            )
 
         return groups
 
@@ -381,37 +390,38 @@ class BaseInject(tasklib.base.ContainerTask):
         slc : slice
             Slice into the frequency axis.
         """
-
         return slice(None)
 
 
 class ConvertICRStoCIRS(tasklib.base.ContainerTask):
-    
+    """Convert the ICRS positions of a catalogue to CIRS at the epoch of the data."""
+
     find_nearest = config.Property(proptype=bool, default=True)
     apparent = config.Property(proptype=bool, default=True)
-    
+
     def setup(self, manager):
         """Store the telescope object.
-        
+
         Parameters
         ----------
         manager : either `ProductManager`, `BeamTransfer` or `TransitTelescope`
             Contains a TransitTelescope object describing the telescope.
+        catalog : SourceCatalog or FluxModelCatalog
+            Sources to inject.
         """
-        
         self.telescope = io.get_telescope(manager)
 
     def process(self, catalog, data):
         """Convert ICRS coordinates to the CIRS coordinates on the epoch in the data.
-        
+
         Parameters
         ----------
         catalog : SourceCatalog, SpectroscopicCatalog
             Catalog of source positions in ICRS coordinates.
-        
+
         data : StackMask, SiderealStream, TimeStream
-            Data whose 
-        
+            Data whose
+
         Returns
         -------
         catalog_cirs : SourceCatalog, SpectroscopicCatalog, SourceCatalogVersusRA
@@ -421,7 +431,7 @@ class ConvertICRStoCIRS(tasklib.base.ContainerTask):
         input_coords = catalog["position"].attrs.get("coords", "icrs")
         if input_coords != "icrs":
             raise RuntimeError("Source positions must be in ICRS coordinates.")
-        
+
         ra_icrs = catalog["position"]["ra"][:]
         dec_icrs = catalog["position"]["dec"][:]
 
@@ -432,60 +442,66 @@ class ConvertICRStoCIRS(tasklib.base.ContainerTask):
         nlocal = nsource_per_rank[self.comm.rank]
 
         positions = skf.skyfield_star_from_ra_dec(ra_icrs[sslc], dec_icrs[sslc])
-        
+
         # Determine the local sidereal days that contributed to data
-        if False: # isinstance(data, containers.StackMask):
-            
+        if False:  # isinstance(data, containers.StackMask):
+
             lsds = data.lsd[:]
             ra = data.ra[:]
             weight = data.flag[:].astype(float)
-            self.log.info(f"Calculating positions using epoch and flags from {data.lsd.size} LSDs.")
-            
+            self.log.info(
+                f"Calculating positions using epoch and flags from {data.lsd.size} LSDs."
+            )
+
         elif "ra" in data.index_map:
 
-            lsds = np.atleast_1d(data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"])
+            lsds = np.atleast_1d(
+                data.attrs["lsd"] if "lsd" in data.attrs else data.attrs["csd"]
+            )
             ra = data.ra
             weight = np.ones((lsds.size, ra.size), dtype=float)
             self.log.info(f"Calculating positions using epoch from {lsds.size} LSDs.")
-            
+
         elif "time" in data.index_map:
 
-            lsds = np.atleast_1d(np.fix(np.mean(self.telescope.unix_to_lsd(data.time))))    
-            ra = self.telescope.lsa(data.time)        
-            self.log.info(f"Calculating positions using epoch corresponding to LSD {lsds[0]}.")
-            
+            lsds = np.atleast_1d(np.fix(np.mean(self.telescope.unix_to_lsd(data.time))))
+            ra = self.telescope.lsa(data.time)
+            self.log.info(
+                f"Calculating positions using epoch corresponding to LSD {lsds[0]}."
+            )
+
         else:
             raise RuntimeError("Unable to extract LSD from input container.")
-            
+
         nlsd = lsds.size
-        nra = ra.size
 
         # Calculate the source coordinates on each LSD
         ra_cirs = np.zeros((nlocal, nlsd), dtype=ra_icrs.dtype)
         dec_cirs = np.zeros((nlocal, nlsd), dtype=dec_icrs.dtype)
-        
+
         for ii, lsd in enumerate(lsds):
-        
+
             epoch = skf.unix_to_skyfield_time(self.telescope.lsd_to_unix(lsd))
-        
+
             obs = self.telescope.skyfield_obs().at(epoch).observe(positions)
             if self.apparent:
                 obs = obs.apparent()
-        
+
             sra, sdec, _ = obs.cirs_radec(epoch)
-        
+
             ra_cirs[:, ii] = sra._degrees
             dec_cirs[:, ii] = sdec._degrees
-            
-            
+
         # If data contains the average visibilities over multiple LSD, then take the
         # corresponding average of the source positions.  Note that if significant
         # flagging was applied to the data prior to averaging, then this should be
         # described in a StackMask that is supplied to this task as data instead of
         # the actual sidereal stack.
         if nlsd > 1:
-            
-            weight = weight * tools.invert_no_zero(np.sum(weight, axis=0, keepdims=True))
+
+            weight = weight * tools.invert_no_zero(
+                np.sum(weight, axis=0, keepdims=True)
+            )
 
             span = np.max(ra_cirs, axis=-1) - np.min(ra_cirs, axis=-1)
             wraps = np.flatnonzero(span > 180.0)
@@ -494,14 +510,19 @@ class ConvertICRStoCIRS(tasklib.base.ContainerTask):
 
             ra_cirs = np.matmul(ra_cirs, weight) % 360.0
             dec_cirs = np.matmul(dec_cirs, weight)
-    
+
             # If requested transform the source positions from an (nsource, nra)
             # array to an (nsource,) by finding the nearest RA to the sources RA.
             if self.find_nearest:
-                        
-                imin = np.argmin(np.abs(tools.correct_phase_wrap(ra_cirs - ra[np.newaxis, :], deg=True)), axis=1)
+
+                imin = np.argmin(
+                    np.abs(
+                        tools.correct_phase_wrap(ra_cirs - ra[np.newaxis, :], deg=True)
+                    ),
+                    axis=1,
+                )
                 nearest = (np.arange(imin.size), imin)
-        
+
                 ra_cirs = ra_cirs[nearest]
                 dec_cirs = dec_cirs[nearest]
 
@@ -509,21 +530,29 @@ class ConvertICRStoCIRS(tasklib.base.ContainerTask):
 
                 all_ra_cirs = np.zeros(nsource, dtype=ra_cirs.dtype)
                 all_dec_cirs = np.zeros(nsource, dtype=dec_cirs.dtype)
-                
-                self.comm.Allgatherv(ra_cirs, [all_ra_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE]) 
-                self.comm.Allgatherv(dec_cirs, [all_dec_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE])
-                
+
+                self.comm.Allgatherv(
+                    ra_cirs,
+                    [all_ra_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE],
+                )
+                self.comm.Allgatherv(
+                    dec_cirs,
+                    [all_dec_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE],
+                )
+
                 out["position"]["ra"][:] = all_ra_cirs
                 out["position"]["dec"][:] = all_dec_cirs
 
             else:
 
-                out = containers.SourceCatalogVersusRA(ra=ra, axes_from=catalog, attrs_from=catalog, distributed=True)
+                out = containers.SourceCatalogVersusRA(
+                    ra=ra, axes_from=catalog, attrs_from=catalog, distributed=True
+                )
                 out.redistribute("object_id")
-                          
+
                 out["position"][:].local_array["ra"][:] = ra_cirs
                 out["position"][:].local_array["dec"][:] = dec_cirs
-                
+
         else:
             # The data corresponds to a single day.  Use the source positions
             # calculated on this day.
@@ -531,10 +560,16 @@ class ConvertICRStoCIRS(tasklib.base.ContainerTask):
 
             all_ra_cirs = np.zeros(nsource, dtype=ra_cirs.dtype)
             all_dec_cirs = np.zeros(nsource, dtype=dec_cirs.dtype)
-            
-            self.comm.Allgatherv(ra_cirs[:, 0], [all_ra_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE]) 
-            self.comm.Allgatherv(dec_cirs[:, 0], [all_dec_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE])
-            
+
+            self.comm.Allgatherv(
+                ra_cirs[:, 0],
+                [all_ra_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE],
+            )
+            self.comm.Allgatherv(
+                dec_cirs[:, 0],
+                [all_dec_cirs, tuple(nsource_per_rank), tuple(ssrc), MPI.DOUBLE],
+            )
+
             out["position"]["ra"][:] = all_ra_cirs
             out["position"]["dec"][:] = all_dec_cirs
 
@@ -586,7 +621,11 @@ class MakeTemplateStream(tasklib.base.ContainerTask):
         """
         data.redistribute("freq")
         out = containers.SiderealStream(
-            ra=self.nra, axes_from=data, attrs_from=data, distributed=True, comm=data.comm
+            ra=self.nra,
+            axes_from=data,
+            attrs_from=data,
+            distributed=True,
+            comm=data.comm,
         )
         out.redistribute("freq")
         out.vis[:] = 0.0
@@ -638,19 +677,18 @@ class CreateFluxCatalogs(tasklib.base.ContainerTask):
         Name of the files containing the flux catalogs.  Must be .json
         files that can be loaded with ch_util.fluxcat.FluxCatalog.load.
     """
-    
+
     min_dec = config.Property(proptype=float, default=-90.0)
     max_dec = config.Property(proptype=float, default=90.0)
     min_flux = config.Property(proptype=float, default=None)
     max_flux = config.Property(proptype=float, default=None)
     exclude = config.Property(proptype=list)
     files = config.Property(proptype=tasklib.io.list_or_glob)
-    
+
     NOMINAL_FREQ = 600.0
-    
+
     def process(self):
         """Load the next flux catalog and package into SourceCatalog container."""
-        
         # Exit this task if we have created all of the requested catalogs
         if len(self.files) == 0:
             raise exceptions.PipelineStopIteration
@@ -664,9 +702,9 @@ class CreateFluxCatalogs(tasklib.base.ContainerTask):
 
         # Load the flux catalog
         fluxcat.FluxCatalog.load(filename, overwrite=2)
-        
+
         catalog_tag = fluxcat.FluxCatalog.loaded_collections()[0][0]
-        
+
         # Extract source names and positions
         sources = np.array(fluxcat.FluxCatalog.keys())
 
@@ -689,25 +727,26 @@ class CreateFluxCatalogs(tasklib.base.ContainerTask):
         max_flux = self.max_flux if self.max_flux is not None else np.inf
 
         ikeep = np.flatnonzero(
-            not_excluded &
-            (sdec >= self.min_dec) &
-            (sdec <= self.max_dec) &
-            (nominal_flux >= min_flux) &
-            (nominal_flux <= max_flux)
+            not_excluded
+            & (sdec >= self.min_dec)
+            & (sdec <= self.max_dec)
+            & (nominal_flux >= min_flux)
+            & (nominal_flux <= max_flux)
         )
 
         self.log.info(
-            "There are %d sources between declination [%d, %d] with %0.3f < S(600) < %0.3f."
-            % (ikeep.size, self.min_dec, self.max_dec, min_flux, max_flux)
+            f"There are {ikeep.size} sources between declination "
+            f"[{self.min_dec:0.2f}, {self.max_dec:0.2f}] with "
+            f"{min_flux:0.3f} < S(600) < {max_flux:0.3f}."
         )
 
         sources = sources[ikeep]
-        
+
         # Create output container
         catalog = containers.SourceCatalog(object_id=sources)
-        
+
         catalog["position"]["ra"][:] = sra[ikeep]
-        catalog["position"]["dec"][:]= sdec[ikeep]
+        catalog["position"]["dec"][:] = sdec[ikeep]
         catalog["position"].attrs["coords"] = "icrs"
 
         # Save attributes describing the source selection to the output container
@@ -742,7 +781,6 @@ class FluxCatalog(BaseInject):
         catalog : SourceCatalog or FluxModelCatalog
             Catalog of sources.
         """
-
         super().setup(manager, catalog)
 
         # The spectra given with the catalog
@@ -756,16 +794,18 @@ class FluxCatalog(BaseInject):
             self.log.info(f"Using the flux models of {fm.size} sources in the catalog.")
             return
 
-        # Make sure that the FluxCatalog contains the sources in the input catalog        
+        # Make sure that the FluxCatalog contains the sources in the input catalog
         skip_load = False
         for collection in fluxcat.FluxCatalog.loaded_collections():
             if collection[0] == self.catalog_tag:
-                self.log.info("FluxCatalog already contains the "
-                              f"{self.catalog_tag} collection.  Skipping load.")
+                self.log.info(
+                    "FluxCatalog already contains the "
+                    f"{self.catalog_tag} collection.  Skipping load."
+                )
                 skip_load = True
             else:
                 fluxcat.FluxCatalog.delete_loaded_collection(collection[0])
-                
+
         if not skip_load:
             filename = self.catalog.attrs["filename"]
             self.log.info(f"Loading {filename} into FluxCatalog.")
@@ -789,7 +829,6 @@ class FluxCatalog(BaseInject):
         amp : np.ndarray[nfreq,]
             Flux of the source in Jy at the requested frequencies.
         """
-
         if self._flux_model is not None:
             pivot, param = self._flux_model
             x = np.log(freq["centre"] / pivot[source_index])
@@ -799,7 +838,6 @@ class FluxCatalog(BaseInject):
         return fluxcat.FluxCatalog[self.sources[source_index]].predict_flux(
             freq["centre"]
         )
-
 
 
 class SpectroscopicCatalog(BaseInject):
@@ -850,7 +888,9 @@ class SpectroscopicCatalog(BaseInject):
     """
 
     source_model = config.enum(["fixed", "catalog"], default="fixed")
-    spectral_model = config.enum(["channel", "exponential", "gaussian"], default="exponential")
+    spectral_model = config.enum(
+        ["channel", "exponential", "gaussian"], default="exponential"
+    )
 
     amplitude = config.Property(proptype=float, default=1.0)
     scale = config.Property(proptype=float, default=0.0)
@@ -868,7 +908,6 @@ class SpectroscopicCatalog(BaseInject):
             source_model="catalog", this must also contain a "line" table with
             "amplitude" and "width" columns.
         """
-
         super().setup(manager, catalog)
 
         self.output_attrs["source_model"] = self.source_model
@@ -931,14 +970,14 @@ class SpectroscopicCatalog(BaseInject):
         # absorption observable: inject the amplitude into the channel
         # containing the line frequency.
         if swidth == 0.0:
-            in_channel = (sfreq > fedge_lower) & (sfreq <= fedge_upper) 
-            
+            in_channel = (sfreq > fedge_lower) & (sfreq <= fedge_upper)
+
             return samp * in_channel
 
         # Existing exponential model, integrated over each frequency bin.
         dlower = fedge_lower - sfreq
         dupper = fedge_upper - sfreq
-        
+
         if self.spectral_model == "exponential":
 
             adlower = np.abs(dlower / swidth)
@@ -950,19 +989,14 @@ class SpectroscopicCatalog(BaseInject):
                 np.abs(np.exp(-adlower) - np.exp(-adupper)),
             )
 
-        else: # self.spectral_model == "gaussian"
+        else:  # self.spectral_model == "gaussian"
 
             arg_lower = dlower / (np.sqrt(2.0) * swidth)
             arg_upper = dupper / (np.sqrt(2.0) * swidth)
 
-            integral = (
-                np.sqrt(0.5 * np.pi)
-                * swidth
-                * (erf(arg_upper) - erf(arg_lower))
-            )
+            integral = np.sqrt(0.5 * np.pi) * swidth * (erf(arg_upper) - erf(arg_lower))
 
         return samp * integral / channel_width
-
 
     def _process_catalog(self):
         """Process the spectroscopic catalog.
@@ -971,7 +1005,6 @@ class SpectroscopicCatalog(BaseInject):
         It also determines the source frequency, amplitude, width, and local
         frequency bins to process.
         """
-
         catalog = self.catalog
 
         # Convert redshift to observed 21 cm frequency.
@@ -1128,8 +1161,9 @@ class Beam(BaseInject):
         ----------
         manager : ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
+        catalog : SourceCatalog or FluxModelCatalog
+            Sources to inject.
         """
-
         super().setup(manager, catalog)
         self.map_pol_feed = {
             pstr: list(self.telescope.polarisation).index(pstr) for pstr in ["X", "Y"]
@@ -1156,7 +1190,6 @@ class Beam(BaseInject):
             The primary beam as a function of frequency and hour angle
             at the sources declination for the requested polarisation.
         """
-
         index_freq = np.array(
             [np.argmin(np.abs(nu - self.telescope.frequencies)) for nu in freq]
         )
@@ -1186,7 +1219,7 @@ class Beam(BaseInject):
 
 class BeamExternal(BaseInject):
     """Base class that provides methods for evaluating an external beam model."""
-    
+
     input_index = config.Property(proptype=int, default=0)
 
     def setup(self, manager, catalog, beam):
@@ -1196,11 +1229,11 @@ class BeamExternal(BaseInject):
         ----------
         manager : either ProductManager, BeamTransfer, or TransitTelescope
             Contains a TransitTelescope object describing the telescope.
-
+        catalog : SourceCatalog or FluxModelCatalog
+            Sources to inject.
         beam : GridBeam, TrackBeam
             Model for the primary beam.
         """
-
         super().setup(manager, catalog)
         self._initialize_beam(beam)
 
@@ -1218,7 +1251,6 @@ class BeamExternal(BaseInject):
             Container holding the model for the primary beam.
             Currently only accepts GridBeam type containers.
         """
-
         if isinstance(beam, containers.GridBeam):
             self._initialize_grid_beam(beam)
             self._beamfunc = self._grid_beam
@@ -1232,7 +1264,6 @@ class BeamExternal(BaseInject):
 
     def _initialize_beam_with_data(self):
         """Check that the beam and visibility data have the same local frequencies."""
-
         freq = self.freq_local["centre"]
 
         if not np.array_equal(freq, self._beam_freq):
@@ -1247,7 +1278,6 @@ class BeamExternal(BaseInject):
             Coefficients of a linear model for the primary beam,
             which will be evaluated using the beso.beam module.
         """
-
         # Distribute over frequencies, extract local frequencies
         tbeam.redistribute("freq")
 
@@ -1257,7 +1287,6 @@ class BeamExternal(BaseInject):
 
         # Find the relevant indices into the polarisation axis
         ipol = np.array([list(tbeam.pol).index(pstr) for pstr in self.process_pol])
-        npol = ipol.size
         self._beam_pol = [tbeam.pol[ip] for ip in ipol]
 
         # Extract the model coefficients
@@ -1267,7 +1296,9 @@ class BeamExternal(BaseInject):
         BeamModelClass = locate(tbeam.attrs["beam_model_class"])
         beam_model_kwargs = json.loads(tbeam.attrs["beam_model_kwargs"])
 
-        self._beam_model = BeamModelClass(self.telescope, comm=None, **beam_model_kwargs)
+        self._beam_model = BeamModelClass(
+            self.telescope, comm=None, **beam_model_kwargs
+        )
 
     def _track_beam(self, freq, pol, dec, ha):
         """Evaluate a beam model at the requested declination and hour angles.
@@ -1290,19 +1321,18 @@ class BeamExternal(BaseInject):
             The primary beam as a function of frequency and hour angle
             at the sources declination for the requested polarisation.
         """
-
         pp = self._beam_pol.index(pol)
-        
+
         nha = ha.size
         rdec = np.full(nha, dec)
 
         primary_beam = np.zeros((freq.size, nha), dtype=float)
 
         for ii, nu in enumerate(freq):
-            
+
             ff = np.argmin(np.abs(self._beam_freq - nu))
             assert np.abs(nu - self._beam_freq[ff]) < 0.1
-        
+
             self._beam_model.prepare(freq=nu, pol=pol)
 
             primary_beam[ii] = self._beam_model.evaluate_beam(
@@ -1326,7 +1356,6 @@ class BeamExternal(BaseInject):
             contains the "baseline averaged" beam, which will be applied to
             all baselines of a given polarisation.
         """
-
         # Make sure the beam is in celestial coordinates
         if gbeam.coords not in ["celestial", "telescope"]:
             raise RuntimeError(
@@ -1367,7 +1396,7 @@ class BeamExternal(BaseInject):
             theta = np.radians(gbeam.theta)
 
         else:
-            
+
             phi = gbeam.phi
             isort = np.argsort(phi)
             phi = phi[isort]
@@ -1377,7 +1406,9 @@ class BeamExternal(BaseInject):
         # Create an interpolator for each frequency and polarisation
         self._beam = [
             [
-                scipy.interpolate.RectBivariateSpline(theta, phi, beam[ff, pp][:, isort])
+                scipy.interpolate.RectBivariateSpline(
+                    theta, phi, beam[ff, pp][:, isort]
+                )
                 for pp in range(npol)
             ]
             for ff in range(nfreq)
@@ -1416,14 +1447,11 @@ class BeamExternal(BaseInject):
             The primary beam as a function of frequency and hour angle
             at the sources declination for the requested polarisation.
         """
-
         if self.coords == "celestial":
 
             podal = np.abs(ha) <= (0.5 * np.pi)
 
-            phi = np.where(
-                podal, ha, ((ha + 2.0 * np.pi) % (2.0 * np.pi)) - np.pi
-            )
+            phi = np.where(podal, ha, ((ha + 2.0 * np.pi) % (2.0 * np.pi)) - np.pi)
             theta = np.where(podal, dec, np.pi - dec)
 
         else:
@@ -1465,7 +1493,6 @@ class SpectroscopicCatalogWithBeamExternal(BeamExternal, SpectroscopicCatalog):
 
 def _icrs_to_cirs(ra, dec, epoch, telescope):
     """Convert ICRS coordinates to apparent site-observed CIRS coordinates."""
-
     source = skf.skyfield_star_from_ra_dec(ra, dec)
 
     return telescope.object_coords(
@@ -1477,7 +1504,7 @@ def _icrs_to_cirs(ra, dec, epoch, telescope):
 
 def _get_baseline_info(data, telescope):
     # Determine stack axis
-    stack_new, stack_flag = tools.redefine_stack_index_map(
+    stack_new, _stack_flag = tools.redefine_stack_index_map(
         telescope, data.input, data.prod, data.stack, data.reverse_map["stack"]
     )
 
@@ -1518,5 +1545,3 @@ def _get_baseline_info(data, telescope):
     baseline_pol = np.core.defchararray.add(input_pol[aa], input_pol[bb])
 
     return baseline_dist, baseline_pol
-
-

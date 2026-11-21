@@ -46,10 +46,11 @@ import numpy as np
 import scipy.constants
 import scipy.ndimage
 from caput import config
+from caput.astro import skyfield as skf
 from caput.astro.coordinates import spherical
 from caput.pipeline import exceptions, tasklib
-from draco.core import io
 from draco.util import interferometry, tools
+from mpi4py import MPI
 from scipy.special import erf
 
 from ..core import containers
@@ -109,7 +110,13 @@ def _shape_components(rng, duration):
     and scaled so that 90% of the fluence lies within ``duration`` (5% before
     -``duration``/2, 5% after +``duration``/2) and the peak of the sum is 1.
     """
-    x = float(np.clip(np.log(duration / _SHAPE_LONG[0]) / np.log(_SHAPE_LONG[1] / _SHAPE_LONG[0]), 0.0, 1.0))
+    x = float(
+        np.clip(
+            np.log(duration / _SHAPE_LONG[0]) / np.log(_SHAPE_LONG[1] / _SHAPE_LONG[0]),
+            0.0,
+            1.0,
+        )
+    )
     prob = (1.0 - x) * np.array(_SHAPE_NUMBER[0]) + x * np.array(_SHAPE_NUMBER[1])
     k = 1 + int(rng.choice(prob.size, p=prob / prob.sum()))
     lo = (1.0 - x) * _SHAPE_WIDTH[0] + x * _SHAPE_WIDTH[1]
@@ -149,8 +156,14 @@ def _component_profile(t, dt, t0, comp):
     out = np.zeros(rel.shape)
     s2 = np.sqrt(2.0)
     for ck, rk, dk, ak in zip(*comp):
-        rise = rk * (erf((np.minimum(hi, ck) - ck) / (s2 * rk)) - erf((np.minimum(lo, ck) - ck) / (s2 * rk)))
-        decay = dk * (erf((np.maximum(hi, ck) - ck) / (s2 * dk)) - erf((np.maximum(lo, ck) - ck) / (s2 * dk)))
+        rise = rk * (
+            erf((np.minimum(hi, ck) - ck) / (s2 * rk))
+            - erf((np.minimum(lo, ck) - ck) / (s2 * rk))
+        )
+        decay = dk * (
+            erf((np.maximum(hi, ck) - ck) / (s2 * dk))
+            - erf((np.maximum(lo, ck) - ck) / (s2 * dk))
+        )
         out += ak * np.sqrt(0.5 * np.pi) * (rise + decay)
     return out / dt
 
@@ -183,7 +196,11 @@ def _subpulses(rng, duration, rate, width, period, jitter, envelope=None):
         cdf = np.cumsum(_component_value(grid, envelope))
         cdf /= cdf[-1]
     if period > 0:
-        t = -2.0 * sig + rng.uniform(0.0, period) + period * np.arange(int(4.0 * sig / period) + 1)
+        t = (
+            -2.0 * sig
+            + rng.uniform(0.0, period)
+            + period * np.arange(int(4.0 * sig / period) + 1)
+        )
         t = t[t <= 2.0 * sig]
         if t.size == 0:
             t = np.array([rng.uniform(-sig, sig)])
@@ -196,7 +213,11 @@ def _subpulses(rng, duration, rate, width, period, jitter, envelope=None):
         for _ in range(50 * n):
             if len(t) == n:
                 break
-            tk = rng.normal(0.0, sig) if envelope is None else float(np.interp(rng.uniform(), cdf, grid))
+            tk = (
+                rng.normal(0.0, sig)
+                if envelope is None
+                else float(np.interp(rng.uniform(), cdf, grid))
+            )
             wk = width * np.exp(_SUB_WIDTH_SIGMA * rng.standard_normal())
             if envelope is None and abs(tk) > 2.0 * sig:
                 continue
@@ -204,7 +225,11 @@ def _subpulses(rng, duration, rate, width, period, jitter, envelope=None):
                 t.append(tk)
                 w.append(wk)
         t, w = np.array(t), np.array(w)
-    env = np.exp(-0.5 * (t / sig) ** 2) if envelope is None else _component_value(t, envelope)
+    env = (
+        np.exp(-0.5 * (t / sig) ** 2)
+        if envelope is None
+        else _component_value(t, envelope)
+    )
     a = env * np.exp(_SUB_AMP_SIGMA * rng.standard_normal(t.size))
     return t, w, a
 
@@ -229,19 +254,29 @@ def _subpulse_profile(t, dt, t0, duration, floor, sub, envelope=None):
         else:
             out = floor * _component_profile(x, step, 0.0, envelope)
         if a.size:
-            s = sum(ak * _pulse_profile(x, step, tk, wk, "gaussian") for tk, wk, ak in zip(ts, ws, a))
+            s = sum(
+                ak * _pulse_profile(x, step, tk, wk, "gaussian")
+                for tk, wk, ak in zip(ts, ws, a)
+            )
             out = out + (1.0 - floor) * s / sub_peak
         return out
 
     # the peak of the sum of the sub-pulses alone, then of the whole profile
-    fine = np.arange(-1.5 * duration, 1.5 * duration, max(min(ws.min() if ws.size else duration, duration) / 20.0, 0.05))
+    fine = np.arange(
+        -1.5 * duration,
+        1.5 * duration,
+        max(min(ws.min() if ws.size else duration, duration) / 20.0, 0.05),
+    )
     sub_peak = 1.0
     if envelope is None:
         smooth = np.exp(-4.0 * np.log(2.0) * (fine / duration) ** 2)
     else:
         smooth = _component_value(fine, envelope)
     if a.size:
-        g = sum(ak * np.exp(-4.0 * np.log(2.0) * ((fine - tk) / wk) ** 2) for tk, wk, ak in zip(ts, ws, a))
+        g = sum(
+            ak * np.exp(-4.0 * np.log(2.0) * ((fine - tk) / wk) ** 2)
+            for tk, wk, ak in zip(ts, ws, a)
+        )
         sub_peak = float(g.max()) or 1.0
         inst = floor * smooth + (1.0 - floor) * g / sub_peak
     else:
@@ -252,9 +287,7 @@ def _subpulse_profile(t, dt, t0, duration, floor, sub, envelope=None):
 
 def _parallactic_angle(ha, lat, dec):
     """Parallactic angle (radians) at hour angle ``ha``; all angles in radians."""
-    return np.arctan2(
-        np.sin(ha), np.tan(lat) * np.cos(dec) - np.sin(dec) * np.cos(ha)
-    )
+    return np.arctan2(np.sin(ha), np.tan(lat) * np.cos(dec) - np.sin(dec) * np.cos(ha))
 
 
 def _scintillation(freq, index, bw, seed):
@@ -286,8 +319,6 @@ def _scintillation(freq, index, bw, seed):
     return out
 
 
-
-
 def _subpulse_column(tab, name):
     """A sub-pulse column of the catalogue table, zeros for a catalogue without them."""
     if name in tab.dtype.names:
@@ -307,12 +338,16 @@ def _roemer_delay(unix, ra, dec):
     source (ICRS degrees), divided by c: a pulse that reaches the barycentre at t
     reaches the Earth at t - delay.
     """
-    from caput.astro import skyfield as skf
-
     t = skf.unix_to_skyfield_time(np.atleast_1d(np.asarray(unix, dtype=float)))
     r = skf.skyfield_wrapper.ephemeris["earth"].at(t).position.m  # (3, n), ICRS
     ra, dec = np.radians(ra), np.radians(dec)
-    s = np.array([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec) * np.ones_like(ra)])
+    s = np.array(
+        [
+            np.cos(dec) * np.cos(ra),
+            np.cos(dec) * np.sin(ra),
+            np.sin(dec) * np.ones_like(ra),
+        ]
+    )
     return np.sum(r * s.reshape(3, -1), axis=0) / scipy.constants.c
 
 
@@ -324,7 +359,9 @@ def _make_catalog(pop, seed_rng, epoch_ref, attrs):
     cat["position"].attrs["coords"] = "icrs"
     tab = cat["lpt"]
     period = pop["period"]
-    epoch = np.where(period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan)
+    epoch = np.where(
+        period > 0, epoch_ref + seed_rng.uniform(0.0, 1.0, n) * period, np.nan
+    )
     for name in ("flux", "flux_scatter", "null_fraction", "period", "t_offset_beam", "duration",
                  "spectral_index", "spectral_curvature", "frac_lin", "frac_circ", "pol_angle", "rm",
                  "scint_index", "scint_bw", "distance", *SUBPULSE_COLUMNS, "dm", *VARIABILITY_COLUMNS, "shape"):  # fmt: skip
@@ -391,7 +428,9 @@ class GenerateLPTCatalog(tasklib.base.ContainerTask):
         spec = merge_population(self.population)
         rng = np.random.default_rng(self.seed)
         pop = draw_population(rng, self.n_source, spec)
-        cat = _make_catalog(pop, rng, self.epoch_ref, self._attrs(f"lpt_seed{self.seed}", spec))
+        cat = _make_catalog(
+            pop, rng, self.epoch_ref, self._attrs(f"lpt_seed{self.seed}", spec)
+        )
         self.log.info(
             f"Drew {self.n_source} LPTs: periods {np.min(pop['period']):.0f}-{np.max(pop['period']):.0f} s, "
             f"flux {pop['flux'].min():.4f}-{pop['flux'].max():.3f} Jy."
@@ -523,7 +562,9 @@ class InjectLPT(BeamExternal):
         Parameters
         ----------
         manager : ProductManager, BeamTransfer or TransitTelescope
+            Telescope.
         catalog : containers.LPTCatalog
+            Sources to inject.
         beam : GridBeam
             Primary beam (celestial or telescope coordinates) with XX and YY.
         """
@@ -542,9 +583,13 @@ class InjectLPT(BeamExternal):
             self._cover = ("ha", ha.min(), ha.max())
 
     def _covered(self, ha, dec):
-        """True where a source at ``dec`` and hour angle ``ha`` (radians) is above the
-        horizon and within the beam model."""
-        sin_alt = np.sin(dec) * np.sin(self.latitude) + np.cos(dec) * np.cos(self.latitude) * np.cos(ha)
+        """Return whether a source is above the horizon and within the beam model.
+
+        The source is at ``dec`` and hour angle ``ha`` (radians).
+        """
+        sin_alt = np.sin(dec) * np.sin(self.latitude) + np.cos(dec) * np.cos(
+            self.latitude
+        ) * np.cos(ha)
         kind, lo, hi = self._cover
         if kind == "x":
             q = -np.cos(dec) * np.sin(ha)
@@ -559,7 +604,10 @@ class InjectLPT(BeamExternal):
         ``covered`` [source, sample] marks the samples within the beam model.
         """
         tab = self.catalog["lpt"][:]
-        ra_i, dec_i = self.catalog["position"]["ra"][:], self.catalog["position"]["dec"][:]
+        ra_i, dec_i = (
+            self.catalog["position"]["ra"][:],
+            self.catalog["position"]["dec"][:],
+        )
         ra_c, dec_c = np.degrees(self.sra) % 360.0, np.degrees(self.sdec)
         t_tr = self.telescope.lsd_to_unix(lsd + ra_c / 360.0)
         sig_t = _beam_sigma_time(dec_c)
@@ -568,7 +616,13 @@ class InjectLPT(BeamExternal):
         nsub = _subpulse_column(tab, "subpulse_rate")
         shape = _subpulse_column(tab, "shape")
         var = {k: _subpulse_column(tab, k) for k in VARIABILITY_COLUMNS}
-        per_pulse = ("phase_jitter", "duration_scatter", "spectral_index_scatter", "opm_fraction", "mode_fraction")
+        per_pulse = (
+            "phase_jitter",
+            "duration_scatter",
+            "spectral_index_scatter",
+            "opm_fraction",
+            "mode_fraction",
+        )
         for s in range(tab.size):
             cov = covered[s]
             if not cov.any():
@@ -580,7 +634,10 @@ class InjectLPT(BeamExternal):
             # measured shapes has 90% of its fluence within half of this
             span = 1.0 if nsub[s] > 0 or shape[s] > 0 else 0.5
             # the widest pulse and the largest shift its own draws can give
-            reach = span * dur * np.exp(3.0 * var["duration_scatter"][s]) + 3.0 * var["phase_jitter"][s] * per
+            reach = (
+                span * dur * np.exp(3.0 * var["duration_scatter"][s])
+                + 3.0 * var["phase_jitter"][s] * per
+            )
             if per > 0 and not np.isfinite(tab["epoch"][s]):
                 # a train through the transit of the day, at the Earth
                 ep = t_tr[s] + tab["t_offset_beam"][s] * sig_t[s]
@@ -593,14 +650,20 @@ class InjectLPT(BeamExternal):
                 t0 = t_all[cov].min() - reach - dt
                 t1 = t_all[cov].max() + reach + dt
                 pad = 600.0 if self.barycentric else 0.0  # > the largest Roemer delay
-                k = np.arange(np.ceil((t0 - pad - ep) / per), np.floor((t1 + pad - ep) / per) + 1)
+                k = np.arange(
+                    np.ceil((t0 - pad - ep) / per), np.floor((t1 + pad - ep) / per) + 1
+                )
                 tc = ep + k * per
                 if self.barycentric and tc.size:
                     # arrival at the Earth: the delay at the (approximate) arrival time
-                    tc = tc - _roemer_delay(tc - _roemer_delay(tc, ra_i[s], dec_i[s]), ra_i[s], dec_i[s])
+                    tc = tc - _roemer_delay(
+                        tc - _roemer_delay(tc, ra_i[s], dec_i[s]), ra_i[s], dec_i[s]
+                    )
                 pulses = [(int(kk), tk, False) for kk, tk in zip(k, tc)]
             else:
-                pulses = [(int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s], False)]
+                pulses = [
+                    (int(lsd), t_tr[s] + tab["t_offset_beam"][s] * sig_t[s], False)
+                ]
             if per > 0 and var["interpulse"][s] > 0:
                 # half a period after each pulse (and before the first one in the data)
                 pulses = pulses + [(kk, tk + 0.5 * per, True) for kk, tk, _ in pulses]
@@ -614,7 +677,9 @@ class InjectLPT(BeamExternal):
                 f_lin, f_circ, f_scale = tab["frac_lin"][s], tab["frac_circ"][s], 1.0
                 mode, opm_t = False, np.nan
                 if varies:
-                    rv = np.random.default_rng([int(tab["seed"][s]), int(kk) + 2**40, 99 + int(inter)])
+                    rv = np.random.default_rng(
+                        [int(tab["seed"][s]), int(kk) + 2**40, 99 + int(inter)]
+                    )
                     g, u = rv.standard_normal(3), rv.uniform(size=3)
                     tc = tc + var["phase_jitter"][s] * per * g[0]
                     dur_p = dur * np.exp(var["duration_scatter"][s] * g[1])
@@ -623,7 +688,10 @@ class InjectLPT(BeamExternal):
                     alpha_p = alpha_p + var["spectral_index_scatter"][s] * g[2]
                     mode = bool(u[0] < var["mode_fraction"][s])
                     if mode:
-                        f_lin, f_circ = var["mode_frac_lin"][s], var["mode_frac_circ"][s]
+                        f_lin, f_circ = (
+                            var["mode_frac_lin"][s],
+                            var["mode_frac_circ"][s],
+                        )
                         f_scale = var["mode_flux"][s]
                     if u[1] < var["opm_fraction"][s]:
                         opm_t = (u[2] - 0.5) * 0.6 * dur_p  # within the central 60%
@@ -634,7 +702,11 @@ class InjectLPT(BeamExternal):
                 key = [int(tab["seed"][s]), int(kk) + 2**40] + ([1] if inter else [])
                 rng = np.random.default_rng(key)
                 nulled = rng.uniform() < tab["null_fraction"][s]
-                flux = tab["flux"][s] * np.exp(tab["flux_scatter"][s] * rng.standard_normal()) * f_scale
+                flux = (
+                    tab["flux"][s]
+                    * np.exp(tab["flux_scatter"][s] * rng.standard_normal())
+                    * f_scale
+                )
                 if inter:
                     flux = flux * var["interpulse"][s]
                 scint_seed = int(rng.integers(0, 2**31 - 1))
@@ -645,9 +717,12 @@ class InjectLPT(BeamExternal):
                 # probability active_fraction (the same on every day for a seed)
                 active = True
                 if 0.0 < var["active_fraction"][s] < 1.0:
-                    block = int(np.floor(tc / (max(var["active_timescale"][s], 0.01) * 86400.0)))
+                    block = int(
+                        np.floor(tc / (max(var["active_timescale"][s], 0.01) * 86400.0))
+                    )
                     active = bool(
-                        np.random.default_rng([int(tab["seed"][s]), block, 7]).uniform() < var["active_fraction"][s]
+                        np.random.default_rng([int(tab["seed"][s]), block, 7]).uniform()
+                        < var["active_fraction"][s]
                     )
                 rows.append((s, kk, nulled or not active, tc, flux, scint_seed, sub_seed, dur_p, alpha_p,
                              f_lin, f_circ, var["pa_swing"][s], opm_t, mode, inter, active, shape_seed))  # fmt: skip
@@ -692,7 +767,9 @@ class InjectLPT(BeamExternal):
         dt = np.median(np.diff(t_all))
 
         self._process_catalog()
-        ha_src = tools.correct_phase_wrap(np.radians(ra_deg)[np.newaxis] - self.sra[:, np.newaxis])
+        ha_src = tools.correct_phase_wrap(
+            np.radians(ra_deg)[np.newaxis] - self.sra[:, np.newaxis]
+        )
         covered = self._covered(ha_src, self.sdec[:, np.newaxis])
         sched, ra_c, dec_c = self._schedule(lsd, t_all, covered)
         tab = self.catalog["lpt"][:]
@@ -709,7 +786,9 @@ class InjectLPT(BeamExternal):
         n_comp = np.zeros(npulse, dtype=np.int32)
         # the largest delays across the band, earlier (high frequencies) and later (low)
         freq_band = np.asarray(data.index_map["freq"]["centre"][:], dtype=np.float64)
-        unit_delay = dispersion_delay(1.0, np.array([freq_band.max(), freq_band.min()]), self.reference_freq)
+        unit_delay = dispersion_delay(
+            1.0, np.array([freq_band.max(), freq_band.min()]), self.reference_freq
+        )
         n_drawn = np.zeros(npulse, dtype=np.int32)
         support = np.zeros(npulse)
         for p in range(npulse):
@@ -717,7 +796,9 @@ class InjectLPT(BeamExternal):
             dur = sched["duration"][p]
             if shape[s] > 0:
                 # one of the measured shapes, alone or as the envelope of the sub-pulses
-                comps[p] = _shape_components(np.random.default_rng(int(sched["shape_seed"][p])), dur)
+                comps[p] = _shape_components(
+                    np.random.default_rng(int(sched["shape_seed"][p])), dur
+                )
                 n_comp[p] = comps[p][0].size
             if nsub[s] > 0:
                 sub = _subpulses(
@@ -726,17 +807,26 @@ class InjectLPT(BeamExternal):
                     _subpulse_column(tab, "subpulse_jitter")[s], comps[p],
                 )  # fmt: skip
                 prof[p] = _subpulse_profile(
-                    t_all, dt, sched["unix_center"][p], dur, _subpulse_column(tab, "subpulse_floor")[s], sub,
+                    t_all,
+                    dt,
+                    sched["unix_center"][p],
+                    dur,
+                    _subpulse_column(tab, "subpulse_floor")[s],
+                    sub,
                     comps[p],
                 )
                 subs[p] = sub
                 n_drawn[p] = sub[0].size
                 support[p] = 2.0 * dur
             elif comps[p] is not None:
-                prof[p] = _component_profile(t_all, dt, sched["unix_center"][p], comps[p])
+                prof[p] = _component_profile(
+                    t_all, dt, sched["unix_center"][p], comps[p]
+                )
                 support[p] = dur
             else:
-                prof[p] = _pulse_profile(t_all, dt, sched["unix_center"][p], dur, self.profile)
+                prof[p] = _pulse_profile(
+                    t_all, dt, sched["unix_center"][p], dur, self.profile
+                )
                 support[p] = dur
         touched = prof > self.min_profile
         for p in np.flatnonzero(dm_src[src] > 0) if npulse else []:
@@ -754,7 +844,12 @@ class InjectLPT(BeamExternal):
             tc = sched["unix_center"][p] + shift
             if subs[p] is not None:
                 return _subpulse_profile(
-                    t, dt, tc, sched["duration"][p], _subpulse_column(tab, "subpulse_floor")[s_], subs[p],
+                    t,
+                    dt,
+                    tc,
+                    sched["duration"][p],
+                    _subpulse_column(tab, "subpulse_floor")[s_],
+                    subs[p],
                     comps[p],
                 )
             if comps[p] is not None:
@@ -770,7 +865,11 @@ class InjectLPT(BeamExternal):
         name, full = next(iter(axis.items()))
         sub = ra_deg[isel] if full is None else full[isel]
         sparse = data.__class__(
-            axes_from=data, attrs_from=data, distributed=data.distributed, comm=data.comm, **{name: sub}
+            axes_from=data,
+            attrs_from=data,
+            distributed=data.distributed,
+            comm=data.comm,
+            **{name: sub},
         )
         # A new axis loses its attributes; for the time axis ``alignment`` says
         # whether the times are the start, centre or end of each sample, and
@@ -796,10 +895,14 @@ class InjectLPT(BeamExternal):
         pol_index = {p: v for p, v in pol_index.items() if v.size}
         ib = np.sort(np.concatenate(list(pol_index.values())))
         pos = {p: np.searchsorted(ib, v) for p, v in pol_index.items()}
-        uv = dist[:, ib][:, np.newaxis, :, np.newaxis] / lam[np.newaxis, :, np.newaxis, np.newaxis]
+        uv = (
+            dist[:, ib][:, np.newaxis, :, np.newaxis]
+            / lam[np.newaxis, :, np.newaxis, np.newaxis]
+        )
         x_nu = nu / self.reference_freq
         xy_phase = np.exp(
-            1j * (np.radians(self.xy_offset) + 2 * np.pi * nu * 1e6 * self.xy_delay * 1e-9)
+            1j
+            * (np.radians(self.xy_offset) + 2 * np.pi * nu * 1e6 * self.xy_delay * 1e-9)
         )[:, np.newaxis]
 
         bsum = np.zeros(npulse)
@@ -824,17 +927,31 @@ class InjectLPT(BeamExternal):
                 * x_nu ** sched["spectral_index"][p]
                 * np.exp(tab["spectral_curvature"][s] * np.log(x_nu) ** 2)
             )
-            spec = spec * _scintillation(
-                freq_all, tab["scint_index"][s], tab["scint_bw"][s], int(sched["scint_seed"][p])
-            )[lo : lo + nf]
+            spec = (
+                spec
+                * _scintillation(
+                    freq_all,
+                    tab["scint_index"][s],
+                    tab["scint_bw"][s],
+                    int(sched["scint_seed"][p]),
+                )[lo : lo + nf]
+            )
             stokes_i = spec[:, np.newaxis] * w  # freq, time
-            psi = np.radians(tab["pol_angle"][s]) + tab["rm"][s] * lam[:, np.newaxis] ** 2
+            psi = (
+                np.radians(tab["pol_angle"][s]) + tab["rm"][s] * lam[:, np.newaxis] ** 2
+            )
             if self.parallactic:
                 psi = psi + _parallactic_angle(sha, self.latitude, sdec)[np.newaxis]
             if sched["pa_swing"][p] != 0.0 or np.isfinite(sched["opm_t"][p]):
                 # the angle turns across the pulse, and may jump by 90 degrees
-                trel = t_cols[np.newaxis, :] - sched["unix_center"][p] - delay[:, np.newaxis]
-                psi = psi + np.radians(sched["pa_swing"][p]) * np.clip(trel / sched["duration"][p], -1.5, 1.5)
+                trel = (
+                    t_cols[np.newaxis, :]
+                    - sched["unix_center"][p]
+                    - delay[:, np.newaxis]
+                )
+                psi = psi + np.radians(sched["pa_swing"][p]) * np.clip(
+                    trel / sched["duration"][p], -1.5, 1.5
+                )
                 if np.isfinite(sched["opm_t"][p]):
                     psi = psi + 0.5 * np.pi * (trel > sched["opm_t"][p])
             lin = sched["frac_lin"][p] * stokes_i
@@ -856,9 +973,9 @@ class InjectLPT(BeamExternal):
             ).conj()  # freq, baseline, time
             for pp, ii in pos.items():
                 phase[:, ii] *= amp[pp][:, np.newaxis, :]
-            vis.local_array[np.ix_(np.arange(nf), ib, cols)] += phase.astype(vis.local_array.dtype)
-
-        from mpi4py import MPI
+            vis.local_array[np.ix_(np.arange(nf), ib, cols)] += phase.astype(
+                vis.local_array.dtype
+            )
 
         sparse.comm.Allreduce(MPI.IN_PLACE, bsum, op=MPI.SUM)
         sparse.comm.Allreduce(MPI.IN_PLACE, wsum, op=MPI.SUM)
@@ -904,7 +1021,9 @@ class InjectLPT(BeamExternal):
             rec["dec_cirs"] = dec_c[src]
             rec["y"] = y
             rec["x_start"] = x_start
-            rec["ra_start"] = 360.0 * (self.telescope.unix_to_lsd(t_start) - lsd) % 360.0
+            rec["ra_start"] = (
+                360.0 * (self.telescope.unix_to_lsd(t_start) - lsd) % 360.0
+            )
             rec["beam_mean"] = bsum * tools.invert_no_zero(wsum)
             rec["scint_seed"] = sched["scint_seed"]
             rec["n_subpulse"] = n_drawn
@@ -914,7 +1033,9 @@ class InjectLPT(BeamExternal):
         log.pulse[:] = rec
         log.attrs["lsd"] = lsd
         log.attrs["tag"] = f"lsd_{lsd}"
-        log.attrs["beam_cover"] = json.dumps([self._cover[0], float(self._cover[1]), float(self._cover[2])])
+        log.attrs["beam_cover"] = json.dumps(
+            [self._cover[0], float(self._cover[1]), float(self._cover[2])]
+        )
         log.attrs["barycentric"] = self.barycentric
         self.log.info(
             f"LSD {lsd}: {npulse} pulses within the beam model, {int(injected.sum())} injected "
@@ -954,6 +1075,7 @@ class AddInjectedHybrid(tasklib.base.ContainerTask):
         Parameters
         ----------
         data : HybridVisStream
+            Visibilities without the injections.
 
         Returns
         -------
@@ -966,9 +1088,13 @@ class AddInjectedHybrid(tasklib.base.ContainerTask):
         for ax in ("pol", "ew", "el"):
             a, b = data.index_map[ax][:], inj.index_map[ax][:]
             if a.shape != b.shape or not np.array_equal(a, b):
-                raise ValueError(f"The {ax} axes of the data and the injections differ.")
+                raise ValueError(
+                    f"The {ax} axes of the data and the injections differ."
+                )
         if not np.allclose(data.freq, inj.freq):
-            raise ValueError("The frequency axes of the data and the injections differ.")
+            raise ValueError(
+                "The frequency axes of the data and the injections differ."
+            )
         ra_d, ra_i = data.index_map["ra"][:], inj.index_map["ra"][:]
         dra = np.median(np.diff(ra_d))
         idx = np.clip(np.searchsorted(ra_d, ra_i - 0.5 * dra), 0, ra_d.size - 1)
@@ -990,7 +1116,8 @@ class DiscardInput(tasklib.base.ContainerTask):
     """Take an input and output nothing (to switch off a branch of a config)."""
 
     def process(self, data):
-        return None
+        """Return nothing."""
+        return
 
 
 class MatchLPTInjections(tasklib.base.ContainerTask):
@@ -1021,6 +1148,7 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
         table : containers.TransientCandidateTable
             Sifted candidates of the search with the injections.
         log : containers.LPTInjectionLog
+            Pulses injected into this day.
 
         Returns
         -------
@@ -1048,7 +1176,9 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             span = pl["duration"][k]
             if "support" in pl.dtype.names and pl["support"][k] > 0:
                 span = pl["support"][k]
-            win = (d_ra >= -self.match_dt * deg_s) & (d_ra <= (span + self.match_dt) * deg_s)
+            win = (d_ra >= -self.match_dt * deg_s) & (
+                d_ra <= (span + self.match_dt) * deg_s
+            )
             near = win & (np.abs(rec["y"] - pl["y"][k]) <= self.match_dy)
             res["n_match"][k] = near.sum()
             if not near.any():
