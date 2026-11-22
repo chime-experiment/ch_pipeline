@@ -1164,8 +1164,7 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             res[name] = pl[name]
         res["candidate"] = -1
         for name in ("snr", "amplitude", "cand_duration", "cand_spectral_index",
-                     "cand_y", "cand_x", "cand_ra", "ns_scale", "ns_dchi2",
-                     "cand_imag"):  # fmt: skip
+                     "cand_y", "cand_x", "cand_ra", "ns_scale", "ns_dchi2"):  # fmt: skip
             res[name] = np.nan
 
         deg_s = np.degrees(_OMEGA)
@@ -1195,12 +1194,27 @@ class MatchLPTInjections(tasklib.base.ContainerTask):
             res["cand_ra"][k] = rec["ra"][j]
             res["ns_scale"][k] = rec["ns_scale"][j]
             res["ns_dchi2"][k] = rec["ns_dchi2"][j]
-            if "amplitude_imag" in rec.dtype.names:
-                res["cand_imag"][k] = rec["amplitude_imag"][j]
             if sift is not None:
                 res["keep"][k] = sift["keep"][j]
                 res["flags"][k] = sift["flags"][j]
         out.injection[:] = res
+        # The tables of one kind of search (rm, circular, imag), of the matched
+        # candidates
+        cand = res["candidate"]
+        hit = cand >= 0
+        for name in ("rm", "circular", "imag"):
+            if name not in table.datasets:
+                continue
+            src = table.datasets[name][:]
+            out.add_dataset(name)
+            val = np.zeros(n, dtype=out.datasets[name][:].dtype)
+            for col in src.dtype.names:
+                ocol = col if col.startswith("cand_") else "cand_" + col
+                ocol = "cand_imag" if col == "amplitude_imag" else ocol
+                if val.dtype[ocol].kind == "f":
+                    val[ocol] = np.nan
+                val[ocol][hit] = src[col][cand[hit]]
+            out.datasets[name][:] = val
         if "sift_flags" in table.attrs:
             out.attrs["sift_flags"] = table.attrs["sift_flags"]
         out.attrs["match_dy"] = self.match_dy

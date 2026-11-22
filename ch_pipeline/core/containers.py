@@ -1447,6 +1447,14 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
     ``snr_q`` (optional, for a search in Stokes parameters) is the S/N of Stokes Q
     summed over the bands at RM 0, 0 where there is no trial; the noise
     calibration of L uses it.
+
+    The other optional datasets belong to one kind of search each.  Without Stokes
+    parameters, ``amplitude_imag`` is the imaginary part of the amplitude of every
+    polarisation.  For a search in Stokes parameters (``pol`` is I, V, L) there are
+    three, with no ``pol`` axis: ``i_imag`` is the imaginary part of the amplitude
+    of I (noise, for a sky of real flux), ``u_rm0`` is Stokes U at RM 0, measured
+    with the filter and weight of V (Jy), and ``rm`` is the RM of the L trial
+    (rad/m^2).
     """
 
     _axes = ("pol", "duration", "spectral_index", "el", "x")
@@ -1482,15 +1490,18 @@ class TransientMatchedFilterTrials(SiderealContainer, DataWeightContainer):
             "compression": COMPRESSION,
             "compression_opts": COMPRESSION_OPTS,
         },
-        "snr_q": {
-            "axes": ["duration", "spectral_index", "el", "ra", "x"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "el",
-            "chunks": (1, 1, 32, 1024, 32),
-            "compression": COMPRESSION,
-            "compression_opts": COMPRESSION_OPTS,
+        **{
+            name: {
+                "axes": ["duration", "spectral_index", "el", "ra", "x"],
+                "dtype": np.float32,
+                "initialise": False,
+                "distributed": True,
+                "distributed_axis": "el",
+                "chunks": (1, 1, 32, 1024, 32),
+                "compression": COMPRESSION,
+                "compression_opts": COMPRESSION_OPTS,
+            }
+            for name in ("snr_q", "i_imag", "u_rm0", "rm")
         },
         "ha": {
             "axes": ["el", "x"],
@@ -1594,7 +1605,15 @@ class TransientBandGroupMap(FreqContainer, SiderealContainer):
 
 
 class TransientCandidateMap(SiderealContainer, DataWeightContainer):
-    """Best transient trial at each elevation and start time."""
+    """Best transient trial at each elevation and start time.
+
+    ``snr`` is the S/N of the best trial and ``amplitude`` its flux density, which
+    keeps its sign where the maximum was of |S/N| (Stokes V).  ``duration`` is in
+    samples.  The optional datasets are those of
+    :class:`TransientMatchedFilterTrials` at the best trial: ``amplitude_imag``, or
+    for a search in Stokes parameters ``i_imag``, ``u_rm0`` and ``rm`` (of the best
+    trial of I, V and L, with no ``pol`` axis).
+    """
 
     _axes = ("pol", "el", "x")
 
@@ -1647,6 +1666,18 @@ class TransientCandidateMap(SiderealContainer, DataWeightContainer):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "el",
+        },
+        # Of the best trial of I, V and L of a search in Stokes parameters (see
+        # TransientMatchedFilterTrials)
+        **{
+            name: {
+                "axes": ["el", "ra"],
+                "dtype": np.float32,
+                "initialise": False,
+                "distributed": True,
+                "distributed_axis": "el",
+            }
+            for name in ("i_imag", "u_rm0", "rm")
         },
         "ha": {
             "axes": ["el", "x"],
@@ -1857,9 +1888,12 @@ class LPTInjectionResults(TableSpec):
     The columns of the :class:`LPTInjectionLog`, then whether a candidate was found
     within the match window (``found``, ``candidate`` its row in the candidate
     table or -1, ``n_match`` the number in the window), and that candidate's
-    properties and sifting result.  ``cand_imag`` is the candidate's
-    ``amplitude_imag`` (for the Stokes search: U at RM 0 for V, the best RM for L).
-    The ``pol`` attribute names the polarisation of the candidates (I, V, L, co).
+    properties and sifting result.  The ``pol`` attribute names the polarisation
+    of the candidates (I, V, L, co).  As in the candidate table, a table is present
+    only for the search it belongs to (NaN or 0 where no candidate was found):
+    ``rm`` (L: ``cand_rm``, the candidate's best RM), ``circular`` (V:
+    ``cand_sign`` and ``cand_u_rm0``) and ``imag`` (``cand_imag``, the imaginary
+    part of the candidate's amplitude).
     """
 
     _table_spec: ClassVar = {
@@ -1880,10 +1914,24 @@ class LPTInjectionResults(TableSpec):
                 ["flags", np.uint32],
                 ["ns_scale", np.float32],
                 ["ns_dchi2", np.float32],
-                ["cand_imag", np.float32],
             ],
             "axis": "pulse",
-        }
+        },
+        "rm": {
+            "columns": [["cand_rm", np.float32]],
+            "axis": "pulse",
+            "initialise": False,
+        },
+        "circular": {
+            "columns": [["cand_sign", np.int8], ["cand_u_rm0", np.float32]],
+            "axis": "pulse",
+            "initialise": False,
+        },
+        "imag": {
+            "columns": [["cand_imag", np.float32]],
+            "axis": "pulse",
+            "initialise": False,
+        },
     }
 
     @property
@@ -1995,11 +2043,13 @@ class TransientCandidateTrialCutouts(ContainerPrototype):
     """The calibrated trials of the matched filter in windows around candidates.
 
     For each candidate (``candidate_index`` is its row in the candidate table), the
-    amplitude and weight (and the imaginary part, e.g. the best RM of L) of each
-    polarisation of the trials (I, V and L of the Stokes search) and every duration,
-    at the candidate's telescope-x (``x_index``) and spectral index
-    (``spectral_index``, per polarisation: L is searched at fewer), in a window of
-    ``el_offset`` elevations and ``ra_offset`` start times centred on the candidate.
+    amplitude and weight of each polarisation of the trials (I, V and L of the
+    Stokes search) and every duration, at the candidate's telescope-x (``x_index``)
+    and spectral index (``spectral_index``, per polarisation: L is searched at
+    fewer), in a window of ``el_offset`` elevations and ``ra_offset`` start times
+    centred on the candidate.  The optional datasets of the trials come with them
+    (``i_imag``, ``u_rm0`` and ``rm`` of the Stokes search, with no ``pol`` axis,
+    or ``amplitude_imag``; see :class:`TransientMatchedFilterTrials`).
     Unlike the best-trial maps, each duration is a single trial, with no tail to
     earlier starts.  ``el_index`` and ``ra_index`` give the indices into the maps, -1
     outside them, where the weight is zero; ``el`` and ``ra`` continue the grid
@@ -2029,6 +2079,16 @@ class TransientCandidateTrialCutouts(ContainerPrototype):
             "initialise": False,
             "distributed": True,
             "distributed_axis": "candidate",
+        },
+        **{
+            name: {
+                "axes": ["candidate", "duration", "el_offset", "ra_offset"],
+                "dtype": np.float32,
+                "initialise": False,
+                "distributed": True,
+                "distributed_axis": "candidate",
+            }
+            for name in ("i_imag", "u_rm0", "rm")
         },
         "candidate_index": {
             "axes": ["candidate"],
@@ -2090,8 +2150,11 @@ class TransientTargetWindows(FreqContainer):
     centred on it, at its telescope-x (``x_index``, into the ``x`` attribute): the
     amplitude (Jy) and weight of each band and polarisation (``pol``) for each
     ``duration``, and the trials over all bands (``trial_amplitude``,
-    ``trial_weight``, ``trial_imag``; ``trial_pol``) for each ``duration`` and
-    ``spectral_index``.  ``trial_imag`` of L is the best RM.  The weights are before
+    ``trial_weight``; ``trial_pol``) for each ``duration`` and ``spectral_index``.
+    For a search in Stokes parameters ``trial_rm`` is the best RM of L,
+    ``trial_u_rm0`` Stokes U at RM 0 and ``trial_i_imag`` the imaginary part of I
+    (no ``trial_pol`` axis); otherwise ``trial_imag`` is the imaginary part of
+    every polarisation.  The weights are before
     the calibration of the noise (see :class:`ch_pipeline.analysis.transients.TargetWindows`).
     ``el_index`` and ``ra_index`` are -1 outside the data.  Distributed over targets.
     """
@@ -2132,7 +2195,37 @@ class TransientTargetWindows(FreqContainer):
                 "distributed": True,
                 "distributed_axis": "target",
             }
-            for name in ("trial_amplitude", "trial_weight", "trial_imag")
+            for name in ("trial_amplitude", "trial_weight")
+        },
+        "trial_imag": {
+            "axes": [
+                "target",
+                "trial_pol",
+                "duration",
+                "spectral_index",
+                "el_offset",
+                "ra_offset",
+            ],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "target",
+        },
+        **{
+            name: {
+                "axes": [
+                    "target",
+                    "duration",
+                    "spectral_index",
+                    "el_offset",
+                    "ra_offset",
+                ],
+                "dtype": np.float32,
+                "initialise": False,
+                "distributed": True,
+                "distributed_axis": "target",
+            }
+            for name in ("trial_i_imag", "trial_u_rm0", "trial_rm")
         },
         **{
             name: {
@@ -2201,6 +2294,17 @@ class TransientCandidateTable(TableSpec):
     negative search (:class:`ch_pipeline.analysis.transients.CalibrateSignificance`),
     and the ``window`` table statistics of the single samples within each candidate's
     duration (:class:`ch_pipeline.analysis.transients.AddWindowStats`).
+
+    Three tables hold what only one kind of search measures, and each is present
+    only in the tables of that search: ``rm``, the best RM of each candidate of the
+    search in linear polarisation (L); ``circular``, for Stokes V, the sign of V
+    (``snr`` is |S/N| there; ``amplitude`` is signed) and Stokes U at RM 0; and
+    ``imag``, the imaginary part of the amplitude (Stokes I, and searches without
+    Stokes parameters).
+
+    In the ``candidate`` table ``ra`` is the start time of the candidate as the RA
+    of the meridian (the axis of the maps); its position on the sky is ``ra_icrs``
+    and ``dec_icrs``.  ``duration`` is in seconds.
     """
 
     _axes = ("group", "freq")
@@ -2220,9 +2324,6 @@ class TransientCandidateTable(TableSpec):
                 ["amplitude", np.float32],
                 ["duration", np.float32],
                 ["spectral_index", np.float32],
-                # The imaginary part of the best trial, if saved (for the Stokes
-                # search: U at RM 0 for V, the best RM for L)
-                ["amplitude_imag", np.float32],
                 # Position on the sky (ICRS) and hour angle
                 ["ra_icrs", np.float64],
                 ["dec_icrs", np.float64],
@@ -2383,6 +2484,27 @@ class TransientCandidateTable(TableSpec):
                 ["win_rank1", np.float32],
                 ["win_row_rms", np.float32],
             ],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        # The best RM of the search in linear polarisation (L tables only), in
+        # rad/m^2
+        "rm": {
+            "columns": [["rm", np.float32]],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        # Stokes V tables only: the sign of V (+1 or -1; snr is |S/N|), and Stokes
+        # U at RM 0 with the filter and weight of the V trial (Jy)
+        "circular": {
+            "columns": [["sign", np.int8], ["u_rm0", np.float32]],
+            "axis": "candidate",
+            "initialise": False,
+        },
+        # The imaginary part of the amplitude of the best trial (Jy): Stokes I, and
+        # searches without Stokes parameters
+        "imag": {
+            "columns": [["amplitude_imag", np.float32]],
             "axis": "candidate",
             "initialise": False,
         },
