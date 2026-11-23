@@ -1,4 +1,17 @@
-"""HFB Tasks for flagging data."""
+"""HFB Tasks for flagging data.
+
+Tasks
+=====
+- :py:class:`RadiometerRFIFlagging`
+- :py:class:`DirectionalRFIFlagging`
+- :py:class:`RFIMaskRegridderNearest`
+- :py:class:`RFIMaskReduceBeamNS`
+- :py:class:`ApplyRFIMask`
+
+Functions
+=========
+- :py:func:`sensitivity_metric`
+"""
 
 import beam_model.formed as fm
 import numpy as np
@@ -12,7 +25,7 @@ from scipy.spatial.distance import cdist
 from .containers import HFBDirectionalRFIMaskBitmap, HFBRFIMask
 
 
-class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
+class RadiometerRFIFlagging(tasklib.base.ContainerTask):
     """Identify RFI in HFB data using the radiometer noise test, averaging over beams.
 
     Attributes
@@ -40,7 +53,7 @@ class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
         -------
         out : containers.HFBRFIMask
             Boolean mask that can be applied to an HFB data container
-            with the task `ApplyHFBMask` to mask contaminated
+            with the task `ApplyRFIMask` to mask contaminated
             frequencies, subfrequencies and time samples.
         """
         # Radiometer noise test: the sensitivity metric would be unity for
@@ -67,67 +80,7 @@ class HFBRadiometerRFIFlagging(tasklib.base.ContainerTask):
         return out
 
 
-class ApplyHFBMask(tasklib.base.ContainerTask):
-    """Apply a mask to an HFB stream.
-
-    Attributes
-    ----------
-    zero_data : bool, optional
-        Zero the data in addition to modifying the weights. Default is True.
-    """
-
-    zero_data = config.Property(proptype=bool, default=True)
-
-    def process(self, stream, mask):
-        """Set weights to zero for flagged data.
-
-        Parameters
-        ----------
-        stream : containers.HFBData
-            Container with HFB data and weights.
-
-        mask : containers.HFBRFIMask
-            Boolean mask indicating the samples that are contaminated by RFI.
-
-        Returns
-        -------
-        stream : containers.HFBData
-            Container with HFB data and weights, with weights of flagged data
-            set to zero.
-        """
-        # flag = mask[:, :, np.newaxis, :]
-
-        # Create a slice that will expand the mask to
-        # the same dimensions as the weight array
-        waxis = stream.weight.attrs["axis"]
-        slc = [slice(None)] * len(waxis)
-        for ww, name in enumerate(waxis):
-            if name not in mask.mask.attrs["axis"]:
-                slc[ww] = None
-
-        # Extract mask, transform to regular numpy array
-        # TODO: Changes needed when distributed reading work for HFBData
-        flag = mask.mask[:].local_array
-
-        # Expand mask to same dimension as weight array
-        flag = flag[tuple(slc)]
-
-        # Log how much data we're masking
-        self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
-
-        # Apply the mask
-        if np.any(flag):
-            # Apply the mask to the weights
-            stream.weight[:] *= 1.0 - flag
-
-            # If requested, apply the mask to the data
-            if self.zero_data:
-                stream.hfb[:] *= 1.0 - flag
-
-        return stream
-
-
-class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
+class DirectionalRFIFlagging(tasklib.base.ContainerTask):
     """Produce a RFI mask based on HFB sensitivity values.
 
     This task detects RFI signals based on deviations from expected radiometer noise
@@ -214,7 +167,7 @@ class HFBDirectionalRFIFlagging(tasklib.base.ContainerTask):
         return out
 
 
-class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
+class RFIMaskRegridderNearest(tasklib.base.ContainerTask):
     """Convert HFBDirectionalRFIMaskBitmap axis from beam_ns to el.
 
     This task takes an HFBDirectionalRFIMaskBitmap, selects the RFI mask corresponding
@@ -256,7 +209,7 @@ class RFIMaskHFBRegridderNearest(tasklib.base.ContainerTask):
     remove_persistent_beamns_frac = config.Property(proptype=float, default=None)
 
     def process(self, rfimaskbitmap):
-        """Convert beam_ns axis of an HFBDIrectionalRFIMaskBitmap to el axis.
+        """Convert beam_ns axis of an HFBDirectionalRFIMaskBitmap to el axis.
 
         Parameters
         ----------
@@ -425,6 +378,66 @@ class RFIMaskReduceBeamNS(tasklib.base.ContainerTask):
 
         # Return output container
         return output
+
+
+class ApplyRFIMask(tasklib.base.ContainerTask):
+    """Apply a mask to an HFB stream.
+
+    Attributes
+    ----------
+    zero_data : bool, optional
+        Zero the data in addition to modifying the weights. Default is True.
+    """
+
+    zero_data = config.Property(proptype=bool, default=True)
+
+    def process(self, stream, mask):
+        """Set weights to zero for flagged data.
+
+        Parameters
+        ----------
+        stream : containers.HFBData
+            Container with HFB data and weights.
+
+        mask : containers.HFBRFIMask
+            Boolean mask indicating the samples that are contaminated by RFI.
+
+        Returns
+        -------
+        stream : containers.HFBData
+            Container with HFB data and weights, with weights of flagged data
+            set to zero.
+        """
+        # flag = mask[:, :, np.newaxis, :]
+
+        # Create a slice that will expand the mask to
+        # the same dimensions as the weight array
+        waxis = stream.weight.attrs["axis"]
+        slc = [slice(None)] * len(waxis)
+        for ww, name in enumerate(waxis):
+            if name not in mask.mask.attrs["axis"]:
+                slc[ww] = None
+
+        # Extract mask, transform to regular numpy array
+        # TODO: Changes needed when distributed reading work for HFBData
+        flag = mask.mask[:].local_array
+
+        # Expand mask to same dimension as weight array
+        flag = flag[tuple(slc)]
+
+        # Log how much data we're masking
+        self.log.info(f"{(100.0 * np.mean(flag)):.2f} percent of data will be masked.")
+
+        # Apply the mask
+        if np.any(flag):
+            # Apply the mask to the weights
+            stream.weight[:] *= 1.0 - flag
+
+            # If requested, apply the mask to the data
+            if self.zero_data:
+                stream.hfb[:] *= 1.0 - flag
+
+        return stream
 
 
 def sensitivity_metric(stream, average_beams):

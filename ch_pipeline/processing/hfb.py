@@ -117,7 +117,7 @@ pipeline:
         single_group: false
 
     # Run HFB directional RFI flagging / bitmap creation
-    - type: ch_pipeline.hfb.flagging.HFBDirectionalRFIFlagging
+    - type: ch_pipeline.hfb.flagging.DirectionalRFIFlagging
       in: tstream_hfb
       out: rfibitmap_hfb
       params:
@@ -179,14 +179,14 @@ pipeline:
         max_thresh: 100
 
     # Flag samples whose noise exceeds the radiometer expectation.
-    - type: ch_pipeline.hfb.flagging.HFBRadiometerRFIFlagging
+    - type: ch_pipeline.hfb.flagging.RadiometerRFIFlagging
       in: masked_weights
       out: rfimask
       params:
         threshold: 1.7
 
     # Apply the RFI mask.
-    - type: ch_pipeline.hfb.flagging.ApplyHFBMask
+    - type: ch_pipeline.hfb.flagging.ApplyRFIMask
       in: [tstream_chunk, rfimask]
       out: masked_tstream
       params:
@@ -199,7 +199,7 @@ pipeline:
       in: masked_weights
 
     # Subtract the median over beams to remove the common bandpass shape.
-    - type: ch_pipeline.hfb.analysis.HFBMedianSubtraction
+    - type: ch_pipeline.hfb.process.MedianSubtraction
       in: masked_tstream
       out: diff
 
@@ -207,7 +207,7 @@ pipeline:
       in: masked_tstream
 
     # Keep only the NS beams near a source, in the chosen EW columns.
-    - type: ch_pipeline.hfb.analysis.SelectBeamsAroundSources
+    - type: ch_pipeline.hfb.select.SelectBeamsAroundSources
       requires: [manager, abscat]
       in: diff
       out: sel_diff
@@ -268,7 +268,7 @@ pipeline:
       in: tstream4
 
     # Resample from unix time onto a regular sidereal RA grid.
-    - type: ch_pipeline.hfb.sidereal.HFBSiderealRegridder
+    - type: ch_pipeline.hfb.sidereal.SiderealRegridder
       in: tstream5
       out: tstream6
       params:
@@ -278,7 +278,7 @@ pipeline:
       in: tstream5
 
     # Divide out the PFB shape across each coarse channel.
-    - type: ch_pipeline.hfb.analysis.HFBDividePFB
+    - type: ch_pipeline.hfb.process.DividePFB
       in: tstream6
       out: flat_stream
 
@@ -286,7 +286,7 @@ pipeline:
       in: tstream6
 
     # Fold subfreq into freq to give one high-resolution frequency axis.
-    - type: ch_pipeline.hfb.analysis.MakeHighFreqResRingMap
+    - type: ch_pipeline.hfb.process.MakeHighFreqResRingMap
       in: flat_stream
       out: highres_stream
 
@@ -294,7 +294,7 @@ pipeline:
       in: flat_stream
 
     # Cut out each source's RA / el / freq window from the ringmap.
-    - type: ch_pipeline.hfb.analysis.ExtractAbsorberCutouts
+    - type: ch_pipeline.hfb.select.ExtractAbsorberCutouts
       requires: [manager, abscat]
       in: highres_stream
       out: cutouts

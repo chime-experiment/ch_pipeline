@@ -1,4 +1,9 @@
-"""Regrid the data to sidereal time."""
+"""Regrid the data to sidereal time.
+
+Tasks
+=====
+- :py:class:`SiderealRegridder`
+"""
 
 import numpy as np
 from beam_model.formed import FFTFormedActualBeamModel
@@ -8,7 +13,7 @@ from draco.analysis.sidereal import SiderealRegridderLinear
 from .containers import HFBData, HFBRingMap
 
 
-class HFBSiderealRegridder(SiderealRegridderLinear):
+class SiderealRegridder(SiderealRegridderLinear):
     """Regrid HFB data."""
 
     def setup(self, observer=None):

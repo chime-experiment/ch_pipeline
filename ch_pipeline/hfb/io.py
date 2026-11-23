@@ -1,4 +1,19 @@
-"""HFB tasks for reading and writing files."""
+"""HFB tasks for reading and writing files.
+
+Mixins
+======
+- :py:class:`BeamSelectionMixin`
+
+Tasks
+=====
+- :py:class:`BaseLoadFiles`
+- :py:class:`LoadFilesFromParams`
+- :py:class:`LoadFiles`
+- :py:class:`LoadFilesForCatalog`
+- :py:class:`MakeAbsorberCatalog`
+- :py:class:`CreateAbsorberStacks`
+- :py:class:`UpdateAbsorberStacks`
+"""
 
 import gc
 import json
@@ -22,6 +37,7 @@ from cora import foreground
 from draco.core.io import get_telescope
 
 from .containers import HFBAbsorberCatalog, HFBData, HFBHighResRingMapStack, HFBReader
+from .util import ra_window_pixels
 
 
 class BeamSelectionMixin:
@@ -458,6 +474,163 @@ class LoadFiles(LoadFilesFromParams):
         super().setup()
 
 
+class LoadFilesForCatalog(io.BaseLoadFiles):
+    """Load HFB data for the absorbers in a catalog.
+
+    Works like LoadFiles but computes the frequency selection as the union
+    of the absorbers' frequency windows, loading only those channels, then
+    handing back one time-chunk per file group.
+
+    The absorber parameters are stored as arrays in each returned
+    container's attributes ('source_names', 'source_ra', 'source_dec',
+    'source_freq') and are propagated through the pipeline via
+    'attrs_from'.
+
+    Attributes
+    ----------
+    n_coarse : int
+        Coarse channels either side of the one nearest each absorber's
+        frequency (i.e. 2 * n_coarse + 1 channels), clipped at the true
+        telescope band edges. Default is 6.
+    """
+
+    n_coarse = config.Property(proptype=int, default=6)
+
+    _fgroup_ptr = 0
+
+    def setup(self, manager, filelists, catalog):
+        """Parse the file groups, take the catalog and set up the observer.
+
+        Parameters
+        ----------
+        manager : drift.core.telescope.TransitTelescope
+            A Telescope object holding the geographic location of the telescope.
+        filelists : list
+            A specification of the set of files for the day.
+        catalog : HFBAbsorberCatalog
+            The catalog of absorbers to load.
+        """
+        self.observer = get_telescope(manager)
+
+        if not isinstance(filelists, list):
+            raise RuntimeError("Argument must be a list.")
+
+        self.filegroups = []
+        for flist in filelists:
+            if isinstance(flist, tuple):
+                fgroup = {"files": flist[0], "time_range": flist[1]}
+            elif isinstance(flist, list):
+                fgroup = {"files": flist, "time_range": (None, None)}
+            elif isinstance(flist, str | Path):
+                fgroup = {"files": [flist], "time_range": (None, None)}
+            else:
+                raise ValueError(
+                    f"Did not expect to get an object of type {type(flist)}"
+                )
+            # Avoid adding filegroups with empty filelists (the output of
+            # QueryDatabase with return_intervals can include days with no files)
+            if fgroup["files"]:
+                self.filegroups.append(fgroup)
+
+        self.log.info(f"Will iterate over {len(self.filegroups)} file groups.")
+
+        # Take the absorber parameters from the catalog container
+        if not isinstance(catalog, HFBAbsorberCatalog):
+            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
+        catalog.validate()
+
+        names = np.array([str(n) for n in catalog.index_map["object_id"]])
+        freqs = np.asarray(catalog["absorber"]["freq"][:])
+        freq_ax = np.linspace(
+            self.observer.freq_start,
+            self.observer.freq_end,
+            self.observer.num_freq,
+            endpoint=False,
+        )
+        nfreq = len(freq_ax)
+
+        # Per-absorber coarse-channel windows
+        _slices = []
+        for f0 in freqs:
+            i0 = int(np.argmin(np.abs(freq_ax - f0)))
+            _slices.append(
+                slice(max(0, i0 - self.n_coarse), min(nfreq, i0 + self.n_coarse + 1))
+            )
+
+        # Union of all absorber channel windows, as a sorted list of indices.
+        self.freq_sel = sorted(
+            {ch for sl in _slices for ch in range(sl.start, sl.stop)}
+        )
+
+        self.log.info(
+            f"Catalog has {len(names)} absorbers, {len(self.freq_sel)} total "
+            f"channels to distribute across {mpitools.size} MPI ranks."
+        )
+
+        self._source_names = names
+        self._source_ra = np.asarray(catalog["position"]["ra"][:])
+        self._source_dec = np.asarray(catalog["position"]["dec"][:])
+        self._source_freq = freqs
+
+    def process(self):
+        """Load the next file group for all absorbers.
+
+        Returns
+        -------
+        tstream : HFBData
+            One time-chunk with all absorbers' frequency channels
+            distributed across MPI ranks.
+        """
+        gc.collect()
+
+        if self._fgroup_ptr >= len(self.filegroups):
+            raise exceptions.PipelineStopIteration
+
+        filegroup = self.filegroups[self._fgroup_ptr]
+        self._fgroup_ptr += 1
+
+        self.log.info(f"Reading file group {self._fgroup_ptr}/{len(self.filegroups)}.")
+
+        time_range = filegroup.get("time_range", (None, None))
+
+        # Load each file into an HFBData container, applying the union
+        # frequency selection, then concatenate along the time axis
+        fgroup_containers = []
+        for fname in filegroup["files"]:
+            cont = HFBData.from_file(
+                fname,
+                distributed=self.distributed,
+                freq_sel=self.freq_sel,
+            )
+            fgroup_containers.append(cont)
+
+        tstream = (
+            _concatenate_time(fgroup_containers)
+            if len(fgroup_containers) > 1
+            else fgroup_containers[0]
+        )
+
+        # Redistribute so channels are evenly spread across MPI ranks
+        tstream.redistribute("freq")
+
+        # Find the time to use to compute the container's LSD
+        if time_range and time_range != (None, None):
+            container_time = float(np.mean(time_range))
+        else:
+            container_time = 0.5 * (float(tstream.time[0]) + float(tstream.time[-1]))
+
+        lsd = int(self.observer.unix_to_lsd(container_time))
+        tstream.attrs["lsd"] = lsd
+        tstream.attrs["tag"] = f"lsd_{lsd}"
+
+        tstream.attrs["source_names"] = self._source_names
+        tstream.attrs["source_ra"] = self._source_ra
+        tstream.attrs["source_dec"] = self._source_dec
+        tstream.attrs["source_freq"] = self._source_freq
+
+        return tstream
+
+
 class MakeAbsorberCatalog(base.ContainerTask):
     """Build an HFBAbsorberCatalog from JSON target lists, resolving calibrators.
 
@@ -691,304 +864,6 @@ class MakeAbsorberCatalog(base.ContainerTask):
         return cat
 
 
-class LoadFilesForCatalog(io.BaseLoadFiles):
-    """Load HFB data for the absorbers in a catalog.
-
-    Works like LoadFiles but computes the frequency selection as the union
-    of the absorbers' frequency windows, loading only those channels, then
-    handing back one time-chunk per file group.
-
-    The absorber parameters are stored as arrays in each returned
-    container's attributes ('source_names', 'source_ra', 'source_dec',
-    'source_freq') and are propagated through the pipeline via
-    'attrs_from'.
-
-    Attributes
-    ----------
-    n_coarse : int
-        Coarse channels either side of the one nearest each absorber's
-        frequency (i.e. 2 * n_coarse + 1 channels), clipped at the true
-        telescope band edges. Default is 6.
-    """
-
-    n_coarse = config.Property(proptype=int, default=6)
-
-    _fgroup_ptr = 0
-
-    def setup(self, manager, filelists, catalog):
-        """Parse the file groups, take the catalog and set up the observer.
-
-        Parameters
-        ----------
-        manager : drift.core.telescope.TransitTelescope
-            A Telescope object holding the geographic location of the telescope.
-        filelists : list
-            A specification of the set of files for the day.
-        catalog : HFBAbsorberCatalog
-            The catalog of absorbers to load.
-        """
-        self.observer = get_telescope(manager)
-
-        if not isinstance(filelists, list):
-            raise RuntimeError("Argument must be a list.")
-
-        self.filegroups = []
-        for flist in filelists:
-            if isinstance(flist, tuple):
-                fgroup = {"files": flist[0], "time_range": flist[1]}
-            elif isinstance(flist, list):
-                fgroup = {"files": flist, "time_range": (None, None)}
-            elif isinstance(flist, str | Path):
-                fgroup = {"files": [flist], "time_range": (None, None)}
-            else:
-                raise ValueError(
-                    f"Did not expect to get an object of type {type(flist)}"
-                )
-            # Avoid adding filegroups with empty filelists (the output of
-            # QueryDatabase with return_intervals can include days with no files)
-            if fgroup["files"]:
-                self.filegroups.append(fgroup)
-
-        self.log.info(f"Will iterate over {len(self.filegroups)} file groups.")
-
-        # Take the absorber parameters from the catalog container
-        if not isinstance(catalog, HFBAbsorberCatalog):
-            raise TypeError(f"Expected an HFBAbsorberCatalog, got {type(catalog)}.")
-        catalog.validate()
-
-        names = np.array([str(n) for n in catalog.index_map["object_id"]])
-        freqs = np.asarray(catalog["absorber"]["freq"][:])
-        freq_ax = np.linspace(
-            self.observer.freq_start,
-            self.observer.freq_end,
-            self.observer.num_freq,
-            endpoint=False,
-        )
-        nfreq = len(freq_ax)
-
-        # Per-absorber coarse-channel windows
-        _slices = []
-        for f0 in freqs:
-            i0 = int(np.argmin(np.abs(freq_ax - f0)))
-            _slices.append(
-                slice(max(0, i0 - self.n_coarse), min(nfreq, i0 + self.n_coarse + 1))
-            )
-
-        # Union of all absorber channel windows, as a sorted list of indices.
-        self.freq_sel = sorted(
-            {ch for sl in _slices for ch in range(sl.start, sl.stop)}
-        )
-
-        self.log.info(
-            f"Catalog has {len(names)} absorbers, {len(self.freq_sel)} total "
-            f"channels to distribute across {mpitools.size} MPI ranks."
-        )
-
-        self._source_names = names
-        self._source_ra = np.asarray(catalog["position"]["ra"][:])
-        self._source_dec = np.asarray(catalog["position"]["dec"][:])
-        self._source_freq = freqs
-
-    def process(self):
-        """Load the next file group for all absorbers.
-
-        Returns
-        -------
-        tstream : HFBData
-            One time-chunk with all absorbers' frequency channels
-            distributed across MPI ranks.
-        """
-        gc.collect()
-
-        if self._fgroup_ptr >= len(self.filegroups):
-            raise exceptions.PipelineStopIteration
-
-        filegroup = self.filegroups[self._fgroup_ptr]
-        self._fgroup_ptr += 1
-
-        self.log.info(f"Reading file group {self._fgroup_ptr}/{len(self.filegroups)}.")
-
-        time_range = filegroup.get("time_range", (None, None))
-
-        # Load each file into an HFBData container, applying the union
-        # frequency selection, then concatenate along the time axis
-        fgroup_containers = []
-        for fname in filegroup["files"]:
-            cont = HFBData.from_file(
-                fname,
-                distributed=self.distributed,
-                freq_sel=self.freq_sel,
-            )
-            fgroup_containers.append(cont)
-
-        tstream = (
-            _concatenate_time(fgroup_containers)
-            if len(fgroup_containers) > 1
-            else fgroup_containers[0]
-        )
-
-        # Redistribute so channels are evenly spread across MPI ranks
-        tstream.redistribute("freq")
-
-        # Find the time to use to compute the container's LSD
-        if time_range and time_range != (None, None):
-            container_time = float(np.mean(time_range))
-        else:
-            container_time = 0.5 * (float(tstream.time[0]) + float(tstream.time[-1]))
-
-        lsd = int(self.observer.unix_to_lsd(container_time))
-        tstream.attrs["lsd"] = lsd
-        tstream.attrs["tag"] = f"lsd_{lsd}"
-
-        tstream.attrs["source_names"] = self._source_names
-        tstream.attrs["source_ra"] = self._source_ra
-        tstream.attrs["source_dec"] = self._source_dec
-        tstream.attrs["source_freq"] = self._source_freq
-
-        return tstream
-
-
-class UpdateAbsorberStacks(base.ContainerTask):
-    """Merge each absorber's cutout from ExtractAbsorberCutouts into its stack file.
-
-    The cutout is written into this day's csd slot of <stack_dir>/<name>.h5, which
-    must already exist with matching axes: 'beam_ew', 'ra' and 'freq' must equal
-    the stack file's axes exactly; 'el' only has to have the same length.
-
-    A csd slot that already holds data is overwritten. When a cutout has weights
-    all zero, nothing is updated.
-
-    This task takes the container ExtractAbsorberCutouts produced ('csd' in its attrs,
-    one named group per absorber).
-
-    Attributes
-    ----------
-    stack_dir : str
-        Directory holding the per-absorber stack files.
-    """
-
-    stack_dir = config.Property(proptype=str)
-
-    def process(self, cont):
-        """Merge this day's cutouts into their stack files.
-
-        Parameters
-        ----------
-        cont : caput.memdata.MemDiskGroup
-            The output of ExtractAbsorberCutouts with 'cont.attrs["csd"]'
-        """
-        if cont is None:
-            self.log.warning("Nothing to merge (no cutouts this day).")
-            return
-
-        csd = int(cont.attrs["csd"])
-        names = list(cont.keys())
-
-        error = None
-        nsaved = 0
-        nskipped = 0
-
-        if self.comm.rank == 0:
-            for name in names:
-                grp = cont[name]
-                weight = grp["weight"][:]
-
-                # No usable data for this absorber today.
-                if not np.any(weight):
-                    self.log.info(
-                        f"Absorber {name}: all weights zero at csd={csd}, "
-                        "leaving its stack untouched."
-                    )
-                    nskipped += 1
-                    continue
-
-                axes = {
-                    "beam_ew": grp["beam_ew"][:],
-                    "el": grp["el"][:],
-                    "ra": grp["ra"][:],
-                    "freq": grp["freq"][:],
-                }
-                data = {"hfb": grp["hfb"][:], "weight": grp["weight"][:]}
-                try:
-                    self._merge_into_stack(name, csd, axes, data)
-                    nsaved += 1
-                except Exception as e:
-                    self.log.exception(f"Absorber {name}: stack update failed: {e}")
-                    error = f"{name}: {type(e).__name__}: {e}"
-                    break
-
-        # Stop the job cleanly if it failed.
-        error, nsaved, nskipped = self.comm.bcast((error, nsaved, nskipped), root=0)
-        if error is not None:
-            raise RuntimeError(f"UpdateAbsorberStacks failed on rank 0: {error}")
-        self.log.info(
-            f"Merged {nsaved}/{len(names)} cutouts into their stacks "
-            f"({nskipped} skipped: all weights zero)."
-        )
-
-    def _merge_into_stack(self, name, csd, axes, data):
-        """Write one absorber's cutout into its stack file. Rank 0 only.
-
-        Parameters
-        ----------
-        name : str
-            Absorber name; the stack file is <stack_dir>/<name>.h5.
-        csd : int
-            Day this cutout is from.
-        axes : dict
-            {'beam_ew', 'el', 'ra', 'freq'} -> axis values of the cutout.
-            beam_ew, ra and freq must equal the stack file's axes while el only has to
-            have the same length.
-        data : dict
-            Dataset name -> array, e.g. {'hfb': ..., 'weight': ...}.
-        """
-        path = os.path.join(self.stack_dir, f"{name}.h5")
-
-        if not os.path.exists(path):
-            raise RuntimeError(
-                f"{name}: stack file {path} does not exist. Stack files need to be "
-                "created with ch_pipeline.hfb.io.create_absorber_stacks()"
-                "before running this task"
-            )
-
-        # Open on disk in append mode
-        stack = HFBHighResRingMapStack.from_file(
-            path, ondisk=True, mode="a", distributed=False
-        )
-
-        try:
-            for axis, values in axes.items():
-                existing = np.asarray(stack.index_map[axis])
-                values = np.asarray(values)
-                if existing.shape != values.shape:
-                    raise RuntimeError(
-                        f"{name}: cutout '{axis}' axis has shape {values.shape}, "
-                        f"but stack file {path} has {existing.shape}."
-                    )
-                if axis != "el" and not np.allclose(
-                    existing, values, rtol=1e-5, atol=1e-8
-                ):
-                    raise RuntimeError(
-                        f"{name}: cutout '{axis}' axis values differ from stack "
-                        f"file {path} (same shape, different values)."
-                    )
-
-            csd_index = np.asarray(stack.index_map["csd"])
-            matches = np.flatnonzero(csd_index == csd)
-            if matches.size == 0:
-                raise RuntimeError(
-                    f"{name}: csd={csd} is outside the range of stack file "
-                    f"{path} ({csd_index.min()}-{csd_index.max()}). Recreate "
-                    "the stacks with a wider csd_range."
-                )
-            ic = int(matches[0])
-
-            for dset, arr in data.items():
-                stack[dset][ic] = arr
-        finally:
-            stack.close()
-
-
 class CreateAbsorberStacks(base.ContainerTask):
     """Create empty per-source stack files for UpdateAbsorberStacks to fill.
 
@@ -1098,10 +973,6 @@ class CreateAbsorberStacks(base.ContainerTask):
         ncreated : int
             Number of files written.
         """
-        # Local import: analysis.py imports from this module, so a top-level
-        # import would be circular.
-        from .analysis import ra_window_pixels
-
         csd_array = np.arange(int(self.csd_range[0]), int(self.csd_range[1]))
 
         stack_dir = Path(self.stack_dir)
@@ -1235,3 +1106,144 @@ class CreateAbsorberStacks(base.ContainerTask):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+
+class UpdateAbsorberStacks(base.ContainerTask):
+    """Merge each absorber's cutout from ExtractAbsorberCutouts into its stack file.
+
+    The cutout is written into this day's csd slot of <stack_dir>/<name>.h5, which
+    must already exist with matching axes: 'beam_ew', 'ra' and 'freq' must equal
+    the stack file's axes exactly; 'el' only has to have the same length.
+
+    A csd slot that already holds data is overwritten. When a cutout has weights
+    all zero, nothing is updated.
+
+    This task takes the container ExtractAbsorberCutouts produced ('csd' in its attrs,
+    one named group per absorber).
+
+    Attributes
+    ----------
+    stack_dir : str
+        Directory holding the per-absorber stack files.
+    """
+
+    stack_dir = config.Property(proptype=str)
+
+    def process(self, cont):
+        """Merge this day's cutouts into their stack files.
+
+        Parameters
+        ----------
+        cont : caput.memdata.MemDiskGroup
+            The output of ExtractAbsorberCutouts with 'cont.attrs["csd"]'
+        """
+        if cont is None:
+            self.log.warning("Nothing to merge (no cutouts this day).")
+            return
+
+        csd = int(cont.attrs["csd"])
+        names = list(cont.keys())
+
+        error = None
+        nsaved = 0
+        nskipped = 0
+
+        if self.comm.rank == 0:
+            for name in names:
+                grp = cont[name]
+                weight = grp["weight"][:]
+
+                # No usable data for this absorber today.
+                if not np.any(weight):
+                    self.log.info(
+                        f"Absorber {name}: all weights zero at csd={csd}, "
+                        "leaving its stack untouched."
+                    )
+                    nskipped += 1
+                    continue
+
+                axes = {
+                    "beam_ew": grp["beam_ew"][:],
+                    "el": grp["el"][:],
+                    "ra": grp["ra"][:],
+                    "freq": grp["freq"][:],
+                }
+                data = {"hfb": grp["hfb"][:], "weight": grp["weight"][:]}
+                try:
+                    self._merge_into_stack(name, csd, axes, data)
+                    nsaved += 1
+                except Exception as e:
+                    self.log.exception(f"Absorber {name}: stack update failed: {e}")
+                    error = f"{name}: {type(e).__name__}: {e}"
+                    break
+
+        # Stop the job cleanly if it failed.
+        error, nsaved, nskipped = self.comm.bcast((error, nsaved, nskipped), root=0)
+        if error is not None:
+            raise RuntimeError(f"UpdateAbsorberStacks failed on rank 0: {error}")
+        self.log.info(
+            f"Merged {nsaved}/{len(names)} cutouts into their stacks "
+            f"({nskipped} skipped: all weights zero)."
+        )
+
+    def _merge_into_stack(self, name, csd, axes, data):
+        """Write one absorber's cutout into its stack file. Rank 0 only.
+
+        Parameters
+        ----------
+        name : str
+            Absorber name; the stack file is <stack_dir>/<name>.h5.
+        csd : int
+            Day this cutout is from.
+        axes : dict
+            {'beam_ew', 'el', 'ra', 'freq'} -> axis values of the cutout.
+            beam_ew, ra and freq must equal the stack file's axes while el only has to
+            have the same length.
+        data : dict
+            Dataset name -> array, e.g. {'hfb': ..., 'weight': ...}.
+        """
+        path = os.path.join(self.stack_dir, f"{name}.h5")
+
+        if not os.path.exists(path):
+            raise RuntimeError(
+                f"{name}: stack file {path} does not exist. Stack files need to be "
+                "created with ch_pipeline.hfb.io.CreateAbsorberStacks "
+                "before running this task."
+            )
+
+        # Open on disk in append mode
+        stack = HFBHighResRingMapStack.from_file(
+            path, ondisk=True, mode="a", distributed=False
+        )
+
+        try:
+            for axis, values in axes.items():
+                existing = np.asarray(stack.index_map[axis])
+                values = np.asarray(values)
+                if existing.shape != values.shape:
+                    raise RuntimeError(
+                        f"{name}: cutout '{axis}' axis has shape {values.shape}, "
+                        f"but stack file {path} has {existing.shape}."
+                    )
+                if axis != "el" and not np.allclose(
+                    existing, values, rtol=1e-5, atol=1e-8
+                ):
+                    raise RuntimeError(
+                        f"{name}: cutout '{axis}' axis values differ from stack "
+                        f"file {path} (same shape, different values)."
+                    )
+
+            csd_index = np.asarray(stack.index_map["csd"])
+            matches = np.flatnonzero(csd_index == csd)
+            if matches.size == 0:
+                raise RuntimeError(
+                    f"{name}: csd={csd} is outside the range of stack file "
+                    f"{path} ({csd_index.min()}-{csd_index.max()}). Recreate "
+                    "the stacks with a wider csd_range."
+                )
+            ic = int(matches[0])
+
+            for dset, arr in data.items():
+                stack[dset][ic] = arr
+        finally:
+            stack.close()
