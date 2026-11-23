@@ -1,5 +1,4 @@
-"""
-CHIME HFB Pipeline
+"""CHIME HFB Pipeline.
 
 .. currentmodule:: ch_pipeline.hfb
 
@@ -10,4 +9,8 @@ CHIME HFB Pipeline
     containers
     flagging
     io
+    process
+    select
+    sidereal
+    util
 """
