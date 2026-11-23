@@ -4,6 +4,8 @@ import copy
 import json
 import logging
 import os
+import resource
+import sys
 import time
 import warnings
 from typing import ClassVar
@@ -2873,21 +2875,33 @@ def _merge_flags(rfi, flag, nel_local):
 
 
 def _log_memory(task, label):
-    """Log the largest resident memory of a rank and of a node (collective)."""
+    """Log the largest resident memory of a rank and of a node (collective).
+
+    Both are the memory at the time of the call.  The peak of a rank since the start
+    of the job (its largest resident memory at any time, shared arrays included)
+    is logged too, with the rank that holds it: memory that is taken and released
+    between two calls shows only there.
+    """
     # Private memory of the rank: the arrays shared by the ranks of a node (see
     # _NodeSharedFreq) count once, in the node total
     mi = psutil.Process().memory_info()
     rss = mi.rss - getattr(mi, "shared", 0)
     vm = psutil.virtual_memory()
     node = vm.total - vm.available
+    # ru_maxrss is in bytes on macOS and in kilobytes elsewhere
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak *= 1 if sys.platform == "darwin" else 1024
     comm = task.comm
+    peak_rank = 0
     if comm is not None and comm.size > 1:
         rss = comm.allreduce(rss, op=MPI.MAX)
         node = comm.allreduce(node, op=MPI.MAX)
+        peak, peak_rank = comm.allreduce((float(peak), comm.rank), op=MPI.MAXLOC)
     if comm is None or comm.rank == 0:
         task.log.info(
             f"Memory ({label}): largest rank {rss / 2**30:.1f} GiB (private), largest "
-            f"node {node / 2**30:.0f} GiB."
+            f"node {node / 2**30:.0f} GiB; largest peak of a rank so far "
+            f"{peak / 2**30:.1f} GiB (rank {peak_rank})."
         )
 
 
@@ -5554,6 +5568,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                         else:
                             vplus[gg, bb, psl] = vp[0]
             t_bands = time.time() - t_pass
+            _log_memory(
+                self, f"matched filter, pass {ipass + 1}/{npass} after the bands"
+            )
 
             # Each band on its own
             for op, (gg, part) in enumerate(bsrc):
@@ -5654,13 +5671,19 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     for iw in range(len(rm_wins)):
                         coef_w = sb[:, np.newaxis] * rm_coef_w[iw]
                         jw = iw - 1 if base_win else iw
+                        # The sky term of a rotated window is a copy of its bands at
+                        # this elevation: made when the window is searched (a
+                        # function), so that one is held at a time
                         if jw < 0:
                             sky_w = self._rm_sky(le, sb, lam, qvec, vplus, vminus, vrot)
                             nq_w, nu_w = numer[1, :, le], numer[2, :, le]
                         else:
-                            sky_w = self._rm_sky(
-                                le, sb, lam, qvec, None, None, vrot_win[jw]
-                            )
+
+                            def sky_w(jw=jw, le=le, sb=sb, lam=lam, qvec=qvec):
+                                return self._rm_sky(
+                                    le, sb, lam, qvec, None, None, vrot_win[jw]
+                                )
+
                             nq_w, nu_w = qu_win[jw, 0, :, le], qu_win[jw, 1, :, le]
                         wsearch.append((nq_w, nu_w, coef_w, rm_w[iw], sky_w))
                     nq_0, nu_0, coef_0, rm_0, sky_0 = wsearch[0]
@@ -5995,7 +6018,9 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         windows : list of tuple, optional
             Further RM windows (``rm_windows``), each ``(nq, nu, coef, rm, sky)`` as
             above, searched with the same response, variance and track; the maximum
-            is over all the windows.
+            is over all the windows.  ``sky`` may be a function that returns the sky
+            term: it is called when the window is searched and its result released
+            after, so that the terms of the windows are not held together.
 
         Returns
         -------
@@ -6054,6 +6079,8 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
         rm_all = np.concatenate([w[3] for w in wins])
         koff = 0
         for wq, wu, wcoef, wrm, wsky in wins:
+            if callable(wsky):
+                wsky = wsky()
             z = (wq + 1.0j * wu).astype(np.complex64).reshape(nb, -1)
             for c0 in range(0, wrm.size, self.rm_chunk):
                 ks = slice(c0, min(c0 + self.rm_chunk, wrm.size))
@@ -6086,6 +6113,7 @@ class TransientMatchedFilterSkyNoise(TransientMatchedFilter):
                     if jj > 0 and jj + 1 in durations:
                         update(durations.index(jj + 1), acc, accv, k0)
             koff += wrm.size
+            wsky = z = None
 
         tmax = np.full((ndur, nx, nra), -1.0, dtype=np.float32)
         pol_amp = np.zeros((ndur, nx, nra), dtype=np.float32)
