@@ -246,7 +246,7 @@ class QueryDatabase(tasklib.base.MPILoggedTask):
                 f.include_RA_interval(self.start_RA, self.end_RA)
             elif self.start_RA or self.start_RA:
                 self.log.warning(
-                    "One but not both of start_RA and end_RA " "are set. Ignoring both."
+                    "One but not both of start_RA and end_RA are set. Ignoring both."
                 )
 
             f.filter_acqs(di.ArchiveInst.name == self.instrument)

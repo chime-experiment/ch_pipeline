@@ -2605,7 +2605,6 @@ class ReconstructGainError(tasklib.base.ContainerTask):
 
         # The following containers are only output if requested
         if self.full_output:
-
             # Create output LPF gain
             out_lpf = containers.GainData(
                 freq=freq,
@@ -2671,7 +2670,6 @@ class ReconstructGainError(tasklib.base.ContainerTask):
 
         # Loop over times
         for tt, timestamp in enumerate(unix_times):
-
             # Make sure the flags can be factorized into an input flag and frequency flag
             fmeas = flag[..., tt]
 
@@ -2699,12 +2697,10 @@ class ReconstructGainError(tasklib.base.ContainerTask):
 
             rcond = self.rcond
             for ii in range(self.niter):
-
                 self.log.info(f"Iteration {ii} of {self.niter}.")
 
                 # Low-pass filter the gains
                 if self.simple_lpf and (ii == (self.niter - 1)):
-
                     # If the simple LPF was requested, then we first need to interpolate
                     # over the masked frequencies.  This is slow, so we only do this for
                     # the last iteration.  Otherwise we use the faster DAYENUREST method
@@ -2719,7 +2715,6 @@ class ReconstructGainError(tasklib.base.ContainerTask):
                     # by applying DAYENU.  If the signal covariance matrix inversion fails,
                     # then we increase the condition number (rcond) and try again.
                     if self.remove_hpf:
-
                         try:
                             H = self._get_hpf(cov, freq_flag, rcond=rcond)
 
@@ -2751,7 +2746,6 @@ class ReconstructGainError(tasklib.base.ContainerTask):
                 ratio = gmeas * inv_ginterp
 
                 if ii < (self.niter - 1):
-
                     # Collapse over feeds
                     avg_ratio = self._average_over_feeds(ratio)
 
@@ -2934,7 +2928,6 @@ class ReconstructGainError(tasklib.base.ContainerTask):
         cov = np.zeros((nfreq, nfreq), dtype=complex)
 
         for tt, (tc, tw, eps) in enumerate(zip(*args)):
-
             self.log.info(
                 f"Filter component {tt}: "
                 f"tau_c = {tc:0.2f} usec, "
@@ -3059,14 +3052,12 @@ class CorrectGainError(tasklib.base.ContainerTask):
         gains.redistribute("freq")
 
         if "time" in gains.index_map:
-
             self.timestamp = gains.time
 
             self.frac_error = gains.gain[:].local_array
             self.flag = gains.weight[:].local_array > 0.0
 
         elif "time" in gains.attrs:
-
             self.timestamp = np.atleast_1d(gains.attrs["time"])
 
             self.frac_error = gains.gain[:].local_array[:, :, np.newaxis]
@@ -3180,7 +3171,6 @@ class CorrectGainError(tasklib.base.ContainerTask):
 
         # Loop over the unique combinations of gains and input flags
         for uu in range(nuniq):
-
             self.log.info(
                 f"Processing unique gains/flags {uu} of {nuniq}. "
                 f"Time index is {uindex[uu, 0]}.  Flag index is {uindex[uu, 1]}."
@@ -3206,7 +3196,6 @@ class CorrectGainError(tasklib.base.ContainerTask):
             vis = np.where(conj, vis.conj(), vis)
 
             for ff in range(nfreq):
-
                 corr = np.bincount(
                     stack, weights=vis[ff].real, minlength=nstack + 1
                 ) + 1.0j * np.bincount(
@@ -3409,7 +3398,6 @@ class ConcatenateGains(tasklib.base.ContainerTask):
         out.redistribute("freq")
 
         for tt, (gg, ii) in enumerate(index):
-
             gain = gains[gg]
 
             if "time" in gain.index_map:

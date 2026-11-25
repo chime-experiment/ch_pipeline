@@ -160,7 +160,7 @@ def item_list(revision, long, human, time):
     "-n",
     "--number",
     type=int,
-    default=10,
+    default=1,
     help="The maximum number of jobs to be submitted this time.",
 )
 @click.option(

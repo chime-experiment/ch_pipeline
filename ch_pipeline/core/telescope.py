@@ -237,7 +237,6 @@ class CHIME(telescope.PolarisedTelescope):
         """
         # Do I/O, and resolve the layout, only on rank 0
         if mpitools.rank == 0:
-
             # Get the path of the layout file
             from importlib.resources import files
 
@@ -286,7 +285,6 @@ class CHIME(telescope.PolarisedTelescope):
 
             # If not, find which layout was in use at the requested time
             else:
-
                 # The last 'end' element is None, change it to today
                 lay_end[-1] = datetime.datetime.today()
 
@@ -746,12 +744,12 @@ class CHIME(telescope.PolarisedTelescope):
 
 def _flat_top_gauss6(x, A, sig, x0):
     """Flat-top gaussian. Power of 6."""
-    return A * np.exp(-abs((x - x0) / sig) ** 6)
+    return A * np.exp(-(abs((x - x0) / sig) ** 6))
 
 
 def _flat_top_gauss3(x, A, sig, x0):
     """Flat-top gaussian. Power of 3."""
-    return A * np.exp(-abs((x - x0) / sig) ** 3)
+    return A * np.exp(-(abs((x - x0) / sig) ** 3))
 
 
 class CHIMEParameterizedBeam(CHIME):

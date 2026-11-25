@@ -2319,7 +2319,6 @@ class DataFlagger(tasklib.base.ContainerTask):
 
         # Multiply weight mask by existing weight dataset
         if np.any(~weight_mask):
-
             if apply_input_flags and "input" not in waxis:
                 # Use apply_gain function to apply mask based on product map
                 weight_mask = weight_mask.astype(weight.dtype)
@@ -3152,7 +3151,6 @@ class MaskFromCatalogBase(CatalogBase):
 
         # Loop over sources
         for ii in np.ndindex(nfreq, nsource):
-
             if self.has_redshift:
                 freq_diff = (freq[ii[0]] - src_freq[ii[1]]) / src_freq_err[ii[1]]
                 if abs(freq_diff) > self.nsigma_freq:
@@ -3321,7 +3319,6 @@ class TaperFromCatalogBase(CatalogBase):
 
         # Loop over sources
         for ff, ss in np.ndindex(nfreq, nsource):
-
             if self.has_redshift:
                 freq_diff = abs((freq[ff] - src_freq[ss]) / window_freq[ss])
                 if freq_diff > (1.0 + self.spectral_taper):

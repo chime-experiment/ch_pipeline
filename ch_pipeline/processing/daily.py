@@ -805,10 +805,10 @@ class DailyProcessing(base.ProcessingType):
         },
         # System modules to use/load
         "modpath": "/project/rpp-chime/chime/chime_env/modules/modulefiles",
-        "modlist": "chime/python/2025.10",
+        "modlist": "chime/python/2026.10",
         "nfreq_delay": 1025,
         # Job params
-        "time": 90,  # How long in minutes?
+        "time": 70,  # How long in minutes?
         "nodes": 4,  # Number of nodes to use.
         "ompnum": 8,  # Number of OpenMP threads
         "pernode": 24,  # Jobs per node
