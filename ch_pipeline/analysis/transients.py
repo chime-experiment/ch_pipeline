@@ -30,7 +30,7 @@ from caput.util import mpitools
 from ch_ephem import sources as ch_sources
 from ch_ephem.observers import chime
 from draco.analysis.ringmapmaker import find_grid_indices
-from draco.analysis.transform import MixTwoDatasets
+from draco.analysis.transform import Downselect, MixTwoDatasets
 from draco.core import containers as draco_containers
 from draco.core import io
 from draco.util import tools
@@ -8890,6 +8890,74 @@ def _select_axis_range(cont, axis, lo, hi):
     copy_datasets_filter(cont, out, selection={axis: sel}, copy_without_selection=True)
 
     return out, keep
+
+
+class DownselectDatasets(Downselect):
+    """Apply axis selections to some of the datasets of a container.
+
+    As draco's Downselect, which copies every dataset that has one of the selected
+    axes, but only the listed datasets are copied, so the others never take memory.
+    For example for the fold product, which keeps the amplitudes and weights of the
+    matched filter trials of I and V but not the datasets a search in Stokes
+    parameters keeps with them (_STOKES_TRIAL_EXTRAS): they have no polarisation
+    axis, so selecting polarisations does not remove them.
+
+    Attributes
+    ----------
+    datasets : list of str
+        Names of the datasets to keep.  Those the container does not have are
+        ignored, but it must have at least one.
+    """
+
+    datasets = config.list_type(type_=str)
+
+    def process(self, data):
+        """Apply the selections.
+
+        Parameters
+        ----------
+        data : container
+            For example TransientMatchedFilterTrials.  Not modified.
+
+        Returns
+        -------
+        out : same type as ``data``
+            A copy of the listed datasets with the selections applied.
+        """
+        names = [name for name in self.datasets if name in data.datasets]
+        if not names:
+            raise ValueError(
+                f"The container has none of the datasets {list(self.datasets)}."
+            )
+
+        # The selection along each axis, as in Downselect
+        sel = {}
+        for key in self.selections:
+            axis, type_ = key.rsplit("_", 1)
+            ax_sel = self._sel.get(f"{axis}_sel")
+            if ax_sel is None:
+                continue
+            if type_ == "map":
+                imap = list(data.index_map[axis])
+                ax_sel = [imap.index(x) for x in ax_sel]
+            sel[axis] = ax_sel
+
+        out = data.__class__(
+            axes_from=data,
+            attrs_from=data,
+            skip_datasets=True,
+            distributed=data.distributed,
+            comm=data.comm,
+            **{
+                axis: mpiarray._apply_sel(data.index_map[axis], ax_sel, 0)
+                for axis, ax_sel in sel.items()
+            },
+        )
+        # copy_datasets_filter modifies the selection it is given
+        for name in names:
+            copy_datasets_filter(data.datasets[name], out, selection=dict(sel))
+
+        return out
 
 
 class SelectRARange(tasklib.base.ContainerTask):
