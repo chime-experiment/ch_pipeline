@@ -1,4 +1,27 @@
-"""HFB containers."""
+"""HFB containers.
+
+Containers
+==========
+- :py:class:`HFBContainer`
+- :py:class:`HFBBeamContainer`
+- :py:class:`HFBData`
+- :py:class:`HFBReader`
+- :py:class:`HFBTimeAverage`
+- :py:class:`HFBHighResContainer`
+- :py:class:`HFBHighResData`
+- :py:class:`HFBHighResTimeAverage`
+- :py:class:`HFBHighResSpectrum`
+- :py:class:`HFBRingMapBase`
+- :py:class:`HFBBeamRingMap`
+- :py:class:`HFBRingMap`
+- :py:class:`HFBHighResRingMap`
+- :py:class:`HFBHighResRingMapStack`
+- :py:class:`HFBHighResBeamAvgRingMap`
+- :py:class:`HFBSearchResult`
+- :py:class:`HFBRFIMask`
+- :py:class:`HFBDirectionalRFIMaskBitmap`
+- :py:class:`HFBAbsorberCatalog`
+"""
 
 from functools import cached_property
 from typing import ClassVar
@@ -251,42 +274,6 @@ class HFBReader(tod.TODReader):
             datasets=self.dataset_sel,
             **kwargs,
         )
-
-
-class HFBRFIMask(TODContainer, FreqContainer):
-    """Container for holding a mask indicating HFB data free of RFI events.
-
-    The `sens` dataset (if initialized) holds the sensitivity metric data.
-    """
-
-    _axes = ("subfreq",)
-
-    _dataset_spec: ClassVar = {
-        "mask": {
-            "axes": ["freq", "subfreq", "time"],
-            "dtype": bool,
-            "initialise": True,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-        "sens": {
-            "axes": ["freq", "subfreq", "time"],
-            "dtype": np.float32,
-            "initialise": False,
-            "distributed": True,
-            "distributed_axis": "freq",
-        },
-    }
-
-    @property
-    def mask(self):
-        """Get the mask dataset."""
-        return self.datasets["mask"]
-
-    @property
-    def sens(self):
-        """Get the sensitivity metric dataset."""
-        return self.datasets["sens"]
 
 
 class HFBTimeAverage(FreqContainer, HFBBeamContainer):
@@ -672,6 +659,42 @@ class HFBSearchResult(HFBRingMapBase, HFBHighResContainer):
     def amplitude(self):
         """The absorption-feature-amplitude dataset."""
         return self.datasets["amplitude"]
+
+
+class HFBRFIMask(TODContainer, FreqContainer):
+    """Container for holding a mask indicating HFB data free of RFI events.
+
+    The `sens` dataset (if initialized) holds the sensitivity metric data.
+    """
+
+    _axes = ("subfreq",)
+
+    _dataset_spec: ClassVar = {
+        "mask": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": bool,
+            "initialise": True,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+        "sens": {
+            "axes": ["freq", "subfreq", "time"],
+            "dtype": np.float32,
+            "initialise": False,
+            "distributed": True,
+            "distributed_axis": "freq",
+        },
+    }
+
+    @property
+    def mask(self):
+        """Get the mask dataset."""
+        return self.datasets["mask"]
+
+    @property
+    def sens(self):
+        """Get the sensitivity metric dataset."""
+        return self.datasets["sens"]
 
 
 class HFBDirectionalRFIMaskBitmap(FreqContainer, TODContainer):
